@@ -1,0 +1,15 @@
+{
+  "name": "create_fibonacci",
+  "description": "Cline creates a Python script that prints the first N Fibonacci numbers",
+  "prompts": [
+    "Create a Python file called fibonacci.py that defines a function fibonacci(n) returning the first n Fibonacci numbers as a list, and prints fibonacci(10) when run as main."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "fibonacci.py",
+      "content_patterns": ["fibonacci", "def ", "return", "__main__"]
+    }
+  ],
+  "timeout": 120
+}

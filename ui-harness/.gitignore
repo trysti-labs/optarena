@@ -1,0 +1,5 @@
+node_modules/
+.workspace/
+.vscode-storage/
+.wdio-vscode-service/
+run*.log

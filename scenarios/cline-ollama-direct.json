@@ -1,0 +1,5 @@
+{
+  "name": "cline-ollama-direct",
+  "driver": "cline-ui",
+  "backend": { "kind": "ollama", "base_url": "http://localhost:11434", "model": "gemma4:12b" }
+}

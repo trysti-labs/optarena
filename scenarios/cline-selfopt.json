@@ -1,0 +1,5 @@
+{
+  "name": "cline-selfopt",
+  "driver": "cline-ui",
+  "backend": { "kind": "ollama", "base_url": "http://localhost:8001", "model": "selfopt" }
+}

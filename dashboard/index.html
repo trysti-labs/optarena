@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OptArena — agent tool testing &amp; comparison</title>
+<style>
+  /* ── OptArena theme + validated chart palette ─────────────────────────────
+     Series colors validated (dataviz six-checks) against surface #0C0C18:
+     blue #3987e5, aqua #199e70 — ΔE 69.8, both ≥3:1. Status colors ship with
+     icon + label, never color alone. */
+  :root {
+    --bg:          #080810;
+    --bg-card:     #0C0C18;
+    --bg-elevated: #111124;
+    --bg-hover:    #10101E;
+    --accent:      #7C5CFC;
+    --text:        #E2E8F0;
+    --text-muted:  #8892A4;
+    --text-dim:    #4A5568;
+    --grid:        #1d1d30;   /* hairline, one step off surface */
+    --baseline:    #2a2a40;
+    --series-a:    #3987e5;   /* categorical slot 1 (validated) */
+    --series-b:    #199e70;   /* categorical slot 2 (validated) */
+    --good:        #0ca30c;
+    --critical:    #d03b3b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px; line-height: 1.45; padding: 24px clamp(16px, 4vw, 48px);
+  }
+  header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 20px; }
+  header h1 { font-size: 22px; font-weight: 650; }
+  header h1 .accent { color: var(--accent); }
+  header .sub { color: var(--text-muted); font-size: 13px; }
+
+  .row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .card {
+    background: var(--bg-card); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: var(--radius); padding: 16px 18px; flex: 1 1 260px; min-width: 0;
+  }
+  .card h2 { font-size: 13px; font-weight: 600; color: var(--text-muted);
+             text-transform: uppercase; letter-spacing: .04em; margin-bottom: 12px; }
+
+  /* Stat tiles: label / value / delta */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--bg-elevated); border-radius: 8px; padding: 12px 14px; }
+  .tile .label { color: var(--text-muted); font-size: 12px; margin-bottom: 4px; }
+  .tile .value { font-size: 26px; font-weight: 600; }
+  .tile .delta { font-size: 12px; margin-top: 2px; color: var(--text-muted); }
+  .tile .delta.up   { color: var(--good); }
+  .tile .delta.down { color: var(--critical); }
+
+  /* Filters row — one row above the charts */
+  .filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .filters label { color: var(--text-muted); font-size: 13px; }
+  select {
+    background: var(--bg-elevated); color: var(--text);
+    border: 1px solid rgba(255,255,255,0.10); border-radius: 6px;
+    padding: 6px 10px; font: inherit; max-width: 340px;
+  }
+  select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* Bars (div-based): ≤24px thick, 4px rounded data-end, square baseline,
+     2px surface gap between grouped neighbors, hairline baseline. */
+  .hbar-chart { display: flex; flex-direction: column; gap: 10px; }
+  .hbar-row { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 10px; align-items: center; }
+  .hbar-name { color: var(--text-muted); font-size: 13px; overflow: hidden;
+               text-overflow: ellipsis; white-space: nowrap; }
+  .hbar-track { position: relative; height: 20px; border-left: 1px solid var(--baseline); }
+  .hbar {
+    height: 16px; margin-top: 2px; background: var(--series-a);
+    border-radius: 0 4px 4px 0;              /* data-end rounded, baseline square */
+    min-width: 2px; position: relative;
+  }
+  .hbar.b { background: var(--series-b); }
+  .hbar-val { position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
+              color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .group { margin-bottom: 14px; }
+  .group .gname { color: var(--text-muted); font-size: 13px; margin-bottom: 4px; }
+  .group .pair { display: flex; flex-direction: column; gap: 2px; }  /* 2px surface gap */
+
+  .legend { display: flex; gap: 16px; margin: 4px 0 14px; }
+  .legend .key { display: flex; gap: 6px; align-items: center; color: var(--text-muted); font-size: 12px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+  /* Table (the always-available relief view) */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 6px 10px;
+       border-bottom: 1px solid var(--grid); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--grid);
+       font-variant-numeric: tabular-nums; }
+  tr:hover td { background: var(--bg-hover); }
+  .res { font-weight: 600; }
+  .res.pass { color: var(--good); }
+  .res.fail { color: var(--critical); }
+  .fail-detail { color: var(--text-dim); font-size: 12px; max-width: 380px; }
+
+  /* Tooltip */
+  #tip {
+    position: fixed; pointer-events: none; display: none; z-index: 10;
+    background: var(--bg-elevated); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px; padding: 8px 12px; font-size: 12px; max-width: 320px;
+    box-shadow: 0 6px 22px rgba(0,0,0,.5);
+  }
+  #tip .t-title { font-weight: 600; margin-bottom: 3px; }
+  #tip .t-line { color: var(--text-muted); }
+
+  .empty { color: var(--text-muted); padding: 28px; text-align: center; }
+  .empty code { background: var(--bg-elevated); padding: 2px 7px; border-radius: 5px;
+                color: var(--text); font-size: 12px; }
+  footer { color: var(--text-dim); font-size: 12px; margin-top: 22px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="accent">Opt</span>Arena</h1>
+  <span class="sub">agent tool testing &amp; comparison — local runs, side-by-side</span>
+</header>
+
+<div id="app"><div class="empty">Loading results…</div></div>
+<div id="tip"></div>
+<footer>OptArena · results read from <code>results/index.json</code> ·
+  new runs: <code>optarena run --driver cline-ui --name my-run</code></footer>
+
+<script>
+"use strict";
+const $ = (sel, el) => (el || document).querySelector(sel);
+const app = $("#app");
+const tip = $("#tip");
+const fmtS = (v) => v == null ? "—" : (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + "s";
+const fmtPct = (v) => v == null ? "—" : Math.round(v * 100) + "%";
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+let INDEX = [];               // results/index.json entries (newest first)
+const RUN_CACHE = {};         // file -> full run record
+
+async function fetchJSON(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+  return r.json();
+}
+async function loadRun(entry) {
+  if (!RUN_CACHE[entry.file]) RUN_CACHE[entry.file] = await fetchJSON("../results/" + entry.file);
+  return RUN_CACHE[entry.file];
+}
+
+/* ── Tooltip ── */
+function bindTips(root) {
+  root.querySelectorAll("[data-tip]").forEach((el) => {
+    el.addEventListener("mousemove", (e) => {
+      tip.innerHTML = el.dataset.tip;
+      tip.style.display = "block";
+      const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+      tip.style.left = Math.min(e.clientX + pad, innerWidth - w - 8) + "px";
+      tip.style.top = Math.min(e.clientY + pad, innerHeight - h - 8) + "px";
+    });
+    el.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+  });
+}
+
+/* ── Views ── */
+function tilesHTML(run) {
+  const s = run.summary || {};
+  const b = (run.scenario || {}).backend || {};
+  return `<div class="tiles">
+    <div class="tile"><div class="label">Pass rate</div>
+      <div class="value">${fmtPct(s.pass_rate)}</div>
+      <div class="delta">${s.passed}/${s.cases} cases</div></div>
+    <div class="tile"><div class="label">Mean case time</div>
+      <div class="value">${fmtS(s.mean_duration_s)}</div>
+      <div class="delta">total ${fmtS(s.total_duration_s)}</div></div>
+    <div class="tile"><div class="label">Driver</div>
+      <div class="value" style="font-size:18px">${esc(run.scenario.driver)}</div>
+      <div class="delta">${esc(b.model || "")} @ ${esc((b.base_url || "").replace(/^https?:\/\//, ""))}</div></div>
+    <div class="tile"><div class="label">Tokens</div>
+      <div class="value">${s.total_tokens ? s.total_tokens.toLocaleString() : "—"}</div>
+      <div class="delta">${esc(run.started_at || "")}</div></div>
+  </div>`;
+}
+
+function passRateChartHTML() {
+  const rows = INDEX.slice(0, 12).map((r) => {
+    const pct = (r.summary && r.summary.pass_rate || 0);
+    const t = `<div class="t-title">${esc(r.scenario)}</div>
+       <div class="t-line">driver ${esc(r.driver)} · model ${esc((r.backend||{}).model||"")}</div>
+       <div class="t-line">${(r.summary||{}).passed}/${(r.summary||{}).cases} passed · mean ${fmtS((r.summary||{}).mean_duration_s)}</div>`;
+    return `<div class="hbar-row">
+      <div class="hbar-name" title="${esc(r.run_id)}">${esc(r.scenario)}</div>
+      <div class="hbar-track"><div class="hbar" data-tip='${t.replace(/'/g, "&#39;")}'
+        style="width:${Math.max(1, pct * 100)}%"><span class="hbar-val">${fmtPct(pct)}</span></div></div>
+    </div>`;
+  }).join("");
+  return `<div class="hbar-chart">${rows}</div>`;
+}
+
+function compareHTML(runA, runB) {
+  const cases = {};
+  for (const c of runA.cases) (cases[c.name] = cases[c.name] || {}).a = c;
+  for (const c of runB.cases) (cases[c.name] = cases[c.name] || {}).b = c;
+  const names = Object.keys(cases).sort();
+  const maxDur = Math.max(1, ...names.flatMap((n) =>
+    [cases[n].a, cases[n].b].filter(Boolean).map((c) => c.duration_s || 0)));
+
+  const labelA = runA.scenario.name, labelB = runB.scenario.name;
+  const bar = (c, cls, label) => {
+    if (!c) return `<div class="hbar-track"></div>`;
+    const t = `<div class="t-title">${esc(c.name)} — ${esc(label)}</div>
+      <div class="t-line">${c.passed ? "✓ passed" : "✗ " + esc((c.failures[0] || c.error || "failed"))}</div>
+      <div class="t-line">${fmtS(c.duration_s)} · files: ${esc(c.files.join(", ") || "none")}</div>`;
+    return `<div class="hbar-track"><div class="hbar ${cls}" data-tip='${t.replace(/'/g, "&#39;")}'
+      style="width:${Math.max(1, (c.duration_s || 0) / maxDur * 88)}%">
+      <span class="hbar-val">${fmtS(c.duration_s)}${c.passed ? "" : " ✗"}</span></div></div>`;
+  };
+
+  const groups = names.map((n) => `<div class="group">
+      <div class="gname">${esc(n)}</div>
+      <div class="pair">${bar(cases[n].a, "", labelA)}${bar(cases[n].b, "b", labelB)}</div>
+    </div>`).join("");
+
+  const res = (c) => c == null ? "<td>—</td>"
+    : `<td class="res ${c.passed ? "pass" : "fail"}">${c.passed ? "✓ pass" : "✗ fail"}</td>`;
+  const failNote = (c) => c && !c.passed
+    ? `<div class="fail-detail">${esc((c.failures[0] || c.error || ""))}</div>` : "";
+  const tableRows = names.map((n) => {
+    const a = cases[n].a, b2 = cases[n].b;
+    const delta = a && b2 && a.duration_s != null && b2.duration_s != null
+      ? (b2.duration_s - a.duration_s) : null;
+    return `<tr><td>${esc(n)}${failNote(a)}${failNote(b2)}</td>${res(a)}${res(b2)}
+      <td>${fmtS(a && a.duration_s)}</td><td>${fmtS(b2 && b2.duration_s)}</td>
+      <td>${delta == null ? "—" : (delta > 0 ? "+" : "") + delta.toFixed(1) + "s"}</td></tr>`;
+  }).join("");
+
+  const sa = runA.summary, sb = runB.summary;
+  const accA = sa.pass_rate, accB = sb.pass_rate;
+  const verdict = `<div class="tiles" style="margin-bottom:14px">
+    <div class="tile"><div class="label">More accurate</div>
+      <div class="value" style="font-size:17px">${accA === accB ? "tie" : esc(accA > accB ? labelA : labelB)}</div>
+      <div class="delta">${fmtPct(accA)} vs ${fmtPct(accB)}</div></div>
+    <div class="tile"><div class="label">Faster (mean case)</div>
+      <div class="value" style="font-size:17px">${esc(sa.mean_duration_s <= sb.mean_duration_s ? labelA : labelB)}</div>
+      <div class="delta">${fmtS(sa.mean_duration_s)} vs ${fmtS(sb.mean_duration_s)}</div></div>
+    <div class="tile"><div class="label">Pass-rate delta (B − A)</div>
+      <div class="value ${accB - accA >= 0 ? "" : ""}" style="font-size:17px">${(accB - accA >= 0 ? "+" : "") + Math.round((accB - accA) * 100)}pp</div>
+      <div class="delta">&nbsp;</div></div>
+  </div>`;
+
+  return `${verdict}
+    <div class="legend">
+      <span class="key"><span class="swatch" style="background:var(--series-a)"></span>${esc(labelA)}</span>
+      <span class="key"><span class="swatch" style="background:var(--series-b)"></span>${esc(labelB)}</span>
+    </div>
+    ${groups}
+    <h2 style="margin-top:18px">Per-case results</h2>
+    <table>
+      <thead><tr><th>case</th><th>A result</th><th>B result</th><th>A time</th><th>B time</th><th>Δ time</th></tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>`;
+}
+
+/* ── Page assembly ── */
+async function render() {
+  const selA = $("#selA") ? $("#selA").value : (INDEX[1] ? 1 : 0);
+  const selB = $("#selB") ? $("#selB").value : 0;
+
+  const options = (sel) => INDEX.map((r, i) =>
+    `<option value="${i}" ${String(i) === String(sel) ? "selected" : ""}>${esc(r.scenario)} · ${esc(r.run_id)}</option>`).join("");
+
+  const iA = Math.min(Number(selA) || 0, INDEX.length - 1);
+  const iB = Math.min(Number(selB) || 0, INDEX.length - 1);
+  const [runA, runB] = await Promise.all([loadRun(INDEX[iA]), loadRun(INDEX[iB])]);
+
+  app.innerHTML = `
+    <div class="filters card" style="flex:1 1 100%">
+      <label>Run A</label><select id="selA">${options(iA)}</select>
+      <label>Run B</label><select id="selB">${options(iB)}</select>
+      <span style="color:var(--text-dim);font-size:12px">pick two runs to compare — latest first</span>
+    </div>
+    <div class="row">
+      <div class="card" style="flex:2 1 420px"><h2>Run A — ${esc(runA.scenario.name)}</h2>${tilesHTML(runA)}</div>
+    </div>
+    <div class="row">
+      <div class="card" style="flex:2 1 520px"><h2>Compare — per-case duration &amp; results</h2>
+        ${iA === iB ? '<div class="empty">Run A and Run B are the same run — pick a different Run B.</div>' : compareHTML(runA, runB)}
+      </div>
+      <div class="card" style="flex:1 1 320px"><h2>Pass rate by run</h2>${passRateChartHTML()}</div>
+    </div>`;
+
+  $("#selA").addEventListener("change", render);
+  $("#selB").addEventListener("change", render);
+  bindTips(app);
+}
+
+(async function init() {
+  try {
+    INDEX = await fetchJSON("../results/index.json");
+  } catch (e) {
+    app.innerHTML = `<div class="card"><div class="empty">
+      No results yet (${esc(e.message)}).<br><br>
+      Run a scenario first, e.g. <code>optarena run --driver ollama-chat --name baseline</code>,
+      then serve this dashboard with <code>optarena serve</code>.</div></div>`;
+    return;
+  }
+  if (!INDEX.length) {
+    app.innerHTML = `<div class="card"><div class="empty">results/index.json is empty — run a scenario first.</div></div>`;
+    return;
+  }
+  // Default: A = second-newest, B = newest (a natural before/after compare).
+  await render();
+})();
+</script>
+</body>
+</html>

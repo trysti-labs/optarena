@@ -1,0 +1,17 @@
+{
+  "name": "modify_add_type_hints",
+  "description": "Cline adds type hints to an existing Python file",
+  "prompts": [
+    "Add type hints to all function parameters and return types in utils.py."
+  ],
+  "setup_files": {
+    "utils.py": "def add(a, b):\n    return a + b\n\ndef greet(name):\n    return 'Hello, ' + name\n\ndef clamp(value, low, high):\n    return max(low, min(high, value))\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "utils.py",
+      "content_patterns": ["->", "str"]
+    }
+  ],
+  "timeout": 150
+}
