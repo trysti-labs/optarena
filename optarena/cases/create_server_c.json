@@ -1,0 +1,15 @@
+{
+  "name": "create_server_c",
+  "description": "Cline creates a basic TCP echo server in C",
+  "prompts": [
+    "Create a simple TCP echo server in C. Save it as server.c. It should listen on port 8080, accept one connection, echo back whatever the client sends, then exit."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "server.c",
+      "content_patterns": ["socket", "bind", "listen", "accept", "main"]
+    }
+  ],
+  "timeout": 150
+}

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+
+# Results (local run data)
+results/
+
+# ui-harness runtime artifacts
+ui-harness/node_modules/
+ui-harness/.wdio-vscode-service/
+ui-harness/.vscode-storage-*/
+ui-harness/.workspace-*/
+ui-harness/run*.log
+ui-harness/logs/
+
+# OS noise
+Thumbs.db
+.DS_Store

@@ -1,0 +1,16 @@
+{
+  "name": "multi_prompt_session",
+  "description": "Multi-turn session: first create a file, then extend it in a follow-up prompt",
+  "prompts": [
+    "Create a Python file called greet.py with a function greet(name) that returns 'Hello, <name>!'",
+    "Now add a function farewell(name) to greet.py that returns 'Goodbye, <name>!'"
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "greet.py",
+      "content_patterns": ["greet", "farewell", "def ", "return"]
+    }
+  ],
+  "timeout": 200
+}

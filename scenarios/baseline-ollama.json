@@ -1,0 +1,5 @@
+{
+  "name": "baseline-ollama",
+  "driver": "ollama-chat",
+  "backend": { "kind": "ollama", "base_url": "http://localhost:11434", "model": "llama3.2" }
+}
