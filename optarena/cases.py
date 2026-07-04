@@ -61,7 +61,10 @@ def load_cases(names: list[str] | None = None, cases_dir: "Path | str | None" = 
         json.loads(p.read_text(encoding="utf-8"))
         for p in sorted(directory.glob("*.json"))
     ]
-    if names:
+    if names is not None:
+        # `names == []` (e.g. a --language filter that matched nothing) must
+        # mean "run none of them" - not "no filter" (an empty list is falsy
+        # in Python, so `if names:` would silently fall through to "all").
         wanted = {n.strip() for n in names}
         cases = [c for c in cases if c["name"] in wanted]
         missing = wanted - {c["name"] for c in cases}

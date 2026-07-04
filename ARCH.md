@@ -130,7 +130,13 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   powers `optarena list cases --language <x>` and `optarena run --language
   <x>` (the latter resolves to the matching case names before the scenario
   is built, in `cli._scenario_from_args()`). All seven built-in cases are
-  tagged (`c`, `python`, `javascript`).
+  tagged (`c`, `python`, `javascript`). **Caught via manual testing:**
+  `load_cases(names, ...)` used `if names:` to decide "filter or load all" -
+  since an empty list is falsy in Python, a `--language` filter matching
+  zero cases resolved to `names=[]` and silently fell through to "no
+  filter, load everything" instead of "load nothing". Fixed to
+  `if names is not None:`; a run with no matching cases now correctly
+  reports `cases=0` and does nothing, rather than running the whole catalogue.
 - `setup_files` are written into the workspace before the run ("modify" cases).
 - `expected_files` is the **oracle**: the case passes iff every spec matches a
   file that is *new or modified* since the pre-run snapshot, containing every

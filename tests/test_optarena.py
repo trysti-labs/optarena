@@ -353,6 +353,17 @@ class ScenarioTests(unittest.TestCase):
         cases = load_cases(cases_dir=str(d))
         self.assertEqual([c["name"] for c in cases], ["custom"])
 
+    def test_load_cases_empty_names_list_means_none_not_all(self):
+        # Found via manual testing: a --language filter that matches zero
+        # cases resolves to `names=[]`. An empty list is falsy in Python, so
+        # `if names:` would silently treat it the same as `names=None` (no
+        # filter -> load everything) instead of "load nothing".
+        d = Path(tempfile.mkdtemp())
+        (d / "a_case.json").write_text(json.dumps(
+            {"name": "custom", "prompts": ["p"], "expected_files": []}), encoding="utf-8")
+        cases = load_cases(names=[], cases_dir=str(d))
+        self.assertEqual(cases, [])
+
     def test_language_filter_resolves_to_matching_case_names_only(self):
         from optarena.cli import _scenario_from_args
         d = Path(tempfile.mkdtemp())
