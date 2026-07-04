@@ -2,10 +2,10 @@
 cline/runner.py
 ───────────────
 Cline-specific automation:
-  - configure()   — write Cline API settings to VS Code globalState
-  - open_panel()  — click activity-bar icon or use command palette
-  - inject_prompt() — paste prompt into Cline textarea and submit
-  - wait_for_done() — poll DOM for Cline-specific completion indicators
+  - configure()   - write Cline API settings to VS Code globalState
+  - open_panel()  - click activity-bar icon or use command palette
+  - inject_prompt() - paste prompt into Cline textarea and submit
+  - wait_for_done() - poll DOM for Cline-specific completion indicators
 
 Extension ID: saoudrizwan.claude-dev
 """
@@ -84,7 +84,7 @@ def open_panel(page: Page, ctx: BrowserContext) -> bool:
             pass
 
     # Fallback: command palette
-    print("  [cline] activity-bar icon not found — trying command palette")
+    print("  [cline] activity-bar icon not found - trying command palette")
     try:
         run_vscode_command(page, "Cline: Open In New Tab")
         time.sleep(1.5)

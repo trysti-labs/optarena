@@ -7,9 +7,10 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync, execFileSync } from 'node:child_process';
 import { PROMPTS_DIR } from './paths.js';
 
-const IGNORE_DIRS = new Set(['.git', '.vscode', '.cline', 'node_modules']);
+const IGNORE_DIRS = new Set(['.git', '.vscode', '.cline', '.aider', 'node_modules', '__pycache__']);
 
 /**
  * Recursively map each workspace file (relative POSIX path) to a content
@@ -91,8 +92,232 @@ export function checkExpected(created, expectedSpec, root) {
         failures.push(`"${match}" missing expected content "${needle}"`);
       }
     }
+    for (const needle of spec.not_content_patterns || []) {
+      if (lower.includes(String(needle).toLowerCase())) {
+        failures.push(`"${match}" contains forbidden content "${needle}"`);
+      }
+    }
+    for (const pattern of spec.regex_patterns || []) {
+      try {
+        if (!new RegExp(pattern, 'i').test(content)) {
+          failures.push(`"${match}" does not match regex "${pattern}"`);
+        }
+      } catch (e) {
+        failures.push(`invalid regex "${pattern}": ${e.message}`);
+      }
+    }
+    if (Number.isInteger(spec.min_lines) && spec.min_lines > 0) {
+      const nLines = content.split('\n').filter((l, i, a) => i < a.length - 1 || l !== '').length;
+      if (nLines < spec.min_lines) {
+        failures.push(`"${match}" has ${nLines} line(s), expected >= ${spec.min_lines}`);
+      }
+    }
   }
   return failures;
+}
+
+const DOCKER_IMAGE_DEFAULT = 'optarena-tester:latest';
+let dockerChecked = false;
+let dockerOk = false;
+let dockerWarned = false;
+
+function dockerAvailable() {
+  if (dockerChecked) return dockerOk;
+  dockerChecked = true;
+  try {
+    execFileSync('docker', ['info'], { stdio: 'pipe', timeout: 10000 });
+    dockerOk = true;
+  } catch {
+    dockerOk = false;
+  }
+  return dockerOk;
+}
+
+function dockerImageAvailable(image) {
+  try {
+    execFileSync('docker', ['image', 'inspect', image], { stdio: 'pipe', timeout: 10000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function newOracleInfo(cmd) {
+  return { check_command: cmd || null, ran: false, sandbox: null, image: null,
+           exit_code: null, duration_s: null, output: '' };
+}
+
+// One shared container for the WHOLE harness run (all cases) - mirrors
+// cases.DockerSandbox in the Python side. Without this, runCheckCommand would
+// start a fresh `docker run --rm` per case, which is the bug this fixes: N
+// cases used to mean N containers for one run.
+let activeSandbox = null;
+
+/**
+ * Start the shared sandbox container, mounting `root` (the harness's fixed
+ * workspace directory) once. Returns the sandbox handle, or null when Docker
+ * isn't available/enabled - callers then fall back to running check_command
+ * on the host, same as before this existed.
+ */
+export function startDockerSandbox(root, image) {
+  image = image || process.env.OPTARENA_DOCKER_IMAGE || DOCKER_IMAGE_DEFAULT;
+  if (process.env.OPTARENA_NO_DOCKER === '1' || !dockerAvailable()) return null;
+  if (!dockerImageAvailable(image)) {
+    console.error(`[optarena] Docker image '${image}' not found - check_command will run on the host. Run \`optarena docker build\`.`);
+    return null;
+  }
+  const name = `optarena-sandbox-${Math.random().toString(16).slice(2, 14)}`;
+  const resolvedRoot = path.resolve(root);
+  try {
+    execFileSync('docker', [
+      'run', '-d', '--rm', '--name', name,
+      '--network', 'none', '--memory', '2g', '--cpus', '2',
+      '-v', `${resolvedRoot}:/workspace`, '-w', '/workspace',
+      image, 'sleep', 'infinity',
+    ], { stdio: 'pipe', timeout: 20000 });
+  } catch (e) {
+    console.error(`[optarena] could not start docker sandbox: ${e.message}`);
+    return null;
+  }
+  activeSandbox = { name, root: resolvedRoot, image };
+  console.log(`[optarena] docker sandbox: ${name} (image ${image}) - one container for this whole run`);
+  return activeSandbox;
+}
+
+/** Stop the shared sandbox container (safe to call with null/already-stopped). */
+export function stopDockerSandbox(sandbox) {
+  if (!sandbox) return;
+  try { execFileSync('docker', ['stop', '-t', '2', sandbox.name], { stdio: 'pipe' }); } catch { /* already gone */ }
+  if (activeSandbox === sandbox) activeSandbox = null;
+}
+
+function runInSandbox(cmd, root, timeoutMs, sandbox, info) {
+  info.sandbox = 'docker';
+  info.image = sandbox.image;
+  info.container = sandbox.name;
+  const rel = path.relative(sandbox.root, path.resolve(root)).split(path.sep).join('/');
+  const workdir = rel ? `/workspace/${rel}` : '/workspace';
+  const timeoutS = Math.max(1, Math.ceil(timeoutMs / 1000));
+  const t0 = Date.now();
+  try {
+    const out = execFileSync('docker', [
+      'exec', '-w', workdir, sandbox.name,
+      'timeout', `${timeoutS}s`, 'sh', '-c', cmd,
+    ], { timeout: timeoutMs + 10000, stdio: 'pipe' });
+    info.duration_s = (Date.now() - t0) / 1000;
+    info.ran = true;
+    info.exit_code = 0;
+    info.output = String(out || '').slice(-400).trim();
+    return { failures: [], oracle: info };
+  } catch (e) {
+    info.duration_s = (Date.now() - t0) / 1000;
+    info.ran = true;
+    info.exit_code = e.status ?? null;
+    info.output = `${e.stdout || ''}${e.stderr || ''}`.slice(-400).trim();
+    if (e.status === 124) {
+      return { failures: [`check_command timed out after ${timeoutS}s (docker exec): ${cmd}`], oracle: info };
+    }
+    const code = e.status != null ? `exit ${e.status}` : (e.signal || 'error');
+    return { failures: [`check_command failed in docker (${code}): ${cmd}${info.output ? ' :: ' + info.output : ''}`], oracle: info };
+  }
+}
+
+/**
+ * Run the case's optional check_command (JS mirror of cases.run_check_command).
+ * Runs inside the shared `optarena-tester` Docker container when Docker is
+ * available (isolation + no host toolchain needed), falling back to running
+ * directly on the host when it is not. Returns `{failures, oracle}` - oracle
+ * always reports what actually happened (sandbox, exit code, timing, output),
+ * not just the verdict.
+ */
+export function runCheckCommand(testCase, root) {
+  const cmd = testCase.check_command;
+  const info = newOracleInfo(cmd);
+  if (!cmd) return { failures: [], oracle: info };
+  const timeout = (testCase.check_command_timeout || 60) * 1000;
+
+  if (process.env.OPTARENA_NO_DOCKER !== '1' && activeSandbox) {
+    return runInSandbox(cmd, root, timeout, activeSandbox, info);
+  }
+
+  const image = process.env.OPTARENA_DOCKER_IMAGE || DOCKER_IMAGE_DEFAULT;
+  let useDocker = process.env.OPTARENA_NO_DOCKER !== '1' && dockerAvailable();
+  if (useDocker && !dockerImageAvailable(image)) {
+    useDocker = false;
+    if (!dockerWarned) {
+      console.error(`[optarena] Docker image '${image}' not found - falling back to host. Run \`optarena docker build\`.`);
+      dockerWarned = true;
+    }
+  }
+  if (!useDocker) {
+    if (!dockerAvailable() && !dockerWarned) {
+      console.error('[optarena] Docker not available - running check_command directly on the host.');
+      dockerWarned = true;
+    }
+    info.sandbox = 'host';
+    const t0 = Date.now();
+    try {
+      const out = execSync(cmd, { cwd: root, timeout, stdio: 'pipe' });
+      info.duration_s = (Date.now() - t0) / 1000;
+      info.ran = true;
+      info.exit_code = 0;
+      info.output = String(out || '').slice(-400).trim();
+      return { failures: [], oracle: info };
+    } catch (e) {
+      info.duration_s = (Date.now() - t0) / 1000;
+      info.ran = true;
+      info.exit_code = e.status ?? null;
+      info.output = `${e.stdout || ''}${e.stderr || ''}`.slice(-400).trim();
+      const code = e.status != null ? `exit ${e.status}` : (e.signal || 'error');
+      return { failures: [`check_command failed (${code}): ${cmd}${info.output ? ' :: ' + info.output : ''}`], oracle: info };
+    }
+  }
+  info.sandbox = 'docker';
+  info.image = image;
+  const name = `optarena-check-${Math.random().toString(16).slice(2, 14)}`;
+  info.container = name;
+  const dockerArgs = [
+    'run', '--rm', '--name', name,
+    '--network', 'none', '--memory', '512m', '--cpus', '1',
+    '-v', `${path.resolve(root)}:/workspace`, '-w', '/workspace',
+    image, 'sh', '-c', cmd,
+  ];
+  const t0 = Date.now();
+  try {
+    const out = execFileSync('docker', dockerArgs, { timeout: timeout + 15000, stdio: 'pipe' });
+    info.duration_s = (Date.now() - t0) / 1000;
+    info.ran = true;
+    info.exit_code = 0;
+    info.output = String(out || '').slice(-400).trim();
+    return { failures: [], oracle: info };
+  } catch (e) {
+    try { execFileSync('docker', ['rm', '-f', name], { stdio: 'pipe' }); } catch { /* already gone */ }
+    info.duration_s = (Date.now() - t0) / 1000;
+    info.ran = true;
+    info.exit_code = e.status ?? null;
+    info.output = `${e.stdout || ''}${e.stderr || ''}`.slice(-400).trim();
+    const code = e.status != null ? `exit ${e.status}` : (e.signal || 'error');
+    return { failures: [`check_command failed in docker (${code}): ${cmd}${info.output ? ' :: ' + info.output : ''}`], oracle: info };
+  }
+}
+
+/**
+ * Full oracle: write test_setup_files (real test code the model never saw),
+ * check expected-file specs, then check_command when they pass. Returns
+ * `{failures, oracle}` - see runCheckCommand for the oracle shape.
+ */
+export function evaluateCase(testCase, created, root) {
+  const testFiles = Object.keys(testCase.test_setup_files || {});
+  writeSetupFiles(root, testCase.test_setup_files);
+  const failures = checkExpected(created, testCase.expected_files || [], root);
+  if (failures.length > 0) {
+    const info = newOracleInfo(testCase.check_command);
+    info.test_setup_files = testFiles;
+    return { failures, oracle: info };
+  }
+  const result = runCheckCommand(testCase, root);
+  result.oracle.test_setup_files = testFiles;
+  return result;
 }
 
 /** Write a case's setup_files into the workspace before the case runs. */

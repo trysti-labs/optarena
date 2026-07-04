@@ -80,7 +80,7 @@ def run_one(
     # Always kill whatever is on the port first so globalState can be written
     # while VS Code is stopped, then do a fresh isolated launch.
     if cdp_alive(cdp_port):
-        print(f"  [run] stale VS Code on :{cdp_port} — killing before configure")
+        print(f"  [run] stale VS Code on :{cdp_port} - killing before configure")
         kill_vscode(cdp_port)
 
     try:
@@ -117,7 +117,7 @@ def run_one(
 
             # Warn (don't fail) if extension not found in extensions dir
             if not check_extension_installed("saoudrizwan.claude-dev"):
-                print("  [run] WARN: Cline extension not found in extensions dir — proceeding anyway")
+                print("  [run] WARN: Cline extension not found in extensions dir - proceeding anyway")
                 result.warn("Cline extension not detected in extensions directory")
 
             # Open Cline panel
@@ -157,10 +157,10 @@ def run_one(
 
             if passed:
                 result.pass_()
-                print(f"  [run] PASS — files: {[f.name for f in created]}")
+                print(f"  [run] PASS - files: {[f.name for f in created]}")
             else:
                 result.fail(err or "Expected files not created")
-                print(f"  [run] FAIL — {err}")
+                print(f"  [run] FAIL - {err}")
 
         except Exception as exc:
             import traceback

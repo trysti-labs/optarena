@@ -1,6 +1,7 @@
 {
   "name": "multi_prompt_session",
   "description": "Multi-turn session: first create a file, then extend it in a follow-up prompt",
+  "language": "python",
   "prompts": [
     "Create a Python file called greet.py with a function greet(name) that returns 'Hello, <name>!'",
     "Now add a function farewell(name) to greet.py that returns 'Goodbye, <name>!'"
@@ -9,8 +10,12 @@
   "expected_files": [
     {
       "path_pattern": "greet.py",
-      "content_patterns": ["greet", "farewell", "def ", "return"]
+      "content_patterns": ["greet", "farewell", "def "]
     }
   ],
+  "test_setup_files": {
+    "test_greet.py": "import importlib.util\nspec = importlib.util.spec_from_file_location('greet_mod', 'greet.py')\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nassert mod.greet('Ann') == 'Hello, Ann!', f\"greet('Ann') = {mod.greet('Ann')!r}\"\nassert mod.farewell('Ann') == 'Goodbye, Ann!', f\"farewell('Ann') = {mod.farewell('Ann')!r}\"\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_greet.py",
   "timeout": 200
 }

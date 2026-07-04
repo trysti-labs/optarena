@@ -2,7 +2,7 @@
 optarena/store.py
 ──────────────
 Filesystem results store. Each run is one JSON file in results/runs/; an
-index.json summarises all runs so the dashboard (and `arena compare`) can list
+index.json summarises all runs so the dashboard (and `optarena compare`) can list
 them without parsing every file.
 
 Layout:
@@ -20,11 +20,18 @@ RESULTS_DIR = Path(__file__).resolve().parents[1] / "results"
 RUNS_DIR = RESULTS_DIR / "runs"
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    """Write via tmp + replace so `optarena serve` never reads a partial file."""
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
 def save_run(record) -> Path:
     """Persist a RunRecord and refresh the index. Returns the run file path."""
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     path = RUNS_DIR / f"{record.run_id}.json"
-    path.write_text(json.dumps(record.to_dict(), indent=2), encoding="utf-8")
+    _write_atomic(path, json.dumps(record.to_dict(), indent=2))
     rebuild_index()
     return path
 
@@ -59,7 +66,7 @@ def rebuild_index() -> Path:
         })
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     index = RESULTS_DIR / "index.json"
-    index.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    _write_atomic(index, json.dumps(entries, indent=2))
     return index
 
 

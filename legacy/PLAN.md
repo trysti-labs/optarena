@@ -1,7 +1,7 @@
 # VS Code Extension Automation Test Plan
 _June 30, 2026_
 
-> **⚠️ SUPERSEDED — see [README.md](./README.md) (OptArena).** The CDP + `pyautogui`
+> **⚠️ SUPERSEDED - see [README.md](./README.md) (OptArena).** The CDP + `pyautogui`
 > approach described below could never reach Cline's webview (it runs in a separate
 > renderer process) and relied on fragile screen-pixel clicking. This directory is now
 > the **OptArena** framework: `optarena/` (runner/compare/CLI), `cline-ui/` (the
@@ -159,23 +159,23 @@ Fields:
 
 ### `shared/vscode_utils.py`
 
-- `vscode_state_db() → Path` — locate `state.vscdb` cross-platform
-- `write_globalstate(ext_id, settings: dict)` — write extension API config while VS Code is stopped
-- `cdp_alive() → bool` — check if `:9222` is responding
-- `vscode_running() → bool` — check process list
-- `kill_vscode()` — kill VS Code process
-- `launch_vscode(workspace: Path) → None` — kill if needed, launch with `--remote-debugging-port=9222`
-- `cdp_connect(playwright) → (Browser, BrowserContext, Page)` — connect via CDP, return context + main page
-- `set_clipboard(text: str)` — cross-platform clipboard write (PowerShell on Win, pbcopy on Mac, xclip on Linux)
-- `open_command_palette(page: Page)` — Ctrl+Shift+P
-- `run_vscode_command(page: Page, command: str)` — open palette, type command, Enter
+- `vscode_state_db() → Path` - locate `state.vscdb` cross-platform
+- `write_globalstate(ext_id, settings: dict)` - write extension API config while VS Code is stopped
+- `cdp_alive() → bool` - check if `:9222` is responding
+- `vscode_running() → bool` - check process list
+- `kill_vscode()` - kill VS Code process
+- `launch_vscode(workspace: Path) → None` - kill if needed, launch with `--remote-debugging-port=9222`
+- `cdp_connect(playwright) → (Browser, BrowserContext, Page)` - connect via CDP, return context + main page
+- `set_clipboard(text: str)` - cross-platform clipboard write (PowerShell on Win, pbcopy on Mac, xclip on Linux)
+- `open_command_palette(page: Page)` - Ctrl+Shift+P
+- `run_vscode_command(page: Page, command: str)` - open palette, type command, Enter
 
 ### `shared/workspace.py`
 
-- `setup_workspace(ws: Path, setup_files: dict) → None` — create dir, write `.vscode/settings.json` with auto-approve flags, write any `setup_files`
-- `snapshot(ws: Path) → set[Path]` — all files in workspace
-- `new_files(before: set[Path], ws: Path) → list[Path]` — files added since snapshot
-- `check_expected(new_files, expected_files_spec, ws) → list[str]` — returns list of failure messages; empty = pass
+- `setup_workspace(ws: Path, setup_files: dict) → None` - create dir, write `.vscode/settings.json` with auto-approve flags, write any `setup_files`
+- `snapshot(ws: Path) → set[Path]` - all files in workspace
+- `new_files(before: set[Path], ws: Path) → list[Path]` - files added since snapshot
+- `check_expected(new_files, expected_files_spec, ws) → list[str]` - returns list of failure messages; empty = pass
 
 ### `shared/result.py`
 
@@ -189,12 +189,12 @@ Fields:
 - `auto_approve_loop(ctx, ws, before, expected_spec, timeout, idle_timeout=8) → (passed, new_files, error)`
   - Polls for file creation, button clicks (Approve/Save/Run/Apply/Yes), and error banners
   - Returns early when all expected files are found
-  - `idle_timeout`: if no new files for this many seconds and the last approval was > idle_timeout seconds ago, declares done (even if nothing was created — the extension may have finished without creating files)
+  - `idle_timeout`: if no new files for this many seconds and the last approval was > idle_timeout seconds ago, declares done (even if nothing was created - the extension may have finished without creating files)
 
 ### `shared/selfopt.py`
 
-- `selfopt_healthy(url: str) → bool` — `GET /api/tags` health check
-- `require_selfopt(url: str)` — raise `SkipTest` if not reachable
+- `selfopt_healthy(url: str) → bool` - `GET /api/tags` health check
+- `require_selfopt(url: str)` - raise `SkipTest` if not reachable
 
 ---
 
@@ -239,21 +239,21 @@ in each `run_tests.py` orchestrates:
 
 - **globalState keys**: `apiProvider`, `ollamaBaseUrl` / `openAiBaseUrl`, `openAiApiKey`, `ollamaModelId` / `openAiModelId`
 - **Activity-bar aria**: `[aria-label="Cline"]` or `[aria-label*="Cline"]`
-- **Panel complete detection**: look for absence of a spinner + presence of text that doesn't look like "thinking..." — or just rely on file-system polling. Cline does not have a reliable "done" DOM element that we can hook without deep webview access.
+- **Panel complete detection**: look for absence of a spinner + presence of text that doesn't look like "thinking..." - or just rely on file-system polling. Cline does not have a reliable "done" DOM element that we can hook without deep webview access.
 - **API config prefix**: `saoudrizwan.claude-dev/`
 
 ### Continue (`continue.continue`)
 
-- **globalState keys**: `config.json` — Continue stores config as a JSON blob in the globalState DB. Key: `continue/config` or directly edits `~/.continue/config.json`.
+- **globalState keys**: `config.json` - Continue stores config as a JSON blob in the globalState DB. Key: `continue/config` or directly edits `~/.continue/config.json`.
 - **Activity-bar aria**: `[aria-label="Continue"]`
 - **Simpler interaction**: Continue's chat is a `<textarea>` in the webview; same clipboard approach applies.
 - **Config**: Edit `~/.continue/config.json` directly (it's a plain file, not SQLite). Append a model entry for SelfOpt.
 
 ### Roo-Cline (`RooVeterinaryInc.roo-cline`)
 
-- **globalState keys**: `apiProvider`, `ollamaBaseUrl`, `ollamaModelId` — same schema as Cline (`saoudrizwan.claude-dev`) but under key prefix `rooveterinaryinc.roo-cline/`
+- **globalState keys**: `apiProvider`, `ollamaBaseUrl`, `ollamaModelId` - same schema as Cline (`saoudrizwan.claude-dev`) but under key prefix `rooveterinaryinc.roo-cline/`
 - **Activity-bar aria**: `[aria-label*="Roo"]` or `[aria-label*="roo"]`
-- **Panel detection**: Same as Cline — file-system polling is the most reliable approach.
+- **Panel detection**: Same as Cline - file-system polling is the most reliable approach.
 
 ---
 

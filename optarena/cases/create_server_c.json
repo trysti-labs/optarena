@@ -1,6 +1,7 @@
 {
   "name": "create_server_c",
-  "description": "Cline creates a basic TCP echo server in C",
+  "description": "Creates a basic TCP echo server in C",
+  "language": "c",
   "prompts": [
     "Create a simple TCP echo server in C. Save it as server.c. It should listen on port 8080, accept one connection, echo back whatever the client sends, then exit."
   ],
@@ -8,8 +9,13 @@
   "expected_files": [
     {
       "path_pattern": "server.c",
-      "content_patterns": ["socket", "bind", "listen", "accept", "main"]
+      "content_patterns": ["socket", "bind", "listen", "accept"]
     }
   ],
+  "test_setup_files": {
+    "test_server.py": "import subprocess, socket, time\nsubprocess.run(['gcc', 'server.c', '-o', 'server_bin'], check=True)\nsrv = subprocess.Popen(['./server_bin'])\ntry:\n    conn = None\n    for _ in range(20):\n        try:\n            conn = socket.create_connection(('127.0.0.1', 8080), timeout=1)\n            break\n        except OSError:\n            time.sleep(0.5)\n    assert conn is not None, 'could not connect to 127.0.0.1:8080 within 10s'\n    msg = b'hello-optarena'\n    conn.sendall(msg)\n    conn.settimeout(5)\n    data = conn.recv(1024)\n    conn.close()\n    assert data == msg, f'expected echo {msg!r}, got {data!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_server.py",
+  "check_command_timeout": 60,
   "timeout": 150
 }

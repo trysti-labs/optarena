@@ -39,8 +39,9 @@ class Backend:
 
     @property
     def openai_base(self) -> str:
-        """The OpenAI-compatible base URL regardless of kind."""
-        return self.base_url.rstrip("/") + ("/v1" if self.kind == "ollama" else "")
+        """The OpenAI-compatible base URL (always ends in /v1), regardless of kind."""
+        base = self.base_url.rstrip("/")
+        return base if base.endswith("/v1") else base + "/v1"
 
     def label(self) -> str:
         return f"{self.model}@{re.sub(r'^https?://', '', self.base_url)}"
@@ -53,6 +54,7 @@ class Scenario:
     backend: Backend = field(default_factory=Backend)
     cases: list[str] | None = None           # None ⇒ all cases
     timeout: int | None = None               # per-case override, seconds
+    cases_dir: str | None = None             # None ⇒ the built-in catalogue
 
     @classmethod
     def from_dict(cls, data: dict) -> "Scenario":
@@ -63,6 +65,7 @@ class Scenario:
             backend=backend,
             cases=data.get("cases"),
             timeout=data.get("timeout"),
+            cases_dir=data.get("cases_dir"),
         )
 
     @classmethod
@@ -76,4 +79,5 @@ class Scenario:
             "backend": vars(self.backend),
             "cases": self.cases,
             "timeout": self.timeout,
+            "cases_dir": self.cases_dir,
         }

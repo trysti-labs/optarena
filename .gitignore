@@ -14,6 +14,11 @@ ui-harness/.workspace-*/
 ui-harness/run*.log
 ui-harness/logs/
 
+# Nested standalone repos (separate remotes)
+website/
+website2/
+website-docs/
+
 # OS noise
 Thumbs.db
 .DS_Store

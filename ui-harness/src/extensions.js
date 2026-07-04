@@ -116,6 +116,42 @@ export const EXTENSIONS = {
     },
   },
 
+  kilo: {
+    key: 'kilo',
+    label: 'Kilo Code',
+    // Kilo Code is a Roo-Cline fork: same globalState config shape, its own ids.
+    extDirPrefix: 'kilocode.kilo-code',
+    viewCommand: 'workbench.view.extension.kilo-code-ActivityBar',
+    newTaskCommand: 'kilo-code.plusButtonClicked',
+    wizard: 'roo',
+    approveRe: AGENT_APPROVE_RE,
+    rejectRe: AGENT_REJECT_RE,
+    configKind: 'globalState',
+    seedGlobalState(apiMode, url, model = 'llama3.2') {
+      const id = 'kilocode.kilo-code';
+      const cfg = apiMode === 'openai'
+        ? { apiProvider: 'openai', openAiBaseUrl: `${url}/v1`, openAiApiKey: 'optarena', openAiModelId: model, id: 'default' }
+        : { apiProvider: 'ollama', ollamaBaseUrl: url, ollamaModelId: model, id: 'default' };
+      const providerProfiles = {
+        currentApiConfigName: 'default',
+        apiConfigs: { default: cfg },
+      };
+      const flags = {
+        providerProfiles,
+        autoApprovalEnabled: true,
+        alwaysAllowWrite: true,
+        alwaysAllowReadOnly: true,
+        alwaysAllowExecute: true,
+        alwaysAllowBrowser: true,
+        alwaysAllowMcp: true,
+        telemetrySetting: 'disabled',
+      };
+      const items = { [id]: flags };
+      for (const [k, v] of Object.entries(flags)) items[`${id}/${k}`] = v;
+      return items;
+    },
+  },
+
   continue: {
     key: 'continue',
     label: 'Continue',

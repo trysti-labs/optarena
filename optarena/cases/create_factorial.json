@@ -1,15 +1,21 @@
 {
   "name": "create_factorial",
-  "description": "Cline creates a C program that computes factorial",
+  "description": "Creates a C program that computes factorial",
+  "language": "c",
   "prompts": [
-    "Create a C program for factorial in a file called factorial.c. The program should read an integer from stdin and print its factorial."
+    "Create a C program for factorial in a file called factorial.c. The program should read a single integer from stdin and print its factorial (just the number, on its own line)."
   ],
   "setup_files": {},
   "expected_files": [
     {
       "path_pattern": "factorial.c",
-      "content_patterns": ["factorial", "int main", "return"]
+      "content_patterns": ["int main"]
     }
   ],
+  "test_setup_files": {
+    "test_factorial.py": "import subprocess\nsubprocess.run(['gcc', 'factorial.c', '-o', 'factorial_bin'], check=True)\ncases = [(0, 1), (1, 1), (5, 120), (10, 3628800)]\nfor n, expected in cases:\n    out = subprocess.run(['./factorial_bin'], input=f'{n}\\n', capture_output=True, text=True, timeout=5).stdout\n    assert str(expected) in out, f'factorial({n}): expected {expected} in output, got {out!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_factorial.py",
+  "check_command_timeout": 60,
   "timeout": 120
 }

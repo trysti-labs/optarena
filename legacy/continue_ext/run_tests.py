@@ -60,7 +60,7 @@ def run_one(
     print(f"  WS:   {workspace}")
     print(f"{'='*60}")
 
-    # Continue hot-reloads config — write it before launching VS Code
+    # Continue hot-reloads config - write it before launching VS Code
     try:
         warnings = configure(api_mode, selfopt_url)
         for w in warnings:
@@ -72,7 +72,7 @@ def run_one(
         return result
 
     if cdp_alive(cdp_port):
-        print(f"  [run] stale VS Code on :{cdp_port} — killing before launch")
+        print(f"  [run] stale VS Code on :{cdp_port} - killing before launch")
         kill_vscode(cdp_port)
 
     try:
@@ -96,7 +96,7 @@ def run_one(
                 return result
 
             if not check_extension_installed("continue.continue"):
-                print("  [run] WARN: Continue extension not found in extensions dir — proceeding anyway")
+                print("  [run] WARN: Continue extension not found in extensions dir - proceeding anyway")
                 result.warn("Continue extension not detected in extensions directory")
 
             if not open_panel(page, ctx):
@@ -127,10 +127,10 @@ def run_one(
 
             if passed:
                 result.pass_()
-                print(f"  [run] PASS — files: {[f.name for f in created]}")
+                print(f"  [run] PASS - files: {[f.name for f in created]}")
             else:
                 result.fail(err or "Expected files not created")
-                print(f"  [run] FAIL — {err}")
+                print(f"  [run] FAIL - {err}")
 
         except Exception as exc:
             import traceback

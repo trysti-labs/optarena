@@ -1,11 +1,11 @@
 {
-  "name": "cline-ui-tests",
+  "name": "optarena-ui-harness",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "UI automation tests that drive the real Cline VS Code extension against a SelfOpt backend, using wdio-vscode-service (real webview frame switching).",
+  "description": "UI automation harness that drives real VS Code AI-agent extensions (Cline, Roo Code, Continue) against any OpenAI/Ollama-compatible backend, using wdio-vscode-service (real webview frame switching).",
   "scripts": {
-    "test": "wdio run ./wdio.conf.ts"
+    "test": "wdio run ./wdio.conf.js"
   },
   "devDependencies": {
     "@wdio/cli": "^9.21.0",

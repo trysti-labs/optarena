@@ -14,14 +14,14 @@ import { getExtension } from './extensions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Project root: tests/tools/cline-ui */
+/** Harness root: ui-harness/ */
 export const PROJECT_DIR = path.resolve(__dirname, '..');
 
 /** Run configuration (overridable via env). */
 export const EXT = (process.env.EXT || 'cline').toLowerCase();
 export const DESCRIPTOR = getExtension(EXT);
 export const API_MODE = (process.env.API_KIND || process.env.CLINE_API || 'ollama').toLowerCase();
-export const BACKEND_URL = process.env.BACKEND_URL || process.env.SELFOPT_URL || 'http://localhost:11434';
+export const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:11434';
 export const MODEL_ID = process.env.MODEL_ID || 'llama3.2';
 
 /** Optional: OptArena writes one JSON line per case here (see test/agent.e2e.js). */

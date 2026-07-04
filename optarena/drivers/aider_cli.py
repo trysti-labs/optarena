@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from ..cases import changed_files, check_expected, snapshot, write_setup_files
+from ..cases import changed_files, evaluate_case, snapshot, write_setup_files
 from ..scenario import Scenario
 from .base import CaseResult, Driver
 
@@ -33,6 +33,7 @@ def find_aider() -> str | None:
 
 class AiderDriver(Driver):
     name = "aider"
+    parallel_safe = True   # one subprocess per case, isolated workspaces
 
     def __init__(self) -> None:
         self._aider: str | None = None
@@ -62,7 +63,7 @@ class AiderDriver(Driver):
             for prompt in case.get("prompts", []):
                 cmd = [
                     self._aider,
-                    "--openai-api-base", backend.base_url.rstrip("/") + "/v1",
+                    "--openai-api-base", backend.openai_base,
                     "--openai-api-key", backend.api_key,
                     "--model", f"openai/{backend.model}",
                     "--no-git", "--yes", "--no-auto-commits",
@@ -85,6 +86,6 @@ class AiderDriver(Driver):
         result.duration_s = time.monotonic() - t0
 
         result.files = changed_files(before, workspace)
-        result.failures = check_expected(result.files, case.get("expected_files", []), workspace)
+        result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
         result.passed = result.error is None and not result.failures
         return result

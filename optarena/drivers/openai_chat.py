@@ -19,7 +19,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from ..cases import changed_files, check_expected, snapshot, write_setup_files
+from ..cases import changed_files, evaluate_case, snapshot, write_setup_files
+from ..pricing import estimate_cost
 from ..scenario import Scenario
 from .base import CaseResult, Driver
 
@@ -27,7 +28,7 @@ _CODE_BLOCK = re.compile(r"```(?:\w+[^\n]*)?\n(.*?)```", re.DOTALL)
 
 _SYSTEM = (
     "You are a code generator. Reply with exactly ONE fenced code block containing "
-    "the complete file content requested — no commentary outside the block."
+    "the complete file content requested - no commentary outside the block."
 )
 
 
@@ -44,11 +45,12 @@ def _post_json(url: str, payload: dict, timeout: int, headers: dict | None = Non
 
 class OpenAIChatDriver(Driver):
     name = "openai-chat"
+    parallel_safe = True   # stateless HTTP per case
 
     def _chat(self, prompt: str, scenario: Scenario, timeout: int) -> tuple[str, dict]:
         backend = scenario.backend
         body = _post_json(
-            f"{backend.base_url.rstrip('/')}/v1/chat/completions",
+            f"{backend.openai_base}/chat/completions",
             {
                 "model": backend.model,
                 "messages": [
@@ -92,12 +94,20 @@ class OpenAIChatDriver(Driver):
                 for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                     if key in usage:
                         result.extra[key] = result.extra.get(key, 0) + usage[key]
-        except Exception as exc:  # noqa: BLE001 — report, don't crash the run
+        except Exception as exc:  # noqa: BLE001 - report, don't crash the run
             result.error = f"{type(exc).__name__}: {exc}"
         result.duration_s = time.monotonic() - t0
 
+        # USD cost from token usage (0 for local backends / unpriced models).
+        result.extra["cost_usd"] = estimate_cost(
+            scenario.backend.model,
+            result.extra.get("prompt_tokens", 0),
+            result.extra.get("completion_tokens", 0),
+            base_url=scenario.backend.base_url,
+        )
+
         result.files = changed_files(before, workspace)
-        result.failures = check_expected(result.files, expected, workspace)
+        result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
         result.passed = result.error is None and not result.failures
         return result
 

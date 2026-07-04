@@ -1,10 +1,10 @@
-# OptArena — Architecture
+# OptArena - Architecture
 
 _Last updated: 2026-07-02_
 
 OptArena is a **local-first testing and comparison framework for AI coding
-tools**. It runs the same task cases through real tools — a VS Code extension's
-actual UI, a CLI agent, an SDK agent, or a raw model — against any
+tools**. It runs the same task cases through real tools - a VS Code extension's
+actual UI, a CLI agent, an SDK agent, or a raw model - against any
 OpenAI/Ollama-compatible backend, records per-case metrics, and compares
 scenarios side-by-side.
 
@@ -18,7 +18,7 @@ model, every component, the contracts between them, and how to extend it.
 ### Goals
 
 1. **UI-native testing.** Where a tool has a real UI (Cline in VS Code), drive
-   *that* — real webview typing, real approval buttons — not a simulation of
+   *that* - real webview typing, real approval buttons - not a simulation of
    its API traffic. Bugs live in the seams the UI exercises.
 2. **Comparison as the primary output.** Every question OptArena answers is an
    A/B: tool vs tool, backend vs backend, model vs model, agent vs raw-model
@@ -92,7 +92,7 @@ optarena/                       repo root
 Two languages by necessity: driving VS Code requires Node (wdio-vscode-service
 is the only maintained stack that switches WebDriver context into webview
 iframes). Everything else is Python. The two sides communicate only via
-**environment variables in** and a **JSONL results file out** (§6.3) — no RPC.
+**environment variables in** and a **JSONL results file out** (§6.3) - no RPC.
 
 ---
 
@@ -114,20 +114,98 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
 {
   "name":           "create_factorial",
   "description":    "Creates a C program that computes factorial",
+  "language":       "c",
   "prompts":        ["Create a C program … in a file called factorial.c …"],
   "setup_files":    {"utils.py": "def add(a, b): …"},
   "expected_files": [{"path_pattern": "factorial.c",
                       "content_patterns": ["factorial", "int main", "return"]}],
+  "test_setup_files": {"test_factorial.py": "import subprocess … assert '120' in out"},
+  "check_command":  "python3 test_factorial.py",
   "timeout":        120
 }
 ```
 
 - `prompts` are sent in order (multi-turn sessions supported).
+- `language` is free-form metadata (not validated against a fixed list) - it
+  powers `optarena list cases --language <x>` and `optarena run --language
+  <x>` (the latter resolves to the matching case names before the scenario
+  is built, in `cli._scenario_from_args()`). All seven built-in cases are
+  tagged (`c`, `python`, `javascript`). **Caught via manual testing:**
+  `load_cases(names, ...)` used `if names:` to decide "filter or load all" -
+  since an empty list is falsy in Python, a `--language` filter matching
+  zero cases resolved to `names=[]` and silently fell through to "no
+  filter, load everything" instead of "load nothing". Fixed to
+  `if names is not None:`; a run with no matching cases now correctly
+  reports `cases=0` and does nothing, rather than running the whole catalogue.
 - `setup_files` are written into the workspace before the run ("modify" cases).
 - `expected_files` is the **oracle**: the case passes iff every spec matches a
   file that is *new or modified* since the pre-run snapshot, containing every
   `content_patterns` substring (case-insensitive). `path_pattern` is a glob
   matched against the relative path and the basename.
+- Optional per-spec assertions: `not_content_patterns` (forbidden substrings),
+  `regex_patterns` (required, case-insensitive), `min_lines`.
+- Optional per-case `check_command` (+ `check_command_timeout`, default 60 s):
+  a shell command run in the workspace after the file checks pass; non-zero
+  exit fails the case. Content patterns assert shape, the command asserts
+  behavior (compile it, run the real tests). Implemented identically in the
+  Python oracle (`cases.py`) and the JS mirror (`ui-harness/src/oracle.js`).
+- Optional per-case `test_setup_files`: `{relpath: content}`, written into the
+  workspace by `evaluate_case`/`evaluateCase` *after* the driver's run (so the
+  model never sees the tests it's graded against, unlike `setup_files`), just
+  before `check_command` runs. This is how a case ships real test code
+  (pytest-style asserts, a Node `assert` script, a Python harness that
+  compiles-and-runs a C binary and checks its stdout) instead of relying on
+  substring matching for correctness.
+- **`check_command` execution is sandboxed in Docker** when available, via
+  **one shared container per `optarena run` invocation** (`cases.DockerSandbox`
+  / `oracle.js`'s `startDockerSandbox`) - not one container per check_command
+  call. `runner.run_scenario()` starts it once (only if some loaded case has
+  a `check_command`), bind-mounting the run's whole temp workspace root
+  (parent of every case/trial subdirectory) at `/workspace`; every case and
+  every trial then `docker exec`s into that same container with `-w
+  /workspace/<case>/<trial-subdir>`, and it is stopped once at the end
+  (`finally` block, so it's cleaned up even on error). This was a real bug in
+  an earlier version - a fresh ephemeral `docker run --rm` per call meant 7
+  cases x 3 trials = 21 containers started/torn down for one run; verified
+  fixed by grepping a live run's output for distinct container names (one).
+  `DockerSandbox` uses `--network none`, `--memory 2g`, `--cpus 2`; each
+  `docker exec` wraps its command in the container's own `timeout <N>s` so a
+  hung test is killed inside its own process tree rather than needing the
+  shared container itself removed. Falls back to one ephemeral `docker run
+  --rm` per call (the pre-fix behavior) when `evaluate_case`/`run_check_command`
+  is called with no active sandbox (e.g. directly, outside the runner), and
+  to the host (one-time warning to stderr) when Docker is unreachable or
+  `OPTARENA_NO_DOCKER=1` is set. `docker_image_available()` /
+  `_docker_available()` cache their `docker` CLI probes for the process
+  lifetime. Build the image with `optarena docker build`; `optarena doctor`
+  reports readiness (advisory only - doesn't fail the exit code, since the
+  host fallback exists).
+- **Trade-off of one shared container:** all cases/trials in a run share one
+  network namespace (unlike the old per-call ephemeral containers, which
+  each got a fresh one). A case that binds a fixed port across repeated
+  trials (`create_server_c` binds `:8080`) can occasionally collide with a
+  not-yet-released binding from a prior trial - observed live as a single
+  `Bind failed: Address already in use` trial-3 failure in an otherwise
+  3/3-passing run. This is a pre-existing class of test flakiness (identical
+  to running repeated port-binding tests on a shared host), not specific to
+  Docker; case authors writing port-binding tests should prefer an ephemeral
+  port or tolerate the rare collision via a bind-retry in their
+  `test_setup_files` script.
+- **Why content patterns alone are insufficient:** observed in practice - a
+  small local model wrote valid-looking C++ (`#include <iostream>`,
+  `cout`/`cin`, Unicode smart quotes) into a `factorial.c` case. It contained
+  every required substring (`"factorial"`, `"int main"`, `"return"`) and
+  would have passed a keyword-only oracle; `gcc factorial.c` fails outright.
+  Real test execution via `check_command` is the only oracle that catches
+  this class of failure.
+- `evaluate_case()`/`evaluateCase()` return `(failures, oracle_info)`, not
+  just `failures` - `oracle_info` is `{check_command, ran, sandbox, image,
+  exit_code, duration_s, output, test_setup_files}` and is stashed by every
+  driver into `CaseResult.extra["oracle"]` (trials keep a per-trial list
+  under `extra["oracle_all_trials"]`). This is a CLI-first tool, so `runner.py`
+  prints it by default under each case line - which sandbox ran, exit code,
+  timing, and captured output - rather than collapsing everything to
+  PASS/FAIL and requiring the dashboard to see what actually happened.
 
 **Why a filesystem oracle:** it is tool-neutral. Whether the file appeared via
 a webview approval click, an aider commit, or the baseline driver writing an
@@ -171,8 +249,8 @@ local servers that ignore it.
 }
 ```
 
-`failures` (oracle mismatches — the tool ran but produced the wrong thing) are
-deliberately distinct from `error` (infrastructure problems — tool crashed,
+`failures` (oracle mismatches - the tool ran but produced the wrong thing) are
+deliberately distinct from `error` (infrastructure problems - tool crashed,
 backend refused). A comparison where one side has `error`s is a broken
 experiment, not a lost one.
 
@@ -199,8 +277,18 @@ optarena run --scenario a.json --scenario b.json
   └─ if ≥2 scenarios: compare_runs(A, B) → print table, save comparison JSON
 ```
 
-Exit code: `0` iff every executed scenario had zero failed cases — usable in
+Exit code: `0` iff every executed scenario had zero failed cases - usable in
 scripts even before proper CI support.
+
+Two opt-in runner modes (defaults preserve the single-trial serial behaviour):
+
+- `--trials N` - each case runs N times in fresh workspaces; `passed` is the
+  majority verdict and per-trial detail lands in `extra` (`trials`, `passes`,
+  `pass_rate_trials`, `durations_s`). Ignored for drivers that execute all
+  cases inside `prepare()` (the UI drivers), which set `caches_results`.
+- `--parallel N` - cases fan out over N worker threads for drivers marked
+  `parallel_safe` (baselines, CLI agents). UI drivers stay serial (one
+  display).
 
 ### Driver lifecycle contract
 
@@ -208,7 +296,7 @@ scripts even before proper CI support.
   startup (a VS Code session) run **all cases inside `prepare()`** in one
   session and serve cached results from `run_case()` (§6.3). Per-case launch
   would dominate every timing measurement.
-- `run_case()` must never raise for tool-level failure — it returns a
+- `run_case()` must never raise for tool-level failure - it returns a
   CaseResult with `error` set. Raising is reserved for "the experiment cannot
   proceed at all" (missing binary, harness not installed).
 - Drivers must scrub `ELECTRON_RUN_AS_NODE` and `VSCODE_*` from any subprocess
@@ -218,23 +306,67 @@ scripts even before proper CI support.
 
 ## 5. Metrics & comparison
 
-Per-case: `passed`, `duration_s` (wall time of tool work only — workspace prep
+Per-case: `passed`, `duration_s` (wall time of tool work only - workspace prep
 excluded), `files` (created/changed), `failures[]`, `error`, `extra{}`
-(driver-specific: token counts, stderr tails).
+(driver-specific: token counts, stderr tails, and `extra["oracle"]` - the
+dict returned alongside failures by `evaluate_case()` (§3.1): `check_command`,
+`ran`, `sandbox`, `image`, `container`, `exit_code`, `duration_s`, `output`,
+`test_setup_files`, `diff{files_changed, lines_changed_approx}`, and (on
+failure) `failure_class` - one of `syntax_error`, `compile_error`,
+`assertion_failure`, `timeout`, `runtime_error`, from `classify_failure()` in
+`cases.py`; a best-effort bucket from the captured output, not authoritative
+and not part of the pass/fail verdict itself).
 
-Aggregate (per run): pass rate, mean/median/total duration, total tokens.
+`diff_stats()` (`cases.py`) approximates change size: new files count their
+full line length; "modify" cases (with `setup_files`) diff against the known
+original content (the pre-run snapshot only stores a `size:mtime` signature,
+not content, so this is the best available reference) - an edit that
+happens to produce the same line count still counts as >= 1 changed line
+(`abs(delta) or 1`), so a real edit is never reported as zero.
+
+`pricing.py` estimates USD cost from token usage: `estimate_cost(model,
+prompt_tokens, completion_tokens, base_url)` returns `0.0` for any localhost
+backend (`is_local_backend()`) and for models with no entry in its
+substring-matched price table (longest key wins, so `gpt-4o-mini` doesn't
+fall through to the pricier `gpt-4o` entry) - "free"/unpriced is always the
+honest default, never a fabricated number. The built-in table is overridable
+via `OPTARENA_PRICING` or `~/.optarena/pricing.json` (`{"model": [prompt_per_1m,
+completion_per_1m]}`). The baseline drivers (`openai_chat.py`) compute
+`extra["cost_usd"]` per case once token usage is known; agent drivers (CLI,
+UI, SDK) don't currently report token usage from their underlying tool, so
+their `cost_usd` is absent, same as their `total_tokens` today.
+
+Aggregate (per run): pass rate, mean/median/total duration, total tokens,
+`total_cost_usd` (sum of per-case `cost_usd`, `None` when every case was
+free/unpriced so the CLI/dashboard render "free" rather than "$0.00"), and
+`mean_files_changed` (mean of each case's `len(files)`).
 
 Comparison (`compare.py`): cases aligned by name (a case present in only one
-run shows as `—`), per-case pass/pass and duration delta, plus a verdict:
+run shows as `-`), per-case pass/pass and duration delta, plus a verdict:
 
-- `more_accurate` — higher pass rate (or `tie`)
-- `faster` — lower mean case duration
-- `pass_rate_delta`, `mean_duration_delta_s` — signed B−A
+- `more_accurate` - higher pass rate (or `tie`)
+- `faster` - lower mean case duration
+- `cheaper` - lower `total_cost_usd` (`None` when neither run had a priced cost)
+- `pass_rate_delta`, `mean_duration_delta_s` - signed B-A
 
 Comparisons are saved to `results/comparisons/` and rendered by both the
 terminal table and the dashboard. **Accuracy outranks speed** in interpretation
 ordering (the dashboard shows accuracy verdict first); OptArena reports both
 and editorializes no further.
+
+### 5.1 Regression testing (`optarena regression`)
+
+`regression_summary(cmp)` / `format_regression()` (`compare.py`) build on the
+same `compare_runs()` output but answer a narrower, more actionable question
+than the pairwise table: **which named cases flipped between A and B**, not
+just an aggregate delta. `regressed_cases` = passed in A, failed in B;
+`improved_cases` = the reverse. `cmd_regression` (`cli.py`) prints the
+accuracy/mean-time/cost/token deltas plus both name lists, and returns exit
+code `1` if `regressed_cases` is non-empty - `optarena regression <before>
+<after>` is meant to be usable as a CI gate on a model/tool/prompt upgrade,
+not just a human-readable report. The cost line is only printed when both
+runs have a priced `total_cost_usd` (`format_regression`'s `cost_a`/`cost_b`
+check) - two free local runs correctly show no cost line at all.
 
 ---
 
@@ -243,7 +375,18 @@ and editorializes no further.
 ### 6.1 Registry (`drivers/__init__.py`)
 
 Name → class with lazy imports so optional dependencies (crewai) don't tax
-everyone. Adding a driver = one module + one registry entry.
+everyone. Adding a driver = one module + one registry entry. Each entry
+carries metadata surfaced by `optarena list drivers`:
+
+- `kind`: `ui | cli | sdk | baseline`
+- `backend`: `scenario` (obeys the scenario backend; backend-vs-backend is
+  valid) or `fixed` (own account/provider; tool-vs-tool only)
+- `status`: `stable | experimental | optional`
+
+The headless terminal agents (Claude Code, Codex, OpenCode, Goose, Qwen Code)
+share one generic driver (`drivers/cli_agents.py`) specialized by per-tool
+descriptors - binary name, prompt/auto-approve flags, backend-injection env -
+the same data-not-code pattern as `ui-harness/src/extensions.js`.
 
 | Driver | Status | Mechanism |
 |---|---|---|
@@ -269,14 +412,14 @@ the next prompt.
 
 The flagship. `vscode_ui.py` shells out to `ui-harness/` (`npm test`), which:
 
-1. **Launches an isolated VS Code** via `wdio-vscode-service` — pinned version
+1. **Launches an isolated VS Code** via `wdio-vscode-service` - pinned version
    (newest with bundled locators, currently 1.123.0; `stable` rejects the
    service's ChromeDriver flags), throwaway profile under
    `ui-harness/.vscode-storage-<ext>/`, workspace under `.workspace-<ext>/`.
 2. **Seeds the extension's configuration** before launch so it boots pointed
    at the scenario backend with auto-approval, no onboarding:
    - Cline/Roo: rows in the profile's `state.vscdb` (`ItemTable`, keys
-     `<extId>/<key>`, JSON values) — provider, base URL, model, permissive
+     `<extId>/<key>`, JSON values) - provider, base URL, model, permissive
      auto-approval, telemetry off.
    - Continue: `config.yaml` in an isolated `CONTINUE_GLOBAL_DIR`.
 3. **Drives the real webview**: opens the extension's view by command ID,
@@ -288,7 +431,7 @@ The flagship. `vscode_ui.py` shells out to `ui-harness/` (`npm test`), which:
 5. **Judges via the same filesystem oracle** (JS mirror in `src/oracle.js`)
    and **appends one JSON line per case** to `RESULTS_FILE`.
 
-**Python↔Node protocol** — environment in:
+**Python↔Node protocol** - environment in:
 
 | Env | Meaning |
 |---|---|
@@ -334,7 +477,7 @@ an id, filename, path, or unique substring (most recent match wins).
 
 One static file, vanilla JS, no build step. Served by `optarena serve` (stdlib
 `http.server` rooted at the repo root, so `/dashboard/` and `/results/` share
-an origin) — or any static server.
+an origin) - or any static server.
 
 - Fetches `../results/index.json`, lazily fetches run files on selection,
   computes comparisons client-side (same alignment rules as `compare.py`).
@@ -357,7 +500,7 @@ Any terminal inside VS Code leaks `ELECTRON_RUN_AS_NODE=1` and `VSCODE_*` into
 children. An inherited `ELECTRON_RUN_AS_NODE` makes a spawned `Code.exe` run as
 plain Node (rejecting every Chromium flag: `bad option: --no-sandbox`);
 `VSCODE_IPC_HOOK` routes it into the parent instance. **Both the Python drivers
-and `wdio.conf.js` scrub these** — the double scrub is intentional (either side
+and `wdio.conf.js` scrub these** - the double scrub is intentional (either side
 may be entered directly).
 
 ### 8.2 The stuck-updater mutex
@@ -372,17 +515,17 @@ update re-attempts on next VS Code restart).
 
 ### 8.3 Windows specifics
 
-- `tempfile.mkstemp` returns an **open** fd — close it before any later
+- `tempfile.mkstemp` returns an **open** fd - close it before any later
   `unlink` (WinError 32).
 - Always pass `encoding="utf-8", errors="replace"` to subprocesses; npm and VS
   Code emit UTF-8 that cp1252 consoles cannot decode.
 - Console prints stick to ASCII-safe glyphs (cp1252 lacks `→`, `⚠`, `…`).
-- Kill orphaned `index.exe`/`chromedriver` (wdio's shim) after crashed runs —
+- Kill orphaned `index.exe`/`chromedriver` (wdio's shim) after crashed runs -
   they linger and destabilize subsequent sessions.
 
 ### 8.4 Webview driving rules (from the Cline port)
 
-- **Never cache a webview handle** — moving the view or an SPA re-render
+- **Never cache a webview handle** - moving the view or an SPA re-render
   replaces the iframe. Re-acquire per interaction.
 - This Electron lacks the Actions-API scroll CDP command
   (`Browser.getWindowForTarget`): use JS `scrollIntoView()+focus()` and a JS
@@ -399,7 +542,7 @@ update re-attempts on next VS Code restart).
 Everything is local: prompts and generated code go only to the backend URL in
 the scenario; results are local JSON; the dashboard server binds `127.0.0.1`.
 No telemetry. Seeded extension profiles are throwaway directories inside the
-repo (gitignored) and never touch the user's real VS Code profile — with one
+repo (gitignored) and never touch the user's real VS Code profile - with one
 deliberate exception: the ui-harness *reads* the user's installed extensions
 directory to load the extension under test.
 
@@ -408,16 +551,16 @@ directory to load the extension under test.
 ## 10. Roadmap
 
 Near-term:
-- **Headless CI mode** — Xvfb on Linux for UI drivers; baselines/CLI drivers
+- **Headless CI mode** - Xvfb on Linux for UI drivers; baselines/CLI drivers
   already run headless.
-- **More drivers** — Cline CLI (headless `cline --auto-approve`), OpenHands,
+- **More drivers** - Cline CLI (headless `cline --auto-approve`), OpenHands,
   Continue CLI, Copilot agent mode when automatable.
-- **Richer oracles** — optional per-case build/test command (compile the C
+- **Richer oracles** - optional per-case build/test command (compile the C
   file, run pytest) on top of content patterns; optional LLM-judge scoring
   with the judge itself a pluggable backend.
-- **Run matrix** — `optarena run --matrix` (drivers × backends) with a matrix
+- **Run matrix** - `optarena run --matrix` (drivers × backends) with a matrix
   dashboard view.
-- **Parallelism** — baselines/CLI drivers can fan out per-case; UI drivers
+- **Parallelism** - baselines/CLI drivers can fan out per-case; UI drivers
   stay serial (one display).
 
 Structural:

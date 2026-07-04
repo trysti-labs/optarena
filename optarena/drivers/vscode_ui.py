@@ -5,7 +5,7 @@ Drives real VS Code extension UIs (Cline / Roo Code / Continue) via the
 `ui-harness` WebdriverIO harness in ../../ui-harness. That harness launches an
 isolated VS Code, seeds the extension's config for the scenario backend,
 types prompts into the actual webview chat, auto-approves, and verifies the
-workspace diff — the OptArena driver just orchestrates it and collects results.
+workspace diff - the OptArena driver just orchestrates it and collects results.
 
 Because launching VS Code per case would dominate timing, prepare() executes
 the whole scenario's case set in ONE editor session; the harness appends one
@@ -26,10 +26,12 @@ from .base import CaseResult, Driver
 HARNESS_DIR = Path(__file__).resolve().parents[2] / "ui-harness"
 
 # Maturity per extension (also documented in drivers/__init__.py).
-_STATUS = {"cline": "stable", "roo": "experimental", "continue": "experimental"}
+_STATUS = {"cline": "stable", "roo": "experimental", "continue": "experimental", "kilo": "experimental"}
 
 
 class VSCodeUIDriver(Driver):
+    caches_results = True   # prepare() runs the whole case set in one session
+
     def __init__(self, ext: str) -> None:
         self.ext = ext
         self.name = f"{ext}-ui"
@@ -40,12 +42,12 @@ class VSCodeUIDriver(Driver):
             raise RuntimeError(f"ui-harness not found at {HARNESS_DIR}")
         if not (HARNESS_DIR / "node_modules").exists():
             raise RuntimeError(
-                f"ui-harness not installed — run: cd {HARNESS_DIR} && npm install"
+                f"ui-harness not installed - run: cd {HARNESS_DIR} && npm install"
             )
         if _STATUS.get(self.ext) != "stable":
             print(f"  [{self.name}] NOTE: this driver is {_STATUS.get(self.ext)}")
 
-        # mkstemp returns an OPEN fd — close it immediately, or Windows blocks
+        # mkstemp returns an OPEN fd - close it immediately, or Windows blocks
         # the later unlink (WinError 32) while we still hold the handle.
         fd, tmp_name = tempfile.mkstemp(suffix=".jsonl", prefix="optarena_ui_")
         os.close(fd)
@@ -60,7 +62,8 @@ class VSCodeUIDriver(Driver):
             "API_KIND": backend.kind,             # ollama | openai
             "MODEL_ID": backend.model,
             "RESULTS_FILE": str(results_file),
-            "CASES_DIR": str(Path(__file__).resolve().parents[1] / "cases"),
+            "CASES_DIR": str(scenario.cases_dir
+                              or Path(__file__).resolve().parents[1] / "cases"),
         })
         if scenario.cases:
             env["CASES"] = ",".join(scenario.cases)
@@ -68,12 +71,17 @@ class VSCodeUIDriver(Driver):
             env["CASE_TIMEOUT"] = str(scenario.timeout)
 
         npm = "npm.cmd" if os.name == "nt" else "npm"
-        print(f"  [{self.name}] launching VS Code UI run (this takes minutes)…")
+        # Bound the whole harness run: per-case budget + launch slack, never
+        # less than 30 min (a cold first run also downloads VS Code, ~280 MB).
+        from ..cases import load_cases
+        n_cases = len(load_cases(scenario.cases, cases_dir=scenario.cases_dir))
+        run_timeout = max(60 * 30, n_cases * ((scenario.timeout or 150) + 120) + 600)
+        print(f"  [{self.name}] launching VS Code UI run (this takes minutes)...")
         proc = subprocess.run(
             [npm, "test"], cwd=HARNESS_DIR, env=env,
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",   # npm output is UTF-8, not cp1252
-            timeout=60 * 30,
+            timeout=run_timeout,
         )
         if results_file.exists():
             for line in results_file.read_text(encoding="utf-8").splitlines():
@@ -87,11 +95,12 @@ class VSCodeUIDriver(Driver):
                     files=rec.get("files", []),
                     failures=rec.get("failures", []),
                     error=rec.get("error"),
+                    extra=rec.get("extra", {}),
                 )
             try:
                 results_file.unlink(missing_ok=True)
             except OSError:
-                pass  # stray handle on Windows — temp dir cleanup will get it
+                pass  # stray handle on Windows - temp dir cleanup will get it
         if not self._results:
             tail = (proc.stdout or "")[-1200:] + (proc.stderr or "")[-400:]
             raise RuntimeError(

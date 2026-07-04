@@ -61,7 +61,7 @@ def run_one(
     print(f"{'='*60}")
 
     if cdp_alive(cdp_port):
-        print(f"  [run] stale VS Code on :{cdp_port} — killing before configure")
+        print(f"  [run] stale VS Code on :{cdp_port} - killing before configure")
         kill_vscode(cdp_port)
 
     try:
@@ -95,7 +95,7 @@ def run_one(
                 return result
 
             if not check_extension_installed("RooVeterinaryInc.roo-cline"):
-                print("  [run] WARN: Roo-Cline extension not found in extensions dir — proceeding anyway")
+                print("  [run] WARN: Roo-Cline extension not found in extensions dir - proceeding anyway")
                 result.warn("Roo-Cline extension not detected in extensions directory")
 
             if not open_panel(page, ctx):
@@ -126,10 +126,10 @@ def run_one(
 
             if passed:
                 result.pass_()
-                print(f"  [run] PASS — files: {[f.name for f in created]}")
+                print(f"  [run] PASS - files: {[f.name for f in created]}")
             else:
                 result.fail(err or "Expected files not created")
-                print(f"  [run] FAIL — {err}")
+                print(f"  [run] FAIL - {err}")
 
         except Exception as exc:
             import traceback
