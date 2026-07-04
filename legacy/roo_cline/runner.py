@@ -1,7 +1,7 @@
 """
 roo_cline/runner.py
 ────────────────────
-Roo-Cline automation — same flow as cline/runner.py but with:
+Roo-Cline automation - same flow as cline/runner.py but with:
   - Extension ID: RooVeterinaryInc.roo-cline
   - Activity-bar aria labels: *Roo*
   - globalState prefix: rooveterinaryinc.roo-cline
@@ -63,7 +63,7 @@ def open_panel(page: Page, ctx: BrowserContext) -> bool:
         except Exception:
             pass
 
-    print("  [roo-cline] activity-bar icon not found — trying command palette")
+    print("  [roo-cline] activity-bar icon not found - trying command palette")
     for cmd in ["Roo Cline: Open In New Tab", "roo-cline.openInNewTab"]:
         try:
             run_vscode_command(page, cmd)

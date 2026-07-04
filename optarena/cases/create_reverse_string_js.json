@@ -1,0 +1,20 @@
+{
+  "name": "create_reverse_string_js",
+  "description": "Creates a Node.js module that reverses a string",
+  "language": "javascript",
+  "prompts": [
+    "Create a Node.js file called reverse.js that exports a function reverseString(str) which returns str reversed. Export it exactly like this at the end of the file: module.exports = { reverseString };"
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "reverse.js",
+      "content_patterns": ["reverseString", "module.exports"]
+    }
+  ],
+  "test_setup_files": {
+    "test_reverse.js": "const { reverseString } = require('./reverse.js');\nconst assert = require('assert');\nassert.strictEqual(reverseString('hello'), 'olleh');\nassert.strictEqual(reverseString(''), '');\nassert.strictEqual(reverseString('a'), 'a');\nassert.strictEqual(reverseString('race car'), 'rac ecar');\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_reverse.js",
+  "timeout": 90
+}

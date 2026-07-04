@@ -2,14 +2,15 @@
  * wdio.conf.js
  * ────────────
  * WebdriverIO + wdio-vscode-service config for driving a real VS Code AI agent
- * extension (Cline / Roo-Cline / Continue, selected via EXT) against SelfOpt.
+ * extension (Cline / Roo-Cline / Continue, selected via EXT) against the
+ * scenario backend (any OpenAI/Ollama-compatible endpoint).
  *
  * Unlike the old CDP/pyautogui harness, wdio-vscode-service downloads + launches
  * a clean VS Code, exposes the VS Code API via browser.executeWorkbench(), and
  * switches the WebDriver context INTO the extension's webview iframe.
  *
- * onPrepare seeds the test profile so the extension boots configured for SelfOpt
- * with auto-approval (no onboarding, no manual approvals).
+ * onPrepare seeds the test profile so the extension boots configured for the
+ * backend with auto-approval (no onboarding, no manual approvals).
  */
 import fs from 'node:fs';
 import {
@@ -82,7 +83,7 @@ export const config = {
   },
 
   onPrepare() {
-    console.log(`\n[onPrepare] ${DESCRIPTOR.label} UI tests — EXT=${EXT}  API=${API_MODE}  backend=${BACKEND_URL}`);
+    console.log(`\n[onPrepare] ${DESCRIPTOR.label} UI tests - EXT=${EXT}  API=${API_MODE}  backend=${BACKEND_URL}`);
     console.log(`[onPrepare] extension: ${EXT_PATH}`);
 
     for (const dir of [STORAGE_PATH, WORKSPACE]) {

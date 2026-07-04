@@ -168,10 +168,10 @@ def launch_vscode(workspace: Path, port: int = 9222) -> int:
     # If something is already on the port (e.g. a previous test left it alive),
     # kill it before we try to launch a fresh instance.
     if cdp_alive(port):
-        print(f"  [vscode] CDP still alive on :{port} — killing stale instance")
+        print(f"  [vscode] CDP still alive on :{port} - killing stale instance")
         kill_vscode(port)
         if cdp_alive(port):
-            raise RuntimeError(f"Cannot free CDP port {port} — kill failed")
+            raise RuntimeError(f"Cannot free CDP port {port} - kill failed")
 
     # Isolated user-data dir keeps test settings away from the real VS Code.
     test_user_data = Path(tempfile.gettempdir()) / f"vscode_test_userdata_{port}"
@@ -299,7 +299,7 @@ def write_globalstate(ext_id: str, settings: dict) -> list[str]:
     """
     db = _state_db_path()
     if not db.exists():
-        return [f"globalState DB not found at {db} — configure extension API manually."]
+        return [f"globalState DB not found at {db} - configure extension API manually."]
 
     warnings: list[str] = []
     try:
@@ -403,7 +403,7 @@ def get_webview_textarea_screen_pos(page: Page) -> Optional[tuple[int, int]]:
 
     if "error" in rect:
         # Fall back to bottom-left quarter of the window (sidebar region)
-        print(f"  [webview] {rect} — using fallback coords")
+        print(f"  [webview] {rect} - using fallback coords")
         x = int((win["screenX"] + min(280, win["outerW"] // 4)) * scale)
         y = int((win["screenY"] + win["outerH"] - 80) * scale)
     else:

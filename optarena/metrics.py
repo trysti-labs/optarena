@@ -20,6 +20,8 @@ def aggregate(case_dicts: list[dict]) -> dict:
                  or (c.get("extra", {}).get("prompt_tokens", 0)
                      + c.get("extra", {}).get("completion_tokens", 0))
                  for c in case_dicts)
+    cost = sum(c.get("extra", {}).get("cost_usd", 0) or 0 for c in case_dicts)
+    files_changed = [len(c.get("files", []) or []) for c in case_dicts]
     return {
         "cases": total,
         "passed": passed,
@@ -30,6 +32,8 @@ def aggregate(case_dicts: list[dict]) -> dict:
         "mean_duration_s": round(statistics.mean(durations), 1) if durations else 0.0,
         "median_duration_s": round(statistics.median(durations), 1) if durations else 0.0,
         "total_tokens": tokens or None,
+        "total_cost_usd": round(cost, 4) if cost else None,
+        "mean_files_changed": round(statistics.mean(files_changed), 1) if files_changed else 0.0,
     }
 
 

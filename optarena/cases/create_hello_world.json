@@ -1,6 +1,7 @@
 {
   "name": "create_hello_world",
-  "description": "Simplest possible test: Cline creates hello.py that prints Hello World",
+  "description": "Simplest possible test: creates hello.py that prints Hello, World!",
+  "language": "python",
   "prompts": [
     "Create a Python file called hello.py that prints 'Hello, World!'"
   ],
@@ -8,8 +9,12 @@
   "expected_files": [
     {
       "path_pattern": "hello.py",
-      "content_patterns": ["print", "Hello"]
+      "content_patterns": ["print"]
     }
   ],
+  "test_setup_files": {
+    "test_hello.py": "import subprocess, sys\nout = subprocess.check_output([sys.executable, 'hello.py'], text=True)\nassert 'Hello, World!' in out, f'expected \"Hello, World!\" in stdout, got {out!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_hello.py",
   "timeout": 90
 }

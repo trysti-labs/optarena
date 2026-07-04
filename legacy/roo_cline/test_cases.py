@@ -1,5 +1,5 @@
 """
-roo_cline/test_cases.py — Roo-Cline test catalogue loader.
+roo_cline/test_cases.py - Roo-Cline test catalogue loader.
 Reuses the same prompt JSON files as cline/ (same prompt format, same expectations).
 """
 from __future__ import annotations

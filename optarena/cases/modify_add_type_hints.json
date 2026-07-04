@@ -1,8 +1,9 @@
 {
   "name": "modify_add_type_hints",
-  "description": "Cline adds type hints to an existing Python file",
+  "description": "Adds type hints to an existing Python file",
+  "language": "python",
   "prompts": [
-    "Add type hints to all function parameters and return types in utils.py."
+    "Add type hints to all function parameters and return types in utils.py. Do not change any function's behavior or signature order."
   ],
   "setup_files": {
     "utils.py": "def add(a, b):\n    return a + b\n\ndef greet(name):\n    return 'Hello, ' + name\n\ndef clamp(value, low, high):\n    return max(low, min(high, value))\n"
@@ -10,8 +11,12 @@
   "expected_files": [
     {
       "path_pattern": "utils.py",
-      "content_patterns": ["->", "str"]
+      "content_patterns": ["->"]
     }
   ],
+  "test_setup_files": {
+    "test_utils.py": "import importlib.util, inspect\nspec = importlib.util.spec_from_file_location('utils_mod', 'utils.py')\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nassert mod.add(2, 3) == 5, f'add(2, 3) = {mod.add(2, 3)}, expected 5'\nassert mod.greet('World') == 'Hello, World', f\"greet('World') = {mod.greet('World')!r}\"\nassert mod.clamp(15, 0, 10) == 10, f'clamp(15, 0, 10) = {mod.clamp(15, 0, 10)}, expected 10'\nassert mod.clamp(-5, 0, 10) == 0, f'clamp(-5, 0, 10) = {mod.clamp(-5, 0, 10)}, expected 0'\nfor fname in ('add', 'greet', 'clamp'):\n    sig = inspect.signature(getattr(mod, fname))\n    assert sig.return_annotation is not inspect.Signature.empty, f'{fname}() missing a return type hint'\n    for pname, param in sig.parameters.items():\n        assert param.annotation is not inspect.Signature.empty, f'{fname}() parameter {pname!r} missing a type hint'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_utils.py",
   "timeout": 150
 }

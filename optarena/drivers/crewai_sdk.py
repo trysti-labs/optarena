@@ -7,7 +7,7 @@ path rather than a UI or CLI. Requires `pip install crewai`.
 
 The agent is asked to output the complete file in one code block; the driver
 writes it to the expected path (same convention as the chat baseline) since a
-bare crew has no file tools — this measures crewAI's orchestration + prompting
+bare crew has no file tools - this measures crewAI's orchestration + prompting
 stack on top of the backend.
 """
 
@@ -18,7 +18,7 @@ import re
 import time
 from pathlib import Path
 
-from ..cases import changed_files, check_expected, snapshot, write_setup_files
+from ..cases import changed_files, evaluate_case, snapshot, write_setup_files
 from ..scenario import Scenario
 from .base import CaseResult, Driver
 
@@ -32,7 +32,7 @@ class CrewAIDriver(Driver):
         try:
             import crewai  # noqa: F401
         except ImportError as exc:
-            raise RuntimeError("crewai not installed — pip install crewai") from exc
+            raise RuntimeError("crewai not installed - pip install crewai") from exc
 
     def run_case(self, case: dict, scenario: Scenario, workspace: Path) -> CaseResult:
         from crewai import Agent, Crew, Task, LLM
@@ -48,7 +48,7 @@ class CrewAIDriver(Driver):
         os.environ.setdefault("OPENAI_API_KEY", backend.api_key)
         llm = LLM(
             model=f"openai/{backend.model}",
-            base_url=backend.base_url.rstrip("/") + "/v1",
+            base_url=backend.openai_base,
             api_key=backend.api_key,
         )
         coder = Agent(
@@ -84,6 +84,6 @@ class CrewAIDriver(Driver):
         result.duration_s = time.monotonic() - t0
 
         result.files = changed_files(before, workspace)
-        result.failures = check_expected(result.files, expected, workspace)
+        result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
         result.passed = result.error is None and not result.failures
         return result

@@ -44,6 +44,12 @@ class Driver:
     """Base driver. Subclasses implement run_case(); prepare/teardown optional."""
 
     name = "base"
+    # True when run_case() only spawns an isolated subprocess / HTTP call per
+    # case, so cases may run concurrently (each in its own workspace).
+    parallel_safe = False
+    # True when prepare() executes ALL cases once and run_case() serves cached
+    # results (the VS Code UI driver). Repeat trials are meaningless there.
+    caches_results = False
 
     def prepare(self, scenario: Scenario, workspace: Path) -> None:
         """Called once before the first case (start servers, launch editors…)."""

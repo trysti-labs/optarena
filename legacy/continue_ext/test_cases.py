@@ -1,4 +1,4 @@
-"""continue_ext/test_cases.py — Continue test catalogue (reuses cline/prompts)."""
+"""continue_ext/test_cases.py - Continue test catalogue (reuses cline/prompts)."""
 from __future__ import annotations
 
 import json

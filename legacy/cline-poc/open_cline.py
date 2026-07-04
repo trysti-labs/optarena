@@ -98,7 +98,7 @@ def configure_cline_api(api_mode: str, selfopt_url: str) -> list[str]:
     """
     db = _vscode_state_db()
     if not db.exists():
-        return [f"globalState DB not found at {db} — configure Cline API manually."]
+        return [f"globalState DB not found at {db} - configure Cline API manually."]
 
     prefix = f"{CLINE_EXT_ID}/"
 
@@ -129,7 +129,7 @@ def configure_cline_api(api_mode: str, selfopt_url: str) -> list[str]:
         conn.close()
         print(f"  [config] Cline API → {api_mode}  ({selfopt_url})")
     except Exception as exc:
-        warnings.append(f"globalState write failed ({exc}) — configure Cline API manually.")
+        warnings.append(f"globalState write failed ({exc}) - configure Cline API manually.")
     return warnings
 
 
@@ -210,7 +210,7 @@ def launch_vscode(workspace: Path) -> None:
     the debug flag is silently ignored.  We must kill the existing instance first.
     """
     if cdp_alive():
-        print("  VS Code CDP already active on :9222 — reusing.")
+        print("  VS Code CDP already active on :9222 - reusing.")
         return
 
     if _vscode_running():
@@ -264,7 +264,7 @@ _WEBVIEW_IFRAME_JS = """
     // VS Code renders webview panels as <iframe> elements inside the main workbench.
     // The iframe element lives in the main renderer (so Playwright can see it), even
     // though its content runs in a sandboxed sub-process.  We find the iframe and
-    // return its bounding rect — pyautogui then clicks at the bottom (textarea area).
+    // return its bounding rect - pyautogui then clicks at the bottom (textarea area).
     const selectors = [
         // VS Code 1.79+: webview panels in the sidebar or editor area
         '.part.sidebar iframe',
@@ -323,7 +323,7 @@ def _fill_textarea(main: Page, prompt: str) -> tuple[bool, str]:
 
     if "error" in rect:
         # Fall back to bottom-left quarter of the VS Code window (sidebar area)
-        print(f"  [warn] {rect} — falling back to sidebar coordinates")
+        print(f"  [warn] {rect} - falling back to sidebar coordinates")
         click_x = int(win["screenX"] + min(280, win["outerW"] // 4))
         click_y = int(win["screenY"] + win["outerH"] - 80)
     else:
@@ -335,7 +335,7 @@ def _fill_textarea(main: Page, prompt: str) -> tuple[bool, str]:
 
     print(f"  [click] textarea area at screen ({click_x}, {click_y})")
 
-    # Copy prompt to clipboard and paste — avoids typewrite encoding issues
+    # Copy prompt to clipboard and paste - avoids typewrite encoding issues
     _set_clipboard(prompt)
     pyautogui.click(click_x, click_y)
     time.sleep(0.4)
@@ -412,7 +412,7 @@ def run_test(api_mode: str, selfopt_url: str, prompt: str, timeout: int) -> Test
 
     ws = Path(tempfile.mkdtemp(prefix=f"cline_{api_mode}_"))
     print(f"\n{'='*60}")
-    print(f"  Cline test — API={api_mode}   workspace={ws}")
+    print(f"  Cline test - API={api_mode}   workspace={ws}")
     print(f"{'='*60}")
     setup_workspace(ws)
 
@@ -484,7 +484,7 @@ def run_test(api_mode: str, selfopt_url: str, prompt: str, timeout: int) -> Test
         #    are spawned without --remote-debugging-port and thus don't appear in
         #    /json/list.  Playwright keyboard events stay in the main renderer.
         #    pyautogui sends OS-level mouse + keyboard input that reaches whichever
-        #    window has screen focus — the Cline textarea in this case.
+        #    window has screen focus - the Cline textarea in this case.
         print("  Injecting prompt into Cline textarea...")
         ok, info = _fill_textarea(main, prompt)
         if not ok:
@@ -510,7 +510,7 @@ def run_test(api_mode: str, selfopt_url: str, prompt: str, timeout: int) -> Test
 
             time.sleep(2)
         else:
-            result.fail(f"Timed out after {timeout}s — no code files in {ws}")
+            result.fail(f"Timed out after {timeout}s - no code files in {ws}")
 
         browser.close()
 

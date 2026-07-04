@@ -114,7 +114,7 @@ def open_panel(page: Page, ctx: BrowserContext) -> bool:
         except Exception:
             pass
 
-    print("  [continue] activity-bar icon not found — trying command palette")
+    print("  [continue] activity-bar icon not found - trying command palette")
     for cmd in ["Continue: Open GUI", "continue.openGUI", "Continue: Focus on Continue View"]:
         try:
             run_vscode_command(page, cmd)

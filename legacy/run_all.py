@@ -35,7 +35,7 @@ from tests.tools.shared.result import TestResult, write_report
 from tests.tools.shared.selfopt import require_selfopt
 
 try:
-    from playwright.sync_api import sync_playwright  # noqa: F401 — availability check
+    from playwright.sync_api import sync_playwright  # noqa: F401 - availability check
 except ImportError:
     print("ERROR: playwright not installed. Run: pip install playwright && playwright install chromium")
     sys.exit(1)

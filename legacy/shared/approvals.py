@@ -141,6 +141,6 @@ def auto_approve_loop(
 
     remaining = time.monotonic() - deadline + timeout
     return False, seen_files, (
-        f"Timed out after {timeout}s — expected files not found. "
+        f"Timed out after {timeout}s - expected files not found. "
         f"Created so far: {[f.name for f in seen_files]}"
     )

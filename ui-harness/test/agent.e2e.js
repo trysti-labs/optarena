@@ -19,7 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { WORKSPACE, BACKEND_URL, API_MODE, MODEL_ID, DESCRIPTOR, RESULTS_FILE } from '../src/paths.js';
 import {
-  snapshot, changedFiles, checkExpected, writeSetupFiles, loadCases,
+  snapshot, changedFiles, checkExpected, evaluateCase, writeSetupFiles, loadCases,
+  startDockerSandbox, stopDockerSandbox,
 } from '../src/oracle.js';
 
 const CASE_TIMEOUT = Number(process.env.CASE_TIMEOUT || 150) * 1000;
@@ -59,7 +60,7 @@ async function freshWebview() {
     }, { timeout: 30000, timeoutMsg: `${DESCRIPTOR.label} webview iframe never appeared` });
   }
   // With multiple webviews (or one that just reloaded), pick the one whose body
-  // actually has content — avoids landing in a stale/detached frame after an
+  // actually has content - avoids landing in a stale/detached frame after an
   // SPA reload (e.g. Roo's welcome → wizard → chat transitions).
   if (webviews.length > 1) {
     for (const wv of webviews) {
@@ -138,7 +139,7 @@ async function advanceOnce() {
   // welcome "Get Started" button.
   if (await domCount('[aria-label="provider-select"]')) {
     if (!/\bollama\b/.test(text)) {
-      // Provider isn't Ollama yet — open the dropdown and pick Ollama.
+      // Provider isn't Ollama yet - open the dropdown and pick Ollama.
       (await $$('[aria-label="provider-select"]'))[0]?.click().catch(() => {});
       await sleep(1000);
       const picked = await clickByText(/^ollama$/i, '[role="option"], [role="menuitem"], li');
@@ -209,7 +210,7 @@ async function injectPrompt(text, isFirst) {
   if (DESCRIPTOR.prepareInput) await runCommand(DESCRIPTOR.prepareInput).catch(() => {});
 
   // First prompt: clear onboarding / provider wizard / agent-mode until the chat
-  // input is ready (each step in a fresh frame — see prepareChat()).
+  // input is ready (each step in a fresh frame - see prepareChat()).
   if (isFirst) {
     const ready = await prepareChat();
     if (!ready) {
@@ -261,7 +262,7 @@ async function clickApprovals() {
         await b.click();
         clicked++;
       } catch {
-        try { await browser.execute((el) => el.click(), b); clicked++; } catch { /* stale — ignore */ }
+        try { await browser.execute((el) => el.click(), b); clicked++; } catch { /* stale - ignore */ }
       }
     }
   } catch { /* webview not ready this tick */ } finally {
@@ -290,20 +291,31 @@ async function backendReachable() {
 }
 
 describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
-  before(async function () {
-    this.timeout(60000);
-    if (!(await backendReachable())) {
-      throw new Error(`Backend not reachable at ${BACKEND_URL} (API=${API_MODE}). Start it first.`);
-    }
-    await freshWebview(); // open the extension view once up front
-    console.log(`  [setup] ${DESCRIPTOR.label} webview is open`);
-  });
-
   // Case selection: ONLY_CASE=<name> or CASES=<name,name,…> (arena uses CASES).
   const only = process.env.ONLY_CASE;
   const casesFilter = (process.env.CASES || '').split(',').map((s) => s.trim()).filter(Boolean);
   const cases = loadCases().filter((c) =>
     (only ? c.name === only : true) && (casesFilter.length ? casesFilter.includes(c.name) : true));
+
+  let sandbox = null;
+
+  before(async function () {
+    this.timeout(60000);
+    if (!(await backendReachable())) {
+      throw new Error(`Backend not reachable at ${BACKEND_URL} (API=${API_MODE}). Start it first.`);
+    }
+    // One shared container for every case in this run, not one per
+    // check_command call - see startDockerSandbox in oracle.js.
+    if (cases.some((c) => c.check_command)) {
+      sandbox = startDockerSandbox(WORKSPACE);
+    }
+    await freshWebview(); // open the extension view once up front
+    console.log(`  [setup] ${DESCRIPTOR.label} webview is open`);
+  });
+
+  after(function () {
+    stopDockerSandbox(sandbox);
+  });
 
   /** Append one JSON line per case for machine consumers (arena driver). */
   function emitResult(rec) {
@@ -327,6 +339,7 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
 
       let created = [];
       let failures = ['(no poll yet)'];
+      let oracle = null;
       const caseStart = Date.now();
       const emit = (error) => emitResult({
         name: testCase.name,
@@ -335,6 +348,7 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
         files: created,
         failures,
         error: error ? String(error.message || error) : null,
+        extra: oracle ? { oracle } : {},
       });
 
       try {
@@ -364,7 +378,7 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
           if (n > 0 || sig !== prevSig) { lastActivity = Date.now(); prevSig = sig; }
 
           if (isFinal) {
-            failures = checkExpected(created, expected, WORKSPACE);
+            ({ failures, oracle } = evaluateCase(testCase, created, WORKSPACE));
             if (failures.length === 0) break;
           } else if (Date.now() - lastActivity > IDLE_MS) {
             break;
