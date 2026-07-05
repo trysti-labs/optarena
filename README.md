@@ -1,6 +1,6 @@
 # OptArena
 
-**The arena where AI coding tools compete - and prove it.**
+**The arena where AI coding agents compete.**
 
 OptArena evaluates software engineering agents: UI agents (Cline's actual
 VS Code UI, Roo, Continue, Kilo), headless CLI agents (aider, Claude Code,
@@ -17,7 +17,7 @@ keyword-matching it.
 Did your prompt optimization make things better? Did your latest update
 regress performance?**
 
-OptArena answers these automatically - same task, same oracle, side by side:
+The arena answers these automatically - same task, same oracle, side by side:
 
 - *tool vs tool* - Cline vs aider vs Continue on the same backend
 - *backend vs backend* - Cline through an optimizing proxy vs raw Ollama
