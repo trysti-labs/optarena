@@ -1,0 +1,47 @@
+{
+  "name": "add_github_actions_ci_go",
+  "description": "Adds a GitHub Actions CI workflow that builds and tests the Go module",
+  "language": "go",
+  "framework": "github-actions",
+  "domain": "devops",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": [
+    "ci",
+    "github-actions",
+    "go",
+    "devops"
+  ],
+  "docker_image": "optarena-tester-go:latest",
+  "prompts": [
+    "Add a GitHub Actions CI workflow for this Go project at .github/workflows/ci.yml. It must: trigger on both `push` and `pull_request` events targeting the `main` branch; run on `ubuntu-latest`; check out the repository (e.g. actions/checkout@v4); set up Go (e.g. actions/setup-go@v5 with go-version '1.22'); and run both a build step (e.g. `go build ./...`) and a test step (e.g. `go test ./...`)."
+  ],
+  "setup_files": {
+    "go.mod": "module ci_demo\n\ngo 1.22\n",
+    "main.go": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n",
+    "main_test.go": "package main\n\nimport \"testing\"\n\nfunc TestPlaceholder(t *testing.T) {\n\tif 1+1 != 2 {\n\t\tt.Fatal(\"math is broken\")\n\t}\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ci.yml",
+      "content_patterns": [
+        "on:",
+        "push",
+        "pull_request",
+        "jobs:",
+        "runs-on",
+        "setup-go",
+        "checkout",
+        "go build",
+        "go test"
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {
+    "check_ci.py": "import re, sys\n\nwith open('.github/workflows/ci.yml', encoding='utf-8') as f:\n    text = f.read()\nlow = text.lower()\n\nchecks = [\n    ('on:' in low, 'missing a top-level \"on:\" trigger key'),\n    ('push' in low, 'missing a push trigger'),\n    ('pull_request' in low, 'missing a pull_request trigger'),\n    ('main' in low, 'missing a reference to the main branch'),\n    ('jobs:' in low, 'missing a jobs: key'),\n    ('runs-on' in low, 'missing runs-on'),\n    ('ubuntu' in low, 'missing an ubuntu runner'),\n    (re.search(r'actions/checkout@v\\d', low) is not None, 'missing an actions/checkout step'),\n    (re.search(r'actions/setup-go@v\\d', low) is not None, 'missing an actions/setup-go step'),\n    (re.search(r'1\\.2\\d', low) is not None, 'missing a go 1.2x version'),\n    (re.search(r'go\\s+build', low) is not None, 'missing a go build step'),\n    (re.search(r'go\\s+test', low) is not None, 'missing a go test step'),\n]\n\nfailed = [msg for ok, msg in checks if not ok]\nif failed:\n    for m in failed:\n        print('FAIL:', m)\n    sys.exit(1)\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_ci.py",
+  "check_command_timeout": 30,
+  "timeout": 60
+}

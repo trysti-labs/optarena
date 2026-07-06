@@ -1,0 +1,44 @@
+{
+  "name": "refactor_extract_service_layer",
+  "description": "Extracts inline pricing math from a controller into a service class",
+  "language": "java",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "refactor",
+    "service-layer",
+    "rest",
+    "spring-boot"
+  ],
+  "docker_image": "optarena-tester-jvm:latest",
+  "prompts": [
+    "In this Maven Spring Boot project, PricingController (src/main/java/com/optarena/pricing/PricingController.java) computes the price total directly inline in the GET /price handler (total = amount * (1 + taxRate), rounded to 2 decimal places). Refactor this so the calculation logic is moved into a new class, src/main/java/com/optarena/pricing/PricingService.java (a @Service with a method such as `double calculateTotal(double amount, double taxRate)`), and have PricingController delegate to it instead of computing the total itself. GET /price?amount=..&taxRate=.. must keep returning the exact same JSON shape {\"total\": <value>} with the same values as before."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>pricing-refactor</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/java/com/optarena/pricing/Application.java": "package com.optarena.pricing;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n\n@SpringBootApplication\npublic class Application {\n    public static void main(String[] args) {\n        SpringApplication.run(Application.class, args);\n    }\n}\n",
+    "src/main/java/com/optarena/pricing/PricingController.java": "package com.optarena.pricing;\n\nimport java.math.BigDecimal;\nimport java.math.RoundingMode;\nimport java.util.Map;\nimport org.springframework.web.bind.annotation.*;\n\n@RestController\npublic class PricingController {\n\n    @GetMapping(\"/price\")\n    public Map<String, Double> price(@RequestParam double amount, @RequestParam double taxRate) {\n        double total = amount * (1 + taxRate);\n        BigDecimal rounded = BigDecimal.valueOf(total).setScale(2, RoundingMode.HALF_UP);\n        return Map.of(\"total\", rounded.doubleValue());\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/PricingController.java",
+      "content_patterns": [
+        "/price"
+      ]
+    },
+    {
+      "path_pattern": "**/PricingService.java",
+      "content_patterns": [
+        "calculateTotal"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_price.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\n\nsubprocess.run(['mvn', '-o', '-q', 'package', '-DskipTests'], check=True)\njars = [j for j in glob.glob('target/*.jar') if not j.endswith('.original')]\nassert jars, 'no runnable jar produced under target/'\nsrv = subprocess.Popen(['java', '-jar', jars[0]])\n\ndef wait_ready():\n    for _ in range(40):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8080/price?amount=1&taxRate=0', timeout=1):\n                return True\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    return False\n\ntry:\n    assert wait_ready(), 'server never became reachable on :8080'\n\n    with urllib.request.urlopen('http://127.0.0.1:8080/price?amount=100&taxRate=0.08', timeout=2) as resp:\n        assert resp.status == 200\n        body = json.loads(resp.read())\n        assert abs(body.get('total', -1) - 108.0) < 1e-6, f'unexpected total: {body!r}'\n\n    with urllib.request.urlopen('http://127.0.0.1:8080/price?amount=50&taxRate=0.1', timeout=2) as resp:\n        body = json.loads(resp.read())\n        assert abs(body.get('total', -1) - 55.0) < 1e-6, f'unexpected total: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=10)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_price.py",
+  "check_command_timeout": 120,
+  "timeout": 210
+}

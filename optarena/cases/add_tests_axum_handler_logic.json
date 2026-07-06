@@ -1,0 +1,37 @@
+{
+  "name": "add_tests_axum_handler_logic",
+  "description": "Adds unit tests for an already-correct plain Rust function extracted from a handler",
+  "language": "rust",
+  "framework": "axum",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": [
+    "rust",
+    "testing",
+    "unit-tests"
+  ],
+  "docker_image": "optarena-tester-rust:latest",
+  "prompts": [
+    "The Rust project in src/main.rs contains a function `pub fn classify_password_strength(password: &str) -> &'static str` (business logic extracted from an Axum signup handler) that is already correct and does not need to be changed. Its rules are: if the password is shorter than 8 characters, it is \"weak\"; if it is at least 8 characters but either shorter than 12 characters or contains no digit, it is \"medium\"; otherwise (at least 12 characters AND contains at least one digit) it is \"strong\". Add unit tests for this function directly in src/main.rs (using a `#[cfg(test)] mod tests` block with `#[test]` functions), covering at least: a short password classified as weak, a password of medium length classified as medium, and a long password containing a digit classified as strong. Do not modify the behavior of classify_password_strength itself."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"password_classifier\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/main.rs": "pub fn classify_password_strength(password: &str) -> &'static str {\n    let len = password.len();\n    let has_digit = password.chars().any(|c| c.is_ascii_digit());\n    if len < 8 {\n        \"weak\"\n    } else if len < 12 || !has_digit {\n        \"medium\"\n    } else {\n        \"strong\"\n    }\n}\n\nfn main() {\n    println!(\"{}\", classify_password_strength(\"changeme\"));\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/main.rs",
+      "content_patterns": [
+        "classify_password_strength"
+      ],
+      "regex_patterns": [
+        "#\\[test\\][\\s\\S]*#\\[test\\]"
+      ]
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "cargo test --offline",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

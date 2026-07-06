@@ -1,0 +1,44 @@
+{
+  "name": "add_github_actions_ci_java",
+  "description": "Adds a GitHub Actions CI workflow that builds the Maven project",
+  "language": "java",
+  "framework": "github-actions",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": [
+    "ci",
+    "github-actions",
+    "maven",
+    "devops"
+  ],
+  "docker_image": "optarena-tester-jvm:latest",
+  "prompts": [
+    "Add a GitHub Actions CI workflow for this Maven project at .github/workflows/ci.yml. It must: trigger on both `push` and `pull_request` events targeting the `main` branch; run on `ubuntu-latest`; check out the repository (e.g. actions/checkout@v4); set up JDK 17 (e.g. actions/setup-java@v4 with distribution 'temurin' and java-version '17'); and run a Maven build/package step (e.g. `mvn -B -DskipTests package`)."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>ci-demo</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ci.yml",
+      "content_patterns": [
+        "on:",
+        "push",
+        "pull_request",
+        "jobs:",
+        "runs-on",
+        "setup-java",
+        "checkout",
+        "mvn"
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {
+    "check_ci.py": "import re, sys\n\nwith open('.github/workflows/ci.yml', encoding='utf-8') as f:\n    text = f.read()\nlow = text.lower()\n\nchecks = [\n    ('on:' in low, 'missing a top-level \"on:\" trigger key'),\n    ('push' in low, 'missing a push trigger'),\n    ('pull_request' in low, 'missing a pull_request trigger'),\n    ('main' in low, 'missing a reference to the main branch'),\n    ('jobs:' in low, 'missing a jobs: key'),\n    ('runs-on' in low, 'missing runs-on'),\n    ('ubuntu' in low, 'missing an ubuntu runner'),\n    (re.search(r'actions/checkout@v\\d', low) is not None, 'missing an actions/checkout step'),\n    (re.search(r'actions/setup-java@v\\d', low) is not None, 'missing an actions/setup-java step'),\n    ('17' in low, 'missing java 17 version'),\n    (re.search(r'mvn\\s+.*(package|install|test)', low) is not None, 'missing a maven build/test/package step'),\n]\n\nfailed = [msg for ok, msg in checks if not ok]\nif failed:\n    for m in failed:\n        print('FAIL:', m)\n    sys.exit(1)\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_ci.py",
+  "check_command_timeout": 30,
+  "timeout": 60
+}

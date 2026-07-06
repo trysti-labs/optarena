@@ -1,0 +1,39 @@
+{
+  "name": "optimize_node_array_dedup",
+  "description": "Optimizes an O(n^2) array-dedup function to O(n) using a Set",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "node",
+    "performance",
+    "optimization"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "dedupe.js exports dedupe(arr), which removes duplicate values from an array while preserving the order of first occurrence. The current implementation checks `result.includes(item)` on every element, which is O(n) per lookup and O(n^2) overall - too slow for large arrays (tens of thousands of elements). Optimize dedupe(arr) in dedupe.js to run in O(n) time using a Set (or Map) to track values already seen, while keeping the exact same behavior: the output must contain each distinct value exactly once, in order of first appearance in the input, and module.exports = { dedupe }; must be preserved."
+  ],
+  "setup_files": {
+    "dedupe.js": "function dedupe(arr) {\n  const result = [];\n  for (const item of arr) {\n    if (!result.includes(item)) {\n      result.push(item);\n    }\n  }\n  return result;\n}\n\nmodule.exports = { dedupe };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dedupe.js",
+      "content_patterns": [
+        "dedupe",
+        "module.exports"
+      ],
+      "regex_patterns": [
+        "new Set\\(|new Map\\("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_perf.js": "const assert = require('assert');\nconst { dedupe } = require('./dedupe.js');\n\nassert.deepStrictEqual(dedupe([1, 2, 2, 3, 1, 4]), [1, 2, 3, 4], 'basic correctness failed');\nassert.deepStrictEqual(dedupe([]), [], 'empty array failed');\nassert.deepStrictEqual(dedupe([5]), [5], 'single element failed');\nassert.deepStrictEqual(dedupe(['a', 'b', 'a', 'a', 'c']), ['a', 'b', 'c'], 'string dedup failed');\n\nconst N = 150000;\nconst big = [];\nfor (let i = 0; i < N; i++) {\n  big.push(Math.floor(Math.random() * N * 3));\n}\nconst seen = new Set();\nconst expected = [];\nfor (const x of big) {\n  if (!seen.has(x)) {\n    seen.add(x);\n    expected.push(x);\n  }\n}\n\nconst t0 = Date.now();\nconst result = dedupe(big);\nconst elapsedMs = Date.now() - t0;\n\nassert.deepStrictEqual(result, expected, 'large-input dedup result did not preserve first-occurrence order / correct dedup');\n\nconst BUDGET_MS = 1500;\nassert(elapsedMs <= BUDGET_MS, `dedupe(arr) took ${elapsedMs}ms for ${N} elements - exceeds the ${BUDGET_MS}ms budget; an O(n) Set/Map-based implementation is required, not the O(n^2) .includes() scan`);\n\nconsole.log(`PASS (${elapsedMs}ms for ${N} elements)`);\n"
+  },
+  "check_command": "node test_perf.js",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

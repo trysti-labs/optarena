@@ -1,0 +1,28 @@
+{
+  "name": "fix_script_command_injection",
+  "description": "Fixes a shell script that uses eval on unsanitized user input, creating a command injection vulnerability",
+  "language": "shell",
+  "domain": "devops",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": ["shell", "security", "command-injection"],
+  "prompts": [
+    "The script greet.sh in this repo takes a single argument, a name, and is meant to print 'Hello, <name>!' to stdout. It currently builds and runs the greeting using eval, which means a name value containing shell metacharacters (for example a semicolon followed by another command, or a command substitution) gets executed as additional shell commands instead of being treated as plain text - a command injection vulnerability. Fix greet.sh so it no longer uses eval or otherwise executes any part of the input as shell code, while still correctly printing 'Hello, <name>!' for normal names, including names containing spaces or punctuation."
+  ],
+  "setup_files": {
+    "greet.sh": "#!/bin/sh\nname=\"$1\"\neval \"echo Hello, $name!\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "greet.sh",
+      "not_content_patterns": ["eval"],
+      "regex_patterns": ["printf|echo"]
+    }
+  ],
+  "test_setup_files": {
+    "test_injection.py": "import subprocess, os\n\ndef run(name):\n    return subprocess.run(['sh', 'greet.sh', name], capture_output=True, text=True, timeout=10)\n\nmarker = 'pwned_marker.txt'\nif os.path.exists(marker):\n    os.remove(marker)\n\nr1 = run('Alice')\nassert r1.returncode == 0, f'expected exit 0 for normal input, got {r1.returncode}, stderr={r1.stderr!r}'\nassert 'Hello, Alice!' in r1.stdout, f'unexpected output for normal input: {r1.stdout!r}'\n\npayload = 'Alice; touch pwned_marker.txt #'\nrun(payload)\nassert not os.path.exists(marker), 'command injection executed - marker file was created'\n\nr3 = run('Bob Smith')\nassert 'Hello, Bob Smith!' in r3.stdout, f'unexpected output for name with space: {r3.stdout!r}'\n\nif os.path.exists(marker):\n    os.remove(marker)\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_injection.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

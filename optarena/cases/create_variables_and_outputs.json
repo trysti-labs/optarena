@@ -1,0 +1,31 @@
+{
+  "name": "create_variables_and_outputs",
+  "description": "Creates a Terraform file declaring a variable and an output that references it",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": ["terraform", "iac", "variables", "outputs"],
+  "prompts": [
+    "Create a Terraform file called variables.tf that declares a variable named `app_name` of type string, with a description and a default value of \"myapp\". Also add an output named `greeting` whose value interpolates var.app_name into the string \"Hello, <app_name>!\" (e.g. using \"Hello, ${var.app_name}!\"). Do not include any provider or resource blocks - just the variable and output declarations."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "*.tf",
+      "content_patterns": ["variable", "app_name", "output", "greeting"],
+      "regex_patterns": [
+        "variable\\s+\"app_name\"\\s*\\{",
+        "output\\s+\"greeting\"\\s*\\{",
+        "var\\.app_name"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_variables_outputs.py": "import subprocess\nimport re\nimport glob\nimport json\n\nproc = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(proc.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {proc.stdout}\\n{proc.stderr}'\n\ntf_files = glob.glob('*.tf')\nassert tf_files, 'no .tf files found'\ncontent = ''\nfor f in tf_files:\n    with open(f, encoding='utf-8') as fh:\n        content += fh.read() + '\\n'\n\nassert re.search(r'variable\\s+\"app_name\"\\s*\\{', content), 'variable \"app_name\" block not found'\nassert re.search(r'output\\s+\"greeting\"\\s*\\{', content), 'output \"greeting\" block not found'\nassert re.search(r'var\\.app_name', content), 'output must reference var.app_name'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_variables_outputs.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

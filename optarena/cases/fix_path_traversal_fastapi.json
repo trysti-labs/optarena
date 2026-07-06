@@ -1,0 +1,32 @@
+{
+  "name": "fix_path_traversal_fastapi",
+  "description": "Fixes a path traversal vulnerability in a file-download endpoint that joins user input directly into a base directory",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": ["security", "path-traversal", "fastapi"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The FastAPI app in app.py has a GET /download/{filename:path} endpoint that reads a file from the `files/` directory and returns its contents as plain text, but it joins `filename` directly onto the base directory with no sanitization, so a request whose filename contains \"..\" segments (e.g. /download/../secret.txt, including percent-encoded variants like /download/..%2Fsecret.txt) can escape the `files/` directory and read arbitrary files on disk. Fix app.py so any attempt to escape the `files/` directory returns a 400 (or 403/404) error instead of file contents, while legitimate requests for files that actually exist directly inside `files/` (e.g. /download/hello.txt) keep working exactly as before. Run with uvicorn on port 8015."
+  ],
+  "setup_files": {
+    "app.py": "import os\nfrom fastapi import FastAPI\nfrom fastapi.responses import PlainTextResponse\n\napp = FastAPI()\n\nBASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'files')\n\n@app.get('/download/{filename:path}')\ndef download(filename: str):\n    path = os.path.join(BASE_DIR, filename)\n    with open(path, 'r') as f:\n        content = f.read()\n    return PlainTextResponse(content)\n",
+    "files/hello.txt": "hello from files dir\n",
+    "secret.txt": "top secret outside files dir\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app.py",
+      "content_patterns": ["download", "files"],
+      "regex_patterns": ["(realpath|abspath|resolve|commonpath|startswith)"]
+    }
+  ],
+  "test_setup_files": {
+    "test_traversal.py": "import subprocess, sys, time, urllib.request, urllib.error\n\ndef req(path):\n    r = urllib.request.Request(f'http://127.0.0.1:8015{path}')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            return resp.status, resp.read().decode(errors='replace')\n    except urllib.error.HTTPError as e:\n        return e.code, e.read().decode(errors='replace')\n\nsrv = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'app:app', '--port', '8015'])\ntry:\n    ok = False\n    for _ in range(30):\n        try:\n            status, body = req('/download/hello.txt')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8015'\n    assert status == 200, f'expected 200 for legitimate file, got {status}'\n    assert 'hello from files dir' in body, f'unexpected body: {body!r}'\n\n    status, body = req('/download/..%2Fsecret.txt')\n    assert status >= 400, f'expected an error status for traversal attempt, got {status} body={body!r}'\n    assert 'top secret' not in body, f'traversal leaked secret file contents: {body!r}'\n\n    status2, body2 = req('/download/..%2F..%2Fsecret.txt')\n    assert status2 >= 400 or 'top secret' not in body2, 'traversal with doubled dots leaked secret contents'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_traversal.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

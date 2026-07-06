@@ -1,0 +1,29 @@
+{
+  "name": "add_tests_typer_cli",
+  "description": "Asks the model to write tests for a small, already-correct Typer CLI using CliRunner",
+  "language": "python",
+  "framework": "typer",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": ["typer", "cli", "testing", "pytest"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The Typer CLI in cli.py (already working, do not modify it) defines a command `add` that takes two integer arguments X and Y and prints their sum, and a command `sub` that takes two integer arguments X and Y and prints X minus Y. Write tests for this CLI in test_cli.py using pytest and Typer's `typer.testing.CliRunner`. Cover at least: (1) `add` with two positive numbers prints the correct sum, (2) `sub` with two numbers prints the correct difference, (3) each invocation's `result.exit_code` is 0. Use plain `assert` statements so pytest can collect them."
+  ],
+  "setup_files": {
+    "cli.py": "import typer\n\napp = typer.Typer()\n\n@app.command()\ndef add(x: int, y: int):\n    print(x + y)\n\n@app.command()\ndef sub(x: int, y: int):\n    print(x - y)\n\nif __name__ == '__main__':\n    app()\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_cli.py",
+      "content_patterns": ["def test_", "assert", "clirunner", "exit_code"],
+      "regex_patterns": ["def\\s+test_\\w+\\s*\\("],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "python3 -m pytest test_cli.py -q",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

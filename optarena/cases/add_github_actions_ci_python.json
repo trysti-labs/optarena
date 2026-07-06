@@ -1,0 +1,28 @@
+{
+  "name": "add_github_actions_ci_python",
+  "description": "Writes a GitHub Actions CI workflow for a Python project running lint and tests on push/PR",
+  "language": "python",
+  "framework": "github-actions",
+  "domain": "devops",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": ["ci", "github-actions", "devops", "yaml"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "Create a GitHub Actions workflow at .github/workflows/ci.yml for a Python project. It must trigger on both `push` and `pull_request`. Define at least two jobs: one named (or job-id) `lint` that sets up Python and runs a linter (e.g. flake8 or ruff), and one named (or job-id) `test` that sets up Python and runs the test suite with `pytest`. Use `actions/checkout` and `actions/setup-python` steps as needed."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "ci.yml",
+      "content_patterns": ["pytest", "actions/checkout", "actions/setup-python"],
+      "regex_patterns": ["(^|\\n)on\\s*:", "(^|\\n)jobs\\s*:"]
+    }
+  ],
+  "test_setup_files": {
+    "test_ci_yaml.py": "import yaml\n\nwith open('.github/workflows/ci.yml') as f:\n    doc = yaml.safe_load(f)\n\nassert isinstance(doc, dict), 'workflow file did not parse to a mapping'\n\n# YAML parses the bare key `on` as the boolean True in some loaders/versions;\n# accept either form.\nkeys = set(doc.keys())\nhas_on = ('on' in keys) or (True in keys)\nassert has_on, f'workflow is missing a top-level \"on\" key, got keys: {keys!r}'\n\ntrigger = doc.get('on', doc.get(True))\nif isinstance(trigger, dict):\n    trigger_keys = set(trigger.keys())\nelif isinstance(trigger, list):\n    trigger_keys = set(trigger)\nelse:\n    trigger_keys = {trigger}\nassert 'push' in trigger_keys, f'workflow must trigger on push, got: {trigger_keys!r}'\nassert 'pull_request' in trigger_keys, f'workflow must trigger on pull_request, got: {trigger_keys!r}'\n\nassert 'jobs' in doc, 'workflow is missing a top-level \"jobs\" key'\njobs = doc['jobs']\nassert isinstance(jobs, dict) and len(jobs) >= 2, f'expected at least 2 jobs, got: {jobs!r}'\n\ndef steps_text(job):\n    steps = job.get('steps', []) or []\n    parts = []\n    for s in steps:\n        if isinstance(s, dict):\n            parts.append(str(s.get('run', '')))\n            parts.append(str(s.get('uses', '')))\n            parts.append(str(s.get('name', '')))\n    return ' '.join(parts).lower()\n\nall_text = ' '.join(steps_text(j) for j in jobs.values())\nassert 'pytest' in all_text, 'no job appears to run pytest'\nassert 'setup-python' in all_text, 'no job sets up python via actions/setup-python'\nassert 'checkout' in all_text, 'no job checks out the repo via actions/checkout'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_ci_yaml.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

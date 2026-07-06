@@ -1,0 +1,27 @@
+{
+  "name": "add_tests_for_utility_script",
+  "description": "Asks the model to write a shell test script covering a small, already-correct word-count utility script",
+  "language": "shell",
+  "domain": "devops",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": ["shell", "testing"],
+  "prompts": [
+    "The script wordcount.sh in this repo (already working correctly - do not modify it) takes a single directory path as its only argument and prints, to stdout, the total word count across all regular files directly inside that directory (non-recursive), followed by a newline. Write a shell test script named test_wordcount.sh that exercises wordcount.sh against several inputs you set up yourself (for example using temporary directories created with mktemp -d), and asserts on the results. Cover at least: (1) a normal directory containing multiple files with a known total word count, (2) the edge case of an empty directory (expected total word count 0), and (3) a directory containing a single file. The test script should print a clear result for each case it checks, and must exit with a non-zero status if any assertion fails, or exit 0 if everything passes."
+  ],
+  "setup_files": {
+    "wordcount.sh": "#!/bin/sh\n# wordcount.sh - print total word count across all regular files directly inside the given directory (non-recursive).\ndir=\"$1\"; total=0; for f in \"$dir\"/*; do [ -f \"$f\" ] || continue; n=$(wc -w < \"$f\" | tr -d ' '); total=$((total + n)); done; echo \"$total\" # end\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_wordcount.sh",
+      "content_patterns": ["wordcount.sh", "empty"],
+      "regex_patterns": ["mktemp"],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "sh test_wordcount.sh",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

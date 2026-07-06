@@ -1,0 +1,40 @@
+{
+  "name": "add_check_constraint_for_validation",
+  "description": "Adds a CHECK constraint preventing negative product prices",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 1,
+  "task_type": "security",
+  "tags": [
+    "schema",
+    "constraint",
+    "sqlite",
+    "validation",
+    "check-constraint"
+  ],
+  "prompts": [
+    "schema.sql defines a `products` table, but it currently has no protection against invalid data: it's possible to insert a product with a negative price, which should never be allowed. Fix schema.sql by adding a CHECK constraint on the `price` column so that any INSERT (or UPDATE) with a negative price is rejected by the database itself, while inserting a product with a zero or positive price continues to work exactly as before. Do not change any other column."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price REAL NOT NULL\n);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "products",
+        "price",
+        "check"
+      ],
+      "regex_patterns": [
+        "check\\s*\\(\\s*price\\s*>=\\s*0"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_check.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\nconn.execute(\"INSERT INTO products (id, name, price) VALUES (1, 'Widget', 9.99)\")\nconn.commit()\n\ntry:\n    conn.execute(\"INSERT INTO products (id, name, price) VALUES (2, 'Bad Widget', -5.00)\")\n    conn.commit()\n    raise AssertionError('expected negative price insert to fail')\nexcept sqlite3.IntegrityError:\n    pass\n\nconn.execute(\"INSERT INTO products (id, name, price) VALUES (3, 'Freebie', 0)\")\nconn.commit()\n\ncount = conn.execute('SELECT COUNT(*) FROM products').fetchone()[0]\nassert count == 2, f'expected 2 valid products to remain, got {count}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_check.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

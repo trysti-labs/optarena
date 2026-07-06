@@ -1,0 +1,33 @@
+{
+  "name": "fix_axum_path_traversal",
+  "description": "Fixes a path traversal vulnerability in an Axum file-download endpoint that joins user input directly into a base directory",
+  "language": "rust",
+  "framework": "axum",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": ["security", "path-traversal", "axum"],
+  "docker_image": "optarena-tester-rust:latest",
+  "prompts": [
+    "The Axum app in src/main.rs has a GET /download/*filename endpoint that reads a file from the `files/` directory and returns its contents as plain text, but it joins the filename directly onto the base directory with no sanitization, so a request whose filename contains \"..\" segments can escape the `files/` directory and read arbitrary files on disk. Fix src/main.rs so any attempt to escape the `files/` directory returns an error status (400/403/404) instead of file contents, while legitimate requests for files that actually exist directly inside `files/` (e.g. /download/hello.txt) keep working exactly as before. The server keeps listening on 0.0.0.0:8046."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"axum_traversal_case\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\naxum = \"0.7\"\ntokio = { version = \"1\", features = [\"full\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n",
+    "src/main.rs": "use axum::{extract::Path, http::StatusCode, routing::get, Router};\nuse std::fs;\nuse std::path::PathBuf;\n\nasync fn download(Path(filename): Path<String>) -> Result<String, (StatusCode, String)> {\n    let base = PathBuf::from(\"files\");\n    let path = base.join(&filename);\n    match fs::read_to_string(&path) {\n        Ok(contents) => Ok(contents),\n        Err(_) => Err((StatusCode::NOT_FOUND, \"not found\".to_string())),\n    }\n}\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new().route(\"/download/*filename\", get(download));\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8046\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n",
+    "files/hello.txt": "hello from files dir\n",
+    "secret.txt": "top secret outside files dir\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/main.rs",
+      "content_patterns": ["download", "files"],
+      "regex_patterns": ["(canonicalize|starts_with|contains\\s*\\(\\s*\"\\.\\.\"|\\.\\.)"]
+    }
+  ],
+  "test_setup_files": {
+    "test_traversal.py": "import subprocess, sys, time, urllib.request, urllib.error\n\ndef req(path):\n    r = urllib.request.Request(f'http://127.0.0.1:8046{path}')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            return resp.status, resp.read().decode(errors='replace')\n    except urllib.error.HTTPError as e:\n        return e.code, e.read().decode(errors='replace')\n\nsubprocess.run(['cargo', 'build', '--offline'], check=True)\nsrv = subprocess.Popen(['./target/debug/axum_traversal_case'])\ntry:\n    ok = False\n    status = body = None\n    for _ in range(30):\n        try:\n            status, body = req('/download/hello.txt')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8046'\n    assert status == 200, f'expected 200 for legitimate file, got {status}'\n    assert 'hello from files dir' in body, f'unexpected body: {body!r}'\n\n    status, body = req('/download/../secret.txt')\n    assert status >= 400, f'expected an error status for traversal attempt, got {status} body={body!r}'\n    assert 'top secret' not in body, f'traversal leaked secret file contents: {body!r}'\n\n    status2, body2 = req('/download/..%2Fsecret.txt')\n    assert status2 >= 400 or 'top secret' not in body2, 'traversal with encoded slash leaked secret contents'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_traversal.py",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

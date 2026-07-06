@@ -1,0 +1,31 @@
+{
+  "name": "fix_sql_injection_python",
+  "description": "Fixes a SQL injection vulnerability caused by string-concatenated user input in a raw query",
+  "language": "python",
+  "framework": "sqlite3",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": ["security", "sql-injection", "sqlite3"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The function `find_user(conn, username)` in db.py builds its SQL query by directly interpolating the `username` argument into the query string (an f-string), which makes it vulnerable to SQL injection. Fix db.py so the query is safely parametrized (e.g. using \"?\" placeholders and passing `username` as a bound parameter to sqlite3), instead of interpolating it directly into the SQL text. The function's behavior for normal usernames must stay the same: it should still return the matching row (or None if no match)."
+  ],
+  "setup_files": {
+    "db.py": "import sqlite3\n\ndef find_user(conn, username):\n    cur = conn.cursor()\n    query = f\"SELECT * FROM users WHERE username = '{username}'\"\n    cur.execute(query)\n    return cur.fetchone()\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "db.py",
+      "content_patterns": ["def find_user", "execute"],
+      "regex_patterns": ["\\?"],
+      "not_content_patterns": ["f\"select", "f'select"]
+    }
+  ],
+  "test_setup_files": {
+    "test_injection.py": "import sqlite3\nfrom db import find_user\n\nconn = sqlite3.connect(':memory:')\nconn.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, is_admin INTEGER)')\nconn.execute(\"INSERT INTO users (username, is_admin) VALUES ('alice', 0)\")\nconn.execute(\"INSERT INTO users (username, is_admin) VALUES ('bob', 1)\")\nconn.commit()\n\nrow = find_user(conn, 'alice')\nassert row is not None, 'expected to find alice'\nassert row[1] == 'alice'\n\nrow_missing = find_user(conn, 'nobody')\nassert row_missing is None, f'expected None for unknown user, got {row_missing!r}'\n\n# Classic injection payload: if the query is still built by string concatenation,\n# this either raises (syntax error from the trailing garbage) or, worse, returns\n# every row / drops the table. A parametrized query just finds no matching\n# username and returns None, and the table must still exist afterwards.\npayload = \"nobody' OR '1'='1\"\ntry:\n    row_injected = find_user(conn, payload)\nexcept sqlite3.Error as exc:\n    raise AssertionError(f'query blew up on injection payload instead of treating it as a literal: {exc}')\nassert row_injected is None, f'injection payload should not match any real user, got {row_injected!r}'\n\ndrop_payload = \"x'; DROP TABLE users; --\"\ntry:\n    find_user(conn, drop_payload)\nexcept sqlite3.Error:\n    pass\ncur = conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='users'\")\nassert cur.fetchone() is not None, 'users table was dropped - SQL injection succeeded'\n\ncur = conn.execute('SELECT COUNT(*) FROM users')\nassert cur.fetchone()[0] == 2, 'existing rows should be untouched'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_injection.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

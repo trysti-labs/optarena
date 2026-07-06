@@ -1,0 +1,40 @@
+{
+  "name": "optimize_missing_index",
+  "description": "Adds a missing index on users.email to speed up login lookups",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "performance",
+    "index",
+    "sqlite",
+    "optimization"
+  ],
+  "prompts": [
+    "schema.sql defines a `users` table used heavily for login lookups of the form `SELECT * FROM users WHERE email = ?`. With hundreds of thousands of rows, this query does a full table scan on every login attempt because there is no index on `email`. Add an appropriate index to schema.sql (via CREATE INDEX) so that looking up a user by email is fast, without changing the existing `users` table's columns, types, or any other behavior."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    email TEXT NOT NULL,\n    name TEXT NOT NULL\n);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "create table",
+        "users",
+        "create index",
+        "email"
+      ],
+      "regex_patterns": [
+        "create\\s+index\\s+\\S+\\s+on\\s+users\\s*\\(\\s*email"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_index.py": "import sqlite3, time, random, string\n\ndef rand_email(i):\n    return f\"user{i}_{''.join(random.choices(string.ascii_lowercase, k=8))}@example.com\"\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\nN = 1_000_000\nREPS = 20\nrows = [(i, rand_email(i), f'name{i}') for i in range(N)]\nconn.executemany('INSERT INTO users (id, email, name) VALUES (?, ?, ?)', rows)\nconn.commit()\n\ntargets = [rows[i][1] for i in range(N - REPS, N)]\n\nt0 = time.monotonic()\nfor tgt in targets:\n    cur = conn.execute('SELECT * FROM users WHERE email = ?', (tgt,))\n    r = cur.fetchall()\n    assert len(r) == 1, f'expected exactly one match for {tgt!r}, got {len(r)}'\nt1 = time.monotonic()\nelapsed = t1 - t0\n\nplan = conn.execute('EXPLAIN QUERY PLAN SELECT * FROM users WHERE email = ?', (targets[0],)).fetchall()\nplan_text = ' '.join(str(p) for p in plan).lower()\nuses_index = 'using index' in plan_text or 'search' in plan_text\nassert uses_index, f'query plan does not appear to use an index on email: {plan}'\nassert elapsed < 0.5, f'{REPS} lookups by email took {elapsed:.3f}s - too slow, an index on email is required (query plan: {plan})'\n\nprint(f'PASS ({elapsed:.4f}s for {REPS} lookups)')\n"
+  },
+  "check_command": "python3 test_index.py",
+  "check_command_timeout": 120,
+  "timeout": 180
+}

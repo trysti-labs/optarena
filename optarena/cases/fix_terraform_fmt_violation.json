@@ -1,0 +1,28 @@
+{
+  "name": "fix_terraform_fmt_violation",
+  "description": "Fixes inconsistent formatting in a Terraform file so it passes terraform fmt -check",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": ["terraform", "iac", "formatting"],
+  "prompts": [
+    "The file main.tf in this repository fails `terraform fmt -check` because of inconsistent indentation and spacing around the `=` signs. Reformat main.tf so that `terraform fmt -check` passes cleanly, without changing any variable names, output names, or values."
+  ],
+  "setup_files": {
+    "main.tf": "variable \"region\" {\n    type = string\n  default=\"us-east-1\"\n    description  = \"AWS region name\"\n}\n\noutput \"region_output\" {\nvalue = var.region\n  description=\"The configured region\"\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": ["variable", "region", "output", "region_output"]
+    }
+  ],
+  "test_setup_files": {
+    "check_fmt.py": "import subprocess\n\nproc = subprocess.run(['terraform', 'fmt', '-check', '-diff'], capture_output=True, text=True)\nassert proc.returncode == 0, f'terraform fmt -check failed (exit {proc.returncode}):\\n{proc.stdout}\\n{proc.stderr}'\n\nproc2 = subprocess.run(['terraform', 'validate', '-no-color'], capture_output=True, text=True)\nassert proc2.returncode == 0 and 'Success!' in proc2.stdout, f'terraform validate failed:\\n{proc2.stdout}\\n{proc2.stderr}'\n\nwith open('main.tf', encoding='utf-8') as f:\n    content = f.read()\nassert 'variable \"region\"' in content, 'variable \"region\" missing - do not rename it'\nassert 'output \"region_output\"' in content, 'output \"region_output\" missing - do not rename it'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_fmt.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

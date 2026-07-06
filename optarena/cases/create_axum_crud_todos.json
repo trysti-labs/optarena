@@ -1,0 +1,42 @@
+{
+  "name": "create_axum_crud_todos",
+  "description": "Creates an in-memory Axum /todos CRUD API (GET, POST, DELETE)",
+  "language": "rust",
+  "framework": "axum",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "rest",
+    "http",
+    "axum",
+    "crud",
+    "in-memory"
+  ],
+  "docker_image": "optarena-tester-rust:latest",
+  "prompts": [
+    "This Cargo project (Cargo.toml already lists axum, tokio, serde, and serde_json as dependencies) needs a src/main.rs. Using Axum, build an in-memory /todos resource with shared state (protected by a Mutex, wrapped in an Arc, created once in main and shared via State) that supports:\n- GET /todos: returns 200 with a JSON array of all todos created so far. Each todo is a JSON object with an integer \"id\" and a string \"title\".\n- POST /todos: accepts a JSON body {\"title\": \"...\"}, assigns it a new unique integer id (starting at 1 and increasing by 1 for each new todo, even across the whole server run), stores it, and returns 201 Created with the created todo (including its assigned id) as JSON.\n- DELETE /todos/:id: removes the todo with that id if it exists and returns 204 No Content; if no todo has that id, returns 404 Not Found instead.\nTodos must persist across requests within the same server run. Have the server listen on 0.0.0.0:8041."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"todos_crud\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\naxum = \"0.7\"\ntokio = { version = \"1\", features = [\"full\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/main.rs",
+      "content_patterns": [
+        "axum",
+        "/todos",
+        "8041"
+      ],
+      "regex_patterns": [
+        "async\\s+fn"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_todos.py": "import subprocess, sys, time, json, urllib.request, urllib.error\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8041{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, (json.loads(payload) if payload else None)\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        try:\n            parsed = json.loads(payload) if payload else None\n        except json.JSONDecodeError:\n            parsed = None\n        return e.code, parsed\n\nsubprocess.run(['cargo', 'build', '--offline'], check=True)\nsrv = subprocess.Popen(['./target/debug/todos_crud'])\ntry:\n    ok = False\n    status = body = None\n    for _ in range(30):\n        try:\n            status, body = req('GET', '/todos')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8041'\n    assert status == 200 and body == [], f'expected empty list initially, got {status} {body!r}'\n\n    status, body = req('POST', '/todos', {'title': 'buy milk'})\n    assert status == 201, f'expected 201, got {status}'\n    assert body['title'] == 'buy milk' and body['id'] == 1, f'unexpected body: {body!r}'\n\n    status, body = req('POST', '/todos', {'title': 'walk dog'})\n    assert status == 201\n    assert body['id'] == 2, f'expected second id to be 2, got {body!r}'\n\n    status, body = req('GET', '/todos')\n    assert status == 200 and len(body) == 2, f'expected 2 todos, got {body!r}'\n\n    status, _ = req('DELETE', '/todos/1')\n    assert status == 204, f'expected 204 on delete, got {status}'\n\n    status, body = req('GET', '/todos')\n    assert status == 200 and len(body) == 1, f'expected 1 todo remaining, got {body!r}'\n    assert body[0]['id'] == 2 and body[0]['title'] == 'walk dog', f'unexpected remaining todo: {body[0]!r}'\n\n    status, _ = req('DELETE', '/todos/999')\n    assert status == 404, f'expected 404 deleting nonexistent id, got {status}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_todos.py",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

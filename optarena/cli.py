@@ -27,7 +27,9 @@ import http.server
 import sys
 from pathlib import Path
 
-from .cases import DOCKER_IMAGE_DEFAULT, DOCKERFILE_DIR, docker_image_available, load_cases
+from .cases import (
+    DOCKER_IMAGES, dockerfile_for, docker_image_available, filter_cases, load_cases,
+)
 from .compare import compare_runs, format_regression, format_table, regression_summary, save_comparison
 from .drivers import DRIVER_NAMES
 from .runner import run_scenario
@@ -47,9 +49,10 @@ def _scenario_from_args(args, driver: str | None = None, model: str | None = Non
         name = f"{args.name}-{driver}-{model}"   # matrix cells stay distinct
     cases = args.cases.split(",") if args.cases else None
     language = getattr(args, "language", None)
-    if language:
-        cases = [c["name"] for c in load_cases(cases, cases_dir=args.cases_dir)
-                 if c.get("language") == language]
+    framework = getattr(args, "framework", None)
+    if language or framework:
+        loaded = load_cases(cases, cases_dir=args.cases_dir)
+        cases = [c["name"] for c in filter_cases(loaded, language=language, framework=framework)]
     return Scenario(
         name=name, driver=driver, backend=backend,
         cases=cases,
@@ -126,10 +129,10 @@ def cmd_list(args) -> int:
     what = args.what
     if what == "cases":
         language = getattr(args, "language", None)
-        for c in load_cases():
-            if language and c.get("language") != language:
-                continue
-            print(f"  {c['name']:28} {c.get('language', '-'):10} {c.get('description', '')}")
+        framework = getattr(args, "framework", None)
+        for c in filter_cases(load_cases(), language=language, framework=framework):
+            print(f"  {c['name']:28} {c.get('language', '-'):10} "
+                  f"{c.get('framework', '-'):12} {c.get('description', '')}")
     elif what == "drivers":
         from .drivers import DRIVERS
         print(f"  {'driver':14} {'kind':10} {'backend':10} {'status':13} summary")
@@ -161,23 +164,40 @@ def cmd_serve(args) -> int:
 
 
 def cmd_docker(args) -> int:
-    """Build (or rebuild) the shared `optarena-tester` sandbox image."""
+    """Build (or rebuild) one or all of the `optarena-tester*` sandbox images."""
     import subprocess as _sp
 
     if args.action != "build":
         print(f"unknown docker action: {args.action}", file=sys.stderr)
         return 2
-    dockerfile = DOCKERFILE_DIR / "Dockerfile"
-    if not dockerfile.exists():
-        print(f"no Dockerfile at {dockerfile}", file=sys.stderr)
-        return 1
-    print(f"building {DOCKER_IMAGE_DEFAULT} from {dockerfile} ...")
-    proc = _sp.run(
-        ["docker", "build", "-t", DOCKER_IMAGE_DEFAULT, "-f", str(dockerfile), str(DOCKERFILE_DIR)],
-    )
-    if proc.returncode == 0:
-        print(f"  built {DOCKER_IMAGE_DEFAULT} - check_command now runs sandboxed for every case")
-    return proc.returncode
+
+    if args.all:
+        langs = list(DOCKER_IMAGES)
+    elif args.lang:
+        if args.lang not in DOCKER_IMAGES:
+            print(f"unknown --lang '{args.lang}' - choices: {', '.join(DOCKER_IMAGES)}", file=sys.stderr)
+            return 2
+        langs = [args.lang]
+    else:
+        langs = ["base"]
+
+    overall = 0
+    for lang in langs:
+        image = DOCKER_IMAGES[lang]
+        dockerfile = dockerfile_for(lang)
+        if not dockerfile.exists():
+            print(f"no Dockerfile at {dockerfile} - skipping {lang}", file=sys.stderr)
+            overall = 1
+            continue
+        print(f"building {image} from {dockerfile} ...")
+        proc = _sp.run(
+            ["docker", "build", "-t", image, "-f", str(dockerfile), str(dockerfile.parent)],
+        )
+        if proc.returncode == 0:
+            print(f"  built {image}")
+        else:
+            overall = proc.returncode
+    return overall
 
 
 def cmd_doctor(args) -> int:
@@ -235,8 +255,10 @@ def cmd_doctor(args) -> int:
     _check_info("docker daemon reachable", docker_running,
                 "install/start Docker Desktop - recommended so check_command needs no host toolchains")
     if docker_running:
-        _check_info(f"{DOCKER_IMAGE_DEFAULT} image built", docker_image_available(DOCKER_IMAGE_DEFAULT),
-                     "run `optarena docker build`")
+        for lang, image in DOCKER_IMAGES.items():
+            built = docker_image_available(image)
+            hint = "run `optarena docker build`" if lang == "base" else f"run `optarena docker build --lang {lang}`"
+            _check_info(f"{image} image built", built, hint)
 
     print("ui drivers:")
     harness = REPO_ROOT / "ui-harness"
@@ -320,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--cases", help="comma-separated case names (default all)")
     p_run.add_argument("--cases-dir", help="load cases from this directory instead of the built-in catalogue")
     p_run.add_argument("--language", help="only run cases tagged with this language (see `optarena list cases`)")
+    p_run.add_argument("--framework", help="only run cases tagged with this framework (see `optarena list cases`)")
     p_run.add_argument("--timeout", type=int, help="per-case timeout override (s)")
     p_run.add_argument("--trials", type=int, default=1,
                        help="run each case N times; majority verdict + per-trial detail (default 1)")
@@ -343,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
     p_list.add_argument("what", nargs="?", default="runs",
                         choices=["runs", "cases", "drivers"])
     p_list.add_argument("--language", help="(with `cases`) only show cases tagged with this language")
+    p_list.add_argument("--framework", help="(with `cases`) only show cases tagged with this framework")
     p_list.set_defaults(fn=cmd_list)
 
     p_serve = sub.add_parser("serve", help="serve the results dashboard")
@@ -358,8 +382,11 @@ def main(argv: list[str] | None = None) -> int:
     p_init.add_argument("dir", nargs="?", default="cases", help="target directory (default ./cases)")
     p_init.set_defaults(fn=cmd_init)
 
-    p_docker = sub.add_parser("docker", help="manage the optarena-tester sandbox image")
+    p_docker = sub.add_parser("docker", help="manage the optarena-tester sandbox image(s)")
     p_docker.add_argument("action", choices=["build"])
+    p_docker.add_argument("--lang", choices=list(DOCKER_IMAGES),
+                          help="build only this track's image (default: base)")
+    p_docker.add_argument("--all", action="store_true", help="build every registered image")
     p_docker.set_defaults(fn=cmd_docker)
 
     args = parser.parse_args(argv)

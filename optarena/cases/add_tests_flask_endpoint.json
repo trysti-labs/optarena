@@ -1,0 +1,29 @@
+{
+  "name": "add_tests_flask_endpoint",
+  "description": "Asks the model to write pytest tests for a small, already-correct Flask endpoint",
+  "language": "python",
+  "framework": "flask",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": ["flask", "testing", "pytest"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The Flask app in app.py (already working, do not modify it) exposes POST /divide, which accepts a JSON body {\"a\": number, \"b\": number} and returns {\"result\": a / b} with status 200, or, when b is 0, returns status 400 with a JSON body containing an \"error\" key (no division is performed). Write tests for this endpoint in test_app.py using pytest and Flask's built-in test client (`app.test_client()`). Cover at least: (1) a normal division that succeeds with the correct result, (2) division by zero returns a 400 with an error field, (3) a missing required field (e.g. no \"b\" key) is handled gracefully (does not crash the test process, and is not treated as a 200 success). Use plain `assert` statements so pytest can collect them."
+  ],
+  "setup_files": {
+    "app.py": "from flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\n@app.route('/divide', methods=['POST'])\ndef divide():\n    data = request.get_json(silent=True) or {}\n    if 'a' not in data or 'b' not in data:\n        return jsonify({'error': 'a and b are required'}), 400\n    a = data['a']\n    b = data['b']\n    if b == 0:\n        return jsonify({'error': 'division by zero'}), 400\n    return jsonify({'result': a / b}), 200\n\nif __name__ == '__main__':\n    app.run(port=8020)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_app.py",
+      "content_patterns": ["def test_", "assert", "test_client", "/divide", "400"],
+      "regex_patterns": ["def\\s+test_\\w+\\s*\\("],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "python3 -m pytest test_app.py -q",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

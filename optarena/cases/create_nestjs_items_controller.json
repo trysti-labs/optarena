@@ -1,0 +1,42 @@
+{
+  "name": "create_nestjs_items_controller",
+  "description": "Creates a NestJS controller for an in-memory items resource",
+  "language": "javascript",
+  "framework": "nestjs",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "rest",
+    "http",
+    "nestjs",
+    "typescript"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "Write a NestJS application in main.ts (a tsconfig.json with the right compiler options for decorators is already provided - do not change it) implementing an in-memory items resource with an ItemsController mapped to the /items route. Implement: GET /items returns 200 with a JSON array of all items; POST /items accepts JSON body {\"name\": string} and returns 201 with the created item {id, name} (id is a number, auto-incrementing starting at 1); GET /items/:id returns 200 with the item if found, or throws a NotFoundException (404) if not found. Bootstrap the app with NestFactory and listen on port 8021. The app must be runnable directly with `ts-node main.ts` (no separate build step, no package.json)."
+  ],
+  "setup_files": {
+    "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"module\": \"commonjs\",\n    \"target\": \"ES2020\",\n    \"experimentalDecorators\": true,\n    \"emitDecoratorMetadata\": true,\n    \"skipLibCheck\": true,\n    \"esModuleInterop\": true,\n    \"strict\": false,\n    \"baseUrl\": \"/usr/local/lib/node_modules\",\n    \"moduleResolution\": \"node\"\n  }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.ts",
+      "content_patterns": [
+        "@controller",
+        "items",
+        "8021",
+        "nestfactory"
+      ],
+      "regex_patterns": [
+        "@Post\\("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_items.py": "import subprocess, time, json, urllib.request, urllib.error\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8021{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, (json.loads(payload) if payload else None)\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        try:\n            parsed = json.loads(payload) if payload else None\n        except json.JSONDecodeError:\n            parsed = None\n        return e.code, parsed\n\nsrv = subprocess.Popen(['ts-node', 'main.ts'])\ntry:\n    ok = False\n    status = body = None\n    for _ in range(40):\n        try:\n            status, body = req('GET', '/items')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, f'server never became reachable on :8021 (last: {status} {body!r})'\n    assert status == 200 and body == [], f'expected empty list, got {status} {body!r}'\n\n    status, body = req('POST', '/items', {'name': 'widget'})\n    assert status == 201, f'expected 201, got {status} {body!r}'\n    assert body['name'] == 'widget' and isinstance(body['id'], int)\n    iid = body['id']\n\n    status, body = req('GET', f'/items/{iid}')\n    assert status == 200 and body['name'] == 'widget'\n\n    status, body = req('GET', '/items/999999')\n    assert status == 404, f'expected 404 for missing item, got {status}'\n\n    status, body = req('GET', '/items')\n    assert status == 200 and len(body) == 1\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_items.py",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

@@ -1,0 +1,43 @@
+{
+  "name": "fix_aspnet_path_traversal",
+  "description": "Fixes a path traversal vulnerability in a minimal API file-serving endpoint that joins user input directly into a base directory",
+  "language": "csharp",
+  "framework": "aspnet-core",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "security",
+    "path-traversal",
+    "aspnet-core",
+    "minimal-api"
+  ],
+  "docker_image": "optarena-tester-dotnet:latest",
+  "prompts": [
+    "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Program.cs has a GET /files?name=... endpoint that reads a file from the `data/` directory (relative to the working directory) and returns its contents as plain text, but it joins the `name` query parameter directly onto the base directory with no sanitization, so a value containing \"..\" segments (e.g. /files?name=../secret.txt) can escape the `data/` directory and read arbitrary files elsewhere on disk. Fix Program.cs so any attempt to escape the `data/` directory (via \"..\", an absolute path, or a path separator in the name) returns HTTP 400 Bad Request instead of file contents, while legitimate requests for files that actually exist directly inside `data/` (e.g. /files?name=hello.txt) keep working exactly as before. Do not change the port (8056)."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n",
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\nvar baseDir = Path.Combine(Directory.GetCurrentDirectory(), \"data\");\n\napp.MapGet(\"/files\", (string name) =>\n{\n    var path = Path.Combine(baseDir, name);\n    if (!File.Exists(path)) return Results.NotFound();\n    return Results.Text(File.ReadAllText(path));\n});\n\napp.Run(\"http://0.0.0.0:8056\");\n",
+    "data/hello.txt": "hello world\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Program.cs",
+      "content_patterns": [
+        "/files",
+        "8056"
+      ],
+      "regex_patterns": [
+        "(\\.\\.|getfullpath|getfilename|ispathrooted)"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "secret.txt": "TOP-SECRET-9f3a1c\n",
+    "test_traversal.py": "import subprocess, sys, time, urllib.request, urllib.parse, urllib.error\n\nsubprocess.run(['dotnet', 'build', '-c', 'Release', '-o', 'out'], check=True)\nimport glob\ndlls = glob.glob('out/*.dll')\ndll = [d for d in dlls if 'app' in d.lower()][0]\nsrv = subprocess.Popen(['dotnet', dll])\n\ndef get(name):\n    url = 'http://127.0.0.1:8056/files?' + urllib.parse.urlencode({'name': name})\n    try:\n        with urllib.request.urlopen(url, timeout=5) as resp:\n            return resp.status, resp.read().decode(errors='replace')\n    except urllib.error.HTTPError as e:\n        return e.code, e.read().decode(errors='replace')\n\ntry:\n    ok = False\n    status = None\n    body = None\n    for _ in range(40):\n        try:\n            status, body = get('hello.txt')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8056'\n    assert status == 200, f'expected 200 for legitimate file, got {status}'\n    assert 'hello world' in body, f'unexpected body: {body!r}'\n\n    status2, body2 = get('../secret.txt')\n    assert status2 >= 400, f'expected an error status for traversal attempt, got {status2} body={body2!r}'\n    assert 'TOP-SECRET' not in body2, f'traversal leaked secret file contents: {body2!r}'\n\n    status3, body3 = get('..%2Fsecret.txt')\n    assert status3 >= 400 or 'TOP-SECRET' not in body3, 'percent-encoded traversal leaked secret contents'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_traversal.py",
+  "check_command_timeout": 100,
+  "timeout": 180
+}

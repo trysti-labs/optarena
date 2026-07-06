@@ -1,0 +1,43 @@
+{
+  "name": "refactor_node_callback_to_promise",
+  "description": "Refactors a callback-style Node function into a Promise/async-await style, preserving behavior",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "node",
+    "refactor",
+    "promises",
+    "async-await"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "utils.js exports a callback-style function readConfig(id, callback) - it calls callback(error, result), Node's classic error-first callback style, which is hard to compose with modern async/await code. Refactor utils.js so readConfig(id) instead returns a Promise: it should resolve with { id, name: `config-${id}` } for a non-negative integer id, or reject with an Error whose message is 'invalid id' for a negative id. Remove the callback parameter entirely - callers should use readConfig(id).then(...)/.catch(...) or await readConfig(id) inside a try/catch. Keep the exact export name module.exports = { readConfig };"
+  ],
+  "setup_files": {
+    "utils.js": "function readConfig(id, callback) {\n  setTimeout(() => {\n    if (id < 0) {\n      callback(new Error('invalid id'));\n      return;\n    }\n    callback(null, { id, name: `config-${id}` });\n  }, 10);\n}\n\nmodule.exports = { readConfig };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "utils.js",
+      "content_patterns": [
+        "readconfig",
+        "module.exports"
+      ],
+      "not_content_patterns": [
+        "function readconfig(id, callback)"
+      ],
+      "regex_patterns": [
+        "Promise|async"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_refactor.js": "const assert = require('assert');\nconst { readConfig } = require('./utils.js');\n\nasync function main() {\n  const result = readConfig(5);\n  assert(result && typeof result.then === 'function', 'readConfig(id) must return a Promise (result.then must be a function)');\n\n  const cfg = await readConfig(5);\n  assert.deepStrictEqual(cfg, { id: 5, name: 'config-5' }, `unexpected resolved value: ${JSON.stringify(cfg)}`);\n\n  const cfg0 = await readConfig(0);\n  assert.deepStrictEqual(cfg0, { id: 0, name: 'config-0' });\n\n  let threw = false;\n  try {\n    await readConfig(-1);\n  } catch (e) {\n    threw = true;\n    assert.strictEqual(e.message, 'invalid id', `expected error message 'invalid id', got '${e.message}'`);\n  }\n  assert(threw, 'expected readConfig(-1) to reject with an Error');\n\n  console.log('PASS');\n}\n\nmain().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "check_command": "node test_refactor.js",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

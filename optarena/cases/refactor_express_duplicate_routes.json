@@ -1,0 +1,41 @@
+{
+  "name": "refactor_express_duplicate_routes",
+  "description": "Refactors two Express routes with duplicated inline id-validation logic into a shared helper",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "express",
+    "refactor",
+    "duplication"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "The Express server in server.js has two endpoints, GET /products/:id and GET /users/:id, that each contain their own copy of the exact same inline logic: parsing the :id route param as an integer, responding with 400 {\"error\": \"invalid id\"} if it isn't a positive integer, then looking up the record and responding with 404 {\"error\": \"not found\"} if it doesn't exist. This duplication makes the two routes hard to keep in sync. Refactor server.js to extract this shared id-validation/lookup logic into a single reusable middleware or helper function used by both routes, without changing the observable behavior of either endpoint (the same status codes and JSON bodies must still be returned for the same inputs). Keep listening on port 8024."
+  ],
+  "setup_files": {
+    "server.js": "const express = require('express');\nconst app = express();\n\nconst products = { 1: { id: 1, name: 'Widget' }, 2: { id: 2, name: 'Gadget' } };\nconst users = { 1: { id: 1, name: 'Alice' }, 2: { id: 2, name: 'Bob' } };\n\napp.get('/products/:id', (req, res) => {\n  const id = parseInt(req.params.id, 10);\n  if (!Number.isInteger(id) || id <= 0) {\n    return res.status(400).json({ error: 'invalid id' });\n  }\n  const item = products[id];\n  if (!item) {\n    return res.status(404).json({ error: 'not found' });\n  }\n  res.json(item);\n});\n\napp.get('/users/:id', (req, res) => {\n  const id = parseInt(req.params.id, 10);\n  if (!Number.isInteger(id) || id <= 0) {\n    return res.status(400).json({ error: 'invalid id' });\n  }\n  const item = users[id];\n  if (!item) {\n    return res.status(404).json({ error: 'not found' });\n  }\n  res.json(item);\n});\n\napp.listen(8024);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "server.js",
+      "content_patterns": [
+        "express",
+        "/products",
+        "/users",
+        "8024"
+      ],
+      "regex_patterns": [
+        "function\\s+\\w+\\s*\\("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_refactor.py": "import subprocess, time, json, urllib.request, urllib.error\n\ndef req(method, path):\n    r = urllib.request.Request(f'http://127.0.0.1:8024{path}', method=method)\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            return resp.status, json.loads(resp.read())\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        return e.code, (json.loads(payload) if payload else None)\n\nsrv = subprocess.Popen(['node', 'server.js'])\ntry:\n    ok = False\n    for _ in range(30):\n        try:\n            status, body = req('GET', '/products/1')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8024'\n    assert status == 200 and body == {'id': 1, 'name': 'Widget'}, f'{status} {body!r}'\n\n    status, body = req('GET', '/products/abc')\n    assert status == 400 and body == {'error': 'invalid id'}, f'{status} {body!r}'\n\n    status, body = req('GET', '/products/999')\n    assert status == 404 and body == {'error': 'not found'}, f'{status} {body!r}'\n\n    status, body = req('GET', '/users/2')\n    assert status == 200 and body == {'id': 2, 'name': 'Bob'}, f'{status} {body!r}'\n\n    status, body = req('GET', '/users/xyz')\n    assert status == 400 and body == {'error': 'invalid id'}, f'{status} {body!r}'\n\n    status, body = req('GET', '/users/999')\n    assert status == 404 and body == {'error': 'not found'}, f'{status} {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\n\nsource = open('server.js', encoding='utf-8').read()\noccurrences = source.count('invalid id')\nassert occurrences <= 1, f'duplicated id-validation logic (\\\"invalid id\\\") still appears {occurrences} times across both routes - it must be extracted into one shared helper/middleware, not copy-pasted'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_refactor.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

@@ -1,0 +1,41 @@
+{
+  "name": "fix_express_error_handling",
+  "description": "Fixes an Express endpoint that crashes with a raw 500 stack trace on invalid input",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "express",
+    "error-handling",
+    "bugfix"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "The Express server in server.js exposes POST /divide, which accepts a JSON body {\"a\": number, \"b\": number} and should respond with 200 and {\"result\": a / b}. Right now, when `a` or `b` is missing or not a number, the handler throws an unhandled exception (it calls .toFixed on values that may be undefined or non-numeric), which crashes the request and causes Express's default error handler to respond with a raw 500 status and an HTML stack trace - a bad, leaky error response. Fix server.js so that when `a` or `b` is missing or not a number, the endpoint instead responds with status 400 and a clean JSON body containing an \"error\" key describing the problem (no exception should be thrown, no stack trace exposed). Valid numeric input must still return 200 with the correct division result exactly as before. Keep listening on port 8022."
+  ],
+  "setup_files": {
+    "server.js": "const express = require('express');\nconst app = express();\napp.use(express.json());\n\napp.post('/divide', (req, res) => {\n  const { a, b } = req.body;\n  const result = a.toFixed(4) / b.toFixed(4);\n  res.json({ result: Number(result) });\n});\n\napp.listen(8022);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "server.js",
+      "content_patterns": [
+        "/divide",
+        "400",
+        "error"
+      ],
+      "regex_patterns": [
+        "typeof\\s+a",
+        "app\\.listen\\(\\s*8022"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_divide.py": "import subprocess, time, json, urllib.request, urllib.error\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8022{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, resp.headers.get('Content-Type', ''), payload\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        return e.code, e.headers.get('Content-Type', ''), payload\n\nsrv = subprocess.Popen(['node', 'server.js'])\ntry:\n    ok = False\n    for _ in range(30):\n        try:\n            status, ctype, payload = req('POST', '/divide', {'a': 10, 'b': 2})\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8022'\n    assert status == 200, f'expected 200 for valid division, got {status}'\n    body = json.loads(payload)\n    assert body['result'] == 5, f'expected result 5, got {body!r}'\n\n    status, ctype, payload = req('POST', '/divide', {'a': 'not-a-number', 'b': 2})\n    assert status == 400, f'expected 400 for non-numeric a, got {status} :: {payload[:200]!r}'\n    assert 'text/html' not in ctype.lower(), f'error response leaked HTML/stack trace, content-type={ctype!r}'\n    body = json.loads(payload)\n    assert 'error' in body, f'expected JSON error body, got {body!r}'\n\n    status, ctype, payload = req('POST', '/divide', {'a': 10})\n    assert status == 400, f'expected 400 for missing b, got {status} :: {payload[:200]!r}'\n    body = json.loads(payload)\n    assert 'error' in body\n\n    status, ctype, payload = req('POST', '/divide', {'a': 8, 'b': 4})\n    assert status == 200\n    body = json.loads(payload)\n    assert body['result'] == 2, f'expected result 2, got {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_divide.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

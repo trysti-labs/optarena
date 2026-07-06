@@ -1,0 +1,39 @@
+{
+  "name": "fix_express_command_injection",
+  "description": "Fixes a command-injection vulnerability where user input is interpolated into a shell command string passed to child_process.exec",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "express",
+    "security",
+    "command-injection"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "The Express server in server.js exposes GET /greet-cmd?name=..., which is supposed to respond with JSON {\"output\": \"Hello, <name>\"} by shelling out to the `echo` command. Right now it builds the shell command by directly interpolating the `name` query parameter into a string passed to child_process.exec, e.g. exec(`echo Hello, ${name}`, ...) - a classic command-injection vulnerability, since a value like `world; echo INJECTED` lets an attacker run arbitrary additional shell commands. Fix server.js so that arbitrary shell commands can no longer be injected via `name` (for example, by using child_process.execFile with the command and arguments passed as a separate array instead of a single interpolated shell string, or by strictly validating/sanitizing `name` to a safe character set and rejecting anything else with 400), while a normal name like 'Alice' still results in output containing 'Hello, Alice' with status 200. Keep listening on port 8028."
+  ],
+  "setup_files": {
+    "server.js": "const express = require('express');\nconst { exec } = require('child_process');\nconst app = express();\n\napp.get('/greet-cmd', (req, res) => {\n  const name = req.query.name || 'world';\n  exec(`echo Hello, ${name}`, (err, stdout) => {\n    if (err) {\n      return res.status(500).json({ error: 'command failed' });\n    }\n    res.json({ output: stdout.trim() });\n  });\n});\n\napp.listen(8028);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "server.js",
+      "content_patterns": [
+        "/greet-cmd",
+        "8028"
+      ],
+      "regex_patterns": [
+        "execfile|test\\(\\s*name|match\\(\\s*/"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_injection.py": "import subprocess, time, json, urllib.request, urllib.error, urllib.parse\n\ndef req(path):\n    url = f'http://127.0.0.1:8028{path}'\n    try:\n        with urllib.request.urlopen(url, timeout=3) as resp:\n            return resp.status, resp.read().decode('utf-8', errors='replace')\n    except urllib.error.HTTPError as e:\n        return e.code, e.read().decode('utf-8', errors='replace')\n\ndef output_of(body):\n    try:\n        return json.loads(body).get('output', '')\n    except json.JSONDecodeError:\n        return body\n\nsrv = subprocess.Popen(['node', 'server.js'])\ntry:\n    ok = False\n    for _ in range(30):\n        try:\n            status, body = req('/greet-cmd?name=Alice')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8028'\n    assert status == 200, f'expected 200 for legitimate input, got {status} {body!r}'\n    data = json.loads(body)\n    assert 'Hello, Alice' in data.get('output', ''), f'legitimate input broken: {data!r}'\n\n    # For each payload, a SAFE fix either (a) never lets the shell interpret the\n    # metacharacters - in which case the literal payload text (semicolons, $(),\n    # backticks and all) comes back untouched inside the output, proving nothing\n    # was executed - or (b) rejects the input outright with 400. A VULNERABLE\n    # implementation lets the shell interpret/strip the metacharacters, so the\n    # literal payload text is NOT found intact in the response.\n    payloads = [\n        'world; echo INJECTED_MARKER',\n        '$(echo INJECTED2)',\n        '`echo INJECTED3`',\n    ]\n    for payload in payloads:\n        status, body = req('/greet-cmd?name=' + urllib.parse.quote(payload))\n        if status == 400:\n            continue  # sanitize-and-reject strategy: also a valid fix\n        assert status == 200, f'unexpected status {status} for payload {payload!r}: {body!r}'\n        out = output_of(body)\n        assert payload in out, (\n            f'shell metacharacters in {payload!r} were interpreted/stripped instead of '\n            f'being treated as literal, inert text - command injection succeeded: {out!r}'\n        )\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_injection.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

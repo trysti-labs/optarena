@@ -1,0 +1,38 @@
+{
+  "name": "fix_cpp_memory_leak",
+  "description": "Fixes a C++ class whose destructor leaks memory and never decrements its live-instance counter",
+  "language": "cpp",
+  "domain": "systems",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "cpp",
+    "memory-leak",
+    "destructor",
+    "rounds"
+  ],
+  "prompts": [
+    "The header buffer.h defines a class `Buffer` that is meant to manage a dynamically allocated array and track how many instances currently exist via the static counter `Buffer::instance_count` (incremented whenever a Buffer is constructed). Right now, `instance_count` never goes back down after a Buffer object is destroyed - even after every Buffer object has gone out of scope, `Buffer::instance_count` stays at whatever it peaked at, and the memory allocated in the constructor is never released. Fix the destructor `~Buffer()` so that destroying a Buffer object properly frees its allocated memory and decrements `instance_count` by one, without changing the public interface (the constructor signature `Buffer(int size)` and the member name `instance_count` must stay the same)."
+  ],
+  "setup_files": {
+    "buffer.h": "#pragma once\n\nclass Buffer {\npublic:\n    static inline int instance_count = 0;\n\n    explicit Buffer(int size) {\n        data_ = new int[size];\n        instance_count++;\n    }\n\n    ~Buffer() {\n        // BUG: does not delete[] data_ and does not decrement instance_count\n    }\n\nprivate:\n    int* data_;\n};\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "buffer.h",
+      "content_patterns": [
+        "class Buffer",
+        "instance_count",
+        "~Buffer"
+      ],
+      "min_lines": 5
+    }
+  ],
+  "test_setup_files": {
+    "test_leak_main.cpp": "#include \"buffer.h\"\n#include <cassert>\n#include <iostream>\n\nint main() {\n    assert(Buffer::instance_count == 0);\n    {\n        Buffer a(16);\n        assert(Buffer::instance_count == 1);\n        Buffer b(32);\n        assert(Buffer::instance_count == 2);\n    }\n    assert(Buffer::instance_count == 0);\n\n    for (int i = 0; i < 200000; i++) {\n        Buffer c(8);\n        assert(Buffer::instance_count == 1);\n    }\n    assert(Buffer::instance_count == 0);\n\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n",
+    "test_leak.py": "import subprocess\nsubprocess.run(['g++', '-std=c++17', 'test_leak_main.cpp', '-o', 'test_leak_bin'], check=True)\nproc = subprocess.run(['./test_leak_bin'], capture_output=True, text=True, timeout=15)\nassert proc.returncode == 0, f'leak test failed: exit {proc.returncode}, stderr={proc.stderr[-300:]}'\nassert 'PASS' in proc.stdout\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_leak.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

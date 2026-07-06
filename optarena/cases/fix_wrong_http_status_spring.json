@@ -1,0 +1,42 @@
+{
+  "name": "fix_wrong_http_status_spring",
+  "description": "Fixes a POST endpoint that wrongly returns 200 instead of 201",
+  "language": "java",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "rest",
+    "http",
+    "bugfix",
+    "spring-boot"
+  ],
+  "docker_image": "optarena-tester-jvm:latest",
+  "prompts": [
+    "In this Maven Spring Boot project, POST /notes (implemented in src/main/java/com/optarena/notes/NoteController.java) creates a new note and stores it, but it currently returns HTTP 200 OK. Fix it so that a successful creation returns HTTP 201 Created (with the created note as the JSON response body). GET /notes must keep returning HTTP 200 with the list of notes, unchanged. Do not change any other behavior."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>notes-status-fix</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/java/com/optarena/notes/Application.java": "package com.optarena.notes;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n\n@SpringBootApplication\npublic class Application {\n    public static void main(String[] args) {\n        SpringApplication.run(Application.class, args);\n    }\n}\n",
+    "src/main/java/com/optarena/notes/Note.java": "package com.optarena.notes;\n\npublic class Note {\n    private long id;\n    private String text;\n\n    public Note() {}\n\n    public Note(long id, String text) {\n        this.id = id;\n        this.text = text;\n    }\n\n    public long getId() { return id; }\n    public void setId(long id) { this.id = id; }\n    public String getText() { return text; }\n    public void setText(String text) { this.text = text; }\n}\n",
+    "src/main/java/com/optarena/notes/NoteController.java": "package com.optarena.notes;\n\nimport java.util.List;\nimport java.util.Map;\nimport java.util.concurrent.CopyOnWriteArrayList;\nimport java.util.concurrent.atomic.AtomicLong;\nimport org.springframework.web.bind.annotation.*;\n\n@RestController\n@RequestMapping(\"/notes\")\npublic class NoteController {\n\n    private final List<Note> notes = new CopyOnWriteArrayList<>();\n    private final AtomicLong idSeq = new AtomicLong(1);\n\n    @GetMapping\n    public List<Note> list() {\n        return notes;\n    }\n\n    @PostMapping\n    public Note create(@RequestBody Map<String, String> body) {\n        Note note = new Note(idSeq.getAndIncrement(), body.get(\"text\"));\n        notes.add(note);\n        return note;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/NoteController.java",
+      "content_patterns": [
+        "/notes"
+      ],
+      "regex_patterns": [
+        "(?:HttpStatus\\.CREATED|\\bstatus\\s*\\(\\s*201\\s*\\)|\\b201\\b)"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_notes.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\n\nsubprocess.run(['mvn', '-o', '-q', 'package', '-DskipTests'], check=True)\njars = [j for j in glob.glob('target/*.jar') if not j.endswith('.original')]\nassert jars, 'no runnable jar produced under target/'\nsrv = subprocess.Popen(['java', '-jar', jars[0]])\n\ndef wait_ready():\n    for _ in range(40):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8080/notes', timeout=1):\n                return True\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    return False\n\ntry:\n    assert wait_ready(), 'server never became reachable on :8080'\n\n    req = urllib.request.Request(\n        'http://127.0.0.1:8080/notes', data=json.dumps({'text': 'hi'}).encode(),\n        headers={'Content-Type': 'application/json'}, method='POST')\n    with urllib.request.urlopen(req, timeout=2) as resp:\n        assert resp.status == 201, f'expected 201 Created, got {resp.status}'\n        created = json.loads(resp.read())\n        assert created.get('text') == 'hi', f'unexpected body: {created!r}'\n\n    with urllib.request.urlopen('http://127.0.0.1:8080/notes', timeout=2) as resp:\n        assert resp.status == 200, f'expected 200, got {resp.status}'\n        body = json.loads(resp.read())\n        assert any(n.get('text') == 'hi' for n in body), f'note missing from list: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=10)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_notes.py",
+  "check_command_timeout": 120,
+  "timeout": 210
+}

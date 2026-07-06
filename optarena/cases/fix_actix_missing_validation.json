@@ -1,0 +1,41 @@
+{
+  "name": "fix_actix_missing_validation",
+  "description": "Fixes an Actix-web endpoint that crashes instead of returning 400 when a required JSON field is missing",
+  "language": "rust",
+  "framework": "actix-web",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "rest",
+    "http",
+    "actix-web",
+    "validation"
+  ],
+  "docker_image": "optarena-tester-rust:latest",
+  "prompts": [
+    "The Actix-web app in src/main.rs has a POST /users endpoint meant to create a user from a JSON body with a required \"username\" field. When a client sends a request without the \"username\" field, the handler currently panics (an unwrapped None), which crashes the request instead of returning a proper error response. Fix src/main.rs so that if \"username\" is missing (or not a string), the endpoint returns a 400 Bad Request status with a JSON body containing an \"error\" key describing the problem, instead of panicking. Valid requests (with \"username\" present) must keep working exactly as before, returning 201 Created with the created user as JSON. The server listens on 0.0.0.0:8043."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"users_validation\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nactix-web = \"4\"\ntokio = { version = \"1\", features = [\"full\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n",
+    "src/main.rs": "use actix_web::{post, web, App, HttpServer, HttpResponse, Responder};\nuse serde_json::Value;\n\n#[post(\"/users\")]\nasync fn create_user(body: web::Json<Value>) -> impl Responder {\n    let username = body[\"username\"].as_str().unwrap().to_string();\n    HttpResponse::Created().json(serde_json::json!({\"username\": username}))\n}\n\n#[actix_web::main]\nasync fn main() -> std::io::Result<()> {\n    HttpServer::new(|| App::new().service(create_user))\n        .bind((\"0.0.0.0\", 8043))?\n        .run()\n        .await\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/main.rs",
+      "content_patterns": [
+        "actix",
+        "/users"
+      ],
+      "regex_patterns": [
+        "(400|badrequest|bad_request)"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_validation.py": "import subprocess, sys, time, json, urllib.request, urllib.error, http.client\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8043{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, (json.loads(payload) if payload else None)\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        try:\n            parsed = json.loads(payload) if payload else None\n        except json.JSONDecodeError:\n            parsed = None\n        return e.code, parsed\n    except (ConnectionResetError, http.client.RemoteDisconnected, http.client.BadStatusLine, urllib.error.URLError) as e:\n        return None, str(e)\n\nsubprocess.run(['cargo', 'build', '--offline'], check=True)\nsrv = subprocess.Popen(['./target/debug/users_validation'])\ntry:\n    ok = False\n    status = body = None\n    for _ in range(30):\n        try:\n            status, body = req('POST', '/users', {'username': 'alice'})\n            ok = status is not None\n            if ok:\n                break\n        except (urllib.error.URLError, ConnectionResetError):\n            pass\n        time.sleep(0.5)\n    assert ok, 'server never became reachable on :8043'\n    assert status == 201, f'expected 201 for valid request, got {status}'\n    assert body['username'] == 'alice'\n\n    status, body = req('POST', '/users', {})\n    assert status == 400, f'expected 400 when username missing, got {status} ({body!r})'\n    assert isinstance(body, dict) and 'error' in body, f'expected JSON body with error key, got {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_validation.py",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

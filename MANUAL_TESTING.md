@@ -19,6 +19,7 @@ Before running any test, establish a working baseline:
 - Python >= 3.10, installed with `pip install -e .` from the repo root (provides the `optarena` command, stdlib-only - no dependencies to install)
 - Ollama running locally (`ollama serve`) with at least one small model pulled (e.g. `ollama pull gemma3:1b`) for the free/fast tests, and optionally a stronger model (e.g. `ollama pull qwen3-coder:30b`) for tests that expect a real pass
 - Docker Desktop installed and running, for the sandboxed check_command tests (section 4) - most tests fall back to the host without it, but the Docker-specific tests need it
+- For the benchmark-corpus language-track tests (section 16, and 4.8-4.11): all six per-language sandbox images built (`optarena docker build --all`, ~2-5 min the first time, mostly cached after) - no host-installed gcc/node/go/rust/dotnet/jvm toolchain is needed, everything runs inside the images
 - For VS Code UI driver tests (section 12): Node >= 18, `cd ui-harness && npm install`, and the relevant extension installed in `~/.vscode/extensions` (Cline, Roo Code, Continue, or Kilo Code)
 - For CLI agent driver tests (section 11): the relevant tool installed and on PATH (`aider`, `claude`, `codex`, `opencode`, `goose`, `qwen`) - `optarena doctor` reports which are actually available
 - For cost-tracking tests against a real paid backend (section 8): an API key for a provider in `optarena/pricing.py`'s table (OpenAI, Anthropic, etc.) - optional, the free/local path is fully testable without one
@@ -67,22 +68,29 @@ optarena list cases
 ```
 
 **Expected:**
-- 7 rows: `create_factorial` (c), `create_fibonacci` (python), `create_hello_world` (python), `create_reverse_string_js` (javascript), `create_server_c` (c), `modify_add_type_hints` (python), `multi_prompt_session` (python)
-- Each row shows `name`, `language`, `description`
+- **120 rows** across 11 language/framework tracks - the exact Phase 1 allocation from `OptArena_Benchmark_Corpus_Specification.md`: Python 20, JavaScript/TypeScript 20, Java 15, Go 10, Rust 10, C# 10, C/C++ 10, SQL 10, Shell 5, Docker Compose (`yaml`) 5, Terraform (`hcl`) 5
+- Each row shows `name`, `language`, `framework` (`-` for cases that don't set one - mostly the original 7 pre-corpus-expansion cases, plus the C/C++/SQL/Shell tracks which use the base image and don't need a specific framework tag), `description`
+- Spot-check a few names per track rather than counting all 120 by eye: `optarena list cases --language rust` should show exactly 10 (`create_health_endpoint_rust`, `create_actix_items_endpoint`, `create_axum_crud_todos`, `fix_actix_missing_validation`, `fix_axum_wrong_status_code`, `fix_axum_path_traversal`, `refactor_axum_duplicate_handlers`, `add_tests_axum_handler_logic`, `optimize_rust_vec_dedup`, `add_github_actions_ci_rust`)
 
 ---
 
-### 1.4 Filter the catalogue by language
+### 1.4 Filter the catalogue by language and framework
 
 **Action:**
 ```bash
 optarena list cases --language python
+optarena list cases --language javascript
+optarena list cases --framework gin
+optarena list cases --language python --framework fastapi
+optarena list cases --language ruby
 ```
 
 **Expected:**
-- Only the 4 Python-tagged cases print (`create_fibonacci`, `create_hello_world`, `modify_add_type_hints`, `multi_prompt_session`)
-- `optarena list cases --language javascript` shows only `create_reverse_string_js`
-- `optarena list cases --language ruby` (a language nothing is tagged with) prints nothing and exits 0
+- `--language python` prints 20 rows spanning FastAPI, Flask, Django, SQLAlchemy, Pydantic, Typer, and framework-less stdlib cases
+- `--language javascript` prints 20 rows spanning Express, NestJS, React, Vue, and plain Node
+- `--framework gin` prints the 6 Gin-tagged Go cases (framework filters work standalone, without also passing `--language`) - `--framework fiber` prints the other 4
+- `--language python --framework fastapi` prints only the FastAPI-tagged subset (5 cases) - both filters AND together, so this correctly excludes the other Python cases that don't set `framework: "fastapi"`
+- `--language ruby` (nothing is tagged with it) prints nothing and exits 0
 
 ---
 
@@ -213,17 +221,20 @@ optarena run --driver ollama-chat --name scoped --model gemma3:1b --cases create
 
 ---
 
-### 3.5 Scoped run via `--language`
+### 3.5 Scoped run via `--language` and `--framework`
 
 **Action:**
 ```bash
 optarena run --driver ollama-chat --name lang-scoped --model qwen3-coder:30b --language javascript
+optarena run --driver ollama-chat --name fw-scoped --model qwen3-coder:30b --framework gin
+optarena run --driver ollama-chat --name both-scoped --model qwen3-coder:30b --language python --framework fastapi
 ```
 
 **Expected:**
-- Banner shows `cases=1`
-- Only `create_reverse_string_js` runs
-- Combining `--language` with an unrelated `--cases` list that shares no cases with that language results in `cases=0` and `Nothing to run` is NOT printed (the scenario still executes with an empty case list) - confirm this doesn't crash
+- `--language javascript` alone: banner shows `cases=20` - every JS/TS-tagged case runs (Express, NestJS, React, Vue, plain Node), not just one
+- `--framework gin` alone: banner shows `cases=6`, only the Gin-tagged Go cases run (these need the `optarena-tester-go` sandbox image - see 4.8 - or fall back to the host with a warning)
+- `--language python --framework fastapi` together: banner shows `cases=5`, only the FastAPI-tagged subset runs - confirms the two filters AND rather than OR (the other Python cases, tagged `flask`/`django`/`sqlalchemy`/`typer`/no-framework, are correctly excluded)
+- Combining `--language`/`--framework` with an unrelated `--cases` list that shares no cases with that language/framework results in `cases=0` and `Nothing to run` is NOT printed (the scenario still executes with an empty case list) - confirm this doesn't crash
 
 ---
 
@@ -262,9 +273,10 @@ optarena docker build
 ```
 
 **Expected:**
-- Builds from `docker/Dockerfile` (Debian + gcc/build-essential + python3 + python-is-python3 + nodejs/npm)
+- Builds from `docker/Dockerfile` (Debian + gcc/g++/build-essential + python3 + python-is-python3 + nodejs/npm + terraform CLI + pyyaml + sqlite3 - this one image covers the C/C++, SQL, Shell, Docker Compose, and Terraform tracks alongside the original Python/C/Node cases)
 - Final line: `built optarena-tester:latest - check_command now runs sandboxed for every case`
 - `docker images` shows `optarena-tester:latest`
+- `docker run --rm --network none optarena-tester:latest terraform version` prints a version with no "out of date" network-check warning (`CHECKPOINT_DISABLE=1` is set in the image)
 
 ---
 
@@ -356,6 +368,77 @@ optarena run --driver ollama-chat --name port-reuse --model qwen3-coder:30b --ca
 **Expected:**
 - Usually all 3 trials pass
 - Occasionally one trial fails with `Bind failed: Address already in use` (or the client times out connecting) - this is an accepted, documented trade-off of one shared container/network-namespace serving all trials (see ARCH.md section on DockerSandbox); it is not a bug to file, though repeated failures on every trial would be worth investigating
+
+---
+
+### 4.8 Build a per-language sandbox image with `--lang`
+
+**Action:**
+```bash
+optarena docker build --lang python
+optarena docker build --lang node
+optarena docker build --lang jvm
+optarena docker build --lang go
+optarena docker build --lang rust
+optarena docker build --lang dotnet
+```
+
+**Expected:**
+- Each builds from `docker/<lang>/Dockerfile` and tags the image `optarena-tester-<lang>:latest` (e.g. `optarena-tester-go:latest`)
+- Each prints `building optarena-tester-<lang>:latest from ...\optarena\docker\<lang>\Dockerfile ...` then `built optarena-tester-<lang>:latest`
+- Build output shows real dependency installation happening at BUILD time, not deferred: pip installs incl. SQLAlchemy/Typer/pyyaml (python), a global `npm install` incl. NestJS/Vue/TypeScript (node), a `mvn package` warming `~/.m2` with `spring-boot-starter-*` (jvm), `go build` warming the module cache with Gin AND Fiber (go), `cargo build` warming `~/.cargo/registry` with Axum AND Actix-web (rust), a `dotnet test` warming the NuGet global-packages folder (dotnet)
+- `optarena docker build --lang ruby` (not a registered track) errors clearly: `unknown --lang 'ruby' - choices: base, python, node, jvm, go, rust, dotnet` and exits non-zero, rather than silently doing nothing
+- `docker images` shows all six `optarena-tester-<lang>:latest` tags after running all six commands
+
+---
+
+### 4.9 Build every registered image at once with `--all`
+
+**Setup:** None of the per-language images need to exist yet (or can already exist - rebuilding is safe and mostly cached).
+
+**Action:**
+```bash
+optarena docker build --all
+```
+
+**Expected:**
+- Builds `base` plus all six per-language images in one invocation, printing a `building ...`/`built ...` pair for each of the 7
+- If a Dockerfile for some track is temporarily missing (e.g. renamed for a test), that track prints `no Dockerfile at <path> - skipping <lang>` to stderr, the rest still build, and the overall exit code is non-zero (don't let one missing Dockerfile silently abort the whole batch)
+- Re-running immediately afterward is fast (Docker layer cache - each step should show `CACHED` except the final export)
+
+---
+
+### 4.10 `optarena doctor` reports every registered image
+
+**Setup:** Docker running. Build some but not all of the per-language images (e.g. only `python` and `go` via 4.8).
+
+**Action:**
+```bash
+optarena doctor
+```
+
+**Expected:**
+- Under `docker (sandboxed check_command execution):`, one line per entry in the image registry - `base`, `python`, `node`, `jvm`, `go`, `rust`, `dotnet` - each showing `optarena-tester[-<lang>]:latest image built`
+- Built images show `[ok ]`; unbuilt ones show `[MISS]` with a hint pointing at the exact command to fix it (`run \`optarena docker build\`` for `base`, `run \`optarena docker build --lang <lang>\`` for the rest)
+- These checks are advisory - `optarena doctor`'s overall exit code is unaffected by missing per-language images (only the driver/backend/environment checks are load-bearing for the exit code)
+
+---
+
+### 4.11 A run mixing two language tracks starts one container per image
+
+**Setup:** Both `optarena-tester-python:latest` and `optarena-tester-go:latest` built (4.8). Docker running.
+
+**Action:**
+```bash
+optarena run --driver ollama-chat --name multi-image --model qwen3-coder:30b \
+  --cases create_health_endpoint_python,create_health_endpoint_go
+```
+
+**Expected:**
+- **Two** `[optarena] docker sandbox: ...` lines print, one per distinct image (`optarena-tester-python:latest` and `optarena-tester-go:latest`) - not one, and not a container per case
+- `create_health_endpoint_python`'s detail line shows `docker:optarena-tester-python:latest`; `create_health_endpoint_go`'s shows `docker:optarena-tester-go:latest` - each case execs into the container matching its own `docker_image`, never the other one
+- After the run, `docker ps -a` shows no lingering `optarena-sandbox-*` containers for either image (both are stopped in the run's `finally` block)
+- Re-running with `--cases create_health_endpoint_python` alone starts only **one** sandbox line (for the python image) - confirms images are provisioned per the actual case set, not unconditionally for every registered track
 
 ---
 
@@ -1012,3 +1095,193 @@ optarena run --driver ollama-chat --cases-dir ./broken-cases --model gemma3:1b
 
 **Expected:**
 - Fails with a clear JSON parse error naming the file, rather than a generic crash with no file context
+
+---
+
+## 16. Benchmark-Corpus Language Tracks (120 cases, 11 tracks)
+
+The full corpus is 120 cases across 11 language/framework tracks - the exact
+Phase 1 allocation from `OptArena_Benchmark_Corpus_Specification.md`
+(Python 20, JavaScript/TypeScript 20, Java 15, Go 10, Rust 10, C# 10,
+C/C++ 10, SQL 10, Shell 5, Docker Compose 5, Terraform 5). Every case was
+already hand-verified end-to-end (a correct reference solution passes, a
+broken/unfixed/unchanged one fails) without a live model, run through the
+real Docker oracle - these tests confirm the same behavior through a real
+driver + real backend, which the hand-written verification scripts can't
+cover on their own. 16.1-16.6 below cover the original six
+`create_health_endpoint_<lang>` cases in depth (one per newly-added sandbox
+image); 16.8 covers spot-checking the other 114 cases, which is more
+practical than enumerating all of them individually.
+
+**Setup for this whole section:** Docker running, all six per-language
+images built (`optarena docker build --all` - see 4.9). A capable model
+(e.g. `qwen3-coder:30b`) is far more likely to produce a passing solution
+than a small one; a small model is a reasonable choice specifically for
+*15.x-style* "confirm failures are reported clearly" testing instead.
+
+### 16.1 Python / FastAPI
+
+**Action:**
+```bash
+optarena run --driver ollama-chat --name py-health --model qwen3-coder:30b --cases create_health_endpoint_python
+```
+
+**Expected:**
+- Model writes `app.py` with a `HealthStatus` Pydantic model and a GET `/health` route
+- `check_command` detail line shows `docker:optarena-tester-python:latest`
+- On pass, hidden `test_health.py` starts `uvicorn app:app --port 8001`, polls until reachable, asserts the JSON body is `{"status": "ok"}`, then terminates the server cleanly (no orphaned `uvicorn` process afterward - check `docker ps -a`/host process list if running without Docker)
+
+---
+
+### 16.2 Node / Express
+
+**Action:**
+```bash
+optarena run --driver ollama-chat --name node-health --model qwen3-coder:30b --cases create_health_endpoint_node
+```
+
+**Expected:**
+- Model writes `server.js` using the globally-installed `express` (no `package.json`/`node_modules` needed - `NODE_PATH` in the image resolves it)
+- `check_command` detail line shows `docker:optarena-tester-node:latest`
+- Hidden test starts `node server.js`, polls port 8002, asserts the JSON body
+
+---
+
+### 16.3 Go / Gin
+
+**Action:**
+```bash
+optarena run --driver ollama-chat --name go-health --model qwen3-coder:30b --cases create_health_endpoint_go
+```
+
+**Expected:**
+- `go.mod`/`go.sum` are already present (via `setup_files`, pinned to `github.com/gin-gonic/gin v1.10.0`) - the model only needs to write `main.go`; it should NOT need to run `go mod tidy` or reach the network itself
+- `check_command` detail line shows `docker:optarena-tester-go:latest`
+- Hidden test runs `go build -o app_bin .` (must succeed fully offline, using the module cache warmed into the image at build time), starts the binary, polls port 8003, asserts the JSON body
+
+---
+
+### 16.4 Rust / Axum
+
+**Action:**
+```bash
+optarena run --driver ollama-chat --name rust-health --model qwen3-coder:30b --cases create_health_endpoint_rust
+```
+
+**Expected:**
+- `Cargo.toml` is already present (via `setup_files`, listing axum/tokio/serde/serde_json) - the model only needs to write `src/main.rs`
+- `check_command` detail line shows `docker:optarena-tester-rust:latest`
+- Hidden test runs `cargo build --offline` (expect ~15-25s on a cold cache miss inside the shared container, since this compiles axum's full dependency tree; near-instant on a warm `target/` from a prior trial), starts `./target/debug/health_endpoint`, polls port 8004, asserts the JSON body
+- `check_command_timeout` for this case is 90s (longer than the other tracks) specifically to give a from-scratch `cargo build` room to finish - if it times out consistently, that is worth investigating rather than just bumping the timeout further
+
+---
+
+### 16.5 C# / ASP.NET Core minimal API
+
+**Action:**
+```bash
+optarena run --driver ollama-chat --name dotnet-health --model qwen3-coder:30b --cases create_health_endpoint_dotnet
+```
+
+**Expected:**
+- `app.csproj` is already present (via `setup_files`, targeting `net8.0`) - the model only needs to write `Program.cs`
+- `check_command` detail line shows `docker:optarena-tester-dotnet:latest`
+- Hidden test runs `dotnet build -c Release -o out` (restore must succeed fully offline via the image's machine-wide `NuGet.Config`, which points only at the warmed global-packages folder), runs the built dll, polls port 8005, asserts the JSON body
+
+---
+
+### 16.6 Java / Spring Boot
+
+**Action:**
+```bash
+optarena run --driver ollama-chat --name java-health --model qwen3-coder:30b --cases create_health_endpoint_java
+```
+
+**Expected:**
+- `pom.xml` is already present (via `setup_files`, pinned to `spring-boot-starter-parent` 3.3.4 with `spring-boot-starter-web`/`spring-boot-starter-test`/`spring-boot-maven-plugin`) - the model only needs to write `Application.java` (`@SpringBootApplication`) and `HealthController.java` (`@RestController`) under `src/main/java/com/optarena/health/`
+- `check_command` detail line shows `docker:optarena-tester-jvm:latest`
+- Hidden test runs `mvn -o -q package -DskipTests` (fully offline, using the `~/.m2` cache warmed at image build time), runs `java -jar target/*.jar` (excluding the `.original` jar `spring-boot-maven-plugin` leaves behind), polls port 8080, asserts the JSON body
+- This is the slowest of the six (~5-7s just for Spring context startup) - `check_command_timeout` is 120s and total case `timeout` is 210s to give it room
+
+---
+
+### 16.7 A weak model's near-miss is still failed correctly
+
+**Setup:** A small/weak local model (e.g. `gemma3:1b`), unlikely to get the framework-specific details right on the first try.
+
+**Action:**
+```bash
+optarena run --driver ollama-chat --name weak-health --model gemma3:1b --cases create_health_endpoint_python,create_health_endpoint_go
+```
+
+**Expected:**
+- A plausible-looking but incomplete/wrong file (e.g. missing the Pydantic model, wrong port, wrong JSON key) fails at the `expected_files` stage with a specific message (e.g. `"app.py" missing expected content "pydantic"`) and never reaches `check_command` - confirms the two-stage oracle (shape check, then behavior check) is still enforced for every new track, not just the original three languages
+- A file that passes the shape check but doesn't actually run (e.g. a syntax error, wrong import) fails at `check_command` with a real compiler/interpreter error in the captured output, not a generic timeout
+
+---
+
+### 16.8 Spot-check the rest of the corpus (114 cases beyond the six health endpoints)
+
+Running all 120 cases against a live model on every test pass isn't
+practical (some tracks - Rust, Java, .NET - take 10-30s+ per case just for
+compile/startup). Spot-check a handful per track instead, picking one case
+per task category (feature/bugfix/refactor/testing/security/performance/
+devops) so every category gets exercised at least once per session:
+
+**Action (example - adjust case names per track as needed):**
+```bash
+optarena run --driver ollama-chat --name spotcheck --model qwen3-coder:30b --cases \
+  create_todo_api_fastapi,fix_flask_missing_field_validation,refactor_duplicate_route_logic_fastapi,\
+  add_tests_typer_cli,fix_sql_injection_python,optimize_slow_dedup_python,add_github_actions_ci_python
+```
+
+**Expected:**
+- All 7 categories run against the same track (Python here) in one invocation; each should show the sandbox/exit/timing detail line, not just a bare PASS/FAIL
+- The **security** case's hidden test should show it actually attempts a malicious/injection input, not just a normal-path assertion (grep the case's `test_setup_files` for the payload if the pass/fail isn't otherwise informative)
+- The **performance** case's hidden test times a large input against a strict budget - if this ever flakes intermittently on slower hardware, check whether the budget in that case's `test_setup_files` needs headroom, rather than assuming the model's solution is inconsistent
+- Repeat the same spot-check pattern for at least one other track (e.g. Go or Rust) to confirm the pattern holds outside Python
+
+---
+
+### 16.9 Corpus-integrity regression check (the refactor no-op bug)
+
+**Context:** while building this corpus, 6 of the initial 11 "refactoring"
+cases were found to incorrectly PASS a model that changed nothing at all -
+the hidden test only checked that behavior stayed correct, and the original
+already-working (if duplicated) code trivially satisfies that. This was
+caught by submitting each case's own unmodified `setup_files` back through
+the real oracle and confirming it *should* fail. Any NEW refactor-category
+case added to the corpus should be checked the same way before being
+trusted - this is the single highest-value integrity check for this class
+of case, worth re-running whenever cases are added or edited, not just
+once at initial authoring time.
+
+**Action:** (Python, run from the `optarena/` repo root; adjust the case
+name and image for whichever refactor case you're checking)
+```python
+import shutil, sys
+from pathlib import Path
+sys.path.insert(0, ".")
+from optarena.cases import load_cases, evaluate_case, DockerSandbox, write_setup_files
+
+case = {c["name"]: c for c in load_cases()}["refactor_duplicate_route_logic_fastapi"]
+root = Path("/tmp/refactor_check")
+if root.exists():
+    shutil.rmtree(root)
+root.mkdir(parents=True)
+write_setup_files(root, case.get("setup_files"))
+created = list((case.get("setup_files") or {}).keys())
+with DockerSandbox(root, image=case.get("docker_image")) as sandbox:
+    failures, info = evaluate_case(case, created, root)
+print("FAILED (expected)" if failures else "PASSED (BUG: no-op should not pass)")
+```
+
+**Expected:**
+- Prints `FAILED (expected)` - submitting the case's own original,
+  unmodified `setup_files` as if it were the model's final answer must be
+  rejected, since nothing was actually refactored
+- If it prints `PASSED (BUG: ...)`, the case's hidden test needs a
+  structural assertion added (count occurrences of the duplicated logic's
+  most distinctive literal in the model's final source file, assert it
+  collapsed to at most one) - see `refactor_duplicate_route_logic_fastapi.json`
+  or `refactor_axum_duplicate_handlers.json` for the exact pattern to copy

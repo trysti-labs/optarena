@@ -1,0 +1,35 @@
+{
+  "name": "create_c_linked_list",
+  "description": "Creates a singly linked list of ints in C with insert/delete/find/print commands",
+  "language": "c",
+  "domain": "systems",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "c",
+    "linked-list",
+    "data-structure"
+  ],
+  "prompts": [
+    "Create a C program in a file called linked_list.c that implements a singly linked list of ints, using a struct `Node` with an int `value` field and a `struct Node *next` field, and a single global head pointer that starts as NULL. The program's main() must read commands from stdin, one per line, until end-of-input (EOF), and for each command produce the following behavior:\n- `insert X` - insert integer X at the HEAD of the list. Produce no output.\n- `delete X` - remove the first node in the list whose value equals X (if any); if no node has that value, do nothing. Produce no output.\n- `find X` - print `1` on its own line if a node with value X exists in the list, otherwise print `0` on its own line.\n- `print` - print all values currently in the list from head to tail, space-separated, on one line (an empty line if the list is empty).\nEach command and its integer argument (if any) are whitespace-separated on their own line."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "linked_list.c",
+      "content_patterns": [
+        "int main"
+      ],
+      "regex_patterns": [
+        "struct\\s+Node"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "test_linked_list.py": "import subprocess\nsubprocess.run(['gcc', 'linked_list.c', '-o', 'linked_list_bin'], check=True)\n\ncommands = '\\n'.join([\n    'insert 1',\n    'insert 2',\n    'insert 3',\n    'print',\n    'find 2',\n    'find 5',\n    'delete 2',\n    'print',\n    'find 2',\n]) + '\\n'\n\nproc = subprocess.run(['./linked_list_bin'], input=commands, capture_output=True, text=True, timeout=10)\nassert proc.returncode == 0, f'nonzero exit: {proc.returncode}, stderr={proc.stderr[-300:]}'\nlines = [l.strip() for l in proc.stdout.strip('\\n').split('\\n')]\nassert lines[0] == '3 2 1', f'expected head-first order \"3 2 1\", got {lines[0]!r} (full output: {proc.stdout!r})'\nassert lines[1] == '1', f'expected find 2 -> 1, got {lines[1]!r}'\nassert lines[2] == '0', f'expected find 5 -> 0, got {lines[2]!r}'\nassert lines[3] == '3 1', f'expected print after delete -> \"3 1\", got {lines[3]!r}'\nassert lines[4] == '0', f'expected find 2 -> 0 after delete, got {lines[4]!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_linked_list.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

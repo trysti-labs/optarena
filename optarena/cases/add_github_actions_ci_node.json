@@ -1,0 +1,45 @@
+{
+  "name": "add_github_actions_ci_node",
+  "description": "Writes a GitHub Actions CI workflow for a Node.js project",
+  "language": "javascript",
+  "framework": "github-actions",
+  "domain": "devops",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": [
+    "ci",
+    "github-actions",
+    "devops",
+    "node"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "Create a GitHub Actions workflow file at .github/workflows/ci.yml for a Node.js project. It must: (1) be named something sensible (e.g. \"CI\"), (2) trigger on push and pull_request events targeting the main branch, (3) define at least one job that runs on ubuntu-latest, (4) check out the repository using actions/checkout, (5) set up Node.js using actions/setup-node (any Node 18+ version), and (6) run at least one command step that would execute the project's tests (for example `npm test` or `npm ci && npm test`). Use valid YAML syntax with 'on:', 'jobs:', 'runs-on:', and 'steps:' keys."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "ci.yml",
+      "content_patterns": [
+        "on:",
+        "jobs:",
+        "runs-on:",
+        "steps:",
+        "actions/checkout",
+        "actions/setup-node",
+        "ubuntu-latest"
+      ],
+      "regex_patterns": [
+        "push",
+        "pull_request",
+        "npm (test|ci)"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_ci.py": "import re\n\npath = '.github/workflows/ci.yml'\nwith open(path, encoding='utf-8') as f:\n    text = f.read()\n\nlower = text.lower()\n\ndef find_top_key(name):\n    m = re.search(rf'(?m)^{name}\\s*:', text)\n    assert m, f'missing top-level \"{name}:\" key in {path}'\n    return m\n\non_match = re.search(r'(?m)^(on|\"on\"|true)\\s*:', text)\nassert on_match, f'missing a top-level \"on:\" trigger key in {path}'\n\nfind_top_key('jobs')\n\nassert 'runs-on' in lower, 'expected a runs-on: key defining the job runner'\nassert 'ubuntu' in lower, 'expected the job to run on an ubuntu runner'\nassert re.search(r'(?m)^\\s*steps\\s*:', text), 'expected a steps: key'\n\nassert 'actions/checkout' in text, 'expected a step using actions/checkout'\nassert 'actions/setup-node' in text, 'expected a step using actions/setup-node'\n\nassert re.search(r'push', lower), 'expected the workflow to trigger on push'\nassert re.search(r'pull_request', lower), 'expected the workflow to trigger on pull_request'\nassert re.search(r'main', text), 'expected the workflow to reference the main branch'\n\nassert re.search(r'npm\\s+(ci|test|install|run)', lower), 'expected a step running an npm test/ci command'\nassert 'test' in lower, 'expected the workflow to reference running tests'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_ci.py",
+  "check_command_timeout": 30,
+  "timeout": 90
+}

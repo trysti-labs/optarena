@@ -1,0 +1,41 @@
+{
+  "name": "fix_nestjs_status_code",
+  "description": "Fixes a NestJS create endpoint that wrongly forces HTTP 200 instead of 201",
+  "language": "javascript",
+  "framework": "nestjs",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "nestjs",
+    "http-status",
+    "bugfix",
+    "typescript"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "The NestJS app in main.ts (tsconfig.json is already set up correctly - do not change it) exposes POST /items, which creates a new item and should respond with HTTP 201 Created, along with the created item {id, name}. Right now the handler is decorated with @HttpCode(200), which forces every response to be 200 even though a resource was just created - this is the wrong status code for a creation endpoint. Fix main.ts so POST /items responds with 201 on success, without changing anything else about the endpoint's behavior (GET /items must still return 200 with the array of items, exactly as before). Keep listening on port 8023."
+  ],
+  "setup_files": {
+    "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"module\": \"commonjs\",\n    \"target\": \"ES2020\",\n    \"experimentalDecorators\": true,\n    \"emitDecoratorMetadata\": true,\n    \"skipLibCheck\": true,\n    \"esModuleInterop\": true,\n    \"strict\": false,\n    \"baseUrl\": \"/usr/local/lib/node_modules\",\n    \"moduleResolution\": \"node\"\n  }\n}\n",
+    "main.ts": "import \"reflect-metadata\";\nimport { Body, Controller, Get, HttpCode, Module, Post } from \"@nestjs/common\";\nimport { NestFactory } from \"@nestjs/core\";\n\n@Controller(\"items\")\nclass ItemsController {\n  private items: { id: number; name: string }[] = [];\n  private nextId = 1;\n\n  @Get()\n  findAll() {\n    return this.items;\n  }\n\n  @Post()\n  @HttpCode(200)\n  create(@Body() body: { name: string }) {\n    const item = { id: this.nextId++, name: body.name };\n    this.items.push(item);\n    return item;\n  }\n}\n\n@Module({ controllers: [ItemsController] })\nclass AppModule {}\n\nasync function bootstrap() {\n  const app = await NestFactory.create(AppModule, { logger: false });\n  await app.listen(8023);\n}\nbootstrap();\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.ts",
+      "content_patterns": [
+        "items",
+        "8023"
+      ],
+      "not_content_patterns": [
+        "@httpcode(200)"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_status.py": "import subprocess, time, json, urllib.request, urllib.error\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8023{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, (json.loads(payload) if payload else None)\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        try:\n            parsed = json.loads(payload) if payload else None\n        except json.JSONDecodeError:\n            parsed = None\n        return e.code, parsed\n\nsrv = subprocess.Popen(['ts-node', 'main.ts'])\ntry:\n    ok = False\n    status = body = None\n    for _ in range(40):\n        try:\n            status, body = req('GET', '/items')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, f'server never became reachable on :8023 (last: {status} {body!r})'\n    assert status == 200 and body == [], f'expected empty list, got {status} {body!r}'\n\n    status, body = req('POST', '/items', {'name': 'widget'})\n    assert status == 201, f'expected 201 Created for POST /items, got {status} {body!r}'\n    assert body['name'] == 'widget' and isinstance(body['id'], int)\n\n    status, body = req('GET', '/items')\n    assert status == 200 and len(body) == 1\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_status.py",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

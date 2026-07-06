@@ -1,0 +1,41 @@
+{
+  "name": "create_items_validation_endpoint",
+  "description": "Creates an ASP.NET Core minimal API POST endpoint that validates a required, non-empty name field",
+  "language": "csharp",
+  "framework": "aspnet-core",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "rest",
+    "http",
+    "validation",
+    "aspnet-core",
+    "minimal-api"
+  ],
+  "docker_image": "optarena-tester-dotnet:latest",
+  "prompts": [
+    "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Write Program.cs to implement POST /items. It accepts a JSON body {\"name\": string}. If 'name' is missing, null, or empty/whitespace-only after trimming, respond with HTTP 400 Bad Request and a JSON body containing an 'error' field describing the problem (no item is created). Otherwise, create an item with an auto-assigned integer id starting at 1 (incrementing for each new item) and the trimmed name, store it in memory, and respond with HTTP 201 Created whose JSON body contains the created item's 'id' and 'name'. Listen on http://0.0.0.0:8051."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Program.cs",
+      "content_patterns": [
+        "/items",
+        "8051"
+      ],
+      "regex_patterns": [
+        "mappost"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_items.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\n\nsubprocess.run(['dotnet', 'build', '-c', 'Release', '-o', 'out'], check=True)\ndlls = glob.glob('out/*.dll')\ndll = [d for d in dlls if 'app' in d.lower()][0]\nsrv = subprocess.Popen(['dotnet', dll])\n\ndef post(body):\n    url = 'http://127.0.0.1:8051/items'\n    data = json.dumps(body).encode()\n    r = urllib.request.Request(url, data=data, method='POST')\n    r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=5) as resp:\n            return resp.status, json.loads(resp.read())\n    except urllib.error.HTTPError as e:\n        try:\n            payload = json.loads(e.read())\n        except Exception:\n            payload = {}\n        return e.code, payload\n\ntry:\n    ok = False\n    for _ in range(40):\n        try:\n            status, payload = post({'name': 'Widget'})\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8051'\n    assert status == 201, f'expected 201 for valid name, got {status} body={payload!r}'\n    assert payload.get('name') == 'Widget', f'unexpected body: {payload!r}'\n    assert payload.get('id') is not None, f'missing id: {payload!r}'\n    first_id = payload['id']\n\n    status2, payload2 = post({'name': 'Gadget'})\n    assert status2 == 201, f'expected 201 for second valid name, got {status2}'\n    assert payload2.get('id') != first_id, 'ids should be distinct/incrementing'\n\n    status3, payload3 = post({'name': '   '})\n    assert status3 == 400, f'expected 400 for blank name, got {status3} body={payload3!r}'\n    assert 'error' in payload3, f'expected error field, got {payload3!r}'\n\n    status4, payload4 = post({})\n    assert status4 == 400, f'expected 400 for missing name, got {status4} body={payload4!r}'\n    assert 'error' in payload4, f'expected error field, got {payload4!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_items.py",
+  "check_command_timeout": 100,
+  "timeout": 180
+}

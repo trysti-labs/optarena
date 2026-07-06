@@ -1,0 +1,30 @@
+{
+  "name": "add_multiple_environment_variables",
+  "description": "Creates per-environment Terraform configuration using a variable, a locals map, and lookup()",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": ["terraform", "iac", "environments", "devops"],
+  "prompts": [
+    "Create a Terraform file called environments.tf that declares a variable named `environment` (type string, default \"dev\", describing that it must be dev, staging, or prod). Then add a `locals` block containing a map named `environment_config` with an entry for each of \"dev\", \"staging\", and \"prod\", where each entry is an object with an `instance_count` number and an `instance_size` string (use different values per environment, e.g. dev is smallest, prod is largest). Use `lookup()` (or equivalent map indexing) on `local.environment_config` with `var.environment` to select the current instance_count and instance_size, and expose both as outputs."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "environments.tf",
+      "content_patterns": ["variable", "environment", "locals", "environment_config", "dev", "staging", "prod"],
+      "regex_patterns": [
+        "variable\\s+\"environment\"\\s*\\{",
+        "locals\\s*\\{"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_envs.py": "import subprocess\nimport re\nimport json\n\nproc = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(proc.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {proc.stdout}\\n{proc.stderr}'\n\nwith open('environments.tf', encoding='utf-8') as f:\n    content = f.read()\n\nassert re.search(r'variable\\s+\"environment\"\\s*\\{', content), 'variable \"environment\" not found'\nassert re.search(r'locals\\s*\\{', content), 'no locals block found'\nfor env in ('dev', 'staging', 'prod'):\n    assert re.search(rf'\\b{env}\\b', content), f'locals map should have an entry for \"{env}\"'\nassert re.search(r'lookup\\(|local\\.\\w+\\[', content), 'should use lookup() or map indexing to select per-environment values'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_envs.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

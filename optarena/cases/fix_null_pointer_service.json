@@ -1,0 +1,38 @@
+{
+  "name": "fix_null_pointer_service",
+  "description": "Fixes a NullPointerException when an order has no gift message",
+  "language": "java",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "npe",
+    "bugfix",
+    "service-layer",
+    "spring-boot"
+  ],
+  "docker_image": "optarena-tester-jvm:latest",
+  "prompts": [
+    "In this Maven Spring Boot project, OrderService.describeGift(Order order) (src/main/java/com/optarena/orders/OrderService.java) throws a NullPointerException whenever order.getGiftMessage() is null, because most orders have no gift message. Fix describeGift so that: when getGiftMessage() is null, it returns exactly the string \"Gift note: (none)\"; when getGiftMessage() is non-null, it returns \"Gift note: \" followed by the message with leading/trailing whitespace trimmed. Do not change the method signature or the Order class."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>orders-npe-fix</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/java/com/optarena/orders/Order.java": "package com.optarena.orders;\n\npublic class Order {\n    private String customerName;\n    private String giftMessage;\n\n    public Order(String customerName, String giftMessage) {\n        this.customerName = customerName;\n        this.giftMessage = giftMessage;\n    }\n\n    public String getCustomerName() { return customerName; }\n    public String getGiftMessage() { return giftMessage; }\n}\n",
+    "src/main/java/com/optarena/orders/OrderService.java": "package com.optarena.orders;\n\npublic class OrderService {\n    public String describeGift(Order order) {\n        return \"Gift note: \" + order.getGiftMessage().trim();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/OrderService.java",
+      "content_patterns": [
+        "describeGift"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/orders/OrderServiceHiddenTest.java": "package com.optarena.orders;\n\nimport org.junit.jupiter.api.Test;\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\npublic class OrderServiceHiddenTest {\n    @Test\n    public void handlesNullGiftMessage() {\n        OrderService svc = new OrderService();\n        Order order = new Order(\"Bob\", null);\n        assertEquals(\"Gift note: (none)\", svc.describeGift(order));\n    }\n\n    @Test\n    public void trimsNonNullGiftMessage() {\n        OrderService svc = new OrderService();\n        Order order = new Order(\"Bob\", \"  Happy birthday!  \");\n        assertEquals(\"Gift note: Happy birthday!\", svc.describeGift(order));\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=OrderServiceHiddenTest",
+  "check_command_timeout": 60,
+  "timeout": 90
+}

@@ -15,7 +15,8 @@ from pathlib import Path
 from unittest import mock
 
 from optarena.cases import (
-    check_expected, classify_failure, diff_stats, evaluate_case, load_cases, run_check_command,
+    DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, check_expected, classify_failure,
+    diff_stats, dockerfile_for, evaluate_case, filter_cases, load_cases, run_check_command,
 )
 from optarena.compare import compare_runs, format_regression, regression_summary
 from optarena.drivers import DRIVERS, get_driver
@@ -123,15 +124,17 @@ class DockerCheckCommandTests(unittest.TestCase):
         self.cases_mod = cases_mod
         # Reset the module-level docker-availability cache before each test.
         self._orig = (cases_mod._docker_checked, cases_mod._docker_ok,
-                      cases_mod._docker_warned, cases_mod._active_sandbox)
+                      cases_mod._docker_warned, dict(cases_mod._active_sandboxes))
         cases_mod._docker_checked = False
         cases_mod._docker_ok = False
         cases_mod._docker_warned = False
-        cases_mod._active_sandbox = None
+        cases_mod._active_sandboxes.clear()
 
     def tearDown(self):
         (self.cases_mod._docker_checked, self.cases_mod._docker_ok,
-         self.cases_mod._docker_warned, self.cases_mod._active_sandbox) = self._orig
+         self.cases_mod._docker_warned, sandboxes) = self._orig
+        self.cases_mod._active_sandboxes.clear()
+        self.cases_mod._active_sandboxes.update(sandboxes)
 
     def test_docker_run_invoked_with_isolation_flags(self):
         calls = []
@@ -209,15 +212,17 @@ class SharedSandboxTests(unittest.TestCase):
         import optarena.cases as cases_mod
         self.cases_mod = cases_mod
         self._orig = (cases_mod._docker_checked, cases_mod._docker_ok,
-                      cases_mod._docker_warned, cases_mod._active_sandbox)
+                      cases_mod._docker_warned, dict(cases_mod._active_sandboxes))
         cases_mod._docker_checked = False
         cases_mod._docker_ok = False
         cases_mod._docker_warned = False
-        cases_mod._active_sandbox = None
+        cases_mod._active_sandboxes.clear()
 
     def tearDown(self):
         (self.cases_mod._docker_checked, self.cases_mod._docker_ok,
-         self.cases_mod._docker_warned, self.cases_mod._active_sandbox) = self._orig
+         self.cases_mod._docker_warned, sandboxes) = self._orig
+        self.cases_mod._active_sandboxes.clear()
+        self.cases_mod._active_sandboxes.update(sandboxes)
 
     def test_one_container_serves_every_call(self):
         calls = []
@@ -378,6 +383,128 @@ class ScenarioTests(unittest.TestCase):
         )
         sc = _scenario_from_args(args)
         self.assertEqual(sc.cases, ["py_case"])
+
+    def test_framework_filter_resolves_to_matching_case_names_only(self):
+        from optarena.cli import _scenario_from_args
+        d = Path(tempfile.mkdtemp())
+        (d / "gin_case.json").write_text(json.dumps(
+            {"name": "gin_case", "language": "go", "framework": "gin",
+             "prompts": ["p"], "expected_files": []}), encoding="utf-8")
+        (d / "axum_case.json").write_text(json.dumps(
+            {"name": "axum_case", "language": "rust", "framework": "axum",
+             "prompts": ["p"], "expected_files": []}), encoding="utf-8")
+        args = argparse.Namespace(
+            driver="ollama-chat", model="llama3.2", kind="ollama",
+            base_url="http://localhost:11434", api_key="optarena", name=None,
+            cases=None, cases_dir=str(d), timeout=None, language=None, framework="gin",
+        )
+        sc = _scenario_from_args(args)
+        self.assertEqual(sc.cases, ["gin_case"])
+
+    def test_language_and_framework_filters_and_together(self):
+        # A language filter alone can't disambiguate two frameworks in the
+        # same language - both filters must narrow jointly (AND), not
+        # override each other.
+        cases = [
+            {"name": "a", "language": "python", "framework": "fastapi"},
+            {"name": "b", "language": "python", "framework": "flask"},
+            {"name": "c", "language": "go", "framework": "gin"},
+        ]
+        self.assertEqual(
+            [c["name"] for c in filter_cases(cases, language="python", framework="fastapi")],
+            ["a"],
+        )
+        self.assertEqual(
+            [c["name"] for c in filter_cases(cases, language="python")],
+            ["a", "b"],
+        )
+
+
+class DockerImageRegistryTests(unittest.TestCase):
+    def test_base_maps_to_default_image_and_top_level_dockerfile(self):
+        self.assertEqual(DOCKER_IMAGES["base"], DOCKER_IMAGE_DEFAULT)
+        self.assertTrue(str(dockerfile_for("base")).endswith("Dockerfile"))
+        self.assertNotIn("base", str(dockerfile_for("base")))
+
+    def test_per_language_tracks_get_their_own_subdirectory(self):
+        for lang in ("python", "node", "jvm", "go", "rust", "dotnet"):
+            self.assertIn(lang, DOCKER_IMAGES)
+            path = dockerfile_for(lang)
+            self.assertEqual(path.parent.name, lang)
+            self.assertEqual(path.name, "Dockerfile")
+
+
+class MultiImageSandboxTests(unittest.TestCase):
+    """
+    A run whose cases span more than one language needs one live container
+    PER distinct image, not just one overall - `_active_sandboxes` is keyed
+    by image tag precisely so `run_check_command` can route each case to the
+    container that actually has its toolchain.
+    """
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="optarena_test_multiimg_"))
+        (self.root / "case_py").mkdir()
+        (self.root / "case_go").mkdir()
+        import optarena.cases as cases_mod
+        self.cases_mod = cases_mod
+        self._orig = (cases_mod._docker_checked, cases_mod._docker_ok,
+                      cases_mod._docker_warned, dict(cases_mod._active_sandboxes))
+        cases_mod._docker_checked = False
+        cases_mod._docker_ok = False
+        cases_mod._docker_warned = False
+        cases_mod._active_sandboxes.clear()
+
+    def tearDown(self):
+        (self.cases_mod._docker_checked, self.cases_mod._docker_ok,
+         self.cases_mod._docker_warned, sandboxes) = self._orig
+        self.cases_mod._active_sandboxes.clear()
+        self.cases_mod._active_sandboxes.update(sandboxes)
+
+    def test_two_images_register_independently_and_route_correctly(self):
+        started = []
+
+        def fake_run(args, **kwargs):
+            if args[:2] == ["docker", "info"]:
+                return mock.Mock(returncode=0)
+            if args[:3] == ["docker", "image", "inspect"]:
+                return mock.Mock(returncode=0)
+            if args[:3] == ["docker", "run", "-d"]:
+                started.append(args[args.index("--name") + 1])
+                return mock.Mock(returncode=0, stdout="", stderr="")
+            if args[:2] == ["docker", "exec"]:
+                # route assertion: the container name execed into must belong
+                # to the image this case actually asked for
+                image_hint = "py" if "case_py" in " ".join(args) else "go"
+                return mock.Mock(returncode=0, stdout=f"ran-on-{image_hint}", stderr="")
+            if args[:2] == ["docker", "stop"]:
+                return mock.Mock(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"unexpected subprocess call: {args}")
+
+        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
+             mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            py_sandbox = DockerSandbox(self.root, image="optarena-tester-python:latest")
+            go_sandbox = DockerSandbox(self.root, image="optarena-tester-go:latest")
+            py_sandbox.start()
+            go_sandbox.start()
+            try:
+                self.assertEqual(len(started), 2, "expected one container per distinct image")
+                self.assertIs(self.cases_mod._active_sandboxes["optarena-tester-python:latest"], py_sandbox)
+                self.assertIs(self.cases_mod._active_sandboxes["optarena-tester-go:latest"], go_sandbox)
+
+                py_case = {"check_command": "echo hi", "docker_image": "optarena-tester-python:latest"}
+                go_case = {"check_command": "echo hi", "docker_image": "optarena-tester-go:latest"}
+                _, py_info = run_check_command(py_case, self.root / "case_py")
+                _, go_info = run_check_command(go_case, self.root / "case_go")
+                self.assertEqual(py_info["image"], "optarena-tester-python:latest")
+                self.assertEqual(go_info["image"], "optarena-tester-go:latest")
+            finally:
+                py_sandbox.stop()
+                go_sandbox.stop()
+
+        self.assertNotIn("optarena-tester-python:latest", self.cases_mod._active_sandboxes)
+        self.assertNotIn("optarena-tester-go:latest", self.cases_mod._active_sandboxes)
 
 
 class StoreTests(unittest.TestCase):

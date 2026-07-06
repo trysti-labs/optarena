@@ -1,0 +1,38 @@
+{
+  "name": "fix_missing_not_null_constraint",
+  "description": "Fixes a schema that wrongly allows NULL in orders.customer_id",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "schema",
+    "constraint",
+    "sqlite",
+    "bugfix"
+  ],
+  "prompts": [
+    "The schema in schema.sql defines `customers` and `orders` tables, but the `orders.customer_id` column currently allows NULL values, which lets an order be created with no customer at all - a data integrity bug, since every order must belong to a customer. Fix schema.sql so that `orders.customer_id` can never be NULL, without changing any other column or table."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER,\n    amount REAL NOT NULL\n);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "orders",
+        "customer_id"
+      ],
+      "regex_patterns": [
+        "customer_id[^,]*not null"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_notnull.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\nconn.execute(\"INSERT INTO customers (id, name) VALUES (1, 'Alice')\")\nconn.execute('INSERT INTO orders (id, customer_id, amount) VALUES (1, 1, 9.99)')\nconn.commit()\n\ntry:\n    conn.execute('INSERT INTO orders (id, customer_id, amount) VALUES (2, NULL, 5.00)')\n    conn.commit()\n    raise AssertionError('expected NULL customer_id insert to fail')\nexcept sqlite3.IntegrityError:\n    pass\n\ncount = conn.execute('SELECT COUNT(*) FROM orders').fetchone()[0]\nassert count == 1, f'expected only the valid order to be present, got {count}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_notnull.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

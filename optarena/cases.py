@@ -27,7 +27,22 @@ decides pass/fail - the JSON schema shared with the original cline harness:
                                              # available; see run_check_command);
                                              # non-zero exit fails the case
       "check_command_timeout": int,          # seconds (default 60)
-      "timeout":        int                  # seconds
+      "docker_image":          str,          # optional: which sandbox image this
+                                             # case needs (see DOCKER_IMAGES in
+                                             # drivers-adjacent docker/ dir);
+                                             # defaults to DOCKER_IMAGE_DEFAULT
+      "timeout":        int,                 # seconds
+
+      # Benchmark-corpus metadata (OptArena_Benchmark_Corpus_Specification.md).
+      # All optional, free-form (not validated against a fixed enum) - they
+      # power `--language`/`--framework` filters and `optarena list cases`
+      # columns, nothing more today.
+      "language":   str,          # e.g. "python", "go", "rust"
+      "framework":  str,          # e.g. "fastapi", "spring-boot", "gin"
+      "domain":     str,          # e.g. "backend", "frontend", "infrastructure"
+      "difficulty": int,          # 1 (easy) .. 5 (expert), per the corpus spec
+      "task_type":  str,          # e.g. "feature", "bug_fix", "refactoring"
+      "tags":       [str, ...]    # free-form labels, e.g. ["rest", "http"]
     }
 
 All assertion keys beyond path_pattern/content_patterns are optional, so
@@ -53,6 +68,30 @@ CASES_DIR = Path(__file__).parent / "cases"
 DOCKER_IMAGE_DEFAULT = "optarena-tester:latest"
 DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker"
 
+# Registry of every sandbox image OptArena knows how to build, keyed by the
+# short name used with `optarena docker build --lang <key>`. "base" is the
+# original combined image (gcc + python3 + node) and stays the default for
+# cases with no `docker_image` set, so the 7 original cases are unaffected.
+# Per-language images add a framework's dependencies pre-fetched at build
+# time (the sandbox runs with --network none, so nothing can be installed
+# at check_command time - it must already be in the image).
+DOCKER_IMAGES: dict[str, str] = {
+    "base": DOCKER_IMAGE_DEFAULT,
+    "python": "optarena-tester-python:latest",
+    "node": "optarena-tester-node:latest",
+    "jvm": "optarena-tester-jvm:latest",
+    "go": "optarena-tester-go:latest",
+    "rust": "optarena-tester-rust:latest",
+    "dotnet": "optarena-tester-dotnet:latest",
+}
+
+
+def dockerfile_for(lang: str) -> Path:
+    """Path to the Dockerfile for a `DOCKER_IMAGES` key. "base" lives directly
+    under docker/ (the original combined image); every other track gets its
+    own docker/<lang>/ subdirectory."""
+    return DOCKERFILE_DIR / "Dockerfile" if lang == "base" else DOCKERFILE_DIR / lang / "Dockerfile"
+
 
 def load_cases(names: list[str] | None = None, cases_dir: "Path | str | None" = None) -> list[dict]:
     """Load all (or the named) cases from *cases_dir*, sorted by filename."""
@@ -71,6 +110,16 @@ def load_cases(names: list[str] | None = None, cases_dir: "Path | str | None" = 
         if missing:
             raise FileNotFoundError(f"Unknown case(s): {', '.join(sorted(missing))}")
     return cases
+
+
+def filter_cases(cases: list[dict], *, language: str | None = None, framework: str | None = None) -> list[dict]:
+    """Narrow a loaded case list by `language`/`framework` tags (AND'd together)."""
+    out = cases
+    if language is not None:
+        out = [c for c in out if c.get("language") == language]
+    if framework is not None:
+        out = [c for c in out if c.get("framework") == framework]
+    return out
 
 
 # ── Filesystem oracle (shared by drivers that verify via workspace diff) ──────
@@ -171,7 +220,10 @@ def docker_image_available(image: str = DOCKER_IMAGE_DEFAULT) -> bool:
         return False
 
 
-_active_sandbox: "DockerSandbox | None" = None
+# Keyed by Docker image tag rather than a single slot - a run whose cases
+# span multiple languages (e.g. --cases includes both a Python and a Go
+# case) needs one long-lived container PER distinct image, not one overall.
+_active_sandboxes: dict[str, "DockerSandbox"] = {}
 
 
 class DockerSandbox:
@@ -183,6 +235,12 @@ class DockerSandbox:
     (the run's whole temp workspace, parent of every case/trial subdirectory)
     is bind-mounted once at container start; each call execs with the
     working directory set to that case's subdirectory under the same mount.
+
+    A run may need several of these at once - one per distinct ``image`` -
+    when its cases span more than one language/framework track; each one
+    registers itself in ``_active_sandboxes`` under its own image tag so
+    ``run_check_command`` can route each case to the container that actually
+    has its toolchain.
 
     Used as a context manager around the whole run (see ``runner.py``):
     ``with DockerSandbox(root) as sandbox:``. If Docker isn't available (or
@@ -197,7 +255,6 @@ class DockerSandbox:
         self.active = False
 
     def start(self) -> bool:
-        global _active_sandbox
         if os.environ.get("OPTARENA_NO_DOCKER") == "1" or not _docker_available():
             return False
         if not docker_image_available(self.image):
@@ -220,18 +277,17 @@ class DockerSandbox:
             print(f"[optarena] could not start docker sandbox: {exc}", file=sys.stderr)
             return False
         self.active = True
-        _active_sandbox = self
+        _active_sandboxes[self.image] = self
         print(f"[optarena] docker sandbox: {self.name} (image {self.image}) - "
               f"one container for this whole run")
         return True
 
     def stop(self) -> None:
-        global _active_sandbox
         if self.active:
             subprocess.run(["docker", "stop", "-t", "2", self.name], capture_output=True)
             self.active = False
-        if _active_sandbox is self:
-            _active_sandbox = None
+        if _active_sandboxes.get(self.image) is self:
+            del _active_sandboxes[self.image]
 
     def __enter__(self) -> "DockerSandbox":
         self.start()
@@ -279,12 +335,14 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     This is the second, behavioral oracle stage: content patterns assert
     shape, the command actually compiles/runs the code and asserts on its
     real output (see ``test_setup_files``). When an active ``DockerSandbox``
-    exists (set up once by ``runner.run_scenario`` for the whole run), this
-    execs into that ONE shared container - it does not start a new one per
-    case/trial. Without an active sandbox (e.g. ``evaluate_case`` called
-    directly, outside the runner), it falls back to one ephemeral
-    ``docker run --rm`` for this call, or to the host (with a one-time
-    warning) when Docker is unavailable or disabled via ``OPTARENA_NO_DOCKER=1``.
+    exists for this case's required image (set up once by
+    ``runner.run_scenario`` for the whole run - possibly several, one per
+    distinct image a run's cases need), this execs into that ONE shared
+    container - it does not start a new one per case/trial. Without a
+    matching active sandbox (e.g. ``evaluate_case`` called directly, outside
+    the runner), it falls back to one ephemeral ``docker run --rm`` for this
+    call, or to the host (with a one-time warning) when Docker is
+    unavailable or disabled via ``OPTARENA_NO_DOCKER=1``.
     """
     global _docker_warned
     cmd = case.get("check_command")
@@ -293,11 +351,12 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
         return [], info
     timeout = int(case.get("check_command_timeout", 60) or 60)
     docker_disabled = os.environ.get("OPTARENA_NO_DOCKER") == "1"
+    image = case.get("docker_image") or os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
 
-    if not docker_disabled and _active_sandbox is not None:
-        return _run_check_command_sandbox(cmd, root, timeout, _active_sandbox, info)
+    active = _active_sandboxes.get(image)
+    if not docker_disabled and active is not None:
+        return _run_check_command_sandbox(cmd, root, timeout, active, info)
 
-    image = os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
     # `_docker_available()` is short-circuited away entirely when the user
     # opted out - it must not shell out to `docker info` in that case.
     use_docker = (not docker_disabled) and _docker_available()
@@ -493,4 +552,9 @@ def write_setup_files(root: Path, setup_files: dict[str, str] | None) -> None:
     for rel, content in (setup_files or {}).items():
         dest = root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
+        # newline="" disables universal-newline translation - on Windows hosts,
+        # write_text() would otherwise turn every "\n" in case JSON content
+        # into "\r\n", which is silently tolerated by most languages but
+        # corrupts POSIX shell scripts (a stray \r glued to `do`/`done`/etc.
+        # breaks dash/sh parsing) once bind-mounted into the Linux sandbox.
+        dest.write_text(content, encoding="utf-8", newline="")

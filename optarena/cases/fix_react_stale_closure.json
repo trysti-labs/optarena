@@ -1,0 +1,41 @@
+{
+  "name": "fix_react_stale_closure",
+  "description": "Fixes a stale-closure bug in a counter increment handler modeled after a React onClick handler",
+  "language": "javascript",
+  "framework": "react",
+  "domain": "frontend",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "react",
+    "hooks",
+    "stale-closure",
+    "bugfix"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "counter.js models the increment handler behind a React Counter component's onClick. createCounter(initialCount) returns { getState, setState, makeIncrementHandler }, where getState()/setState(newState) read/write the current { count } state, and makeIncrementHandler() returns a handler function meant to be called once per click, each time incrementing the count by exactly 1 relative to whatever the count currently is (mirroring how a real onClick={handleIncrement} works in a React component - every click should add 1, however many clicks happen). Right now makeIncrementHandler() has a stale-closure bug: it captures the count at the moment the handler was created (like a useCallback with a missing/empty dependency array capturing a stale value) instead of reading the current count each time it runs, so calling the same handler multiple times only ever increments the count by 1 in total instead of once per call. Fix the bug in counter.js so that calling the handler returned by makeIncrementHandler() N times increases the count by exactly N, without changing the createCounter/makeIncrementHandler function signatures or the shape of the returned object."
+  ],
+  "setup_files": {
+    "counter.js": "function createCounter(initialCount) {\n  let state = { count: initialCount || 0 };\n\n  function getState() {\n    return state;\n  }\n\n  function setState(newState) {\n    state = newState;\n  }\n\n  // BUG: captures `state` once, when the handler is created, instead of\n  // reading the latest state on every call - a classic stale-closure bug.\n  function makeIncrementHandler() {\n    const capturedState = state;\n    return function increment() {\n      setState({ count: capturedState.count + 1 });\n    };\n  }\n\n  return { getState, setState, makeIncrementHandler };\n}\n\nmodule.exports = { createCounter };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "counter.js",
+      "content_patterns": [
+        "createcounter",
+        "makeincrementhandler",
+        "module.exports"
+      ],
+      "not_content_patterns": [
+        "const capturedstate = state;"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_stale_closure.js": "const assert = require('assert');\nconst { createCounter } = require('./counter.js');\n\nconst c = createCounter(0);\nconst increment = c.makeIncrementHandler();\nincrement();\nincrement();\nincrement();\nassert.strictEqual(c.getState().count, 3, `expected 3 increments to raise count by 3, got ${c.getState().count}`);\n\nincrement();\nincrement();\nassert.strictEqual(c.getState().count, 5, `expected count 5 after 5 total increments, got ${c.getState().count}`);\n\nconst c2 = createCounter(10);\nconst inc2a = c2.makeIncrementHandler();\ninc2a();\nconst inc2b = c2.makeIncrementHandler();\ninc2b();\ninc2a();\nassert.strictEqual(c2.getState().count, 13, `expected count 13 (10 + 3 increments across handler instances), got ${c2.getState().count}`);\n\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_stale_closure.js",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

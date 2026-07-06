@@ -1,0 +1,40 @@
+{
+  "name": "fix_wrong_join_type",
+  "description": "Fixes a reporting query that drops customers with zero orders due to an INNER JOIN",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "sqlite",
+    "join",
+    "reporting",
+    "bugfix"
+  ],
+  "prompts": [
+    "schema.sql defines `customers` and `orders` tables (do not change schema.sql). report.sql is meant to produce one row per customer showing their id, name, how many orders they've placed (order_count), and their total spend (total_amount), including customers who have never placed a single order (those should show order_count 0 and total_amount 0). Right now report.sql uses an INNER JOIN between customers and orders, which silently drops any customer who has zero orders from the report - a customer with no orders should still appear as a row. Fix report.sql (and only report.sql) so every customer appears in the results, with order_count and total_amount both 0 for anyone who has never ordered."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    amount REAL NOT NULL\n);\n",
+    "report.sql": "SELECT c.id AS customer_id, c.name AS customer_name, COUNT(o.id) AS order_count, COALESCE(SUM(o.amount), 0) AS total_amount\nFROM customers c\nINNER JOIN orders o ON o.customer_id = c.id\nGROUP BY c.id, c.name\nORDER BY c.id;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "report.sql",
+      "content_patterns": [
+        "left join",
+        "customers",
+        "orders"
+      ],
+      "not_content_patterns": [
+        "inner join"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_report.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\nconn.execute(\"INSERT INTO customers (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')\")\nconn.execute('INSERT INTO orders (id, customer_id, amount) VALUES (1, 1, 9.99), (2, 1, 19.99), (3, 2, 5.00)')\nconn.commit()\n# Carol (id=3) has placed no orders and must still appear in the report.\n\nwith open('report.sql', encoding='utf-8') as f:\n    query = f.read()\n\nrows = conn.execute(query).fetchall()\nby_id = {r[0]: r for r in rows}\n\nassert len(rows) == 3, f'expected all 3 customers in the report, got {len(rows)}: {rows}'\nassert 3 in by_id, f'customer with zero orders (Carol, id=3) is missing from the report: {rows}'\n\ncarol = by_id[3]\nassert carol[2] == 0, f'expected Carols order_count to be 0, got {carol}'\nassert float(carol[3] or 0) == 0.0, f'expected Carols total_amount to be 0, got {carol}'\n\nalice = by_id[1]\nassert alice[2] == 2, f'expected Alice to have 2 orders, got {alice}'\nassert abs(float(alice[3]) - 29.98) < 1e-9, f'expected Alice total_amount 29.98, got {alice}'\n\nbob = by_id[2]\nassert bob[2] == 1, f'expected Bob to have 1 order, got {bob}'\nassert abs(float(bob[3]) - 5.00) < 1e-9, f'expected Bob total_amount 5.00, got {bob}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_report.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

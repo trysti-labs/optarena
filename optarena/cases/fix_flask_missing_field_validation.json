@@ -1,0 +1,30 @@
+{
+  "name": "fix_flask_missing_field_validation",
+  "description": "Fixes a Flask endpoint that crashes with an unhandled 500 when a required JSON field is missing",
+  "language": "python",
+  "framework": "flask",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": ["rest", "http", "flask", "validation"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The Flask app in app.py has a POST /users endpoint meant to create a user from a JSON body with a required `username` field. When a client sends a request without the `username` field, the server currently crashes with an unhandled 500 error (a raw KeyError). Fix app.py so that if `username` is missing, the endpoint returns a 400 status code with a JSON body containing an `error` key describing the problem, instead of crashing. Valid requests (with `username` present) must keep working exactly as before. Run with app.run(port=8013)."
+  ],
+  "setup_files": {
+    "app.py": "from flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\nusers = []\n\n@app.route('/users', methods=['POST'])\ndef create_user():\n    data = request.get_json()\n    username = data['username']\n    users.append(username)\n    return jsonify({'username': username}), 201\n\nif __name__ == '__main__':\n    app.run(port=8013)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app.py",
+      "content_patterns": ["flask", "/users"],
+      "regex_patterns": ["400"]
+    }
+  ],
+  "test_setup_files": {
+    "test_validation.py": "import subprocess, sys, time, json, urllib.request, urllib.error\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8013{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, (json.loads(payload) if payload else None)\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        try:\n            parsed = json.loads(payload) if payload else None\n        except json.JSONDecodeError:\n            parsed = None\n        return e.code, parsed\n\nsrv = subprocess.Popen([sys.executable, 'app.py'])\ntry:\n    ok = False\n    for _ in range(30):\n        try:\n            status, body = req('POST', '/users', {'username': 'alice'})\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8013'\n    assert status == 201, f'expected 201 for valid request, got {status}'\n    assert body['username'] == 'alice'\n\n    status, body = req('POST', '/users', {})\n    assert status == 400, f'expected 400 when username missing, got {status}'\n    assert body is not None and 'error' in body, f'expected JSON body with error key, got {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_validation.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

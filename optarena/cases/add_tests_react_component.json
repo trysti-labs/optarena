@@ -1,0 +1,41 @@
+{
+  "name": "add_tests_react_component",
+  "description": "Asks the model to write a render-and-assert test for an already-correct React component",
+  "language": "javascript",
+  "framework": "react",
+  "domain": "frontend",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": [
+    "react",
+    "testing",
+    "ssr"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "greeting.js (already working, do not modify it) exports a React function component named Greeting (module.exports = { Greeting };) which accepts a prop `name` and renders a <div> whose text is exactly `Hello, <name>!`. Write tests in a file named exactly test_greeting.js. Your test file must require React, `renderToStaticMarkup` from 'react-dom/server', and the Greeting component from './greeting.js', then render the component with at least two different `name` values and use Node's built-in assert module to check the resulting markup contains the expected greeting text for each (e.g. name='Alice' must produce markup containing 'Hello, Alice!', name='Bob' must produce markup containing 'Hello, Bob!'). Print PASS and exit 0 if all assertions pass."
+  ],
+  "setup_files": {
+    "greeting.js": "const React = require('react');\n\nfunction Greeting({ name }) {\n  return React.createElement('div', null, `Hello, ${name}!`);\n}\n\nmodule.exports = { Greeting };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_greeting.js",
+      "content_patterns": [
+        "greeting",
+        "rendertostaticmarkup",
+        "hello,",
+        "assert"
+      ],
+      "regex_patterns": [
+        "require\\(['\"]react['\"]\\)",
+        "assert(\\.\\w+)?\\s*\\("
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "node test_greeting.js",
+  "check_command_timeout": 60,
+  "timeout": 120
+}
