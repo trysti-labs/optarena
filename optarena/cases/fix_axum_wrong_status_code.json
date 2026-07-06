@@ -1,0 +1,41 @@
+{
+  "name": "fix_axum_wrong_status_code",
+  "description": "Fixes an Axum create-item endpoint that incorrectly returns 200 instead of 201",
+  "language": "rust",
+  "framework": "axum",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "rest",
+    "http",
+    "axum",
+    "status-code"
+  ],
+  "docker_image": "optarena-tester-rust:latest",
+  "prompts": [
+    "The Axum app in src/main.rs has a POST /items endpoint meant to create a new item and store it in shared in-memory state. QA reports that even though the item is created successfully, the endpoint returns HTTP 200 OK instead of the correct HTTP 201 Created status code. Fix src/main.rs so POST /items returns 201 Created on success, without changing any other behavior (GET /items must keep working exactly as before). The server listens on 0.0.0.0:8042."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"items_status\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\naxum = \"0.7\"\ntokio = { version = \"1\", features = [\"full\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n",
+    "src/main.rs": "use axum::{extract::State, routing::{get, post}, Json, Router};\nuse serde::{Deserialize, Serialize};\nuse std::sync::{Arc, Mutex};\n\n#[derive(Debug, Clone, Serialize, Deserialize)]\nstruct Item {\n    name: String,\n}\n\ntype SharedItems = Arc<Mutex<Vec<Item>>>;\n\nasync fn list_items(State(items): State<SharedItems>) -> Json<Vec<Item>> {\n    let items = items.lock().unwrap();\n    Json(items.clone())\n}\n\nasync fn create_item(State(items): State<SharedItems>, Json(payload): Json<Item>) -> Json<Item> {\n    let mut items = items.lock().unwrap();\n    items.push(payload.clone());\n    Json(payload)\n}\n\n#[tokio::main]\nasync fn main() {\n    let items: SharedItems = Arc::new(Mutex::new(Vec::new()));\n    let app = Router::new()\n        .route(\"/items\", get(list_items).post(create_item))\n        .with_state(items);\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8042\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/main.rs",
+      "content_patterns": [
+        "axum",
+        "/items"
+      ],
+      "regex_patterns": [
+        "StatusCode::CREATED"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_status.py": "import subprocess, sys, time, json, urllib.request, urllib.error\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8042{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, (json.loads(payload) if payload else None)\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        return e.code, (json.loads(payload) if payload else None)\n\nsubprocess.run(['cargo', 'build', '--offline'], check=True)\nsrv = subprocess.Popen(['./target/debug/items_status'])\ntry:\n    ok = False\n    status = body = None\n    for _ in range(30):\n        try:\n            status, body = req('POST', '/items', {'name': 'widget'})\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8042'\n    assert status == 201, f'expected 201 Created, got {status}'\n    assert body['name'] == 'widget', f'unexpected body: {body!r}'\n\n    status, body = req('GET', '/items')\n    assert status == 200, f'expected 200 on GET /items, got {status}'\n    assert isinstance(body, list) and len(body) == 1 and body[0]['name'] == 'widget'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_status.py",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

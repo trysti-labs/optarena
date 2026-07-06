@@ -63,6 +63,7 @@ optarena/                       repo root
 │   ├── store.py                results persistence + index
 │   ├── compare.py              A/B comparison + terminal table
 │   ├── cases/                  task catalogue (*.json)
+│   ├── pricing.py               USD cost estimation from token usage
 │   └── drivers/                ── tool adapters ──
 │       ├── __init__.py         registry (name → Driver, lazy imports)
 │       ├── base.py             Driver interface + CaseResult
@@ -81,6 +82,14 @@ optarena/                       repo root
 │   └── test/agent.e2e.js       the generic driving spec
 ├── dashboard/
 │   └── index.html              static dashboard (fetches ../results/*)
+├── docker/                     ── check_command sandbox images ──
+│   ├── Dockerfile               base image (gcc + python3 + node) - DOCKER_IMAGE_DEFAULT
+│   ├── python/Dockerfile         + fastapi/pydantic/uvicorn/flask/django
+│   ├── node/Dockerfile           + express/react/babel (global, NODE_PATH-resolved)
+│   ├── jvm/Dockerfile            + maven, ~/.m2 warmed with spring-boot-starter-*
+│   ├── go/Dockerfile             + go, module cache warmed with gin
+│   ├── rust/Dockerfile           + cargo, registry cache warmed with axum/tokio
+│   └── dotnet/Dockerfile         + dotnet SDK, NuGet cache warmed + offline.nuget.config
 ├── scenarios/                  example scenario JSON files
 ├── results/                    run records (gitignored)
 │   ├── runs/<run_id>.json
@@ -129,14 +138,25 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
 - `language` is free-form metadata (not validated against a fixed list) - it
   powers `optarena list cases --language <x>` and `optarena run --language
   <x>` (the latter resolves to the matching case names before the scenario
-  is built, in `cli._scenario_from_args()`). All seven built-in cases are
-  tagged (`c`, `python`, `javascript`). **Caught via manual testing:**
+  is built, in `cli._scenario_from_args()`). **Caught via manual testing:**
   `load_cases(names, ...)` used `if names:` to decide "filter or load all" -
   since an empty list is falsy in Python, a `--language` filter matching
   zero cases resolved to `names=[]` and silently fell through to "no
   filter, load everything" instead of "load nothing". Fixed to
   `if names is not None:`; a run with no matching cases now correctly
   reports `cases=0` and does nothing, rather than running the whole catalogue.
+- **Benchmark-corpus metadata** (`OptArena_Benchmark_Corpus_Specification.md`):
+  `framework`, `domain`, `difficulty` (1 easy .. 5 expert), `task_type`, `tags`
+  are all optional, free-form fields alongside `language` - not validated
+  against a fixed enum, purely descriptive. `framework` gets the same
+  first-class filter as `language`: `cases.filter_cases(cases, language=,
+  framework=)` ANDs both together, used by both `optarena run
+  --language/--framework` and `optarena list cases --language/--framework`.
+  The corpus is 120 cases spanning 11 language/framework tracks (Python,
+  JavaScript/TypeScript, Java, Go, Rust, C#, C/C++, SQL, Shell, Docker
+  Compose, Terraform) at the exact per-track allocation the spec's own
+  Phase 1 table asks for - see §10.1 for the full breakdown and what's
+  explicitly deferred beyond it.
 - `setup_files` are written into the workspace before the run ("modify" cases).
 - `expected_files` is the **oracle**: the case passes iff every spec matches a
   file that is *new or modified* since the pre-run snapshot, containing every
@@ -157,29 +177,89 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   compiles-and-runs a C binary and checks its stdout) instead of relying on
   substring matching for correctness.
 - **`check_command` execution is sandboxed in Docker** when available, via
-  **one shared container per `optarena run` invocation** (`cases.DockerSandbox`
-  / `oracle.js`'s `startDockerSandbox`) - not one container per check_command
-  call. `runner.run_scenario()` starts it once (only if some loaded case has
-  a `check_command`), bind-mounting the run's whole temp workspace root
-  (parent of every case/trial subdirectory) at `/workspace`; every case and
-  every trial then `docker exec`s into that same container with `-w
-  /workspace/<case>/<trial-subdir>`, and it is stopped once at the end
-  (`finally` block, so it's cleaned up even on error). This was a real bug in
-  an earlier version - a fresh ephemeral `docker run --rm` per call meant 7
-  cases x 3 trials = 21 containers started/torn down for one run; verified
-  fixed by grepping a live run's output for distinct container names (one).
+  **one shared container per distinct image needed by a run** (`cases.
+  DockerSandbox`, keyed in the module-level `_active_sandboxes: dict[image,
+  DockerSandbox]`) - not one container per check_command call, and not just
+  one container overall. `runner.run_scenario()` computes `images_needed =
+  {case.get("docker_image") or DOCKER_IMAGE_DEFAULT for case in cases if
+  case.get("check_command")}` and starts one `DockerSandbox` per image in
+  that set, so a run mixing e.g. a Python case and a Go case gets both
+  toolchains live at once, each bind-mounting the run's whole temp workspace
+  root at `/workspace`. Every case's `check_command` resolves its own
+  required image first (`case.get("docker_image") or ... or
+  DOCKER_IMAGE_DEFAULT`) and looks it up in `_active_sandboxes` before
+  `docker exec`ing in; case/trial calls for the same image still share that
+  one container (`-w /workspace/<case>/<trial-subdir>`), and every sandbox in
+  the run is stopped in the `finally` block so cleanup happens even on error.
+  This generalizes an earlier single-container fix - a fresh ephemeral
+  `docker run --rm` per call once meant 7 cases x 3 trials = 21 containers
+  for one run; the single shared container came first, multi-image support
+  (for the benchmark-corpus expansion) came after.
   `DockerSandbox` uses `--network none`, `--memory 2g`, `--cpus 2`; each
   `docker exec` wraps its command in the container's own `timeout <N>s` so a
   hung test is killed inside its own process tree rather than needing the
   shared container itself removed. Falls back to one ephemeral `docker run
   --rm` per call (the pre-fix behavior) when `evaluate_case`/`run_check_command`
-  is called with no active sandbox (e.g. directly, outside the runner), and
-  to the host (one-time warning to stderr) when Docker is unreachable or
+  is called with no matching active sandbox for that case's image (e.g.
+  `evaluate_case` called directly, outside the runner), and to the host
+  (one-time warning to stderr) when Docker is unreachable or
   `OPTARENA_NO_DOCKER=1` is set. `docker_image_available()` /
   `_docker_available()` cache their `docker` CLI probes for the process
-  lifetime. Build the image with `optarena docker build`; `optarena doctor`
-  reports readiness (advisory only - doesn't fail the exit code, since the
-  host fallback exists).
+  lifetime.
+- **`DOCKER_IMAGES` registry** (`cases.py`) maps a short track name to its
+  image tag: `base` (the original combined gcc+python3+node image, unchanged,
+  still the default for cases with no `docker_image`), plus `python`, `node`,
+  `jvm`, `go`, `rust`, `dotnet` - one per benchmark-corpus track that needed a
+  language/framework toolchain the base image doesn't have. `dockerfile_for
+  (lang)` resolves the Dockerfile path by convention: `docker/Dockerfile` for
+  `base`, `docker/<lang>/Dockerfile` for everything else. `optarena docker
+  build` defaults to `base`; `--lang <name>` builds one track, `--all` builds
+  every registered image. `optarena doctor` reports build status for every
+  image in the registry (advisory only - doesn't fail the exit code, since
+  the host fallback exists).
+- **Offline-safe per-language images.** `check_command` runs with `--network
+  none`, so every dependency a track needs must already be baked into its
+  image at *build* time (network available then), not installed at
+  check-command time:
+  - `docker/python`: pip-installs fastapi/pydantic/uvicorn/flask/django/
+    sqlalchemy/typer/pyyaml/httpx/requests/pytest globally.
+  - `docker/node`: npm-installs express/react/react-dom/vue/@babel/*/jest/
+    typescript/ts-node/@nestjs/core/@nestjs/common/@nestjs/platform-express/
+    reflect-metadata/rxjs globally and sets `NODE_PATH` so plain
+    `require(...)` resolves them (NestJS cases run via `ts-node` for
+    decorator support; Next.js and Angular were deliberately not added -
+    both need heavier project scaffolding than fits this pattern, see §10.1).
+  - `docker/jvm`: a scratch Spring Boot project (pinned to
+    `spring-boot-starter-parent` 3.3.4, `spring-boot-starter-web`,
+    `spring-boot-starter-test`, `spring-boot-maven-plugin`) is `mvn package`'d
+    once to warm the shared `~/.m2` cache; a case's own `pom.xml` at the same
+    versions then builds/tests fully offline with `mvn -o`.
+  - `docker/go`: a scratch module requiring Gin AND Fiber is `go build`'t once
+    to warm the module + build cache; `GOFLAGS=-mod=mod`, `GOPROXY=off`,
+    `GOSUMDB=off` let a case's own `go.mod`/`go.sum` (shipped via
+    `setup_files` so the model doesn't need network either) resolve and
+    build fully offline.
+  - `docker/rust`: a scratch crate depending on axum/actix-web/tokio/serde/
+    serde_json (Actix-web built as a separate `src/bin/` target, since its
+    macro can't share a binary with `#[tokio::main]`) is `cargo build`'t once
+    to warm the `~/.cargo` registry (index + downloaded crates); `cargo build
+    --offline` then resolves a case's own `Cargo.toml` (compatible version
+    ranges, no `Cargo.lock` needed) from that cache.
+  - `docker/dotnet`: a scratch minimal-API + xUnit/`WebApplicationFactory`
+    test project is restored/tested once to warm the NuGet global-packages
+    folder, then `offline.nuget.config` is installed machine-wide pointing
+    the *only* package source at that folder (which is itself a valid v3-style
+    local feed by folder layout) - `dotnet restore`/`test` on a case's own
+    project at the same package versions then succeeds fully offline.
+  - `docker/Dockerfile` (base, shared by SQL/Shell/Docker-Compose/Terraform
+    cases alongside the original C/Python/Node ones): also carries
+    `terraform` (pinned binary, `CHECKPOINT_DISABLE=1` so it never phones
+    home for a version check), `pyyaml` (structural validation of YAML in
+    Compose/CI-workflow cases), and `sqlite3` (CLI + Python's stdlib module,
+    for the SQL track).
+  Every one of these was verified by mounting a **fresh** project (not the
+  warmup files, which are deleted from the image) into a container run with
+  `--network none` and confirming `build`/`test` succeeds purely from cache.
 - **Trade-off of one shared container:** all cases/trials in a run share one
   network namespace (unlike the old per-call ephemeral containers, which
   each got a fresh one). A case that binds a fixed port across repeated
@@ -567,3 +647,83 @@ Structural:
 - Publish to PyPI (`pip install optarena`); ui-harness fetched on first UI run.
 - Per-project case packs (`optarena init` scaffolding a local `cases/`).
 - Optional SQLite index if run counts outgrow index.json (schema unchanged).
+
+### 10.1 Benchmark corpus status (vs `OptArena_Benchmark_Corpus_Specification.md`)
+
+The corpus stands at **120 cases** - the exact sum of the spec's own Phase 1
+per-track allocation (Python 20, JavaScript/TypeScript 20, Java 15, Go 10,
+Rust 10, C# 10, C/C++ 10, SQL 10, Shell 5, Docker Compose 5, Terraform 5),
+sitting at the low end of the spec's stated 100-150 target range. Every case
+was hand-verified end-to-end before being counted: a correct reference
+solution passes, a broken/unfixed/unchanged one fails, run through the real
+oracle (`evaluate_case`/`DockerSandbox`), not just claimed.
+
+**Built:**
+- Case schema extended with `framework`/`domain`/`difficulty`/`task_type`/
+  `tags`/`docker_image` (§3.1), plus a `--framework` filter mirroring
+  `--language` everywhere it appears.
+- Multi-image `DockerSandbox` (one shared container per distinct image a
+  run's cases need, not just one overall).
+- Six new sandbox images, one per newly-supported framework family: Python
+  (FastAPI/Flask/Django/SQLAlchemy/Pydantic/Typer), Node (Express/NestJS/
+  React/Vue), JVM (Spring Boot), Go (Gin/Fiber), Rust (Axum/Actix-web),
+  .NET (ASP.NET Core) - all pre-warmed at build time and verified to
+  build/test **fully offline** (`--network none`, matching real
+  `check_command` conditions). The base image gained Terraform CLI
+  (`CHECKPOINT_DISABLE=1`, no network phone-home) and pyyaml/sqlite3 for the
+  SQL/Shell/Docker-Compose/Terraform tracks, none of which need a
+  per-language toolchain image.
+- 120 cases across all 11 tracks, each tagged with the spec's task
+  categories (feature/bug_fix/refactoring/testing/security/performance/
+  devops) and difficulty 1-2 (the easiest two tiers).
+- **A corpus-wide oracle bug found and fixed during verification**: 6 of the
+  corpus's 11 initial "refactoring" cases (spanning Python, Java, C#, Rust, C,
+  and Shell - not concentrated in one track or one authoring pass) would
+  incorrectly PASS a model that changed nothing at all. Their hidden tests
+  only asserted that observable behavior stayed correct, and unmodified
+  "duplicated but already-working" code trivially satisfies that; the
+  `expected_files` structural check was too weak to independently catch "no
+  refactor happened" (e.g. a bare `def\s+\w+\s*\(` regex matches any
+  function, including ones already in the untouched original). Caught by
+  running every case's own unmodified `setup_files` through the real oracle
+  and checking whether it *should* have failed - it's the same class of
+  failure ARCH.md already documents for keyword-only oracles (§3.1, "why
+  content patterns alone are insufficient"), just surfaced in a new category.
+  Fixed by adding a structural assertion to each hidden test that counts
+  occurrences of a distinctive literal from the duplicated logic in the
+  model's final source and requires it collapsed to at most once, proving
+  real consolidation happened rather than just "nothing broke." All 15
+  refactoring-category cases in the final corpus (11 fixed/verified plus 4
+  written afterward, already following the pattern) were independently
+  re-confirmed corpus-wide. The 34 bug_fix/security/performance cases and all
+  8 devops cases were also swept for the same class of bug and found solid.
+
+**Explicitly deferred** (not attempted, not partially built):
+- The remainder of the spec's 100-150 range beyond the exact 120-case
+  per-track allocation - 120 is every case the spec's own table asks for at
+  Phase 1, not a stretch goal beyond it.
+- Repository-scale Level 3-5 benchmarks (20-500+ file repos, auth/async/
+  migrations/architecture) - everything shipped is Level 1-2 (single or
+  few-file, simple feature/fix/refactor), the easiest tiers in the spec's
+  difficulty ladder.
+- Docker Compose cases are **static-validation-only**: `docker-compose.yml`
+  is parsed with `yaml.safe_load` and checked structurally (service names,
+  required keys, no hardcoded secrets); nothing is ever `docker compose up`'d,
+  since the sandbox container has no Docker socket/daemon access
+  (Docker-in-Docker is out of scope).
+- Terraform cases are **provider-free**: only `variable`/`output`/`locals`
+  blocks, verified with `terraform fmt -check`/`terraform validate`, both of
+  which work fully offline for provider-free HCL. No `resource` block is
+  ever used, since any real provider requires `terraform init` to download a
+  plugin, which needs network `check_command` doesn't have.
+- Angular and Next.js were dropped from the JavaScript/TypeScript track's
+  framework list (the spec names 7 possible JS/TS frameworks; this corpus
+  covers Express, NestJS, React, Vue, and plain Node) - both need heavier
+  project scaffolding (a real build step, in Next.js's case) that wasn't
+  practical to verify reliably offline within this pass; the 20-case target
+  was still met by concentrating on the other 5.
+- Suite groupings (Arena Lite/Standard/Extended/Enterprise) - not meaningful
+  until the corpus is large enough to fill them.
+- Publishing any of the six new images to a registry (Docker Hub) - they
+  build and run locally; `docker build --lang <x>`/`--all` exist, `docker
+  push` does not.

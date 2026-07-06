@@ -1,0 +1,36 @@
+{
+  "name": "refactor_compose_duplicate_env",
+  "description": "Extracts environment variables duplicated across two docker-compose services into a shared source",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "docker",
+    "compose",
+    "refactor",
+    "env"
+  ],
+  "prompts": [
+    "docker-compose.yml defines an 'app' service and a 'worker' service that both duplicate the exact same three environment variables inline (DATABASE_URL, API_KEY, LOG_LEVEL). Refactor docker-compose.yml to eliminate this duplication: extract the shared variables into a single .env file referenced by both services via env_file (or, alternatively, a YAML anchor/alias shared by both services), while preserving the effective values each service receives. Do not remove either service."
+  ],
+  "setup_files": {
+    "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"8080:80\"\n    environment:\n      - DATABASE_URL=postgresql://appuser:apppass@db:5432/appdb\n      - API_KEY=changeme-api-key\n      - LOG_LEVEL=info\n  worker:\n    image: myorg/worker:latest\n    environment:\n      - DATABASE_URL=postgresql://appuser:apppass@db:5432/appdb\n      - API_KEY=changeme-api-key\n      - LOG_LEVEL=info\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "app",
+        "worker"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_compose.py": "import os\nimport yaml\n\nwith open('docker-compose.yml') as f:\n    raw = f.read()\ndata = yaml.safe_load(raw)\n\nservices = data.get('services') or {}\nassert 'app' in services and 'worker' in services, f\"expected 'app' and 'worker' services, got {list(services)}\"\n\nREQUIRED = {'DATABASE_URL', 'API_KEY', 'LOG_LEVEL'}\n\ndef env_to_dict(env):\n    if env is None:\n        return {}\n    if isinstance(env, dict):\n        return {str(k): str(v) for k, v in env.items()}\n    out = {}\n    for item in env:\n        item = str(item)\n        if '=' in item:\n            k, v = item.split('=', 1)\n            out[k] = v\n        else:\n            out[item] = ''\n    return out\n\napp = services['app']\nworker = services['worker']\napp_env = env_to_dict(app.get('environment'))\nworker_env = env_to_dict(worker.get('environment'))\n\napp_env_file = app.get('env_file')\nworker_env_file = worker.get('env_file')\nuses_env_file = bool(app_env_file) and bool(worker_env_file)\nuses_anchor = ('&' in raw) and ('*' in raw)\n\nassert uses_env_file or uses_anchor, (\n    'expected the duplicated env vars to be extracted via env_file or a YAML anchor/alias, '\n    'but found neither in docker-compose.yml'\n)\n\nif uses_env_file:\n    def as_list(v):\n        return v if isinstance(v, list) else [v]\n    ref_files = set(as_list(app_env_file)) | set(as_list(worker_env_file))\n    env_file_path = next((rf for rf in ref_files if os.path.exists(rf)), None)\n    assert env_file_path, f'env_file referenced ({ref_files}) but file not found on disk'\n    env_file_vars = {}\n    with open(env_file_path) as ef:\n        for line in ef:\n            line = line.strip()\n            if not line or line.startswith('#') or '=' not in line:\n                continue\n            k, v = line.split('=', 1)\n            env_file_vars[k.strip()] = v.strip()\n    missing = REQUIRED - set(env_file_vars)\n    assert not missing, f'.env file missing required keys: {missing}'\n    still_dup_app = REQUIRED.issubset(set(app_env))\n    still_dup_worker = REQUIRED.issubset(set(worker_env))\n    assert not (still_dup_app and still_dup_worker), (\n        \"env vars are still duplicated inline in both services' environment blocks\"\n    )\nelse:\n    assert REQUIRED.issubset(set(app_env)), f'app missing resolved vars, got {app_env}'\n    assert REQUIRED.issubset(set(worker_env)), f'worker missing resolved vars, got {worker_env}'\n    for k in REQUIRED:\n        assert app_env[k] == worker_env[k], (\n            f'{k} differs between app and worker after anchor resolution: '\n            f'{app_env[k]!r} vs {worker_env[k]!r}'\n        )\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_compose.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

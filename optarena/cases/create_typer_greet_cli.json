@@ -1,0 +1,28 @@
+{
+  "name": "create_typer_greet_cli",
+  "description": "Creates a Typer CLI with a greet command supporting a loud flag",
+  "language": "python",
+  "framework": "typer",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": ["cli", "typer"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "Create a Typer CLI app in cli.py. It should define a `typer.Typer()` app named `app` with a command `greet` that takes a required argument NAME and an optional boolean flag `--loud` (default False). It should print `Hello, NAME!` normally, or `HELLO, NAME!` (uppercased, no exclamation change) when --loud is passed. It must be invocable as `python cli.py greet NAME` and `python cli.py greet NAME --loud` (i.e. `greet` must remain an explicit subcommand name on the command line - since Typer collapses a Typer app with only a single registered command so its one command can be invoked without naming it, add a no-op `@app.callback()` function, or a second command, so `greet` stays an explicit subcommand). The script should call `app()` when run as `__main__`."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "cli.py",
+      "content_patterns": ["typer", "greet", "loud"],
+      "regex_patterns": ["def\\s+greet\\s*\\("]
+    }
+  ],
+  "test_setup_files": {
+    "test_cli.py": "import subprocess, sys\n\ndef run(*args):\n    return subprocess.run([sys.executable, 'cli.py', *args], capture_output=True, text=True, timeout=15)\n\nr = run('greet', 'Ada')\nassert r.returncode == 0, f'exit {r.returncode}, stderr: {r.stderr}'\nassert 'Hello, Ada!' in r.stdout, f'unexpected stdout: {r.stdout!r}'\n\nr2 = run('greet', 'Ada', '--loud')\nassert r2.returncode == 0, f'exit {r2.returncode}, stderr: {r2.stderr}'\nassert 'HELLO, ADA!' in r2.stdout.upper() and 'ADA' in r2.stdout.upper(), f'unexpected stdout: {r2.stdout!r}'\nassert r2.stdout.strip() != r.stdout.strip(), 'loud output should differ from normal output'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_cli.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

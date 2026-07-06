@@ -1,0 +1,39 @@
+{
+  "name": "create_vue_reactive_counter",
+  "description": "Creates a Vue composable using ref/computed for a reactive counter",
+  "language": "javascript",
+  "framework": "vue",
+  "domain": "frontend",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "vue",
+    "composition-api",
+    "reactivity"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "Create a file counter.js that exports a function createCounter(initial) using Vue's Composition API (require ref and computed from 'vue'). createCounter(initial) should return an object { count, double, increment } where: count is a ref initialized to `initial` (default 0 if not provided); double is a computed ref whose value is always count.value * 2; increment is a function that increases count.value by 1 each time it is called. Export it as module.exports = { createCounter };"
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "counter.js",
+      "content_patterns": [
+        "createcounter",
+        "computed",
+        "module.exports"
+      ],
+      "regex_patterns": [
+        "require\\(['\"]vue['\"]\\)",
+        "ref\\("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_counter.js": "const assert = require('assert');\nconst { createCounter } = require('./counter.js');\n\nconst c1 = createCounter();\nassert.strictEqual(c1.count.value, 0, 'default initial should be 0');\nassert.strictEqual(c1.double.value, 0);\n\nconst c = createCounter(3);\nassert.strictEqual(c.count.value, 3);\nassert.strictEqual(c.double.value, 6, 'double should be count * 2');\n\nc.increment();\nassert.strictEqual(c.count.value, 4, 'increment should raise count by 1');\nassert.strictEqual(c.double.value, 8, 'double should track count reactively');\n\nc.increment();\nc.increment();\nassert.strictEqual(c.count.value, 6);\nassert.strictEqual(c.double.value, 12);\n\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_counter.js",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

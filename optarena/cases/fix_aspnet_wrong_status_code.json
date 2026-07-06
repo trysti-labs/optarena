@@ -1,0 +1,40 @@
+{
+  "name": "fix_aspnet_wrong_status_code",
+  "description": "Fixes a minimal API create endpoint that incorrectly returns 200 OK instead of 201 Created",
+  "language": "csharp",
+  "framework": "aspnet-core",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "rest",
+    "http",
+    "bugfix",
+    "aspnet-core",
+    "minimal-api",
+    "status-code"
+  ],
+  "docker_image": "optarena-tester-dotnet:latest",
+  "prompts": [
+    "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Program.cs already contains a POST /products endpoint that stores a new product in memory and returns it as JSON, but it currently returns HTTP 200 OK for a successful creation. Fix Program.cs so a successful creation returns HTTP 201 Created instead, with the same JSON body (the created product's 'id' and 'name'). Do not change the route (/products), the port (8052), or any other behavior."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n",
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\nvar products = new List<Product>();\nvar nextId = 1;\n\napp.MapPost(\"/products\", (ProductCreateRequest req) =>\n{\n    var product = new Product(nextId++, req.Name);\n    products.Add(product);\n    return Results.Ok(product);\n});\n\napp.Run(\"http://0.0.0.0:8052\");\n\npublic record Product(int Id, string Name);\npublic record ProductCreateRequest(string Name);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Program.cs",
+      "content_patterns": [
+        "/products",
+        "8052"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_status_code.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\n\nsubprocess.run(['dotnet', 'build', '-c', 'Release', '-o', 'out'], check=True)\ndlls = glob.glob('out/*.dll')\ndll = [d for d in dlls if 'app' in d.lower()][0]\nsrv = subprocess.Popen(['dotnet', dll])\n\ndef post(body):\n    url = 'http://127.0.0.1:8052/products'\n    data = json.dumps(body).encode()\n    r = urllib.request.Request(url, data=data, method='POST')\n    r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=5) as resp:\n            return resp.status, json.loads(resp.read())\n    except urllib.error.HTTPError as e:\n        try:\n            payload = json.loads(e.read())\n        except Exception:\n            payload = {}\n        return e.code, payload\n\ntry:\n    ok = False\n    status = None\n    payload = None\n    for _ in range(40):\n        try:\n            status, payload = post({'name': 'Widget'})\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8052'\n    assert status == 201, f'expected 201 Created, got {status}'\n    assert payload.get('name') == 'Widget', f'unexpected body: {payload!r}'\n    assert payload.get('id') is not None, f'missing id: {payload!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_status_code.py",
+  "check_command_timeout": 100,
+  "timeout": 180
+}

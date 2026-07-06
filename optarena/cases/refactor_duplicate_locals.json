@@ -1,0 +1,31 @@
+{
+  "name": "refactor_duplicate_locals",
+  "description": "Refactors a Terraform file to extract a duplicated literal value into a single locals block",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": ["terraform", "iac", "locals", "refactor"],
+  "prompts": [
+    "The literal string \"us-west-2\" is hardcoded three separate times in main.tf, once in each of the `log_group_name`, `backup_bucket_name`, and `region_summary` outputs. Refactor main.tf so that \"us-west-2\" is defined exactly once inside a `locals` block (e.g. `local.region`), and have all three outputs reference that local value instead of repeating the literal, while producing the exact same output strings as before."
+  ],
+  "setup_files": {
+    "main.tf": "variable \"service_name\" {\n  type        = string\n  description = \"Name of the service\"\n  default     = \"orders-api\"\n}\n\noutput \"log_group_name\" {\n  description = \"CloudWatch log group name\"\n  value       = \"us-west-2-orders-api-logs\"\n}\n\noutput \"backup_bucket_name\" {\n  description = \"S3 bucket name for backups\"\n  value       = \"us-west-2-orders-api-backups\"\n}\n\noutput \"region_summary\" {\n  description = \"Summary of the deployed region\"\n  value       = \"Active region: us-west-2\"\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": ["locals", "local."],
+      "regex_patterns": [
+        "locals\\s*\\{"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_locals.py": "import subprocess\nimport re\nimport json\n\nproc = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(proc.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {proc.stdout}\\n{proc.stderr}'\n\nwith open('main.tf', encoding='utf-8') as f:\n    content = f.read()\n\nassert re.search(r'locals\\s*\\{', content), 'no locals block found'\noccurrences = len(re.findall(r'us-west-2', content))\nassert occurrences <= 1, f'\"us-west-2\" literal still appears {occurrences} times verbatim - extract it into locals and reference local.<name> instead'\nassert re.search(r'local\\.\\w+', content), 'outputs should reference the locals value (local.<name>)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_locals.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

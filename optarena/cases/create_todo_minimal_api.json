@@ -1,0 +1,43 @@
+{
+  "name": "create_todo_minimal_api",
+  "description": "Creates an in-memory ASP.NET Core minimal API for managing todo items (GET/POST/DELETE)",
+  "language": "csharp",
+  "framework": "aspnet-core",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "rest",
+    "http",
+    "crud",
+    "aspnet-core",
+    "minimal-api"
+  ],
+  "docker_image": "optarena-tester-dotnet:latest",
+  "prompts": [
+    "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Write Program.cs to implement an in-memory todo list with these endpoints: GET /todos returns a JSON array of all todos currently stored (each with integer 'id' and string 'title'), initially empty. POST /todos accepts a JSON body {\"title\": string}, creates a new todo with an auto-assigned integer id starting at 1 and incrementing for each new todo, stores it in memory, and returns HTTP 201 Created with the created todo (id and title) as the JSON body. DELETE /todos/{id} removes the todo with that integer id; if a todo with that id exists, remove it and return HTTP 204 No Content; if no todo with that id exists, return HTTP 404 Not Found. Listen on http://0.0.0.0:8050."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Program.cs",
+      "content_patterns": [
+        "/todos",
+        "8050"
+      ],
+      "regex_patterns": [
+        "mapget",
+        "mappost",
+        "mapdelete"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_todos.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\n\nsubprocess.run(['dotnet', 'build', '-c', 'Release', '-o', 'out'], check=True)\ndlls = glob.glob('out/*.dll')\ndll = [d for d in dlls if 'app' in d.lower()][0]\nsrv = subprocess.Popen(['dotnet', dll])\n\ndef req(method, path, body=None):\n    url = f'http://127.0.0.1:8050{path}'\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(url, data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    return urllib.request.urlopen(r, timeout=5)\n\ntry:\n    ok = False\n    body = None\n    for _ in range(40):\n        try:\n            with req('GET', '/todos') as resp:\n                assert resp.status == 200, f'expected 200, got {resp.status}'\n                body = json.loads(resp.read())\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8050'\n    assert body == [], f'expected empty list initially, got {body!r}'\n\n    with req('POST', '/todos', {'title': 'Buy milk'}) as resp:\n        assert resp.status == 201, f'expected 201 on create, got {resp.status}'\n        created = json.loads(resp.read())\n    assert created.get('title') == 'Buy milk', f'unexpected created body: {created!r}'\n    todo_id = created.get('id')\n    assert todo_id is not None, f'created todo missing id: {created!r}'\n\n    with req('POST', '/todos', {'title': 'Walk dog'}) as resp:\n        assert resp.status == 201\n        created2 = json.loads(resp.read())\n    assert created2.get('id') != todo_id, 'second todo should get a different id'\n\n    with req('GET', '/todos') as resp:\n        listing = json.loads(resp.read())\n    assert any(t.get('id') == todo_id and t.get('title') == 'Buy milk' for t in listing), f'todo not in listing: {listing!r}'\n    assert len(listing) == 2, f'expected 2 todos, got {listing!r}'\n\n    with req('DELETE', f'/todos/{todo_id}') as resp:\n        assert resp.status in (200, 204), f'expected 200/204 on delete, got {resp.status}'\n\n    with req('GET', '/todos') as resp:\n        listing2 = json.loads(resp.read())\n    assert all(t.get('id') != todo_id for t in listing2), f'todo still present after delete: {listing2!r}'\n    assert len(listing2) == 1, f'expected 1 todo left, got {listing2!r}'\n\n    try:\n        req('DELETE', f'/todos/{todo_id}')\n        assert False, 'expected an error status deleting an already-deleted todo'\n    except urllib.error.HTTPError as e:\n        assert e.code == 404, f'expected 404 deleting missing todo, got {e.code}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_todos.py",
+  "check_command_timeout": 100,
+  "timeout": 180
+}

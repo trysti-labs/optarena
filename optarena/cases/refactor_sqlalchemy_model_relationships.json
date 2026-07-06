@@ -1,0 +1,30 @@
+{
+  "name": "refactor_sqlalchemy_model_relationships",
+  "description": "Refactors a messy SQLAlchemy model that does manual foreign-key joins to use proper ORM relationships",
+  "language": "python",
+  "framework": "sqlalchemy",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": ["sqlalchemy", "orm", "refactor"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The SQLAlchemy models in models.py define `Author` and `Book` tables linked by a foreign key, but the helper functions `get_books_for_author` and `get_author_name_for_book` manually query and join across the two tables by hand instead of using SQLAlchemy relationships. Refactor models.py to add a proper `relationship()` (with a backref/back_populates) between `Author` and `Book`, and rewrite `get_books_for_author` and `get_author_name_for_book` to use that relationship instead of manual filtering across both tables. Both functions must keep the exact same signature and return the exact same results as before for the same inputs."
+  ],
+  "setup_files": {
+    "models.py": "from sqlalchemy import create_engine, Column, Integer, String, ForeignKey\nfrom sqlalchemy.orm import declarative_base, sessionmaker\n\nBase = declarative_base()\n\nclass Author(Base):\n    __tablename__ = 'authors'\n    id = Column(Integer, primary_key=True)\n    name = Column(String)\n\nclass Book(Base):\n    __tablename__ = 'books'\n    id = Column(Integer, primary_key=True)\n    title = Column(String)\n    author_id = Column(Integer, ForeignKey('authors.id'))\n\ndef get_books_for_author(session, author_id):\n    return [b.title for b in session.query(Book).filter(Book.author_id == author_id).all()]\n\ndef get_author_name_for_book(session, book_id):\n    book = session.query(Book).filter(Book.id == book_id).first()\n    if book is None:\n        return None\n    author = session.query(Author).filter(Author.id == book.author_id).first()\n    return author.name if author else None\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "models.py",
+      "content_patterns": ["author", "book"],
+      "regex_patterns": ["relationship\\s*\\("]
+    }
+  ],
+  "test_setup_files": {
+    "test_relationships.py": "from sqlalchemy import create_engine\nfrom sqlalchemy.orm import sessionmaker\nimport models\n\nengine = create_engine('sqlite:///:memory:')\nmodels.Base.metadata.create_all(engine)\nSession = sessionmaker(bind=engine)\nsession = Session()\n\na1 = models.Author(name='Ursula')\na2 = models.Author(name='Ted')\nsession.add_all([a1, a2])\nsession.commit()\n\nb1 = models.Book(title='Left Hand', author_id=a1.id)\nb2 = models.Book(title='Dispossessed', author_id=a1.id)\nb3 = models.Book(title='Wind Up', author_id=a2.id)\nsession.add_all([b1, b2, b3])\nsession.commit()\n\ntitles = sorted(models.get_books_for_author(session, a1.id))\nassert titles == ['Dispossessed', 'Left Hand'], f'unexpected titles: {titles!r}'\n\nname = models.get_author_name_for_book(session, b3.id)\nassert name == 'Ted', f'expected Ted, got {name!r}'\n\nname_missing = models.get_author_name_for_book(session, 999999)\nassert name_missing is None, f'expected None for missing book, got {name_missing!r}'\n\nempty = models.get_books_for_author(session, 999999)\nassert empty == [], f'expected empty list for author with no books, got {empty!r}'\n\n# The refactor should introduce a real relationship, not just cosmetic changes.\nauthor_obj = session.query(models.Author).filter(models.Author.id == a1.id).first()\nrelated_titles = sorted(b.title for b in author_obj.books)\nassert related_titles == ['Dispossessed', 'Left Hand'], f'relationship .books not wired correctly: {related_titles!r}'\n\nbook_obj = session.query(models.Book).filter(models.Book.id == b3.id).first()\nassert book_obj.author.name == 'Ted', f'relationship .author not wired correctly: {book_obj.author!r}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_relationships.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

@@ -1,0 +1,38 @@
+{
+  "name": "optimize_go_slice_dedup",
+  "description": "Optimizes an O(n^2) nested-loop integer de-duplication function to O(n) using a map",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "performance",
+    "map",
+    "algorithms",
+    "go"
+  ],
+  "docker_image": "optarena-tester-go:latest",
+  "prompts": [
+    "The Go file dedup.go contains a function `func RemoveDuplicates(input []int) []int` that removes duplicate integers while preserving the order of first occurrence. It currently does this by checking each item against every item already added to the result slice in a nested loop, which is O(n^2) and becomes too slow for large inputs (tens of thousands of elements). Rewrite RemoveDuplicates in dedup.go to run in O(n) time using a map to track which values have already been seen, while preserving the exact same behavior: the returned slice must contain each distinct value exactly once, in the order of its first occurrence in the input."
+  ],
+  "setup_files": {
+    "go.mod": "module dedup_task\n\ngo 1.22\n",
+    "dedup.go": "package main\n\nfunc RemoveDuplicates(input []int) []int {\n\tresult := []int{}\n\tfor _, item := range input {\n\t\tfound := false\n\t\tfor _, existing := range result {\n\t\t\tif existing == item {\n\t\t\t\tfound = true\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\t\tif !found {\n\t\t\tresult = append(result, item)\n\t\t}\n\t}\n\treturn result\n}\n\nfunc main() {\n\tprintln(len(RemoveDuplicates([]int{1, 2, 2, 3})))\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dedup.go",
+      "content_patterns": [
+        "removeduplicates",
+        "map"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "dedup_perf_test.go": "package main\n\nimport (\n\t\"math/rand\"\n\t\"reflect\"\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestRemoveDuplicatesCorrectness(t *testing.T) {\n\tgot := RemoveDuplicates([]int{1, 2, 2, 3, 1, 4, 3})\n\twant := []int{1, 2, 3, 4}\n\tif !reflect.DeepEqual(got, want) {\n\t\tt.Fatalf(\"got %v, want %v\", got, want)\n\t}\n}\n\nfunc TestRemoveDuplicatesPerformance(t *testing.T) {\n\trnd := rand.New(rand.NewSource(42))\n\tinput := make([]int, 30000)\n\tfor i := range input {\n\t\tinput[i] = rnd.Intn(2000000)\n\t}\n\tseen := make(map[int]struct{}, len(input))\n\texpected := make([]int, 0, len(input))\n\tfor _, v := range input {\n\t\tif _, ok := seen[v]; !ok {\n\t\t\tseen[v] = struct{}{}\n\t\t\texpected = append(expected, v)\n\t\t}\n\t}\n\n\tstart := time.Now()\n\tgot := RemoveDuplicates(input)\n\telapsed := time.Since(start)\n\n\tif !reflect.DeepEqual(got, expected) {\n\t\tt.Fatalf(\"dedup result incorrect for large input\")\n\t}\n\tif elapsed > 50*time.Millisecond {\n\t\tt.Fatalf(\"RemoveDuplicates took %v for 30000 elements, expected an O(n) map-based implementation under 50ms\", elapsed)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

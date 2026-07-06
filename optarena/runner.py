@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .cases import DockerSandbox, load_cases
+from .cases import DOCKER_IMAGE_DEFAULT, DockerSandbox, load_cases
 from .drivers import get_driver
 from .drivers.base import CaseResult
 from .metrics import aggregate
@@ -176,16 +176,21 @@ def run_scenario(
           + (f"  trials={trials}" if trials > 1 else "")
           + (f"  parallel={parallel}" if parallel > 1 else "") + " ===")
 
-    # One shared container for every case and every trial in this run - not
-    # one per check_command call. Only started when some case actually has a
-    # check_command; a no-op (and no print) otherwise or when Docker/the
-    # image isn't available (run_check_command then falls back to the host).
-    needs_sandbox = any(c.get("check_command") for c in cases)
-    sandbox = DockerSandbox(root) if needs_sandbox else None
+    # One shared container per distinct image needed by this run's cases -
+    # not one per check_command call, and not just one overall (a run mixing
+    # e.g. a Python case and a Go case needs both toolchains at once). Only
+    # started for images some case actually needs via check_command; a no-op
+    # (and no print) otherwise or when Docker/the image isn't available
+    # (run_check_command then falls back to the host for that case).
+    images_needed = {
+        c.get("docker_image") or DOCKER_IMAGE_DEFAULT
+        for c in cases if c.get("check_command")
+    }
+    sandboxes = [DockerSandbox(root, image=image) for image in images_needed]
 
     driver.prepare(scenario, root)
     try:
-        if sandbox is not None:
+        for sandbox in sandboxes:
             sandbox.start()
         if parallel > 1:
             with ThreadPoolExecutor(max_workers=parallel) as pool:
@@ -205,7 +210,7 @@ def run_scenario(
 
         record.cases = [r.to_dict() for r in results]
     finally:
-        if sandbox is not None:
+        for sandbox in sandboxes:
             sandbox.stop()
         driver.teardown()
 

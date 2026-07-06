@@ -1,0 +1,38 @@
+{
+  "name": "optimize_rust_vec_dedup",
+  "description": "Optimizes an O(n^2) nested-loop order-preserving dedup function to O(n) using a HashSet",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "performance",
+    "hashset",
+    "algorithms",
+    "rust"
+  ],
+  "docker_image": "optarena-tester-rust:latest",
+  "prompts": [
+    "This Cargo library crate (Cargo.toml, no external dependencies needed) contains src/lib.rs with `pub fn dedup_preserve_order(items: &[i32]) -> Vec<i32>` that removes duplicate integers while preserving the order of first occurrence. It currently does this by checking each item against every item already added to the result vector in a nested loop, which is O(n^2) and becomes far too slow for large inputs (tens of thousands of elements). Rewrite dedup_preserve_order in src/lib.rs to run in O(n) time using a `HashSet<i32>` to track which values have already been seen, while preserving the exact same behavior: the returned vector must contain each distinct value exactly once, in the order of its first occurrence in the input slice."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"dedup_perf\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub fn dedup_preserve_order(items: &[i32]) -> Vec<i32> {\n    let mut result: Vec<i32> = Vec::new();\n    for &item in items {\n        let mut found = false;\n        for &existing in &result {\n            if existing == item {\n                found = true;\n                break;\n            }\n        }\n        if !found {\n            result.push(item);\n        }\n    }\n    result\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "dedup_preserve_order",
+        "hashset"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/perf_test.rs": "use dedup_perf::dedup_preserve_order;\nuse std::time::Instant;\n\n#[test]\nfn correctness_and_performance() {\n    // Correctness on a small sample first.\n    let sample = vec![1, 2, 2, 3, 1, 4, 4, 4, 5, 3];\n    let expected = vec![1, 2, 3, 4, 5];\n    assert_eq!(dedup_preserve_order(&sample), expected, \"small-sample result did not match expected order-preserving dedup\");\n\n    assert_eq!(dedup_preserve_order(&[]), Vec::<i32>::new());\n    assert_eq!(dedup_preserve_order(&[7]), vec![7]);\n    assert_eq!(dedup_preserve_order(&[9, 9, 9, 9]), vec![9]);\n\n    // Performance on a large input with many duplicates - an O(n^2)\n    // nested-loop implementation blows well past the budget below; an O(n)\n    // HashSet-based one finishes almost instantly. Timed with\n    // std::time::Instant inside the test itself so the failure is a clear\n    // assertion, not an ambiguous process timeout. Uses a small\n    // dependency-free xorshift PRNG (no `rand` crate needed) seeded\n    // deterministically so the test is reproducible.\n    let n = 100_000usize;\n    let mut state: u64 = 88172645463325252;\n    let mut big: Vec<i32> = Vec::with_capacity(n);\n    for _ in 0..n {\n        state ^= state << 13;\n        state ^= state >> 7;\n        state ^= state << 17;\n        big.push((state % (n as u64 / 2)) as i32);\n    }\n\n    let mut expected_seen = std::collections::HashSet::new();\n    let mut expected_big = Vec::with_capacity(n);\n    for &x in &big {\n        if expected_seen.insert(x) {\n            expected_big.push(x);\n        }\n    }\n\n    let start = Instant::now();\n    let result = dedup_preserve_order(&big);\n    let elapsed = start.elapsed();\n\n    assert_eq!(result, expected_big, \"large-input result does not match expected order-preserving dedup\");\n    assert!(\n        elapsed.as_secs_f64() < 1.5,\n        \"dedup_preserve_order took {:?} for n={}, expected < 1.5s (looks like still O(n^2))\",\n        elapsed,\n        n\n    );\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

@@ -1,0 +1,30 @@
+{
+  "name": "optimize_n_plus_one_sqlalchemy",
+  "description": "Fixes an N+1 query pattern by loading children eagerly instead of one query per parent",
+  "language": "python",
+  "framework": "sqlalchemy",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": ["sqlalchemy", "performance", "n-plus-one"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The function `load_authors_with_books(session)` in models.py loads all `Author` rows, then for each author separately queries its `Book` rows in a Python loop, causing an N+1 query problem (one query for the authors, plus one additional query per author). Rewrite `load_authors_with_books` so it fetches all authors and their books using a single query with eager loading (e.g. SQLAlchemy's `joinedload` or `selectinload`), instead of querying books separately per author in a loop. The function must keep returning the exact same result shape: a list of (author_name, sorted_list_of_book_titles) tuples, in the same order as before."
+  ],
+  "setup_files": {
+    "models.py": "from sqlalchemy import create_engine, Column, Integer, String, ForeignKey\nfrom sqlalchemy.orm import declarative_base, sessionmaker, relationship\n\nBase = declarative_base()\n\nclass Author(Base):\n    __tablename__ = 'authors'\n    id = Column(Integer, primary_key=True)\n    name = Column(String)\n    books = relationship('Book', backref='author')\n\nclass Book(Base):\n    __tablename__ = 'books'\n    id = Column(Integer, primary_key=True)\n    title = Column(String)\n    author_id = Column(Integer, ForeignKey('authors.id'))\n\ndef load_authors_with_books(session):\n    authors = session.query(Author).order_by(Author.id).all()\n    result = []\n    for author in authors:\n        books = session.query(Book).filter(Book.author_id == author.id).all()\n        result.append((author.name, sorted(b.title for b in books)))\n    return result\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "models.py",
+      "content_patterns": ["load_authors_with_books"],
+      "regex_patterns": ["(joinedload|selectinload|subqueryload|contains_eager)"]
+    }
+  ],
+  "test_setup_files": {
+    "test_n_plus_one.py": "from sqlalchemy import create_engine, event\nfrom sqlalchemy.orm import sessionmaker\nimport models\n\nengine = create_engine('sqlite:///:memory:')\nmodels.Base.metadata.create_all(engine)\nSession = sessionmaker(bind=engine)\nsession = Session()\n\nN = 25\nfor i in range(N):\n    a = models.Author(name=f'Author{i}')\n    session.add(a)\n    session.flush()\n    for j in range(3):\n        session.add(models.Book(title=f'Book{i}-{j}', author_id=a.id))\nsession.commit()\nsession.expire_all()\n\nquery_count = 0\n\ndef on_execute(conn, cursor, statement, parameters, context, executemany):\n    global query_count\n    query_count += 1\n\nevent.listen(engine, 'before_cursor_execute', on_execute)\n\nresult = models.load_authors_with_books(session)\n\nevent.remove(engine, 'before_cursor_execute', on_execute)\n\nassert len(result) == N, f'expected {N} authors, got {len(result)}'\nfor i, (name, titles) in enumerate(result):\n    assert name == f'Author{i}', f'unexpected order/name at index {i}: {name!r}'\n    assert titles == sorted(f'Book{i}-{j}' for j in range(3)), f'unexpected books for {name}: {titles!r}'\n\n# One query (or a small constant number, e.g. 2 for a selectinload strategy) -\n# NOT one-per-author (which would be N or more, i.e. >= 25).\nassert query_count <= 3, f'expected a small constant number of queries (eager loading), got {query_count} (N+1 pattern still present)'\n\nprint('PASS', 'query_count=', query_count)\n"
+  },
+  "check_command": "python3 test_n_plus_one.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

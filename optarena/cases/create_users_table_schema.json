@@ -1,0 +1,39 @@
+{
+  "name": "create_users_table_schema",
+  "description": "Creates a SQL schema for a users table with a unique, non-null email column",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "schema",
+    "ddl",
+    "sqlite",
+    "users"
+  ],
+  "prompts": [
+    "Write a SQL schema file named schema.sql that creates a table called `users` with the following columns: `id` (integer primary key, autoincrementing), `email` (text, must be unique and must never be null), and `created_at` (text, must never be null, intended to hold an ISO-8601 timestamp). Do not add any other tables."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "create table",
+        "users",
+        "email",
+        "unique",
+        "not null"
+      ],
+      "regex_patterns": [
+        "primary key"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_schema.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\ncols = {row[1]: row for row in conn.execute('PRAGMA table_info(users)').fetchall()}\nassert 'id' in cols, f'users table missing id column: {cols}'\nassert 'email' in cols, f'users table missing email column: {cols}'\nassert 'created_at' in cols, f'users table missing created_at column: {cols}'\nassert cols['email'][3] == 1, f'email column must be NOT NULL, got {cols[\"email\"]}'\nassert cols['created_at'][3] == 1, f'created_at column must be NOT NULL, got {cols[\"created_at\"]}'\n\nconn.execute(\"INSERT INTO users (email, created_at) VALUES ('a@example.com', '2026-01-01T00:00:00')\")\nconn.commit()\n\ntry:\n    conn.execute(\"INSERT INTO users (email, created_at) VALUES ('a@example.com', '2026-01-02T00:00:00')\")\n    conn.commit()\n    raise AssertionError('expected duplicate email insert to fail')\nexcept sqlite3.IntegrityError:\n    pass\n\ntry:\n    conn.execute(\"INSERT INTO users (email, created_at) VALUES (NULL, '2026-01-03T00:00:00')\")\n    conn.commit()\n    raise AssertionError('expected NULL email insert to fail')\nexcept sqlite3.IntegrityError:\n    pass\n\ntry:\n    conn.execute(\"INSERT INTO users (email, created_at) VALUES ('b@example.com', NULL)\")\n    conn.commit()\n    raise AssertionError('expected NULL created_at insert to fail')\nexcept sqlite3.IntegrityError:\n    pass\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_schema.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

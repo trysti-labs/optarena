@@ -1,0 +1,36 @@
+{
+  "name": "fix_compose_missing_depends_on",
+  "description": "Fixes a docker-compose.yml where the web service can start before its database is ready",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "docker",
+    "compose",
+    "depends_on",
+    "startup-order"
+  ],
+  "prompts": [
+    "docker-compose.yml defines an 'app' service and a 'db' service. In production we've observed the app container starting and trying to connect to Postgres before the db container is ready, causing connection failures right after `docker compose up`. Fix docker-compose.yml so the 'app' service properly waits for 'db' by adding the correct depends_on configuration. Do not change any other part of the file."
+  ],
+  "setup_files": {
+    "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"8080:80\"\n    environment:\n      - DATABASE_URL=postgresql://appuser:apppass@db:5432/appdb\n  db:\n    image: postgres:15\n    ports:\n      - \"5432:5432\"\n    environment:\n      - POSTGRES_USER=appuser\n      - POSTGRES_PASSWORD=apppass\n      - POSTGRES_DB=appdb\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "depends_on",
+        "db"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_compose.py": "import yaml\n\nwith open('docker-compose.yml') as f:\n    data = yaml.safe_load(f)\n\nservices = data.get('services') or {}\nassert 'app' in services and 'db' in services, f'services missing, got {list(services)}'\napp = services['app']\n\ndepends_on = app.get('depends_on') or []\nif isinstance(depends_on, dict):\n    depends_on = list(depends_on.keys())\nassert 'db' in depends_on, f\"app service must depends_on 'db', got {depends_on}\"\n\n# the rest of the file should be intact\nassert app.get('image') == 'myorg/webapp:latest', f\"app image changed unexpectedly: {app.get('image')!r}\"\ndb = services['db']\nassert str(db.get('image', '')).lower().startswith('postgres'), f\"db image changed unexpectedly: {db.get('image')!r}\"\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_compose.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

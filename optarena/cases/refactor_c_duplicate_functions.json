@@ -1,0 +1,36 @@
+{
+  "name": "refactor_c_duplicate_functions",
+  "description": "Refactors two near-identical max_int/max_float functions to remove duplicated logic",
+  "language": "c",
+  "domain": "systems",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "c",
+    "refactor",
+    "duplication"
+  ],
+  "prompts": [
+    "The file max_utils.c defines two functions, `max_int(int a, int b)` and `max_float(float a, float b)`, that each implement the exact same comparison logic (return the larger of the two arguments), just duplicated once per type. Refactor max_utils.c to eliminate this duplication (for example, using a macro, a small common helper, or C11 `_Generic`), while keeping both `int max_int(int, int)` and `float max_float(float, float)` available with their exact current signatures, so existing callers keep working unchanged. Do not add a `main` function to this file."
+  ],
+  "setup_files": {
+    "max_utils.c": "int max_int(int a, int b) {\n    if (a > b) {\n        return a;\n    } else {\n        return b;\n    }\n}\n\nfloat max_float(float a, float b) {\n    if (a > b) {\n        return a;\n    } else {\n        return b;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "max_utils.c",
+      "content_patterns": [
+        "max_int",
+        "max_float"
+      ],
+      "min_lines": 3
+    }
+  ],
+  "test_setup_files": {
+    "test_max_main.c": "#include <assert.h>\n#include <stdio.h>\n\nint max_int(int a, int b);\nfloat max_float(float a, float b);\n\nint main(void) {\n    assert(max_int(3, 5) == 5);\n    assert(max_int(5, 3) == 5);\n    assert(max_int(-1, -5) == -1);\n    assert(max_int(7, 7) == 7);\n    assert(max_float(1.5f, 2.5f) == 2.5f);\n    assert(max_float(2.5f, 1.5f) == 2.5f);\n    assert(max_float(-2.5f, -9.5f) == -2.5f);\n    printf(\"PASS\\n\");\n    return 0;\n}\n",
+    "test_max.py": "import subprocess\nsubprocess.run(['gcc', 'max_utils.c', 'test_max_main.c', '-o', 'test_max_bin'], check=True)\nproc = subprocess.run(['./test_max_bin'], capture_output=True, text=True, timeout=10)\nassert proc.returncode == 0, f'refactor test failed: exit {proc.returncode}, stderr={proc.stderr[-300:]}'\nassert 'PASS' in proc.stdout\nsource = open('max_utils.c', encoding='utf-8').read()\noccurrences = source.count('a > b')\nassert occurrences <= 1, f'duplicated comparison logic (\\\"a > b\\\") still appears {occurrences} times - the shared logic must be extracted, not copy-pasted per type'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_max.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

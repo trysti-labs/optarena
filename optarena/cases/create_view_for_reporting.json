@@ -1,0 +1,39 @@
+{
+  "name": "create_view_for_reporting",
+  "description": "Creates a SQL view aggregating order totals per customer, including customers with zero orders",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "schema",
+    "view",
+    "sqlite",
+    "reporting"
+  ],
+  "prompts": [
+    "Write a SQL schema file named schema.sql that creates two tables, `customers` (id integer primary key, name text not null) and `orders` (id integer primary key, customer_id integer not null referencing customers(id), amount real not null), and also creates a VIEW named `customer_order_totals` with columns `customer_id`, `total_orders`, and `total_amount`, showing - for every customer, including ones with zero orders - how many orders they've placed and the sum of their order amounts (0 for customers with no orders). Do not insert any data - just the DDL for the tables and the view."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "create table",
+        "create view",
+        "customer_order_totals",
+        "customers",
+        "orders"
+      ],
+      "regex_patterns": [
+        "create\\s+view"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_view.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\nconn.execute(\"INSERT INTO customers (id, name) VALUES (1, 'Alice'), (2, 'Bob')\")\nconn.execute('INSERT INTO orders (id, customer_id, amount) VALUES (1, 1, 10.00), (2, 1, 15.00), (3, 2, 20.00)')\nconn.execute(\"INSERT INTO customers (id, name) VALUES (3, 'Carol')\")\nconn.commit()\n\nrows = conn.execute('SELECT customer_id, total_orders, total_amount FROM customer_order_totals ORDER BY customer_id').fetchall()\nby_id = {r[0]: r for r in rows}\n\nassert len(rows) == 3, f'expected one row per customer (3), got {rows}'\n\nassert by_id[1][1] == 2, f'expected Alice to show 2 total_orders, got {by_id[1]}'\nassert abs(float(by_id[1][2]) - 25.00) < 1e-9, f'expected Alice total_amount 25.00, got {by_id[1]}'\n\nassert by_id[2][1] == 1, f'expected Bob to show 1 total_orders, got {by_id[2]}'\nassert abs(float(by_id[2][2]) - 20.00) < 1e-9, f'expected Bob total_amount 20.00, got {by_id[2]}'\n\nassert by_id[3][1] == 0, f'expected Carol (zero orders) to show 0 total_orders, got {by_id[3]}'\nassert float(by_id[3][2] or 0) == 0.0, f'expected Carol total_amount 0, got {by_id[3]}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_view.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

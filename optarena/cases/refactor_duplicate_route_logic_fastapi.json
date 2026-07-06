@@ -1,0 +1,30 @@
+{
+  "name": "refactor_duplicate_route_logic_fastapi",
+  "description": "Refactors two FastAPI endpoints with near-identical inline validation/formatting logic into a shared helper",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": ["fastapi", "refactor", "duplication"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The FastAPI app in app.py has two endpoints, POST /register and POST /invite, that each contain their own copy of the same inline logic: trimming whitespace from a `name` field, rejecting it with a 400 error if it is empty after trimming, and lower-casing an `email` field before storing it. This duplication has caused the two endpoints to drift slightly out of sync and is hard to maintain. Refactor app.py to extract this shared validation/normalization logic into a single reusable helper function (or Pydantic validator) used by both endpoints, without changing the observable behavior of either endpoint. Run with uvicorn on port 8014."
+  ],
+  "setup_files": {
+    "app.py": "from fastapi import FastAPI, HTTPException\nfrom pydantic import BaseModel\n\napp = FastAPI()\n\nclass Person(BaseModel):\n    name: str\n    email: str\n\nregistered = []\ninvited = []\n\n@app.post('/register')\ndef register(p: Person):\n    name = p.name.strip()\n    if not name:\n        raise HTTPException(status_code=400, detail='name is required')\n    email = p.email.lower()\n    record = {'name': name, 'email': email}\n    registered.append(record)\n    return record\n\n@app.post('/invite')\ndef invite(p: Person):\n    name = p.name.strip()\n    if not name:\n        raise HTTPException(status_code=400, detail='name is required')\n    email = p.email.lower()\n    record = {'name': name, 'email': email}\n    invited.append(record)\n    return record\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app.py",
+      "content_patterns": ["fastapi", "/register", "/invite"],
+      "regex_patterns": ["def\\s+\\w+\\s*\\("]
+    }
+  ],
+  "test_setup_files": {
+    "test_refactor.py": "import subprocess, sys, time, json, urllib.request, urllib.error\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8014{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, (json.loads(payload) if payload else None)\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        return e.code, (json.loads(payload) if payload else None)\n\nsrv = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'app:app', '--port', '8014'])\ntry:\n    ok = False\n    for _ in range(30):\n        try:\n            status, body = req('POST', '/register', {'name': '  Alice  ', 'email': 'ALICE@Example.com'})\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8014'\n    assert status == 200, f'expected 200, got {status}'\n    assert body['name'] == 'Alice', f'expected trimmed name, got {body!r}'\n    assert body['email'] == 'alice@example.com', f'expected lowercased email, got {body!r}'\n\n    status, body = req('POST', '/invite', {'name': '   ', 'email': 'BOB@X.com'})\n    assert status == 400, f'expected 400 for blank name via /invite, got {status}'\n\n    status, body = req('POST', '/register', {'name': '   ', 'email': 'BOB@X.com'})\n    assert status == 400, f'expected 400 for blank name via /register, got {status}'\n\n    status, body = req('POST', '/invite', {'name': ' Carol ', 'email': 'CAROL@X.com'})\n    assert status == 200\n    assert body['name'] == 'Carol'\n    assert body['email'] == 'carol@x.com'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\n\nsource = open('app.py', encoding='utf-8').read()\noccurrences = source.count('.strip()')\nassert occurrences <= 1, f'duplicated normalization logic (\\\".strip()\\\") still appears {occurrences} times across both endpoints - it must be extracted into one shared helper, not copy-pasted'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_refactor.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

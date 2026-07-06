@@ -1,0 +1,41 @@
+{
+  "name": "add_tests_express_endpoint",
+  "description": "Asks the model to write tests for an already-correct Express endpoint using Node's built-in http module",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": [
+    "express",
+    "testing",
+    "http"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "The Express server in server.js (already working, do not modify it) listens on port 8026 and exposes GET /square/:n, which returns 200 with JSON {\"n\": <n>, \"square\": <n*n>} when :n is a valid integer, or 400 with JSON {\"error\": ...} when :n is not a valid integer. Write tests in a file named exactly test_server.js. Your test file must: (1) start the server by requiring './server.js' (this has the side effect of calling app.listen), (2) wait briefly for the server to be ready, (3) use only Node's built-in http module (not supertest, not axios - they are not installed) to send at least these requests and assert on the results with Node's built-in assert module: GET /square/4 must return status 200 and body {n:4, square:16}; GET /square/abc must return status 400 with an error field. Print PASS and exit with status 0 if every assertion passes; let an uncaught assertion error (or process.exit(1)) propagate on failure."
+  ],
+  "setup_files": {
+    "server.js": "const express = require('express');\nconst app = express();\n\napp.get('/square/:n', (req, res) => {\n  const n = Number(req.params.n);\n  if (!Number.isInteger(n)) {\n    return res.status(400).json({ error: 'n must be an integer' });\n  }\n  res.json({ n, square: n * n });\n});\n\napp.listen(8026);\n\nmodule.exports = app;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_server.js",
+      "content_patterns": [
+        "/square/4",
+        "/square/abc",
+        "400",
+        "assert",
+        "require"
+      ],
+      "regex_patterns": [
+        "assert(\\.\\w+)?\\s*\\("
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "node test_server.js",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

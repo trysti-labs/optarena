@@ -1,0 +1,40 @@
+{
+  "name": "add_tests_node_utility",
+  "description": "Asks the model to write node:test/node:assert tests for an already-correct utility module",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": [
+    "node",
+    "testing",
+    "node:test"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "mathutils.js (already working, do not modify it) exports two functions: clamp(value, min, max), which returns value restricted to the inclusive range [min, max], and isPrime(n), which returns true if n is a prime integer greater than 1, false otherwise. Write tests in a file named exactly test_mathutils.js using Node's built-in node:test and node:assert modules (require('node:test') for `test(...)` blocks and require('node:assert') for assertions - no external test framework is installed). Cover at least: clamp with a value inside the range (unchanged), a value below min (clamped to min), and a value above max (clamped to max); isPrime for at least one prime (e.g. 7), one non-prime greater than 1 (e.g. 8), and a non-positive/1 edge case (e.g. 1 or 0, both false)."
+  ],
+  "setup_files": {
+    "mathutils.js": "function clamp(value, min, max) {\n  return Math.min(Math.max(value, min), max);\n}\n\nfunction isPrime(n) {\n  if (!Number.isInteger(n) || n <= 1) return false;\n  for (let i = 2; i * i <= n; i++) {\n    if (n % i === 0) return false;\n  }\n  return true;\n}\n\nmodule.exports = { clamp, isPrime };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_mathutils.js",
+      "content_patterns": [
+        "clamp",
+        "isprime",
+        "node:test",
+        "node:assert"
+      ],
+      "regex_patterns": [
+        "test\\s*\\(\\s*['\"]"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "node --test test_mathutils.js",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

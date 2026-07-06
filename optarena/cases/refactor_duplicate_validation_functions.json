@@ -1,0 +1,28 @@
+{
+  "name": "refactor_duplicate_validation_functions",
+  "description": "Refactors two near-identical shell validation functions (username and slug) into a single parameterized function",
+  "language": "shell",
+  "domain": "devops",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": ["shell", "refactor", "duplication"],
+  "prompts": [
+    "The script validate.sh in this repo has two near-identical shell functions, validate_username and validate_slug, each of which checks that a value is non-empty, at least 3 characters long, and made up only of alphanumeric characters plus one extra allowed character (underscore for usernames, hyphen for slugs), printing 'valid' or 'invalid' and returning 0 or 1 accordingly. This duplication has caused the two checks to drift and is hard to maintain. Refactor validate.sh to extract the shared validation logic into a single reusable, parameterized function (taking the extra allowed character as a parameter) used by both validate_username and validate_slug, without changing the script's command-line interface or the observable behavior for either call path (invoked as 'validate.sh username <value>' or 'validate.sh slug <value>')."
+  ],
+  "setup_files": {
+    "validate.sh": "#!/bin/sh\n# validate.sh - validates usernames and slugs\n\nvalidate_username() {\n  value=\"$1\"\n  if [ -z \"$value\" ]; then\n    echo \"invalid\"\n    return 1\n  fi\n  case \"$value\" in\n    *[!a-zA-Z0-9_]*) echo \"invalid\"; return 1 ;;\n  esac\n  if [ \"${#value}\" -lt 3 ]; then\n    echo \"invalid\"\n    return 1\n  fi\n  echo \"valid\"\n  return 0\n}\n\nvalidate_slug() {\n  value=\"$1\"\n  if [ -z \"$value\" ]; then\n    echo \"invalid\"\n    return 1\n  fi\n  case \"$value\" in\n    *[!a-zA-Z0-9-]*) echo \"invalid\"; return 1 ;;\n  esac\n  if [ \"${#value}\" -lt 3 ]; then\n    echo \"invalid\"\n    return 1\n  fi\n  echo \"valid\"\n  return 0\n}\n\ncase \"$1\" in\n  username) validate_username \"$2\" ;;\n  slug) validate_slug \"$2\" ;;\n  *) echo \"usage: validate.sh {username|slug} <value>\" >&2; exit 2 ;;\nesac\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "validate.sh",
+      "content_patterns": ["username", "slug"],
+      "regex_patterns": ["\\w+\\s*\\(\\)\\s*\\{"]
+    }
+  ],
+  "test_setup_files": {
+    "test_refactor.py": "import subprocess\n\ndef run(*args):\n    return subprocess.run(['sh', 'validate.sh', *args], capture_output=True, text=True, timeout=10)\n\ncases = [\n    (('username', 'abc'), 'valid', 0),\n    (('username', 'ab'), 'invalid', 1),\n    (('username', 'foo_bar'), 'valid', 0),\n    (('username', 'foo-bar'), 'invalid', 1),\n    (('slug', 'foo-bar'), 'valid', 0),\n    (('slug', 'foo_bar'), 'invalid', 1),\n    (('slug', 'ab'), 'invalid', 1),\n    (('slug', 'abc'), 'valid', 0),\n]\nfor args, expected_out, expected_code in cases:\n    r = run(*args)\n    assert expected_out in r.stdout, f'{args}: expected {expected_out!r} in stdout, got {r.stdout!r}'\n    assert r.returncode == expected_code, f'{args}: expected exit {expected_code}, got {r.returncode}'\n\nr = run('bogus', 'foo')\nassert r.returncode == 2, f'expected exit 2 for unknown command, got {r.returncode}'\n\nsource = open('validate.sh', encoding='utf-8').read()\noccurrences = source.count('-lt 3')\nassert occurrences <= 1, f'duplicated length-check logic (\\\"-lt 3\\\") still appears {occurrences} times across both functions - it must be extracted into one shared parameterized function, not copy-pasted'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_refactor.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

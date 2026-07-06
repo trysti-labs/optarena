@@ -1,0 +1,29 @@
+{
+  "name": "create_health_endpoint_dotnet",
+  "description": "Creates an ASP.NET Core minimal API health-check endpoint",
+  "language": "csharp",
+  "framework": "aspnet-core",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": ["rest", "http", "health-check", "aspnet-core", "minimal-api"],
+  "docker_image": "optarena-tester-dotnet:latest",
+  "prompts": [
+    "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Write Program.cs to add a GET /health endpoint that returns JSON {\"status\": \"ok\"}. Have it listen on http://0.0.0.0:8005."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Program.cs",
+      "content_patterns": ["/health", "8005"]
+    }
+  ],
+  "test_setup_files": {
+    "test_health.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\nsubprocess.run(['dotnet', 'build', '-c', 'Release', '-o', 'out'], check=True)\ndlls = glob.glob('out/*.dll')\ndll = [d for d in dlls if 'app' in d.lower()][0]\nsrv = subprocess.Popen(['dotnet', dll])\ntry:\n    body = None\n    for _ in range(40):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8005/health', timeout=1) as resp:\n                assert resp.status == 200, f'expected 200, got {resp.status}'\n                body = json.loads(resp.read())\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert body is not None, 'server never became reachable on :8005'\n    assert body.get('status') == 'ok', f'unexpected body: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_health.py",
+  "check_command_timeout": 90,
+  "timeout": 180
+}

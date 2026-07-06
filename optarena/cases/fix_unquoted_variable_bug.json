@@ -1,0 +1,27 @@
+{
+  "name": "fix_unquoted_variable_bug",
+  "description": "Fixes a shell script that mishandles filenames containing spaces due to an unquoted variable / word-splitting bug",
+  "language": "shell",
+  "domain": "devops",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": ["shell", "bug", "quoting", "filesystem"],
+  "prompts": [
+    "The script count_lines.sh in this repo takes a single directory argument and is meant to print one line per file directly inside that directory, in the form '<filename>: <line count>'. It works fine for ordinary filenames, but when the directory contains a file whose name has a space in it, the script produces wrong output - it either reports the wrong line counts, prints errors about files that don't exist, or splits a single filename into multiple bogus entries. Fix count_lines.sh so it correctly reports the filename and line count for every regular file in the given directory, including files whose names contain spaces, while keeping the output format and behavior for ordinary (no-space) filenames unchanged."
+  ],
+  "setup_files": {
+    "count_lines.sh": "#!/bin/sh\ndir=$1\nfor f in $(ls $dir); do\n  count=$(wc -l < $dir/$f | tr -d ' ')\n  echo \"$f: $count\"\ndone\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "count_lines.sh",
+      "content_patterns": ["wc -l"]
+    }
+  ],
+  "test_setup_files": {
+    "test_count_lines.py": "import subprocess, os, shutil\n\ndata = 'data'\nif os.path.exists(data):\n    shutil.rmtree(data)\nos.makedirs(data)\n\nwith open(os.path.join(data, 'my file.txt'), 'w') as f:\n    f.write('line1\\nline2\\nline3\\n')\nwith open(os.path.join(data, 'other.txt'), 'w') as f:\n    f.write('a\\nb\\n')\n\nr = subprocess.run(['sh', 'count_lines.sh', data], capture_output=True, text=True, timeout=15)\nassert r.returncode == 0, f'expected exit 0, got {r.returncode}, stderr={r.stderr!r}'\nout = r.stdout\nassert 'my file.txt: 3' in out, f\"expected 'my file.txt: 3' in output, got: {out!r}\"\nassert 'other.txt: 2' in out, f\"expected 'other.txt: 2' in output, got: {out!r}\"\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_count_lines.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

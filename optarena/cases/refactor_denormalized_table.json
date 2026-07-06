@@ -1,0 +1,42 @@
+{
+  "name": "refactor_denormalized_table",
+  "description": "Normalizes a denormalized orders_flat table into customers + orders",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "schema",
+    "normalization",
+    "sqlite",
+    "refactor"
+  ],
+  "prompts": [
+    "schema.sql defines a single denormalized `orders_flat` table where every row repeats the customer's name and email alongside the order's product and amount (see the seed data at the bottom of the file). This repetition means the customer's name/email is duplicated across every one of their orders. Refactor schema.sql into a normalized schema: a `customers` table (id, name, email - email unique) and an `orders` table (id, customer_id referencing customers(id), product, amount). Rewrite schema.sql from scratch so it creates the new normalized tables and seeds them with data equivalent to the original 3 orders_flat rows (2 distinct customers: Alice with a Widget order at 9.99 and a Gadget order at 19.99, Bob with a Widget order at 9.99), so that joining orders to customers reproduces the same (name, email, product, amount) rows as before. Remove the old orders_flat table entirely - the final schema.sql must not reference orders_flat."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE orders_flat (\n    id INTEGER PRIMARY KEY,\n    customer_name TEXT NOT NULL,\n    customer_email TEXT NOT NULL,\n    product TEXT NOT NULL,\n    amount REAL NOT NULL\n);\n\nINSERT INTO orders_flat (id, customer_name, customer_email, product, amount) VALUES\n    (1, 'Alice', 'alice@example.com', 'Widget', 9.99),\n    (2, 'Alice', 'alice@example.com', 'Gadget', 19.99),\n    (3, 'Bob', 'bob@example.com', 'Widget', 9.99);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "customers",
+        "orders",
+        "references"
+      ],
+      "not_content_patterns": [
+        "orders_flat"
+      ],
+      "regex_patterns": [
+        "create table"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_refactor.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\ntables = {row[0] for row in conn.execute(\"SELECT name FROM sqlite_master WHERE type='table'\").fetchall()}\nassert 'customers' in tables, f'expected a customers table, got {tables}'\nassert 'orders' in tables, f'expected an orders table, got {tables}'\nassert 'orders_flat' not in tables, 'orders_flat should have been removed'\n\ncustomers = conn.execute('SELECT id, name, email FROM customers ORDER BY name').fetchall()\nemails = [c[2] for c in customers]\nassert len(emails) == len(set(emails)), f'customer emails must be unique, got {customers}'\nassert len(customers) == 2, f'expected exactly 2 distinct customers, got {customers}'\n\nrows = conn.execute('''\n    SELECT c.name, c.email, o.product, o.amount\n    FROM orders o\n    JOIN customers c ON o.customer_id = c.id\n    ORDER BY c.name, o.product\n''').fetchall()\n\nexpected = sorted([\n    ('Alice', 'alice@example.com', 'Gadget', 19.99),\n    ('Alice', 'alice@example.com', 'Widget', 9.99),\n    ('Bob', 'bob@example.com', 'Widget', 9.99),\n])\nassert rows == expected, f'joined orders/customers data does not match original orders_flat data: {rows} != {expected}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_refactor.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

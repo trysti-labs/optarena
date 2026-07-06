@@ -1,0 +1,39 @@
+{
+  "name": "add_tests_greeting_service_junit",
+  "description": "Writes JUnit 5 tests for an already-correct MessageFormatter class",
+  "language": "java",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": [
+    "junit",
+    "unit-test",
+    "spring-boot"
+  ],
+  "docker_image": "optarena-tester-jvm:latest",
+  "prompts": [
+    "The class src/main/java/com/optarena/testing/MessageFormatter.java (already implemented, do not modify it) has a public method `String greet(String name)` with this behavior: if name is null, empty, or all-whitespace, it returns exactly \"Hello, stranger!\"; otherwise it returns \"Hello, \" followed by the trimmed name followed by \"!\". Write JUnit 5 tests for it at src/test/java/com/optarena/testing/MessageFormatterTest.java, using org.junit.jupiter.api.Test, with at least 3 separate @Test methods covering: (1) a normal name such as \"Alice\" -> \"Hello, Alice!\"; (2) an empty string name -> \"Hello, stranger!\"; (3) a whitespace-only name (e.g. \"   \") -> \"Hello, stranger!\". You may add a null-name test too. Use assertEquals from org.junit.jupiter.api.Assertions for your assertions."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>greeting-tests</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/java/com/optarena/testing/MessageFormatter.java": "package com.optarena.testing;\n\npublic class MessageFormatter {\n    public String greet(String name) {\n        if (name == null || name.isBlank()) {\n            return \"Hello, stranger!\";\n        }\n        return \"Hello, \" + name.trim() + \"!\";\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/MessageFormatterTest.java",
+      "content_patterns": [
+        "@Test",
+        "MessageFormatter",
+        "greet"
+      ],
+      "regex_patterns": [
+        "@Test[\\s\\S]*@Test"
+      ]
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "mvn -o -q test -Dtest=MessageFormatterTest",
+  "check_command_timeout": 60,
+  "timeout": 90
+}

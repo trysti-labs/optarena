@@ -1,22 +1,45 @@
 # WEBSITE.md - optarena.com design & content brief
 
-Working brief for the marketing site at `website/` (deployed as optarena.com
-via Cloudflare Worker). Written from `OptArena_README_Feedback.md`'s
-positioning critique - use this to redesign/regenerate `website/index.html`
+Working brief for the marketing site, now built as a React/Vite app at
+`website2/` (deployed as optarena.com via Cloudflare Worker; supersedes the
+static `website/` v1). Written from `OptArena_README_Feedback.md`'s
+positioning critique, then sharpened by a second round of feedback pushing
+harder on the Arena metaphor - use this to keep future redesigns consistent
 without re-deriving the reasoning each time.
 
 ## 1. Positioning (read this before writing any copy)
 
-**Old framing:** "a testing framework for AI coding tools."
-**New framing:** an **arena** - competition, leaderboards, reproducibility.
+**Old framing:** "a testing framework for AI coding tools," then briefly
+"the reproducible evaluation platform for AI coding agents" - both correct
+but generic-infrastructure-sounding and, critically, neither one explains
+why the product is called **Arena**. The name promises competition,
+leaderboards, and a declared winner; the copy has to deliver on that
+promise immediately, not as an aside.
 
-> OptArena runs the same task through multiple coding agents/tools, verifies
-> the result by actually compiling and running it, and tells you who won.
+**Current framing:** an **arena** - competition, leaderboards, proving a
+winner. This is not just a tagline choice; it changes what the hero
+*shows*, not just what it *says* - see section 4.1.
 
-Tagline candidates (pick one for the hero, keep others as social/OG copy):
-- "The arena where AI coding tools compete - and prove it."
+> OptArena runs the same task through multiple coding agents, verifies the
+> result by actually compiling and running it, and tells you who won.
+
+**Decided hero headline (as shipped):**
+- H1: "The arena where **AI coding agents compete.**" (accent span on the
+  second line, kept to `white-space: nowrap` so it never breaks mid-phrase)
+- Subhead: "Run the same real-world coding task through multiple AI coding
+  agents, verify every result by actually executing it inside Docker, and
+  see which one wins - accuracy, cost, and speed, side by side."
+- This exact headline is now the single canonical tagline everywhere
+  (README.md, docs intro, docusaurus.config.js tagline/meta) - don't let
+  another surface drift to a different phrasing again; that drift is
+  exactly what prompted this rewrite (the site had shipped "the evaluation
+  platform for AI coding agents" while README/docs already said "the arena
+  where... compete").
+
+Retired tagline candidates (kept for social/OG copy variety only, not the hero):
 - "Stop guessing which AI coding tool is better. Run them against each other."
 - "Real tools. Real tests. Real verdicts."
+- "The proving ground for AI coding agents." (mixes metaphors with "arena" - avoid pairing both in the same breath)
 
 **Category the site should claim** (broader than today's "compare coding
 tools"): **evaluate software engineering agents** - UI agents (Cline, Roo,
@@ -50,28 +73,29 @@ Reordered from the current site specifically to put the two genuinely
 differentiated capabilities (UI-native driving, real verification) ahead of
 generic "comparison framework" framing, per the feedback doc.
 
-### 4.1 Hero
-- Arena-framed headline + one-line sub (see tagline candidates above).
-- **Visual workflow diagram, not text, as the first thing below the fold.**
-  Render as a real SVG/HTML diagram (not literal ASCII-art text) built from
-  the existing `.hero-flow` pattern, extended to show fan-out + verification:
-
-  ```
-  Same task
-     |
-     +--> Cline   --+
-     +--> Roo      --+--> Docker verification --> Leaderboard
-     +--> Aider    --+
-     +--> Claude Code --+
-  ```
-
-  Concretely: one task box, an arrow fanning to N tool boxes (reuse
-  `.grid-cards`-style small tiles), converging into a "Docker verification"
-  node, converging into a "Leaderboard" node. Keep it to 4-5 tools max in the
-  hero visual (Cline, Roo, Aider, Claude Code, raw-model) - the full driver
-  list stays in the Drivers section below.
-- CTAs unchanged: `Get started` (primary, -> quickstart), `View source`
-  (outline, -> GitHub).
+### 4.1 Hero (as shipped in `website2/src/components/Hero.jsx` + `Pipeline.jsx`)
+- Arena-framed headline + tightened one-line sub (see decided copy above).
+- **A live animated pipeline, not a static diagram, as the first thing below
+  the fold** - four equal-size stage cards (Task -> Agents -> Verify ->
+  Leaderboard) that cycle through an active/running/done state on a timer,
+  connected by flowing dashed arrows. Kept to exactly 4 agents in both the
+  "Agents" stage and the "Leaderboard" stage (Cline, Roo Code, Claude Code,
+  Aider) - a mismatched count between the two stages reads as sloppy, not
+  as "there are more than shown."
+- **Labeled "Inside the arena"** directly above the pipeline card (a small
+  mono/uppercase eyebrow, same style as every section's eyebrow) - this is
+  the single highest-leverage place to make the metaphor visible, since
+  it's the first proof the visitor sees, immediately under the headline
+  that just used the word.
+- **Gold/silver/bronze rank badges** (`.rank-badge.rank-1/2/3/4`, a shared
+  class also used on the main Leaderboard table's top 3 rows when sorted by
+  pass rate) on the Leaderboard stage's four rows - not emoji medals, a
+  small CSS gradient badge matching the site's premium/custom-built
+  aesthetic. This is the second-highest-leverage arena cue: it appears in
+  the hero AND in the full leaderboard section, so a visitor sees the same
+  "ranking" visual language twice, reinforcing rather than introducing a
+  new motif each time.
+- CTAs: `Get started` (primary, -> docs), `GitHub` (outline).
 
 ### 4.2 Why? (new section, right after hero)
 Four short questions, each answered in one line - this is copy-paste-able

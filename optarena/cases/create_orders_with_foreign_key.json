@@ -1,0 +1,37 @@
+{
+  "name": "create_orders_with_foreign_key",
+  "description": "Creates customers/orders tables with a cascading foreign key",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "schema",
+    "ddl",
+    "sqlite",
+    "foreign-key"
+  ],
+  "prompts": [
+    "Write a SQL schema file named schema.sql that creates two tables: `customers` (columns: `id` integer primary key, `name` text not null) and `orders` (columns: `id` integer primary key, `customer_id` integer not null, `amount` real not null). `orders.customer_id` must be a FOREIGN KEY referencing `customers(id)` with ON DELETE CASCADE, so that deleting a customer automatically deletes all of that customer's orders."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "create table",
+        "customers",
+        "orders",
+        "foreign key",
+        "references",
+        "cascade"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_schema.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.execute('PRAGMA foreign_keys = ON')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\nconn.execute('PRAGMA foreign_keys = ON')\n\nconn.execute(\"INSERT INTO customers (id, name) VALUES (1, 'Alice')\")\nconn.execute(\"INSERT INTO orders (id, customer_id, amount) VALUES (1, 1, 9.99)\")\nconn.execute(\"INSERT INTO orders (id, customer_id, amount) VALUES (2, 1, 19.99)\")\nconn.commit()\n\ntry:\n    conn.execute(\"INSERT INTO orders (id, customer_id, amount) VALUES (3, 999, 5.00)\")\n    conn.commit()\n    raise AssertionError('expected FK violation for nonexistent customer_id')\nexcept sqlite3.IntegrityError:\n    conn.rollback()\n\ncount_before = conn.execute('SELECT COUNT(*) FROM orders').fetchone()[0]\nassert count_before == 2, f'expected 2 orders before delete, got {count_before}'\n\nconn.execute('DELETE FROM customers WHERE id = 1')\nconn.commit()\n\ncount_after = conn.execute('SELECT COUNT(*) FROM orders').fetchone()[0]\nassert count_after == 0, f'expected cascading delete to remove all orders, got {count_after} remaining'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_schema.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

@@ -1,0 +1,38 @@
+{
+  "name": "add_tests_schema_constraints",
+  "description": "Writes a test script asserting data-integrity invariants over an existing correct schema",
+  "language": "sql",
+  "domain": "data",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "testing",
+    "sqlite",
+    "data-integrity",
+    "assertions"
+  ],
+  "prompts": [
+    "schema.sql (already in this directory) defines and seeds a `customers` table (id, email) and an `orders` table (id, customer_id, amount) - the schema and data are already correct. Write a Python script named test_constraints.py that opens a fresh sqlite3 connection, loads schema.sql into it (e.g. via conn.executescript), and then runs at least three separate, distinct assertions verifying that the data satisfies these invariants: (1) no two customers share the same email address, (2) every order's customer_id refers to a customer that actually exists in the customers table, and (3) every order's amount is greater than zero. The script should print PASS and exit with status 0 if every check passes, and raise an exception (nonzero exit) if any check fails."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    email TEXT UNIQUE NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    amount REAL NOT NULL\n);\n\nINSERT INTO customers (id, email) VALUES (1, 'alice@example.com'), (2, 'bob@example.com');\nINSERT INTO orders (id, customer_id, amount) VALUES (1, 1, 9.99), (2, 1, 19.99), (3, 2, 5.00);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_constraints.py",
+      "content_patterns": [
+        "customer_id",
+        "email",
+        "amount",
+        "assert"
+      ],
+      "regex_patterns": [
+        "assert[\\s\\S]*assert[\\s\\S]*assert"
+      ]
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "python3 test_constraints.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

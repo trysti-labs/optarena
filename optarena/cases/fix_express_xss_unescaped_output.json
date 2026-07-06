@@ -1,0 +1,39 @@
+{
+  "name": "fix_express_xss_unescaped_output",
+  "description": "Fixes a reflected-XSS vulnerability where user input is interpolated unescaped into an HTML response",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "express",
+    "security",
+    "xss"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "The Express server in server.js exposes GET /greet?name=..., which responds with an HTML page greeting the given name, e.g. <h1>Hello, Alice!</h1>. Right now it interpolates the `name` query parameter directly into the HTML response without any escaping - a classic reflected XSS vulnerability, since a value like <script>alert(1)</script> is echoed back verbatim and would execute as a script in a browser. Fix server.js so that any HTML-special characters in `name` (at minimum < > & \" ') are escaped before being embedded in the response, so the response never contains an unescaped '<script' tag or other raw HTML/JS from user input, while a normal name like 'Alice' still renders as before (the response must still contain 'Hello, Alice!' for that case). Keep listening on port 8027."
+  ],
+  "setup_files": {
+    "server.js": "const express = require('express');\nconst app = express();\n\napp.get('/greet', (req, res) => {\n  const name = req.query.name || 'stranger';\n  res.send(`<h1>Hello, ${name}!</h1>`);\n});\n\napp.listen(8027);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "server.js",
+      "content_patterns": [
+        "/greet",
+        "8027"
+      ],
+      "regex_patterns": [
+        "replace\\(|escape"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_xss.py": "import subprocess, time, urllib.request, urllib.error, urllib.parse\n\ndef req(path):\n    url = f'http://127.0.0.1:8027{path}'\n    try:\n        with urllib.request.urlopen(url, timeout=3) as resp:\n            return resp.status, resp.read().decode('utf-8', errors='replace')\n    except urllib.error.HTTPError as e:\n        return e.code, e.read().decode('utf-8', errors='replace')\n\nsrv = subprocess.Popen(['node', 'server.js'])\ntry:\n    ok = False\n    for _ in range(30):\n        try:\n            status, body = req('/greet?name=Alice')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8027'\n    assert status == 200 and 'Hello, Alice!' in body, f'legitimate input broken: {status} {body!r}'\n\n    payload = '<script>alert(1)</script>'\n    status, body = req('/greet?name=' + urllib.parse.quote(payload))\n    assert status == 200, f'expected 200, got {status}'\n    assert '<script>alert(1)</script>' not in body, f'unescaped script tag reflected back verbatim (XSS): {body!r}'\n    assert '<script' not in body.lower(), f'a live <script tag is still present in the response: {body!r}'\n\n    payload2 = '\"><img src=x onerror=alert(2)>'\n    status, body = req('/greet?name=' + urllib.parse.quote(payload2))\n    assert status == 200\n    assert '<img src=x onerror=alert(2)>' not in body, f'unescaped HTML injection reflected back verbatim: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_xss.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

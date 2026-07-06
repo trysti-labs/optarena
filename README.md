@@ -1,6 +1,6 @@
 # OptArena
 
-**The arena where AI coding tools compete - and prove it.**
+**The arena where AI coding agents compete.**
 
 OptArena evaluates software engineering agents: UI agents (Cline's actual
 VS Code UI, Roo, Continue, Kilo), headless CLI agents (aider, Claude Code,
@@ -17,7 +17,7 @@ keyword-matching it.
 Did your prompt optimization make things better? Did your latest update
 regress performance?**
 
-OptArena answers these automatically - same task, same oracle, side by side:
+The arena answers these automatically - same task, same oracle, side by side:
 
 - *tool vs tool* - Cline vs aider vs Continue on the same backend
 - *backend vs backend* - Cline through an optimizing proxy vs raw Ollama
@@ -122,8 +122,12 @@ optarena compare cline-selfopt cline-ollama-direct
 # Dashboard at http://localhost:8300/dashboard/
 optarena serve
 
-# Build the sandbox image once (gcc + python3 + node) - check_command runs inside it
+# Build the base sandbox image (gcc + python3 + node) - check_command runs inside it
 optarena docker build
+
+# Build a per-language image for the benchmark-corpus tracks (python/node/jvm/go/rust/dotnet)
+optarena docker build --lang go
+optarena docker build --all      # every registered image
 
 # Preflight: which drivers/extensions/backends are ready on this machine
 optarena doctor
@@ -193,21 +197,40 @@ command, run in the workspace after the file checks pass, that compiles/runs
 the generated code and asserts on its actual behavior. Pair it with
 `test_setup_files` - real test code (pytest-style asserts, a Node script, a
 compile-and-run harness) written into the workspace **after** the model's
-run, so the model never sees what it's graded against. All seven built-in
-cases now use this - Python, C, and Node.js are the initial languages.
+run, so the model never sees what it's graded against. All 120 built-in
+cases use this, spanning the Phase 1 benchmark-corpus target from
+`OptArena_Benchmark_Corpus_Specification.md`: Python (20, FastAPI/Flask/
+Django/SQLAlchemy/Pydantic/Typer), JavaScript/TypeScript (20, Express/
+NestJS/React/Vue/plain Node), Java (15, Spring Boot), Go (10, Gin/Fiber),
+Rust (10, Axum/Actix-web), C# (10, ASP.NET Core), C/C++ (10), SQL (10),
+Shell (5), Docker Compose (5, static validation only), and Terraform (5,
+`fmt`/`validate` only, no cloud provider blocks). Every case covers one of
+the spec's task categories (feature, bug fix, refactoring, testing,
+security, performance, devops) and was hand-verified end-to-end - a correct
+reference solution passes, a broken one fails - before being counted as
+done; see `ARCH.md` for exactly what's built versus explicitly deferred
+(the full corpus is 100-150 cases; the rest of that range, plus
+repository-scale Level 3+ benchmarks, is future work).
 
-`check_command` runs inside the shared `optarena-tester` Docker image (gcc +
-python3 + node, `docker/Dockerfile`) whenever Docker is available - build it
-once with `optarena docker build` so case authors and CI need no language
-toolchains on the host, and generated code never executes directly there.
-Falls back to the host (with a warning) when Docker is unavailable, or with
-`OPTARENA_NO_DOCKER=1`.
+`check_command` runs inside a Docker sandbox whenever Docker is available -
+the shared `optarena-tester` base image (gcc + python3 + node,
+`docker/Dockerfile`) for the original cases, or a per-language image
+(`docker/<lang>/Dockerfile`, tagged via a case's `"docker_image"` field) for
+cases that need a real framework toolchain pre-installed (FastAPI, Express,
+Spring Boot, Gin, Axum, ASP.NET Core). Build what you need with `optarena
+docker build` (base), `--lang <name>` (one track), or `--all` (everything) so
+case authors and CI need no language toolchains on the host, and generated
+code never executes directly there. Falls back to the host (with a warning)
+when Docker is unavailable, or with `OPTARENA_NO_DOCKER=1`.
 
-**One container per run, not one per check_command call.** `optarena run`
-starts a single Docker container up front (only if some case needs one) and
-every case and every trial `docker exec`s into that same container; it's
-stopped once when the run finishes. 7 cases x 3 trials means 21
-`check_command` invocations sharing one container, not 21 containers.
+**One container per image needed, not one per check_command call.**
+`optarena run` starts one Docker container per distinct image its loaded
+cases actually need (only for cases with a `check_command`) - a run mixing a
+Python case and a Go case gets both toolchains live at once - and every case/
+trial needing a given image `docker exec`s into that same shared container;
+every sandbox started is stopped once when the run finishes. 7 cases x 3
+trials sharing one image means 21 `check_command` invocations against one
+container, not 21 containers.
 
 This is a CLI-first tool, so the run output says exactly what happened per
 case - not just pass/fail, but which sandbox ran the test, its exit code and
@@ -244,10 +267,12 @@ paid models are priced from a built-in table, `optarena/pricing.py`,
 overridable via `~/.optarena/pricing.json`). `compare` adds per-case deltas
 and a verdict (more-accurate / faster / cheaper).
 
-Cases can also declare a `"language"` tag (see the built-in catalogue for
-examples). `optarena list cases --language python` and `optarena run
---language javascript` filter by it - useful once you have cases spanning
-several languages.
+Cases can also declare `"language"`/`"framework"` tags, plus free-form
+benchmark-corpus metadata (`domain`, `difficulty`, `task_type`, `tags` - see
+the built-in catalogue for examples). `optarena list cases --language
+python --framework fastapi` and `optarena run --language go --framework gin`
+filter by either or both (ANDed) - useful once you have cases spanning
+several languages and frameworks.
 
 ## Regression testing
 

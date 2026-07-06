@@ -1,0 +1,28 @@
+{
+  "name": "create_flask_todo_api",
+  "description": "Creates a Flask CRUD todo API backed by an in-memory list",
+  "language": "python",
+  "framework": "flask",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": ["rest", "http", "crud", "flask", "todo"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "Create a Flask app in app.py named `app` that manages an in-memory list of todos. Each todo has an integer `id` and a string `title`. Implement: GET /todos returning a JSON array of all todos; POST /todos accepting JSON body {\"title\": str} that creates a new todo with an auto-incrementing id (starting at 1) and returns the created todo with a 201 status code; DELETE /todos/<int:todo_id> that removes the todo with that id and returns a 204 status code, or 404 if no todo with that id exists. Run the server with app.run(port=8011) when executed directly."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "app.py",
+      "content_patterns": ["flask", "/todos"],
+      "regex_patterns": ["def\\s+\\w+\\s*\\(.*\\)\\s*:"]
+    }
+  ],
+  "test_setup_files": {
+    "test_todo.py": "import subprocess, sys, time, json, urllib.request, urllib.error\n\ndef req(method, path, body=None):\n    data = json.dumps(body).encode() if body is not None else None\n    r = urllib.request.Request(f'http://127.0.0.1:8011{path}', data=data, method=method)\n    if data is not None:\n        r.add_header('Content-Type', 'application/json')\n    try:\n        with urllib.request.urlopen(r, timeout=3) as resp:\n            payload = resp.read()\n            return resp.status, (json.loads(payload) if payload else None)\n    except urllib.error.HTTPError as e:\n        payload = e.read()\n        return e.code, (json.loads(payload) if payload else None)\n\nsrv = subprocess.Popen([sys.executable, 'app.py'])\ntry:\n    ok = False\n    for _ in range(30):\n        try:\n            status, body = req('GET', '/todos')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8011'\n    assert status == 200, f'expected 200 for GET /todos, got {status}'\n    assert body == [], f'expected empty list initially, got {body!r}'\n\n    status, body = req('POST', '/todos', {'title': 'buy milk'})\n    assert status == 201, f'expected 201 on create, got {status}'\n    assert body['title'] == 'buy milk'\n    tid = body['id']\n    assert isinstance(tid, int)\n\n    status, body2 = req('POST', '/todos', {'title': 'walk dog'})\n    assert status == 201\n    tid2 = body2['id']\n    assert tid2 != tid, 'ids must be unique/incrementing'\n\n    status, body = req('GET', '/todos')\n    assert status == 200\n    assert len(body) == 2, f'expected 2 todos, got {body!r}'\n\n    status, _ = req('DELETE', f'/todos/{tid}')\n    assert status == 204, f'expected 204 on delete, got {status}'\n\n    status, body = req('GET', '/todos')\n    assert len(body) == 1, f'expected 1 todo after delete, got {body!r}'\n\n    status, _ = req('DELETE', '/todos/999999')\n    assert status == 404, f'expected 404 deleting nonexistent todo, got {status}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_todo.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

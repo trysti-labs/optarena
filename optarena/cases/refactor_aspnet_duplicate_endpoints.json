@@ -1,0 +1,39 @@
+{
+  "name": "refactor_aspnet_duplicate_endpoints",
+  "description": "Refactors two minimal API endpoints that duplicate the same name-validation/normalization logic into a shared helper",
+  "language": "csharp",
+  "framework": "aspnet-core",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "refactor",
+    "aspnet-core",
+    "minimal-api",
+    "duplication"
+  ],
+  "docker_image": "optarena-tester-dotnet:latest",
+  "prompts": [
+    "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Program.cs has two endpoints, GET /greet/formal and GET /greet/casual, each reading a 'name' query parameter and normalizing it (capitalizing the first letter, lowercasing the rest), but the validation-and-normalization code is duplicated verbatim between the two handlers. Refactor Program.cs to remove the duplication (for example, extract a shared local function or helper method for validating and normalizing the name) while preserving the exact same external behavior: GET /greet/formal?name=alice must return HTTP 200 with JSON {\"greeting\": \"Good day, Alice.\"}, GET /greet/casual?name=alice must return HTTP 200 with JSON {\"greeting\": \"Hey Alice!\"}, and both endpoints must return HTTP 400 with a JSON error body when the 'name' query parameter is missing or blank. Do not change the port (8054)."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n",
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\napp.MapGet(\"/greet/formal\", (HttpRequest request) =>\n{\n    if (!request.Query.TryGetValue(\"name\", out var nameValues) || string.IsNullOrWhiteSpace(nameValues.ToString()))\n    {\n        return Results.BadRequest(new { error = \"name is required\" });\n    }\n    var raw = nameValues.ToString().Trim();\n    var normalized = char.ToUpperInvariant(raw[0]) + raw.Substring(1).ToLowerInvariant();\n    return Results.Ok(new { greeting = $\"Good day, {normalized}.\" });\n});\n\napp.MapGet(\"/greet/casual\", (HttpRequest request) =>\n{\n    if (!request.Query.TryGetValue(\"name\", out var nameValues) || string.IsNullOrWhiteSpace(nameValues.ToString()))\n    {\n        return Results.BadRequest(new { error = \"name is required\" });\n    }\n    var raw = nameValues.ToString().Trim();\n    var normalized = char.ToUpperInvariant(raw[0]) + raw.Substring(1).ToLowerInvariant();\n    return Results.Ok(new { greeting = $\"Hey {normalized}!\" });\n});\n\napp.Run(\"http://0.0.0.0:8054\");\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Program.cs",
+      "content_patterns": [
+        "/greet/formal",
+        "/greet/casual",
+        "8054"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_greet.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\n\nsubprocess.run(['dotnet', 'build', '-c', 'Release', '-o', 'out'], check=True)\ndlls = glob.glob('out/*.dll')\ndll = [d for d in dlls if 'app' in d.lower()][0]\nsrv = subprocess.Popen(['dotnet', dll])\n\ndef get(path):\n    url = f'http://127.0.0.1:8054{path}'\n    try:\n        with urllib.request.urlopen(url, timeout=5) as resp:\n            return resp.status, json.loads(resp.read())\n    except urllib.error.HTTPError as e:\n        try:\n            payload = json.loads(e.read())\n        except Exception:\n            payload = {}\n        return e.code, payload\n\ntry:\n    ok = False\n    for _ in range(40):\n        try:\n            status, payload = get('/greet/formal?name=alice')\n            ok = True\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert ok, 'server never became reachable on :8054'\n    assert status == 200, f'expected 200, got {status}'\n    assert payload.get('greeting') == 'Good day, Alice.', f'unexpected greeting: {payload!r}'\n\n    status2, payload2 = get('/greet/casual?name=alice')\n    assert status2 == 200, f'expected 200, got {status2}'\n    assert payload2.get('greeting') == 'Hey Alice!', f'unexpected greeting: {payload2!r}'\n\n    # Mixed-case input specifically catches a broken refactor that forgets to\n    # lowercase the remainder of the name (an all-lowercase input like\n    # \"alice\" would not expose that regression).\n    status2b, payload2b = get('/greet/formal?name=aliCE')\n    assert status2b == 200, f'expected 200, got {status2b}'\n    assert payload2b.get('greeting') == 'Good day, Alice.', f'unexpected greeting for mixed-case input: {payload2b!r}'\n\n    status3, payload3 = get('/greet/formal')\n    assert status3 == 400, f'expected 400 for missing name, got {status3}'\n\n    status4, payload4 = get('/greet/casual?name=%20%20')\n    assert status4 == 400, f'expected 400 for blank name, got {status4}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\n\nsource = open('Program.cs', encoding='utf-8').read()\noccurrences = source.count('ToUpperInvariant')\nassert occurrences <= 1, f'duplicated validation/normalization logic (\\\"ToUpperInvariant\\\") still appears {occurrences} times across both endpoints - it must be extracted into one shared helper, not copy-pasted'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_greet.py",
+  "check_command_timeout": 100,
+  "timeout": 180
+}

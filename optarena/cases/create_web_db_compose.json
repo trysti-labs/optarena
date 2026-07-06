@@ -1,0 +1,35 @@
+{
+  "name": "create_web_db_compose",
+  "description": "Creates a docker-compose.yml wiring a web app service to a Postgres database service",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "docker",
+    "compose",
+    "postgres"
+  ],
+  "prompts": [
+    "Write a docker-compose.yml at the repo root that defines two services: 'app' and 'db'. 'app' should use the image myorg/webapp:latest, publish host port 8080 to container port 80, set an environment variable DATABASE_URL pointing at the 'db' service (host name 'db', port 5432), and use depends_on so it only starts once 'db' is up. 'db' should use the postgres:15 image, publish host port 5432 to container port 5432, and set POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB environment variables. Do not add any other services."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "services",
+        "app",
+        "db",
+        "postgres"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_compose.py": "import yaml\n\nwith open('docker-compose.yml') as f:\n    data = yaml.safe_load(f)\n\nassert data, 'docker-compose.yml is empty or invalid YAML'\nservices = data.get('services') or {}\nassert 'app' in services, f'missing app service (got: {list(services)})'\nassert 'db' in services, f'missing db service (got: {list(services)})'\n\ndef env_to_dict(env):\n    if env is None:\n        return {}\n    if isinstance(env, dict):\n        return {str(k): str(v) for k, v in env.items()}\n    out = {}\n    for item in env:\n        item = str(item)\n        if '=' in item:\n            k, v = item.split('=', 1)\n            out[k] = v\n        else:\n            out[item] = ''\n    return out\n\napp = services['app']\ndb = services['db']\n\nports = app.get('ports') or []\nassert ports, \"app service has no 'ports' mapping\"\ndef container_port(p):\n    return str(p).split(':')[-1].split('/')[0]\nassert any(container_port(p) == '80' for p in ports), f'app must map a host port to container port 80, got {ports}'\n\napp_env = env_to_dict(app.get('environment'))\nassert app_env, 'app service has no environment variables'\ndb_ref = any('db' in v.lower() for v in app_env.values())\nassert db_ref, f\"app environment should reference the 'db' service by name, got {app_env}\"\n\ndepends_on = app.get('depends_on') or []\nif isinstance(depends_on, dict):\n    depends_on = list(depends_on.keys())\nassert 'db' in depends_on, f\"app service should depend_on 'db', got {depends_on}\"\n\ndb_image = str(db.get('image', ''))\nassert 'postgres' in db_image.lower(), f'db service should use a postgres image, got {db_image!r}'\n\ndb_env = env_to_dict(db.get('environment'))\nassert any('password' in k.lower() for k in db_env), f'db service should set a password env var, got {db_env}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_compose.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

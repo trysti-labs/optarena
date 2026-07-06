@@ -1,0 +1,41 @@
+{
+  "name": "create_cpp_stack_class",
+  "description": "Creates a fixed-capacity int Stack class in a C++ header",
+  "language": "cpp",
+  "domain": "systems",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "stack",
+    "data-structure",
+    "oop"
+  ],
+  "prompts": [
+    "Create a C++ header-only class in a file called stack.h that implements a fixed-capacity stack of ints named `Stack`. Requirements: a default constructor `Stack()` that creates a stack with capacity 100; `void push(int value)` to push a value onto the top; `int pop()` that removes and returns the top value; `int peek() const` that returns the top value without removing it; `bool isEmpty() const` that returns true when the stack has no elements; `bool isFull() const` that returns true when the stack has exactly 100 elements. Do not include a main function in stack.h - it will be #included by other code."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "stack.h",
+      "content_patterns": [
+        "class Stack",
+        "push",
+        "pop",
+        "peek",
+        "isEmpty"
+      ],
+      "regex_patterns": [
+        "bool\\s+isEmpty\\s*\\("
+      ],
+      "min_lines": 5
+    }
+  ],
+  "test_setup_files": {
+    "test_stack_main.cpp": "#include \"stack.h\"\n#include <cassert>\n#include <iostream>\n\nint main() {\n    Stack s;\n    assert(s.isEmpty());\n    assert(!s.isFull());\n\n    s.push(10);\n    s.push(20);\n    s.push(30);\n    assert(!s.isEmpty());\n    assert(s.peek() == 30);\n    assert(s.pop() == 30);\n    assert(s.peek() == 20);\n    assert(s.pop() == 20);\n    assert(s.pop() == 10);\n    assert(s.isEmpty());\n\n    for (int i = 0; i < 100; i++) {\n        s.push(i);\n    }\n    assert(s.isFull());\n    assert(s.peek() == 99);\n\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n",
+    "test_stack.py": "import subprocess\nsubprocess.run(['g++', '-std=c++17', 'test_stack_main.cpp', '-o', 'test_stack_bin'], check=True)\nproc = subprocess.run(['./test_stack_bin'], capture_output=True, text=True, timeout=10)\nassert proc.returncode == 0, f'stack test failed: exit {proc.returncode}, stderr={proc.stderr[-300:]}'\nassert 'PASS' in proc.stdout, f'unexpected output: {proc.stdout!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_stack.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

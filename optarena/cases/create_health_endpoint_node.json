@@ -1,0 +1,27 @@
+{
+  "name": "create_health_endpoint_node",
+  "description": "Creates an Express health-check endpoint",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": ["rest", "http", "health-check", "express"],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "Create an Express server in server.js. Add a GET /health endpoint that responds with JSON {\"status\": \"ok\"}. Have the server listen on port 8002. Do not include a package.json - express is already installed globally."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "server.js",
+      "content_patterns": ["express", "/health", "8002"]
+    }
+  ],
+  "test_setup_files": {
+    "test_health.py": "import subprocess, time, json, urllib.request, urllib.error\nsrv = subprocess.Popen(['node', 'server.js'])\ntry:\n    body = None\n    for _ in range(30):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=1) as resp:\n                assert resp.status == 200, f'expected 200, got {resp.status}'\n                body = json.loads(resp.read())\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert body is not None, 'server never became reachable on :8002'\n    assert body.get('status') == 'ok', f'unexpected body: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_health.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

@@ -1,0 +1,42 @@
+{
+  "name": "fix_vue_computed_bug",
+  "description": "Fixes a Vue computed property that fails to recompute because it reads a non-reactive variable",
+  "language": "javascript",
+  "framework": "vue",
+  "domain": "frontend",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "vue",
+    "computed",
+    "reactivity",
+    "bugfix"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "counter.js exports createCounter(initial), using Vue's Composition API, returning { count, doubled, setMultiplier }. `doubled` is meant to always equal count.value * the current multiplier, and setMultiplier(m) is meant to change that multiplier so doubled immediately reflects the new value. Right now the multiplier is stored in a plain (non-reactive) local variable instead of a ref, so Vue's `computed` never tracks it as a dependency - changing the multiplier via setMultiplier does not cause `doubled` to recompute (it keeps returning the value computed with the old multiplier) until count itself changes. Fix counter.js so the multiplier is reactive (e.g. by storing it in a ref and reading its .value inside the computed getter) so that `doubled` always reflects the latest multiplier immediately after setMultiplier is called, without changing the exported shape { count, doubled, setMultiplier }."
+  ],
+  "setup_files": {
+    "counter.js": "const { ref, computed } = require('vue');\n\nfunction createCounter(initial) {\n  const count = ref(initial || 0);\n  let multiplier = 2; // BUG: plain variable, not reactive - computed won't track it\n\n  const doubled = computed(() => count.value * multiplier);\n\n  function setMultiplier(m) {\n    multiplier = m;\n  }\n\n  return { count, doubled, setMultiplier };\n}\n\nmodule.exports = { createCounter };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "counter.js",
+      "content_patterns": [
+        "createcounter",
+        "computed",
+        "setmultiplier",
+        "module.exports"
+      ],
+      "regex_patterns": [
+        "multiplier\\s*=\\s*ref\\("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_computed.js": "const assert = require('assert');\nconst { createCounter } = require('./counter.js');\n\nconst c = createCounter(5);\nassert.strictEqual(c.doubled.value, 10, `expected initial doubled 10, got ${c.doubled.value}`);\n\nc.setMultiplier(3);\nassert.strictEqual(c.doubled.value, 15, `expected doubled to recompute to 15 after setMultiplier(3), got ${c.doubled.value}`);\n\nc.setMultiplier(1);\nassert.strictEqual(c.doubled.value, 5, `expected doubled to recompute to 5 after setMultiplier(1), got ${c.doubled.value}`);\n\nc.count.value = 10;\nassert.strictEqual(c.doubled.value, 10, `expected doubled 10 after count changes to 10 with multiplier 1, got ${c.doubled.value}`);\n\nc.setMultiplier(4);\nassert.strictEqual(c.doubled.value, 40, `expected doubled 40 after setMultiplier(4) with count 10, got ${c.doubled.value}`);\n\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_computed.js",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

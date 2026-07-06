@@ -1,0 +1,39 @@
+{
+  "name": "fix_sql_injection_query",
+  "description": "Fixes a raw string-concatenation SQL query vulnerable to SQL injection",
+  "language": "sql",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "security",
+    "sql-injection",
+    "sqlite",
+    "parameterized-queries"
+  ],
+  "prompts": [
+    "lookup.py contains a function get_user_by_name(conn, name) that looks up a row in the `users` table (columns: id, name, email) by building a SQL query with plain string concatenation of the `name` argument - a classic SQL injection vulnerability, since a malicious `name` value can change the meaning of the query. Fix get_user_by_name in lookup.py to use a parameterized query (a `?` placeholder with the value passed separately to execute), so it is no longer vulnerable to SQL injection, while still returning the correct row(s) for a normal `name` value."
+  ],
+  "setup_files": {
+    "lookup.py": "import sqlite3\n\n\ndef get_user_by_name(conn, name):\n    query = \"SELECT * FROM users WHERE name = '\" + name + \"'\"\n    cur = conn.execute(query)\n    return cur.fetchall()\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "lookup.py",
+      "content_patterns": [
+        "def get_user_by_name",
+        "execute",
+        "?"
+      ],
+      "not_content_patterns": [
+        "' + name + '"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_injection.py": "import sqlite3\nfrom lookup import get_user_by_name\n\nconn = sqlite3.connect(':memory:')\nconn.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)')\nconn.execute(\"INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com')\")\nconn.execute(\"INSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com')\")\nconn.commit()\n\nrows = get_user_by_name(conn, 'Alice')\nassert len(rows) == 1, f'expected exactly one row for Alice, got {rows!r}'\nassert rows[0][1] == 'Alice', f'expected Alice row, got {rows!r}'\n\nor_injection = get_user_by_name(conn, \"x' OR '1'='1\")\nassert or_injection == [], f'OR-based injection should return no rows for a parameterized query, got {or_injection!r}'\n\ntables = conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='users'\").fetchall()\nassert tables, 'users table is missing'\n\ncount = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]\nassert count == 2, f'expected 2 users to remain untouched, got {count}'\n\nrows2 = get_user_by_name(conn, 'nonexistent')\nassert rows2 == [], f'expected no rows for nonexistent name, got {rows2!r}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_injection.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

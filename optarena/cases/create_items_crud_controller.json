@@ -1,0 +1,43 @@
+{
+  "name": "create_items_crud_controller",
+  "description": "Creates an in-memory /items REST CRUD controller",
+  "language": "java",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "rest",
+    "http",
+    "crud",
+    "spring-boot"
+  ],
+  "docker_image": "optarena-tester-jvm:latest",
+  "prompts": [
+    "This Maven project (pom.xml already uses spring-boot-starter-parent 3.3.4 with spring-boot-starter-web) needs application code under package com.optarena.items, storing items in memory (no database). Create: (1) src/main/java/com/optarena/items/Application.java as the @SpringBootApplication entry point; (2) src/main/java/com/optarena/items/Item.java, a simple model with a numeric `id` and a String `name`; (3) src/main/java/com/optarena/items/ItemsController.java, a @RestController mapped at /items with: GET /items returning the JSON array of all items currently stored (empty array initially); POST /items accepting a JSON body {\"name\": \"...\"} that creates a new item with an auto-generated numeric id, stores it, and returns HTTP 201 Created with the created item as JSON; DELETE /items/{id} that removes the item with that id and returns HTTP 204 No Content if it existed, or HTTP 404 Not Found if no item with that id exists. The app should run on the default port 8080."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>items-crud</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/ItemsController.java",
+      "content_patterns": [
+        "RestController",
+        "/items"
+      ]
+    },
+    {
+      "path_pattern": "**/Application.java",
+      "content_patterns": [
+        "SpringBootApplication"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_items.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\n\nsubprocess.run(['mvn', '-o', '-q', 'package', '-DskipTests'], check=True)\njars = [j for j in glob.glob('target/*.jar') if not j.endswith('.original')]\nassert jars, 'no runnable jar produced under target/'\nsrv = subprocess.Popen(['java', '-jar', jars[0]])\n\ndef wait_ready():\n    for _ in range(40):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8080/items', timeout=1):\n                return True\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    return False\n\ntry:\n    assert wait_ready(), 'server never became reachable on :8080'\n\n    with urllib.request.urlopen('http://127.0.0.1:8080/items', timeout=2) as resp:\n        assert resp.status == 200, f'expected 200, got {resp.status}'\n        body = json.loads(resp.read())\n        assert body == [], f'expected empty list initially, got {body!r}'\n\n    req = urllib.request.Request(\n        'http://127.0.0.1:8080/items', data=json.dumps({'name': 'Widget'}).encode(),\n        headers={'Content-Type': 'application/json'}, method='POST')\n    with urllib.request.urlopen(req, timeout=2) as resp:\n        assert resp.status == 201, f'expected 201, got {resp.status}'\n        created = json.loads(resp.read())\n        assert created.get('name') == 'Widget', f'unexpected created item: {created!r}'\n        assert created.get('id') is not None, f'created item missing id: {created!r}'\n        item_id = created['id']\n\n    with urllib.request.urlopen('http://127.0.0.1:8080/items', timeout=2) as resp:\n        body = json.loads(resp.read())\n        assert len(body) == 1 and body[0]['name'] == 'Widget', f'unexpected list after create: {body!r}'\n\n    req = urllib.request.Request(f'http://127.0.0.1:8080/items/{item_id}', method='DELETE')\n    with urllib.request.urlopen(req, timeout=2) as resp:\n        assert resp.status == 204, f'expected 204, got {resp.status}'\n\n    with urllib.request.urlopen('http://127.0.0.1:8080/items', timeout=2) as resp:\n        body = json.loads(resp.read())\n        assert body == [], f'expected empty list after delete, got {body!r}'\n\n    req = urllib.request.Request('http://127.0.0.1:8080/items/999999', method='DELETE')\n    try:\n        urllib.request.urlopen(req, timeout=2)\n        raise AssertionError('expected 404 when deleting a nonexistent item')\n    except urllib.error.HTTPError as e:\n        assert e.code == 404, f'expected 404, got {e.code}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=10)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_items.py",
+  "check_command_timeout": 120,
+  "timeout": 210
+}

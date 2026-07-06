@@ -1,0 +1,39 @@
+{
+  "name": "add_tests_cpp_stack_class",
+  "description": "Asks the model to write a real assertion-based test file for an already-correct fixed-capacity IntStack class",
+  "language": "cpp",
+  "domain": "systems",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "cpp",
+    "stack",
+    "testing",
+    "cassert"
+  ],
+  "prompts": [
+    "The header int_stack.h (already implemented correctly - do not modify it) defines a fixed-capacity integer stack class `IntStack` with a default capacity of 5. It provides: `void push(int value)` (throws `std::overflow_error` if the stack is full), `int pop()` (throws `std::underflow_error` if empty), `int peek() const` (throws `std::underflow_error` if empty), `bool isEmpty() const`, `bool isFull() const`, and `int size() const`. Write a C++ test file named test_int_stack.cpp that `#include`s int_stack.h and has a `main()` function containing at least 6 separate `assert(...)` calls (from `<cassert>`) that cover: (1) a freshly constructed IntStack `isEmpty()`, (2) pushing several values and popping them back in correct LIFO order, (3) `peek()` returns the top value without removing it, (4) pushing exactly 5 values makes `isFull()` true, (5) calling `pop()` on an empty stack throws `std::underflow_error` (verify with try/catch), (6) calling `push()` on a full stack throws `std::overflow_error` (verify with try/catch). Print `PASS` and `return 0;` at the end if every assertion succeeds."
+  ],
+  "setup_files": {
+    "int_stack.h": "#pragma once\n#include <stdexcept>\n\nclass IntStack {\npublic:\n    explicit IntStack(int capacity = 5) : capacity_(capacity), top_(-1) {\n        data_ = new int[capacity_];\n    }\n\n    ~IntStack() {\n        delete[] data_;\n    }\n\n    void push(int value) {\n        if (isFull()) {\n            throw std::overflow_error(\"IntStack is full\");\n        }\n        data_[++top_] = value;\n    }\n\n    int pop() {\n        if (isEmpty()) {\n            throw std::underflow_error(\"IntStack is empty\");\n        }\n        return data_[top_--];\n    }\n\n    int peek() const {\n        if (isEmpty()) {\n            throw std::underflow_error(\"IntStack is empty\");\n        }\n        return data_[top_];\n    }\n\n    bool isEmpty() const { return top_ == -1; }\n    bool isFull() const { return top_ == capacity_ - 1; }\n    int size() const { return top_ + 1; }\n\nprivate:\n    int* data_;\n    int capacity_;\n    int top_;\n};\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_int_stack.cpp",
+      "content_patterns": [
+        "int_stack.h",
+        "assert",
+        "underflow_error",
+        "overflow_error"
+      ],
+      "regex_patterns": [
+        "assert\\s*\\([\\s\\S]*assert\\s*\\([\\s\\S]*assert\\s*\\([\\s\\S]*assert\\s*\\("
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {},
+  "check_command": "g++ -std=c++17 test_int_stack.cpp -o test_int_stack_bin && ./test_int_stack_bin",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

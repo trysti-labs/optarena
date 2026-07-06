@@ -1,0 +1,38 @@
+{
+  "name": "optimize_c_bubble_to_qsort",
+  "description": "Replaces an O(n^2) bubble sort + O(n^2) dedup with an O(n log n) qsort-based approach",
+  "language": "c",
+  "domain": "systems",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "c",
+    "performance",
+    "sorting",
+    "qsort"
+  ],
+  "prompts": [
+    "The file sort_dedup.c reads a list of integers from stdin (first line: count n, second line: n space-separated integers) and prints the sorted, duplicate-removed list, space-separated, on one line. The current implementation uses an O(n^2) bubble sort and an O(n^2) duplicate-removal pass, which is far too slow for large inputs (n up to 50000). Replace it with an O(n log n) approach - for example `qsort` followed by a single linear pass to drop adjacent duplicates - while producing EXACTLY the same sorted, deduplicated output as before for the same input."
+  ],
+  "setup_files": {
+    "sort_dedup.c": "#include <stdio.h>\n#include <stdlib.h>\n\nvoid bubble_sort(int *arr, int n) {\n    for (int i = 0; i < n - 1; i++) {\n        for (int j = 0; j < n - 1 - i; j++) {\n            if (arr[j] > arr[j + 1]) {\n                int tmp = arr[j];\n                arr[j] = arr[j + 1];\n                arr[j + 1] = tmp;\n            }\n        }\n    }\n}\n\nint main(void) {\n    int n;\n    if (scanf(\"%d\", &n) != 1) return 1;\n    int *arr = malloc(sizeof(int) * (size_t)n);\n    for (int i = 0; i < n; i++) {\n        if (scanf(\"%d\", &arr[i]) != 1) return 1;\n    }\n\n    bubble_sort(arr, n);\n\n    /* O(n^2) dedup: keep an array of uniques, check membership by scanning it */\n    int *uniq = malloc(sizeof(int) * (size_t)n);\n    int ucount = 0;\n    for (int i = 0; i < n; i++) {\n        int found = 0;\n        for (int j = 0; j < ucount; j++) {\n            if (uniq[j] == arr[i]) { found = 1; break; }\n        }\n        if (!found) uniq[ucount++] = arr[i];\n    }\n\n    for (int i = 0; i < ucount; i++) {\n        printf(\"%d\", uniq[i]);\n        if (i != ucount - 1) printf(\" \");\n    }\n    printf(\"\\n\");\n\n    free(arr);\n    free(uniq);\n    return 0;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "sort_dedup.c",
+      "content_patterns": [
+        "int main"
+      ],
+      "not_content_patterns": [
+        "bubble_sort"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "test_perf.py": "import subprocess, time, random\n\nsubprocess.run(['gcc', '-O2', 'sort_dedup.c', '-o', 'sort_dedup_bin'], check=True)\n\nrandom.seed(42)\nn = 70000\nvalues = [random.randint(0, 20000) for _ in range(n)]\ninput_data = f'{n}\\n' + ' '.join(map(str, values)) + '\\n'\nexpected = sorted(set(values))\n\nt0 = time.monotonic()\ntry:\n    proc = subprocess.run(['./sort_dedup_bin'], input=input_data, capture_output=True, text=True, timeout=20)\nexcept subprocess.TimeoutExpired:\n    raise AssertionError('timed out completely (over 20s) - far too slow, still O(n^2)')\nelapsed = time.monotonic() - t0\n\nassert proc.returncode == 0, f'nonzero exit: {proc.returncode}, stderr={proc.stderr[-300:]}'\ngot = list(map(int, proc.stdout.split()))\nassert got == expected, 'output mismatch: sorted/deduplicated result is incorrect'\n\nBUDGET_S = 2.0\nassert elapsed <= BUDGET_S, f'too slow: {elapsed:.2f}s > {BUDGET_S}s budget (likely still O(n^2))'\n\nprint(f'PASS ({elapsed:.2f}s)')\n"
+  },
+  "check_command": "python3 test_perf.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

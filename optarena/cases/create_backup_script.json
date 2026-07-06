@@ -1,0 +1,26 @@
+{
+  "name": "create_backup_script",
+  "description": "Writes a shell script that archives files matching a glob pattern into a timestamped tar.gz backup",
+  "language": "shell",
+  "domain": "devops",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": ["shell", "backup", "tar", "filesystem"],
+  "prompts": [
+    "Write a POSIX shell script called backup.sh that takes three positional arguments, in order: a source directory, a glob pattern (for example '*.txt'), and a destination directory. The script should find all files directly inside the source directory whose names match the pattern, and create a single gzip-compressed tar archive containing just those matching files, written into the destination directory (creating the destination directory first if it does not already exist). Name the archive file so it clearly is a backup and ends in .tar.gz (for example backup_<timestamp>.tar.gz - the exact timestamp format does not matter). If no files in the source directory match the pattern, print an error message to stderr and exit with a non-zero status without creating any archive file."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "backup.sh",
+      "content_patterns": ["tar"],
+      "regex_patterns": ["\\.tar\\.gz"]
+    }
+  ],
+  "test_setup_files": {
+    "test_backup.py": "import subprocess, os, tarfile, glob, shutil\n\nsrc = 'src_data'\ndest = 'dest_backup'\nfor d in (src, dest):\n    if os.path.exists(d):\n        shutil.rmtree(d)\nos.makedirs(src)\n\nwith open(os.path.join(src, 'a.txt'), 'w') as f:\n    f.write('hello world\\n')\nwith open(os.path.join(src, 'b.txt'), 'w') as f:\n    f.write('second file\\n')\nwith open(os.path.join(src, 'c.log'), 'w') as f:\n    f.write('should not be included\\n')\n\nr = subprocess.run(['sh', 'backup.sh', src, '*.txt', dest], capture_output=True, text=True, timeout=20)\nassert r.returncode == 0, f'expected exit 0, got {r.returncode}, stderr={r.stderr!r}'\nassert os.path.isdir(dest), 'destination directory was not created'\n\narchives = glob.glob(os.path.join(dest, '*.tar.gz'))\nassert len(archives) == 1, f'expected exactly one .tar.gz archive in {dest}, found {archives}'\n\nextract_dir = 'extracted_check'\nif os.path.exists(extract_dir):\n    shutil.rmtree(extract_dir)\nos.makedirs(extract_dir)\nwith tarfile.open(archives[0], 'r:gz') as tf:\n    tf.extractall(extract_dir)\n\nnames = set()\ncontents = {}\nfor root, dirs, files in os.walk(extract_dir):\n    for fn in files:\n        names.add(fn)\n        with open(os.path.join(root, fn)) as fh:\n            contents[fn] = fh.read()\n\nassert 'a.txt' in names, f'a.txt missing from archive contents: {names}'\nassert 'b.txt' in names, f'b.txt missing from archive contents: {names}'\nassert 'c.log' not in names, f'c.log should not have been archived: {names}'\nassert 'hello world' in contents['a.txt'], f'a.txt content not preserved: {contents.get(\"a.txt\")!r}'\nassert 'second file' in contents['b.txt'], f'b.txt content not preserved: {contents.get(\"b.txt\")!r}'\n\ndest2 = 'dest_backup_none'\nif os.path.exists(dest2):\n    shutil.rmtree(dest2)\nr2 = subprocess.run(['sh', 'backup.sh', src, '*.doesnotexist', dest2], capture_output=True, text=True, timeout=20)\nassert r2.returncode != 0, 'expected non-zero exit when no files match the pattern'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_backup.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

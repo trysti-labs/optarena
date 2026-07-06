@@ -1,0 +1,35 @@
+{
+  "name": "fix_c_buffer_overflow",
+  "description": "Fixes a classic strcpy stack buffer overflow in a C greeting program",
+  "language": "c",
+  "domain": "systems",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "c",
+    "security",
+    "buffer-overflow",
+    "strcpy"
+  ],
+  "prompts": [
+    "The program in greet.c has a buffer overflow vulnerability: the `greet` function copies an arbitrary-length input string into a fixed 16-byte stack buffer using `strcpy`, with no bounds checking. A long input can overflow the buffer and corrupt memory (undefined behavior, potential crash or exploit). Fix greet.c so it safely handles input of ANY length without overflowing the buffer - for example using `strncpy` with explicit null-termination, or an explicit length check - while preserving its normal behavior for short names: given a line of input on stdin (a name, ending in a newline), it must still print `Hello, <name>!` (with the newline stripped) to stdout, exactly as before, for names shorter than the buffer."
+  ],
+  "setup_files": {
+    "greet.c": "#include <stdio.h>\n#include <string.h>\n\nvoid greet(const char *name) {\n    char buffer[16];\n    strcpy(buffer, name);\n    printf(\"Hello, %s!\\n\", buffer);\n}\n\nint main(void) {\n    char input[4096];\n    if (fgets(input, sizeof(input), stdin) == NULL) {\n        return 1;\n    }\n    size_t len = strlen(input);\n    if (len > 0 && input[len - 1] == '\\n') {\n        input[len - 1] = '\\0';\n    }\n    greet(input);\n    return 0;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "greet.c",
+      "content_patterns": [
+        "int main"
+      ],
+      "min_lines": 5
+    }
+  ],
+  "test_setup_files": {
+    "test_overflow.py": "import subprocess\nsubprocess.run(['gcc', '-fstack-protector-all', 'greet.c', '-o', 'greet_bin'], check=True)\n\n# normal case: short name must still work exactly as before\np1 = subprocess.run(['./greet_bin'], input='Alice\\n', capture_output=True, text=True, timeout=5)\nassert p1.returncode == 0, f'normal input crashed: exit {p1.returncode}'\nassert 'Hello, Alice!' in p1.stdout, f'unexpected output: {p1.stdout!r}'\n\n# malicious case: long input must not crash / corrupt memory\nmalicious = 'A' * 2000 + '\\n'\np2 = subprocess.run(['./greet_bin'], input=malicious, capture_output=True, text=True, timeout=5)\nassert p2.returncode == 0, f'long input crashed/corrupted memory: exit {p2.returncode}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_overflow.py",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

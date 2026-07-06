@@ -1,0 +1,30 @@
+{
+  "name": "optimize_slow_dedup_python",
+  "description": "Optimizes an O(n^2) order-preserving deduplication function to run in O(n) time",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": ["performance", "algorithms", "python"],
+  "docker_image": "optarena-tester-python:latest",
+  "prompts": [
+    "The function `dedup_preserve_order(items)` in dedup.py removes duplicate elements from a list while preserving the order of first occurrence, but it does this by checking membership in a plain Python list it's building up (`if x not in result`), which is O(n) per check and O(n^2) overall for large inputs. Optimize dedup.py so `dedup_preserve_order` runs in O(n) time on average (e.g. by tracking seen elements in a set), while still returning the elements in their original first-occurrence order and still working correctly for lists containing unhashable-safe types like ints and strings."
+  ],
+  "setup_files": {
+    "dedup.py": "def dedup_preserve_order(items):\n    result = []\n    for x in items:\n        if x not in result:\n            result.append(x)\n    return result\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dedup.py",
+      "content_patterns": ["def dedup_preserve_order"],
+      "regex_patterns": ["set\\s*\\("]
+    }
+  ],
+  "test_setup_files": {
+    "test_perf.py": "import time, random\nfrom dedup import dedup_preserve_order\n\n# Correctness on a small sample first.\nsample = [1, 2, 2, 3, 1, 4, 'a', 'a', 'b', 3]\nexpected = [1, 2, 3, 4, 'a', 'b']\nassert dedup_preserve_order(sample) == expected, f'unexpected result: {dedup_preserve_order(sample)!r}'\n\nassert dedup_preserve_order([]) == []\nassert dedup_preserve_order([5]) == [5]\nassert dedup_preserve_order([1, 1, 1, 1]) == [1]\n\n# Performance on a large input - an O(n^2) implementation blows well past this\n# budget; an O(n) one finishes quickly. Timed with time.monotonic() inside the\n# test itself so the failure is a clear assertion, not an ambiguous process\n# timeout.\nrandom.seed(42)\nn = 30000\nbig = [random.randint(0, n // 2) for _ in range(n)]\n\nstart = time.monotonic()\nresult = dedup_preserve_order(big)\nelapsed = time.monotonic() - start\n\nseen = set()\nexpected_big = []\nfor x in big:\n    if x not in seen:\n        seen.add(x)\n        expected_big.append(x)\nassert result == expected_big, 'large-input result does not match expected order-preserving dedup'\n\nassert elapsed < 3.0, f'dedup_preserve_order took {elapsed:.2f}s for n={n}, expected < 3.0s (looks like still O(n^2))'\n\nprint('PASS', 'elapsed=', elapsed)\n"
+  },
+  "check_command": "python3 test_perf.py",
+  "check_command_timeout": 60,
+  "timeout": 150
+}

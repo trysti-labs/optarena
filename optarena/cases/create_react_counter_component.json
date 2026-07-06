@@ -1,0 +1,38 @@
+{
+  "name": "create_react_counter_component",
+  "description": "Creates a React Counter function component rendered via renderToStaticMarkup",
+  "language": "javascript",
+  "framework": "react",
+  "domain": "frontend",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "react",
+    "component",
+    "ssr"
+  ],
+  "docker_image": "optarena-tester-node:latest",
+  "prompts": [
+    "Create a file counter.js that exports a React function component named Counter (module.exports = { Counter };). The component accepts a single prop `count` (a number) and renders a <div> whose text content is exactly `Count: <count>` (for example, for count=5 it renders 'Count: 5'). Do not use JSX syntax - build the element with React.createElement(...) so the file can be required directly by plain Node without a build step. Do not call ReactDOM.render or start any server; just export the component."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "counter.js",
+      "content_patterns": [
+        "counter",
+        "createelement",
+        "module.exports"
+      ],
+      "regex_patterns": [
+        "require\\(['\"]react['\"]\\)"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_counter.js": "const assert = require('assert');\nconst React = require('react');\nconst { renderToStaticMarkup } = require('react-dom/server');\nconst { Counter } = require('./counter.js');\n\nconst markup0 = renderToStaticMarkup(React.createElement(Counter, { count: 0 }));\nassert(markup0.includes('Count: 0'), `expected 'Count: 0' in markup, got: ${markup0}`);\n\nconst markup5 = renderToStaticMarkup(React.createElement(Counter, { count: 5 }));\nassert(markup5.includes('Count: 5'), `expected 'Count: 5' in markup, got: ${markup5}`);\n\nconst markup42 = renderToStaticMarkup(React.createElement(Counter, { count: 42 }));\nassert(markup42.includes('Count: 42'), `expected 'Count: 42' in markup, got: ${markup42}`);\n\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_counter.js",
+  "check_command_timeout": 60,
+  "timeout": 120
+}

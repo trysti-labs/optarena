@@ -1,0 +1,36 @@
+{
+  "name": "optimize_inefficient_stream_loop",
+  "description": "Optimizes an O(n^2) duplicate-finder to run in roughly linear time",
+  "language": "java",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "performance",
+    "algorithms",
+    "spring-boot"
+  ],
+  "docker_image": "optarena-tester-jvm:latest",
+  "prompts": [
+    "DuplicateFinder.findDuplicates(List<Integer> nums) (src/main/java/com/optarena/perf/DuplicateFinder.java) correctly returns every value that appears more than once in `nums`, but it uses a nested loop plus a `.contains()` check on the growing result list, making it O(n^2) - far too slow for large inputs (tens of thousands of elements). Rewrite it to run in roughly linear time using HashSet/HashMap-based counting instead of nested loops or repeated `.contains()` scans, while keeping the exact same public method signature `List<Integer> findDuplicates(List<Integer> nums)` and the same result semantics: every value occurring 2 or more times must appear exactly once in the returned list (the order of the returned list does not matter)."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>dup-finder-perf</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/java/com/optarena/perf/DuplicateFinder.java": "package com.optarena.perf;\n\nimport java.util.ArrayList;\nimport java.util.List;\n\npublic class DuplicateFinder {\n    public List<Integer> findDuplicates(List<Integer> nums) {\n        List<Integer> duplicates = new ArrayList<>();\n        for (int i = 0; i < nums.size(); i++) {\n            for (int j = i + 1; j < nums.size(); j++) {\n                if (nums.get(i).equals(nums.get(j)) && !duplicates.contains(nums.get(i))) {\n                    duplicates.add(nums.get(i));\n                }\n            }\n        }\n        return duplicates;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/DuplicateFinder.java",
+      "content_patterns": [
+        "findDuplicates"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/perf/DuplicateFinderHiddenTest.java": "package com.optarena.perf;\n\nimport org.junit.jupiter.api.Test;\nimport java.util.*;\nimport static org.junit.jupiter.api.Assertions.*;\n\npublic class DuplicateFinderHiddenTest {\n    @Test\n    public void correctnessSmall() {\n        DuplicateFinder f = new DuplicateFinder();\n        List<Integer> input = Arrays.asList(1, 2, 3, 2, 4, 1, 5);\n        Set<Integer> result = new HashSet<>(f.findDuplicates(input));\n        assertEquals(new HashSet<>(Arrays.asList(1, 2)), result);\n    }\n\n    @Test\n    public void performanceLarge() {\n        int n = 100000;\n        List<Integer> input = new ArrayList<>(n);\n        for (int i = 0; i < n; i++) {\n            input.add(i % (n / 2));\n        }\n        DuplicateFinder f = new DuplicateFinder();\n        long start = System.nanoTime();\n        List<Integer> result = f.findDuplicates(input);\n        long elapsedMs = (System.nanoTime() - start) / 1_000_000;\n        assertEquals(n / 2, new HashSet<>(result).size());\n        assertTrue(elapsedMs < 4000, \"findDuplicates took too long: \" + elapsedMs + \"ms (must be well under budget for \" + n + \" elements)\");\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=DuplicateFinderHiddenTest",
+  "check_command_timeout": 60,
+  "timeout": 90
+}
