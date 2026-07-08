@@ -218,9 +218,13 @@ With 10+ drivers, the registry needs three flags the current one lacks:
 | 14 | Case packs + `optarena init` | M | Medium | Done (`optarena init` + `--cases-dir` + scenario `cases_dir`) |
 | 15 | Real test execution (`test_setup_files`) + Docker sandbox | M | Very high | Done (one shared container per run via `docker exec`, not one per call; host fallback) |
 | 16 | `optarena regression` (named regressed/improved cases, CI gate) | S | High | Done (`compare.py`'s `regression_summary`/`format_regression`; exit 1 on regression) |
-| 17 | Richer per-case metrics (diff size, failure class) | S | Medium | Done (`diff_stats`, `classify_failure` in `cases.py`); retries/tool-call counts not implemented (needs per-driver instrumentation) |
+| 17 | Richer per-case metrics (diff size, failure class) | S | Medium | Done (`diff_stats`, `classify_failure` in `cases.py`); turn counts done for claude-code (row 20), retries/tool-call counts for the rest not implemented |
 | 18 | README/positioning rewrite + `WEBSITE.md` brief | S | High (adoption) | Done (Arena framing, Why section, workflow diagram, real dashboard screenshot, regression section) |
 | 19 | Real USD cost (`pricing.py`) + `language` case tag + filter | S | High | Done (found by auditing the v2 website's promises against the code - the leaderboard's Cost/Files-changed/Language columns had no backing data before this) |
+| 20 | Agent-driver token/cost telemetry (aider, claude-code) | M | High | Done 2026-07-08 (`parse_aider_metrics`, `parse_claude_json_metrics`; `--output-format json` for claude-code); opencode/goose/qwen-code/codex still duration-only |
+| 21 | Corpus self-verification (`optarena verify-corpus`, reference/broken solutions) | M | Very high | Done 2026-07-08 (see `CORPUS_EXPANSION_PLAN.md` Priority 0, `ARCH.md` §10.2); found 2 real corpus bugs on its first full run |
+| 22 | Trials stability surfaced in compare/regression (flaky cases, `PASS 2/3`) | S | High | Done 2026-07-08 (`case_deltas`, `regression_summary`) |
+| 23 | Publish sandbox images to a registry (GHCR) | S | Medium | Done 2026-07-08 (`ghcr.io/trysti-labs/optarena/*`, auto-pull fallback, `optarena docker pull`) - supersedes the "not implemented" note in §10.1 of `ARCH.md` |
 
 **2026-07-04 follow-up on item 2:** content-pattern matching alone proved
 insufficient in practice - a small local model wrote valid-looking C++ into a

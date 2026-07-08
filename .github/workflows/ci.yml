@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Unit tests (no Docker)
+        run: OPTARENA_NO_DOCKER=1 python -m unittest discover tests -v
+
+  # Corpus self-verification: every case's reference_solution must PASS the
+  # real Docker-sandboxed oracle, every broken/unmodified variant must FAIL.
+  # Runs when cases or the oracle change; images come from GHCR via the
+  # tool's own pull fallback. Skipped on forks (no image pull access needed,
+  # but keeps PR checks fast).
+  verify-corpus:
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'trysti-labs' || github.repository_owner == 'selfopt'
+    needs: unit-tests
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The sandbox images live on GHCR; login lets the tool's own pull
+      # fallback fetch them even while the packages are private.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify corpus (pulls sandbox images from GHCR on demand)
+        run: python -m optarena verify-corpus

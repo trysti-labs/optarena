@@ -32,6 +32,24 @@ _SYSTEM = (
 )
 
 
+def concrete_target(pattern: str | None) -> Path:
+    """
+    Turn an expected-file `path_pattern` into a concrete path a baseline
+    driver can write to. Patterns are globs ("**/HealthController.java",
+    "*_test.go") - writing them literally creates directories named `**` on
+    POSIX and crashes outright on Windows (`*` is invalid in filenames).
+    Glob-bearing directory parts are dropped and glob metacharacters in the
+    basename become "output" ("*_test.go" -> "output_test.go", "*.tf" ->
+    "output.tf"), which still satisfies the basename glob match.
+    """
+    if not pattern:
+        return Path("output.txt")
+    parts = Path(pattern).parts
+    dirs = [p for p in parts[:-1] if not any(ch in p for ch in "*?[]")]
+    name = re.sub(r"[*?\[\]]+", "output", parts[-1]) if parts else "output.txt"
+    return Path(*dirs, name)
+
+
 def _post_json(url: str, payload: dict, timeout: int, headers: dict | None = None) -> dict:
     req = urllib.request.Request(
         url,
@@ -74,7 +92,7 @@ class OpenAIChatDriver(Driver):
 
         expected = case.get("expected_files", [])
         # The baseline writes files itself: target the first expected path per prompt.
-        target = Path(expected[0]["path_pattern"]) if expected else Path("output.txt")
+        target = concrete_target(expected[0]["path_pattern"] if expected else None)
 
         t0 = time.monotonic()
         try:

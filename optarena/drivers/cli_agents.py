@@ -22,6 +22,7 @@ invocation shapes track each tool's documented headless mode.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -31,6 +32,41 @@ from pathlib import Path
 from ..cases import changed_files, evaluate_case, snapshot, write_setup_files
 from ..scenario import Scenario
 from .base import CaseResult, Driver
+
+
+def parse_claude_json_metrics(stdout: str) -> dict:
+    """
+    Token/cost/turn metrics from `claude -p --output-format json`, whose
+    stdout is one JSON result object with `usage`, `total_cost_usd` and
+    `num_turns`. Scans lines from the end (permission-mode banners may
+    precede the JSON). Empty dict when no result object is found - absent
+    metrics stay absent rather than reading as zero.
+    """
+    for line in reversed((stdout or "").splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if data.get("type") != "result" and "usage" not in data:
+            continue
+        out: dict = {}
+        usage = data.get("usage") or {}
+        if usage:
+            out["prompt_tokens"] = (usage.get("input_tokens", 0)
+                                    + usage.get("cache_creation_input_tokens", 0)
+                                    + usage.get("cache_read_input_tokens", 0))
+            out["completion_tokens"] = usage.get("output_tokens", 0)
+            if usage.get("cache_read_input_tokens"):
+                out["cache_read_tokens"] = usage["cache_read_input_tokens"]
+        if data.get("total_cost_usd") is not None:
+            out["cost_usd"] = float(data["total_cost_usd"])
+        if data.get("num_turns"):
+            out["turns"] = int(data["num_turns"])
+        return out
+    return {}
 
 
 def _scenario_openai_env(backend) -> dict:
@@ -48,13 +84,18 @@ CLI_AGENTS: dict[str, dict] = {
         "label":    "Claude Code",
         "binaries": ["claude"],
         "backend":  "fixed",       # uses the logged-in Anthropic account
+        # --output-format json: same run, but stdout carries usage tokens,
+        # total_cost_usd and num_turns, so this driver reports real cost
+        # alongside the baselines instead of duration-only.
         "argv":     lambda prompt, backend: [
             "-p", prompt, "--dangerously-skip-permissions",
+            "--output-format", "json",
         ],
         "env":      lambda backend: {},
         # Nested runs from inside an editor terminal must not inherit the
         # parent session's context.
         "scrub_env_prefixes": ("CLAUDE",),
+        "parse_metrics": parse_claude_json_metrics,
     },
     "codex": {
         "label":    "Codex CLI",
@@ -148,6 +189,10 @@ class CLIAgentDriver(Driver):
                     capture_output=True, text=True, timeout=timeout,
                     encoding="utf-8", errors="replace",
                 )
+                parse = self.spec.get("parse_metrics")
+                if parse:
+                    for key, val in parse(proc.stdout).items():
+                        result.extra[key] = result.extra.get(key, 0) + val
                 if proc.returncode != 0:
                     result.extra.setdefault("stderr", "")
                     result.extra["stderr"] += (proc.stderr or "")[-800:]

@@ -6,7 +6,11 @@
   "domain": "backend",
   "difficulty": 1,
   "task_type": "testing",
-  "tags": ["flask", "testing", "pytest"],
+  "tags": [
+    "flask",
+    "testing",
+    "pytest"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "The Flask app in app.py (already working, do not modify it) exposes POST /divide, which accepts a JSON body {\"a\": number, \"b\": number} and returns {\"result\": a / b} with status 200, or, when b is 0, returns status 400 with a JSON body containing an \"error\" key (no division is performed). Write tests for this endpoint in test_app.py using pytest and Flask's built-in test client (`app.test_client()`). Cover at least: (1) a normal division that succeeds with the correct result, (2) division by zero returns a 400 with an error field, (3) a missing required field (e.g. no \"b\" key) is handled gracefully (does not crash the test process, and is not treated as a 200 success). Use plain `assert` statements so pytest can collect them."
@@ -17,13 +21,34 @@
   "expected_files": [
     {
       "path_pattern": "test_app.py",
-      "content_patterns": ["def test_", "assert", "test_client", "/divide", "400"],
-      "regex_patterns": ["def\\s+test_\\w+\\s*\\("],
+      "content_patterns": [
+        "def test_",
+        "assert",
+        "test_client",
+        "/divide",
+        "400"
+      ],
+      "regex_patterns": [
+        "def\\s+test_\\w+\\s*\\("
+      ],
       "min_lines": 10
     }
   ],
-  "test_setup_files": {},
-  "check_command": "python3 -m pytest test_app.py -q",
-  "check_command_timeout": 60,
-  "timeout": 150
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path('app.py')\nTEST_CMD = 'python3 -m pytest test_app.py -q'\n# Each entry is one mutant: a list of (original, replacement) edits applied\n# together. Every `original` anchor must appear exactly once in the pristine\n# implementation - which also enforces the prompt's \"do not modify it\".\nMUTANTS = [ [ [ \"    return jsonify({'result': a / b}), 200\", \"    return jsonify({'result': a * b}), 200\" ] ], [ [ \"    if b == 0:\", \"    if b == 0 and False:\" ] ] ]\n\ndef run_tests():\n    # Python caches bytecode by (mtime-seconds, size); a same-length\n    # mutant written within the same second would run the STALE pyc of\n    # the unmutated source. Clear the cache so every run compiles fresh.\n    shutil.rmtree('__pycache__', ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "check_command_timeout": 120,
+  "timeout": 150,
+  "reference_solution": {
+    "test_app.py": "import json\nfrom app import app\n\ndef test_normal_division():\n    r = app.test_client().post('/divide', json={'a': 8, 'b': 2})\n    assert r.status_code == 200 and r.get_json()['result'] == 4.0\n\ndef test_divide_by_zero():\n    r = app.test_client().post('/divide', json={'a': 1, 'b': 0})\n    assert r.status_code == 400 and 'error' in r.get_json()\n\ndef test_missing_field():\n    r = app.test_client().post('/divide', json={'a': 1})\n    assert r.status_code != 200\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_app.py": "def test_nothing():\n    assert True\n"
+      }
+    }
+  ]
 }

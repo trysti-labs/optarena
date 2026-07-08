@@ -12,7 +12,8 @@ Command-line interface.
     optarena  (or: python -m optarena) serve [--port 8300]
     optarena  (or: python -m optarena) doctor [--base-url URL]
     optarena  (or: python -m optarena) init [dir]
-    optarena  (or: python -m optarena) docker build
+    optarena  (or: python -m optarena) docker build|pull [--lang X|--all]
+    optarena  (or: python -m optarena) verify-corpus [--cases a,b]
 
 Passing two --scenario files to `run` executes both and prints + saves the
 comparison automatically.
@@ -66,6 +67,13 @@ def cmd_run(args) -> int:
     if args.cases_dir:
         for sc in scenarios:
             sc.cases_dir = sc.cases_dir or args.cases_dir
+    # --language/--framework must narrow file scenarios too, not just inline
+    # ones (previously they were silently ignored alongside --scenario).
+    if getattr(args, "language", None) or getattr(args, "framework", None):
+        for sc in scenarios:
+            loaded = load_cases(sc.cases, cases_dir=sc.cases_dir)
+            sc.cases = [c["name"] for c in filter_cases(
+                loaded, language=args.language, framework=args.framework)]
     matrix_drivers = (args.matrix_drivers or "").split(",") if args.matrix_drivers else []
     matrix_models = (args.matrix_models or "").split(",") if args.matrix_models else []
     if matrix_drivers or matrix_models:
@@ -164,8 +172,20 @@ def cmd_serve(args) -> int:
 
 
 def cmd_docker(args) -> int:
-    """Build (or rebuild) one or all of the `optarena-tester*` sandbox images."""
+    """Build (or pull) one or all of the `optarena-tester*` sandbox images."""
     import subprocess as _sp
+
+    if args.action == "pull":
+        from .cases import docker_image_pull, docker_image_available
+        langs = list(DOCKER_IMAGES) if args.all else [args.lang or "base"]
+        overall = 0
+        for lang in langs:
+            image = DOCKER_IMAGES[lang]
+            if docker_image_available(image):
+                print(f"  {image} already present")
+            elif not docker_image_pull(image):
+                overall = 1
+        return overall
 
     if args.action != "build":
         print(f"unknown docker action: {args.action}", file=sys.stderr)
@@ -293,6 +313,30 @@ def cmd_doctor(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_verify_corpus(args) -> int:
+    """
+    Corpus self-verification (CI gate): every case's reference_solution must
+    PASS the real oracle and every broken/unmodified variant must FAIL it.
+    See optarena/verify.py for the schema and rationale.
+    """
+    from .verify import verify_cases
+
+    names = args.cases.split(",") if args.cases else None
+    cases = load_cases(names, cases_dir=args.cases_dir)
+    cases = filter_cases(cases, language=getattr(args, "language", None),
+                         framework=getattr(args, "framework", None))
+    violations, checked, skipped = verify_cases(cases)
+    print(f"\n  verify-corpus: {checked} variant(s) checked across "
+          f"{len(cases) - skipped} case(s); {skipped} case(s) declare no variants")
+    if violations:
+        print(f"  {len(violations)} VIOLATION(S):")
+        for v in violations:
+            print(f"    - {v}")
+        return 1
+    print("  all verified")
+    return 0
+
+
 _SAMPLE_CASE = """{
   "name": "sample_hello",
   "description": "Creates hello.py that prints Hello World (edit me)",
@@ -382,11 +426,20 @@ def main(argv: list[str] | None = None) -> int:
     p_init.add_argument("dir", nargs="?", default="cases", help="target directory (default ./cases)")
     p_init.set_defaults(fn=cmd_init)
 
+    p_ver = sub.add_parser("verify-corpus",
+                           help="CI gate: reference solutions must pass the oracle, broken variants must fail")
+    p_ver.add_argument("--cases", help="comma-separated case names (default all)")
+    p_ver.add_argument("--cases-dir", help="load cases from this directory")
+    p_ver.add_argument("--language", help="only verify cases tagged with this language")
+    p_ver.add_argument("--framework", help="only verify cases tagged with this framework")
+    p_ver.set_defaults(fn=cmd_verify_corpus)
+
     p_docker = sub.add_parser("docker", help="manage the optarena-tester sandbox image(s)")
-    p_docker.add_argument("action", choices=["build"])
+    p_docker.add_argument("action", choices=["build", "pull"],
+                          help="build locally, or pull the published ghcr.io images")
     p_docker.add_argument("--lang", choices=list(DOCKER_IMAGES),
-                          help="build only this track's image (default: base)")
-    p_docker.add_argument("--all", action="store_true", help="build every registered image")
+                          help="only this track's image (default: base)")
+    p_docker.add_argument("--all", action="store_true", help="every registered image")
     p_docker.set_defaults(fn=cmd_docker)
 
     args = parser.parse_args(argv)

@@ -6,7 +6,12 @@
   "domain": "backend",
   "difficulty": 1,
   "task_type": "feature",
-  "tags": ["rest", "http", "health-check", "spring-boot"],
+  "tags": [
+    "rest",
+    "http",
+    "health-check",
+    "spring-boot"
+  ],
   "docker_image": "optarena-tester-jvm:latest",
   "prompts": [
     "This Maven project (pom.xml already uses spring-boot-starter-parent 3.3.4 with spring-boot-starter-web) needs its application code under package com.optarena.health. Create src/main/java/com/optarena/health/Application.java as the @SpringBootApplication entry point, and src/main/java/com/optarena/health/HealthController.java as a @RestController with a GET /health endpoint that returns {\"status\": \"ok\"} as JSON. The app should run on the default port 8080."
@@ -17,17 +22,26 @@
   "expected_files": [
     {
       "path_pattern": "**/HealthController.java",
-      "content_patterns": ["RestController", "/health"]
+      "content_patterns": [
+        "RestController",
+        "/health"
+      ]
     },
     {
       "path_pattern": "**/Application.java",
-      "content_patterns": ["SpringBootApplication"]
+      "content_patterns": [
+        "SpringBootApplication"
+      ]
     }
   ],
   "test_setup_files": {
-    "test_health.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\nsubprocess.run(['mvn', '-o', '-q', 'package', '-DskipTests'], check=True)\njars = [j for j in glob.glob('target/*.jar') if not j.endswith('.original')]\nassert jars, 'no runnable jar produced under target/'\nsrv = subprocess.Popen(['java', '-jar', jars[0]])\ntry:\n    body = None\n    for _ in range(40):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=1) as resp:\n                assert resp.status == 200, f'expected 200, got {resp.status}'\n                body = json.loads(resp.read())\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert body is not None, 'server never became reachable on :8080'\n    assert body.get('status') == 'ok', f'unexpected body: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=10)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+    "test_health.py": "import subprocess, sys, time, json, glob, urllib.request, urllib.error\nsubprocess.run(['mvn', '-o', '-q', 'package', '-DskipTests'], check=True)\njars = [j for j in glob.glob('target/*.jar') if not j.endswith('.original')]\nassert jars, 'no runnable jar produced under target/'\nsrv = subprocess.Popen(['java', '-jar', jars[0], '--server.port=8061'])\ntry:\n    body = None\n    for _ in range(40):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8061/health', timeout=1) as resp:\n                assert resp.status == 200, f'expected 200, got {resp.status}'\n                body = json.loads(resp.read())\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert body is not None, 'server never became reachable on :8061'\n    assert body.get('status') == 'ok', f'unexpected body: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=10)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
   },
   "check_command": "python3 test_health.py",
   "check_command_timeout": 120,
-  "timeout": 210
+  "timeout": 210,
+  "reference_solution": {
+    "src/main/java/com/optarena/health/Application.java": "package com.optarena.health;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n\n@SpringBootApplication\npublic class Application {\n    public static void main(String[] args) {\n        SpringApplication.run(Application.class, args);\n    }\n}\n",
+    "src/main/java/com/optarena/health/HealthController.java": "package com.optarena.health;\n\nimport java.util.Map;\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class HealthController {\n    @GetMapping(\"/health\")\n    public Map<String, String> health() {\n        return Map.of(\"status\", \"ok\");\n    }\n}\n"
+  }
 }

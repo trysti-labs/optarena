@@ -50,9 +50,8 @@ a keyword shows up in a file.
 
 ## See it in action
 
-![OptArena dashboard comparing a raw small model against a larger model - 14% vs 100% pass rate](website/screenshots/leaderboard.png)
-
-A real comparison from this repo's own case suite, not a mockup:
+A real comparison from this repo's own case suite, not a mockup
+(dashboard at `optarena serve` renders the same data):
 
 ```bash
 optarena run --driver ollama-chat --name raw-gemma3-1b --model gemma3:1b
@@ -122,17 +121,23 @@ optarena compare cline-selfopt cline-ollama-direct
 # Dashboard at http://localhost:8300/dashboard/
 optarena serve
 
-# Build the base sandbox image (gcc + python3 + node) - check_command runs inside it
-optarena docker build
+# Sandbox images - check_command runs inside them. Pull the published images
+# (ghcr.io/trysti-labs/optarena/*, minutes) or build locally (~30 min):
+optarena docker pull --all       # every registered image, from GHCR
+optarena docker build            # base image (gcc + python3 + node), locally
+optarena docker build --lang go  # one per-language track
+optarena docker build --all      # everything, locally
+# (a run also auto-pulls a missing image on first use; OPTARENA_NO_PULL=1 disables)
 
-# Build a per-language image for the benchmark-corpus tracks (python/node/jvm/go/rust/dotnet)
-optarena docker build --lang go
-optarena docker build --all      # every registered image
+# Corpus self-verification (CI gate): reference solutions must PASS the real
+# oracle, broken/unmodified variants must FAIL it
+optarena verify-corpus
 
 # Preflight: which drivers/extensions/backends are ready on this machine
 optarena doctor
 
 # Stochastic-agent honesty: run each case 3 times, majority verdict + pass@k detail
+# (use an odd N - a tie, e.g. 1 pass / 1 fail at --trials 2, counts as FAIL)
 optarena run --driver ollama-chat --name baseline --trials 3
 
 # Parallel fan-out for baselines/CLI drivers; matrix across drivers x models
@@ -177,6 +182,14 @@ file, so backend-vs-backend comparisons are valid. `fixed` drivers (Claude
 Code, Codex) use their own account/provider - tool-vs-tool comparisons only.
 `optarena doctor` shows which drivers can actually run on your machine.
 
+**Baseline caveat**: the raw-model baselines (and the bare crewAI agent)
+have no file tools - they write the model's single code block to the case's
+*first* expected path themselves. Cases that require several files or a
+project layout (e.g. the Maven-tree Java cases) are therefore effectively
+agent-only: a baseline fails them by construction, which *is* part of what
+"agent vs no-agent" measures, but don't read those specific failures as a
+statement about the model.
+
 Adding a driver = one file in `optarena/drivers/` implementing
 `run_case(case, scenario, workspace) -> CaseResult`, plus a registry line.
 Everything else - runner, metrics, compare, dashboard - is driver-agnostic.
@@ -200,7 +213,7 @@ compile-and-run harness) written into the workspace **after** the model's
 run, so the model never sees what it's graded against. All 120 built-in
 cases use this, spanning the Phase 1 benchmark-corpus target from
 `OptArena_Benchmark_Corpus_Specification.md`: Python (20, FastAPI/Flask/
-Django/SQLAlchemy/Pydantic/Typer), JavaScript/TypeScript (20, Express/
+SQLAlchemy/Pydantic/Typer), JavaScript/TypeScript (20, Express/
 NestJS/React/Vue/plain Node), Java (15, Spring Boot), Go (10, Gin/Fiber),
 Rust (10, Axum/Actix-web), C# (10, ASP.NET Core), C/C++ (10), SQL (10),
 Shell (5), Docker Compose (5, static validation only), and Terraform (5,
@@ -208,7 +221,12 @@ Shell (5), Docker Compose (5, static validation only), and Terraform (5,
 the spec's task categories (feature, bug fix, refactoring, testing,
 security, performance, devops) and was hand-verified end-to-end - a correct
 reference solution passes, a broken one fails - before being counted as
-done; see `ARCH.md` for exactly what's built versus explicitly deferred
+done. The testing-category cases (`add_tests_*`) are additionally
+**mutation-checked**: the hidden oracle first runs the model's tests against
+the correct implementation (they must pass), then against deliberately broken
+variants of it (each must make the tests fail) - so a vacuous test file that
+matches the keyword shape but asserts nothing real cannot pass. See `ARCH.md`
+for exactly what's built versus explicitly deferred
 (the full corpus is 100-150 cases; the rest of that range, plus
 repository-scale Level 3+ benchmarks, is future work).
 
@@ -264,8 +282,21 @@ Per-case metrics: pass/fail, failure reasons and class, wall time, files
 created/changed, an approximate diff size, tokens and USD cost (where the
 backend reports usage - local Ollama/LM Studio backends are always free,
 paid models are priced from a built-in table, `optarena/pricing.py`,
-overridable via `~/.optarena/pricing.json`). `compare` adds per-case deltas
-and a verdict (more-accurate / faster / cheaper).
+overridable via `~/.optarena/pricing.json`). The aider and claude-code
+drivers report real token/cost figures parsed from their own output
+(claude-code adds `turns`), so agent-vs-agent cost comparisons don't
+silently degrade to duration-only. `compare` adds per-case deltas and a
+verdict (more-accurate / faster / cheaper), p95 duration, and - with
+`--trials N` - a per-case stability marker (`PASS 2/3`) plus a flaky-case
+list, so a majority verdict with dissenting trials is never presented as a
+unanimous one.
+
+Cases can also declare a `reference_solution` (must PASS the full oracle)
+and `broken_solutions` (each must FAIL it); `optarena verify-corpus` replays
+them through the real sandboxed oracle and exits non-zero on any violation -
+the CI gate that keeps the corpus honest as cases evolve. For bug_fix/
+refactoring/performance/security cases it also auto-checks that an untouched
+workspace fails ("the model changed nothing" must never score a pass).
 
 Cases can also declare `"language"`/`"framework"` tags, plus free-form
 benchmark-corpus metadata (`domain`, `difficulty`, `task_type`, `tags` - see

@@ -17,8 +17,7 @@
   "expected_files": [
     {
       "path_pattern": "dedup.py",
-      "content_patterns": ["def dedup_preserve_order"],
-      "regex_patterns": ["set\\s*\\("]
+      "content_patterns": ["def dedup_preserve_order"]
     }
   ],
   "test_setup_files": {

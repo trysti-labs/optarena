@@ -9,6 +9,7 @@ printed as a terminal table.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -54,7 +55,10 @@ def _cheaper(a_label: str, b_label: str, sa: dict, sb: dict) -> str | None:
 def save_comparison(cmp: dict) -> Path:
     out_dir = RESULTS_DIR / "comparisons"
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = f"{time.strftime('%Y%m%d-%H%M%S')}_{cmp['a']['label']}_vs_{cmp['b']['label']}.json"
+    # Labels are scenario names, which can embed model ids with "/" or ":" -
+    # sanitize so the comparison file lands where intended on every platform.
+    safe = lambda s: re.sub(r"[^\w.\-+]+", "-", s)  # noqa: E731
+    name = f"{time.strftime('%Y%m%d-%H%M%S')}_{safe(cmp['a']['label'])}_vs_{safe(cmp['b']['label'])}.json"
     path = out_dir / name
     from .store import _write_atomic
     _write_atomic(path, json.dumps(cmp, indent=2))
@@ -70,6 +74,15 @@ def regression_summary(cmp: dict) -> dict:
     """
     regressed = [r["case"] for r in cmp["cases"] if r["a_passed"] and not r["b_passed"]]
     improved = [r["case"] for r in cmp["cases"] if not r["a_passed"] and r["b_passed"]]
+
+    def _is_flaky(marker):     # "2/3" -> True, "3/3"/"0/3"/None -> False
+        if not marker:
+            return False
+        passes, trials = marker.split("/")
+        return 0 < int(passes) < int(trials)
+
+    flaky = [r["case"] for r in cmp["cases"]
+             if _is_flaky(r.get("a_trials")) or _is_flaky(r.get("b_trials"))]
     sa, sb = cmp["a"]["summary"], cmp["b"]["summary"]
     ta, tb = sa.get("total_tokens"), sb.get("total_tokens")
     token_delta = (tb - ta) if (ta is not None and tb is not None) else None
@@ -88,6 +101,7 @@ def regression_summary(cmp: dict) -> dict:
         "cost_a": ca, "cost_b": cb, "cost_delta": cost_delta, "cost_delta_pct": cost_delta_pct,
         "regressed_cases": regressed,
         "improved_cases": improved,
+        "flaky_cases": flaky,
     }
 
 
@@ -126,6 +140,11 @@ def format_regression(summary: dict) -> str:
         lines.append(f"    - {name}")
     if not s["improved_cases"]:
         lines.append("    (none)")
+    if s.get("flaky_cases"):
+        lines.append("")
+        lines.append(f"  flaky cases (non-unanimous across --trials): {len(s['flaky_cases'])}")
+        for name in s["flaky_cases"]:
+            lines.append(f"    - {name}")
     lines.append("")
     return "\n".join(lines)
 
@@ -141,10 +160,16 @@ def format_table(cmp: dict) -> str:
         f"  {'-'*30} {'-'*10} {'-'*10} {'-'*8} {'-'*8}",
     ]
     for row in cmp["cases"]:
-        mark = lambda v: "-" if v is None else ("PASS" if v else "fail")  # noqa: E731
+        # "PASS 2/3" for --trials runs - a majority verdict with dissenting
+        # trials is a weaker claim than a unanimous one, and hiding that is
+        # how flaky agents get oversold.
+        def mark(v, trials):
+            base = "-" if v is None else ("PASS" if v else "fail")
+            return f"{base} {trials}" if trials else base
         t = lambda v: "-" if v is None else f"{v:.1f}s"                    # noqa: E731
         lines.append(
-            f"  {row['case']:30} {mark(row['a_passed']):>10} {mark(row['b_passed']):>10} "
+            f"  {row['case']:30} {mark(row['a_passed'], row.get('a_trials')):>10} "
+            f"{mark(row['b_passed'], row.get('b_trials')):>10} "
             f"{t(row['a_duration_s']):>8} {t(row['b_duration_s']):>8}"
         )
     sa, sb = a["summary"], b["summary"]
@@ -156,6 +181,13 @@ def format_table(cmp: dict) -> str:
         f"  mean duration: {sa['mean_duration_s']:.1f}s vs {sb['mean_duration_s']:.1f}s"
         f"   -> faster: {v['faster']}",
     ]
+    if sa.get("p95_duration_s") is not None and sb.get("p95_duration_s") is not None:
+        lines.append(
+            f"  p95 duration:  {sa['p95_duration_s']:.1f}s vs {sb['p95_duration_s']:.1f}s")
+    if sa.get("flaky_cases") or sb.get("flaky_cases"):
+        lines.append(
+            f"  flaky cases:   {sa.get('flaky_cases', 0)}  vs  {sb.get('flaky_cases', 0)}"
+            f"   (non-unanimous across --trials)")
     if v.get("cheaper"):
         ca = sa.get("total_cost_usd") or 0.0
         cb = sb.get("total_cost_usd") or 0.0

@@ -6,7 +6,12 @@
   "domain": "backend",
   "difficulty": 1,
   "task_type": "feature",
-  "tags": ["rest", "http", "health-check", "axum"],
+  "tags": [
+    "rest",
+    "http",
+    "health-check",
+    "axum"
+  ],
   "docker_image": "optarena-tester-rust:latest",
   "prompts": [
     "This Cargo project (Cargo.toml already lists axum, tokio, serde, and serde_json as dependencies) needs a src/main.rs. Using Axum, create a GET /health endpoint that responds with JSON {\"status\": \"ok\"}, and have the server listen on 0.0.0.0:8004."
@@ -17,13 +22,20 @@
   "expected_files": [
     {
       "path_pattern": "src/main.rs",
-      "content_patterns": ["axum", "/health", "8004"]
+      "content_patterns": [
+        "axum",
+        "/health",
+        "8004"
+      ]
     }
   ],
   "test_setup_files": {
-    "test_health.py": "import subprocess, sys, time, json, urllib.request, urllib.error\nsubprocess.run(['cargo', 'build', '--offline'], check=True)\nbin_path = './target/debug/health_endpoint'\nsrv = subprocess.Popen([bin_path])\ntry:\n    body = None\n    for _ in range(30):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=1) as resp:\n                assert resp.status == 200, f'expected 200, got {resp.status}'\n                body = json.loads(resp.read())\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert body is not None, 'server never became reachable on :8004'\n    assert body.get('status') == 'ok', f'unexpected body: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
+    "test_health.py": "import subprocess, sys, time, json, urllib.request, urllib.error, os\nsubprocess.run(['cargo', 'build', '--offline'], check=True)\nbin_path = os.path.join(os.environ.get('CARGO_TARGET_DIR', 'target'), 'debug', 'health_endpoint')\nsrv = subprocess.Popen([bin_path])\ntry:\n    body = None\n    for _ in range(30):\n        try:\n            with urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=1) as resp:\n                assert resp.status == 200, f'expected 200, got {resp.status}'\n                body = json.loads(resp.read())\n            break\n        except (urllib.error.URLError, ConnectionResetError):\n            time.sleep(0.5)\n    assert body is not None, 'server never became reachable on :8004'\n    assert body.get('status') == 'ok', f'unexpected body: {body!r}'\nfinally:\n    srv.terminate()\n    try:\n        srv.wait(timeout=5)\n    except Exception:\n        srv.kill()\nprint('PASS')\n"
   },
   "check_command": "python3 test_health.py",
-  "check_command_timeout": 90,
-  "timeout": 180
+  "check_command_timeout": 180,
+  "timeout": 180,
+  "reference_solution": {
+    "src/main.rs": "use axum::{routing::get, Json, Router};\nuse serde_json::{json, Value};\n\nasync fn health() -> Json<Value> {\n    Json(json!({\"status\": \"ok\"}))\n}\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new().route(\"/health\", get(health));\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8004\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  }
 }

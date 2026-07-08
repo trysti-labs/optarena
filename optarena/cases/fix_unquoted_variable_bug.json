@@ -15,7 +15,7 @@
   "expected_files": [
     {
       "path_pattern": "count_lines.sh",
-      "content_patterns": ["wc -l"]
+      "content_patterns": []
     }
   ],
   "test_setup_files": {

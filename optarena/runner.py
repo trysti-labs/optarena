@@ -16,6 +16,8 @@ Optional (both default to the historical behaviour):
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import statistics
 import tempfile
@@ -29,6 +31,17 @@ from .drivers import get_driver
 from .drivers.base import CaseResult
 from .metrics import aggregate
 from .scenario import Scenario
+
+
+def safe_run_name(name: str) -> str:
+    """
+    Filename-safe form of a scenario name. Names default to
+    `<driver>-<model>`, and model ids routinely contain "/" (openrouter-style
+    ids) or ":" (Ollama tags) - written literally, "/" makes store.save_run
+    fail with FileNotFoundError AFTER the whole run has been paid for, and
+    ":" breaks Windows. Squash anything path-hostile.
+    """
+    return re.sub(r"[^\w.\-+]+", "-", name)
 
 
 @dataclass
@@ -161,7 +174,7 @@ def run_scenario(
         print(f"  [runner] NOTE: {scenario.driver} is not parallel-safe; running serially")
         parallel = 1
 
-    run_id = f"{time.strftime('%Y%m%d-%H%M%S')}_{scenario.name}"
+    run_id = f"{time.strftime('%Y%m%d-%H%M%S')}_{safe_run_name(scenario.name)}"
     record = RunRecord(
         run_id=run_id,
         scenario=scenario.to_dict(),
@@ -182,8 +195,12 @@ def run_scenario(
     # started for images some case actually needs via check_command; a no-op
     # (and no print) otherwise or when Docker/the image isn't available
     # (run_check_command then falls back to the host for that case).
+    # Resolve each case's image exactly the way run_check_command will
+    # (including the OPTARENA_DOCKER_IMAGE override) - otherwise a run with
+    # the override set would start a sandbox for the wrong image and every
+    # check would silently fall back to one ephemeral `docker run` per call.
     images_needed = {
-        c.get("docker_image") or DOCKER_IMAGE_DEFAULT
+        c.get("docker_image") or os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
         for c in cases if c.get("check_command")
     }
     sandboxes = [DockerSandbox(root, image=image) for image in images_needed]

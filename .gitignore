@@ -22,3 +22,6 @@ website-docs/
 # OS noise
 Thumbs.db
 .DS_Store
+
+# local secrets
+.env
