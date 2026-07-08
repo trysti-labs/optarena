@@ -25,10 +25,21 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository_owner == 'trysti-labs' || github.repository_owner == 'selfopt'
     needs: unit-tests
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # The sandbox images live on GHCR; login lets the tool's own pull
+      # fallback fetch them even while the packages are private.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify corpus (pulls sandbox images from GHCR on demand)
         run: python -m optarena verify-corpus
