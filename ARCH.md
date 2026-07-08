@@ -632,21 +632,39 @@ directory to load the extension under test.
 
 Near-term:
 - **Headless CI mode** - Xvfb on Linux for UI drivers; baselines/CLI drivers
-  already run headless.
+  already run headless. Not implemented.
 - **More drivers** - Cline CLI (headless `cline --auto-approve`), OpenHands,
-  Continue CLI, Copilot agent mode when automatable.
-- **Richer oracles** - optional per-case build/test command (compile the C
-  file, run pytest) on top of content patterns; optional LLM-judge scoring
-  with the judge itself a pluggable backend.
-- **Run matrix** - `optarena run --matrix` (drivers × backends) with a matrix
-  dashboard view.
-- **Parallelism** - baselines/CLI drivers can fan out per-case; UI drivers
-  stay serial (one display).
+  Continue CLI, Copilot agent mode when automatable. `opencode`/`goose`/
+  `qwen-code`/`codex` descriptors shipped (experimental); the rest open.
+- **Remaining driver telemetry** - `aider` and `claude-code` report real
+  token/cost (and `claude-code` turns) as of §10.2; `opencode`/`goose`/
+  `qwen-code`/`codex` still report duration only pending a `parse_metrics`
+  hook per tool (same descriptor pattern, see `cli_agents.py`).
+- **Dashboard matrix grid** - `--matrix-drivers`/`--matrix-models` (below)
+  print a terminal matrix; the dashboard still renders pairs only.
+- **LLM-judge scoring** - deliberately deferred; would dilute the filesystem
+  oracle's tool-neutral credibility. Opt-in only if ever added, never the
+  default pass/fail signal.
+
+Done (moved out of "near-term" as of the dates noted):
+- **Richer oracles** (2026-07-04) - `test_setup_files` + `check_command`,
+  Docker-sandboxed, real compile/run/assert instead of content-pattern-only.
+- **Run matrix** (2026-07-04, terminal only) - `--matrix-drivers`/
+  `--matrix-models` expand to N scenarios with a compact pass-rate/time/
+  tokens table; no dashboard grid yet (see above).
+- **Parallelism** (2026-07-04) - `--parallel N` fans baselines/CLI drivers
+  out over a thread pool; UI drivers stay serial (one display).
+- **Corpus self-verification** (2026-07-08, §10.2) - `optarena verify-corpus`
+  replays reference/broken solutions through the real oracle; wired into CI.
 
 Structural:
 - Publish to PyPI (`pip install optarena`); ui-harness fetched on first UI run.
-- Per-project case packs (`optarena init` scaffolding a local `cases/`).
+  Not implemented.
+- Per-project case packs (`optarena init` scaffolding a local `cases/`) - done.
 - Optional SQLite index if run counts outgrow index.json (schema unchanged).
+  Not implemented; `index.json` has been sufficient at current run volumes.
+- Sandbox images published to GHCR (§10.2) - done; PyPI publish is the
+  remaining "make it installable without cloning" gap.
 
 ### 10.1 Benchmark corpus status (vs `OptArena_Benchmark_Corpus_Specification.md`)
 
@@ -724,6 +742,72 @@ oracle (`evaluate_case`/`DockerSandbox`), not just claimed.
   was still met by concentrating on the other 5.
 - Suite groupings (Arena Lite/Standard/Extended/Enterprise) - not meaningful
   until the corpus is large enough to fill them.
-- Publishing any of the six new images to a registry (Docker Hub) - they
-  build and run locally; `docker build --lang <x>`/`--all` exist, `docker
-  push` does not.
+
+(Registry publishing of the sandbox images - listed as deferred above through
+2026-07-04 - shipped 2026-07-08; see §10.2.)
+
+### 10.2 The 0.1 cut (2026-07-08): corpus integrity, driver telemetry, GHCR
+
+A second audit pass (post-120-case corpus) found and fixed a class of bug
+distinct from §10.1's: not "the corpus is too small" but "the oracle's
+pass/fail boundary was wrong" - a Spring port collision across 7 cases
+sharing one container, three .NET cases whose `app.csproj` glob-compiled
+`tests/*.cs` into the app itself (no correct solution could ever pass), a
+C# perf budget the *unoptimized* code beat outright, and two over-constrained
+content patterns that rejected valid solutions. None were visible from
+reading the case JSON; all surfaced only by running a known-good and a
+known-bad solution through the real oracle. That protocol is now a command,
+not a memory:
+
+**`optarena verify-corpus`** - two new optional case-schema keys:
+`reference_solution` (a correct solution; must PASS the full Docker-sandboxed
+oracle) and `broken_solutions` (deliberately wrong variants; each must FAIL
+it). `bug_fix`/`refactoring`/`performance`/`security` cases also auto-check
+that an *unmodified* workspace fails, without needing an explicit broken
+variant. 16 cases backfilled with proven solutions from the audit; the
+first full corpus run (91 variants / 77 cases) caught three of its own
+backfilled references failing their case's shape check, and separately
+surfaced a genuine `__pycache__` staleness race in the mutation-testing
+runners added alongside the 13 `add_tests_*` cases: a same-byte-length
+Python mutant written within the same filesystem-mtime second as the
+original ran the *stale compiled bytecode* of the unmodified source, so the
+mutant was silently never exercised. Fixed by clearing `__pycache__` before
+every mutation-runner test invocation; re-verified clean 5/5 under repeated
+runs before landing. Wired into CI (`.github/workflows/ci.yml`) as a gate
+on every push to `main`.
+
+**Driver telemetry.** Per-case cost/token reporting previously existed only
+for the two raw-model baselines; every agent driver reported duration only,
+which silently degrades any cost-based comparison ("agent vs no-agent",
+"which tool is cheapest") back to a timing comparison. `aider` now parses
+its own `Tokens: ... sent, ... received. Cost: $... session.` report lines
+(handling both the `4.5k` and `4,500` formats it prints across versions);
+`claude-code` now runs with `--output-format json` and reports usage tokens
+(including cache-read tokens separately), `total_cost_usd`, and `num_turns`
+from the structured result object. A generic `parse_metrics` hook was added
+to the `CLI_AGENTS` descriptor shape in `cli_agents.py` so the remaining
+CLI drivers (`opencode`/`goose`/`qwen-code`/`codex`) can adopt the same
+pattern without new plumbing - not done in this pass (see §10 roadmap).
+
+**Comparison trust.** `--trials N` computed a majority verdict but never
+surfaced *how* unanimous it was; `optarena compare`'s table now shows a
+`PASS 2/3` marker per case for trial runs, `optarena regression` lists
+non-unanimous cases by name under a `flaky_cases` block, and both
+`aggregate()` outputs gained `p95_duration_s` alongside the existing
+mean/median.
+
+**GHCR.** The six per-language sandbox images (~7GB combined) previously
+had to be built locally (~30 min cold). They now publish to
+`ghcr.io/trysti-labs/optarena/optarena-tester-*:latest` via
+`.github/workflows/publish-images.yml` on every `docker/**` change; the
+runtime's `DockerSandbox.start()`/`run_check_command()` paths call a new
+`ensure_image()` that pulls-and-tags a missing image before falling back to
+"build it yourself" guidance (`OPTARENA_NO_PULL=1` opts out; capped at 5
+minutes since this is a first-run convenience, not a build step - a slow or
+unreachable registry must not stall a whole `optarena run`). `optarena
+docker pull [--lang X|--all]` exists for explicit prefetch. One related
+robustness fix: the local-image availability probe (`docker image inspect`)
+is retried once before falling through to a pull attempt, since Docker
+Desktop's resource-saver wake-up made the first probe time out on an image
+that was, in fact, already present - misreading that as "missing" would
+have triggered a pointless network pull every time.
