@@ -90,7 +90,7 @@ See **[ARCH.md](./ARCH.md)** for the full architecture.
 ## Install
 
 ```bash
-git clone <this repo> && cd optarena
+git clone https://github.com/trysti-labs/optarena.git && cd optarena
 pip install -e .            # provides the `optarena` command (no dependencies)
 
 # only for VS Code UI drivers (cline-ui / roo-ui / continue-ui):
@@ -348,3 +348,10 @@ environment gotchas the harness absorbs.
 
 `legacy/` contains the retired first-generation (CDP + pyautogui) harness,
 kept for reference only.
+
+## License
+
+Apache License 2.0 - see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
+Copyright © 2026 Trysti Labs and contributors. An open-source project by
+[Trysti Labs](https://labs.trysti.com); contributions welcome under the same
+license.
