@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "Local-first testing & comparison framework for AI coding tools (real UIs, real CLIs, raw-model baselines) against any OpenAI/Ollama-compatible backend."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+]
 # The core is intentionally dependency-free (stdlib only).
 dependencies = []
 

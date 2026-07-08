@@ -4,8 +4,8 @@ optarena/cli.py
 Command-line interface.
 
     optarena  (or: python -m optarena) run --scenario s1.json [--scenario s2.json]
-    optarena  (or: python -m optarena) run --driver aider --model selfopt \
-           --base-url http://localhost:11434 --name aider-selfopt [--cases a,b]
+    optarena  (or: python -m optarena) run --driver aider --model llama3.2 \
+           --base-url http://localhost:11434 --name aider-run [--cases a,b]
     optarena  (or: python -m optarena) compare <run_ref_a> <run_ref_b>
     optarena  (or: python -m optarena) regression <run_ref_a> <run_ref_b>
     optarena  (or: python -m optarena) list [runs|cases|drivers]

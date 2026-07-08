@@ -7,7 +7,7 @@ VS Code UI, Roo, Continue, Kilo), headless CLI agents (aider, Claude Code,
 Codex, OpenCode, Goose, Qwen Code), SDK agents (crewAI), and raw-model
 baselines - all run through the same task cases, against **any
 OpenAI/Ollama-compatible backend** (Ollama, LM Studio, a router/optimizer
-proxy like SelfOpt, or a remote API), and verified by actually **compiling
+proxy, or a remote API), and verified by actually **compiling
 and running the generated code in an isolated Docker sandbox** - not
 keyword-matching it.
 
@@ -74,7 +74,7 @@ optarena serve   # http://localhost:8300/dashboard/
 4. **Regression testing** - `optarena regression <before> <after>` names the
    cases that broke, not just an aggregate percentage. See below.
 5. **Backend-agnostic** - a backend is any URL speaking the OpenAI or Ollama
-   protocol: plain Ollama, LM Studio, a router proxy like SelfOpt, or a
+   protocol: plain Ollama, LM Studio, a router/optimizer proxy, or a
    remote API.
 6. **Zero infrastructure** - stdlib-only Python core, JSON results, a
    static-HTML dashboard. No database server, no build step, no accounts.
@@ -90,7 +90,7 @@ See **[ARCH.md](./ARCH.md)** for the full architecture.
 ## Install
 
 ```bash
-git clone <this repo> && cd optarena
+git clone https://github.com/trysti-labs/optarena.git && cd optarena
 pip install -e .            # provides the `optarena` command (no dependencies)
 
 # only for VS Code UI drivers (cline-ui / roo-ui / continue-ui):
@@ -111,12 +111,12 @@ optarena list cases                   # task catalogue
 optarena run --driver ollama-chat --name baseline --model llama3.2
 
 # A/B: two scenarios in one command → auto-compares and saves the comparison
-optarena run --scenario scenarios/cline-selfopt.json \
+optarena run --scenario scenarios/cline-proxy.json \
              --scenario scenarios/cline-ollama-direct.json
 
 # Compare any two saved runs later
 optarena list runs
-optarena compare cline-selfopt cline-ollama-direct
+optarena compare cline-proxy cline-ollama-direct
 
 # Dashboard at http://localhost:8300/dashboard/
 optarena serve
@@ -348,3 +348,10 @@ environment gotchas the harness absorbs.
 
 `legacy/` contains the retired first-generation (CDP + pyautogui) harness,
 kept for reference only.
+
+## License
+
+Apache License 2.0 - see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
+Copyright © 2026 Trysti Labs and contributors. An open-source project by
+[Trysti Labs](https://labs.trysti.com); contributions welcome under the same
+license.

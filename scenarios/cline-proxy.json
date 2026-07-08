@@ -1,0 +1,5 @@
+{
+  "name": "cline-proxy",
+  "driver": "cline-ui",
+  "backend": { "kind": "ollama", "base_url": "http://localhost:8001", "model": "proxy" }
+}
