@@ -28,8 +28,14 @@ export function snapshot(root) {
       return;
     }
     for (const e of entries) {
-      if (e.name.startsWith('.') && e.isDirectory()) continue;
-      if (IGNORE_DIRS.has(e.name)) continue;
+      // Skip only the known tool/VCS directories (mirrors the Python oracle's
+      // IGNORE_DIRS) - NOT every dot-directory: cases legitimately expect
+      // files under e.g. `.github/workflows/`, and skipping all dot-dirs made
+      // those files invisible to the diff, auto-failing the CI cases.
+      if (e.isDirectory() && IGNORE_DIRS.has(e.name)) continue;
+      // aider writes .aider.* FILES (history, tags cache) - tool bookkeeping,
+      // not model output; keep them out of the diff (same as the Python side).
+      if (e.isFile() && e.name.startsWith('.aider')) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
         walk(full);
@@ -147,21 +153,23 @@ function newOracleInfo(cmd) {
            exit_code: null, duration_s: null, output: '' };
 }
 
-// One shared container for the WHOLE harness run (all cases) - mirrors
-// cases.DockerSandbox in the Python side. Without this, runCheckCommand would
-// start a fresh `docker run --rm` per case, which is the bug this fixes: N
-// cases used to mean N containers for one run.
-let activeSandbox = null;
+// One shared container PER DISTINCT IMAGE for the WHOLE harness run - mirrors
+// cases._active_sandboxes on the Python side. Keyed by image tag (not a single
+// slot) because a run mixing e.g. a Python case and a Go case needs both
+// toolchains live at once, and each case must exec into the container that
+// actually has its toolchain (a case's `docker_image` field).
+const activeSandboxes = new Map();
 
 /**
- * Start the shared sandbox container, mounting `root` (the harness's fixed
- * workspace directory) once. Returns the sandbox handle, or null when Docker
- * isn't available/enabled - callers then fall back to running check_command
- * on the host, same as before this existed.
+ * Start a shared sandbox container for one image, mounting `root` (the
+ * harness's fixed workspace directory) once. Returns the sandbox handle, or
+ * null when Docker isn't available/enabled or the image isn't built - callers
+ * then fall back per-case (ephemeral docker run, or the host).
  */
 export function startDockerSandbox(root, image) {
   image = image || process.env.OPTARENA_DOCKER_IMAGE || DOCKER_IMAGE_DEFAULT;
   if (process.env.OPTARENA_NO_DOCKER === '1' || !dockerAvailable()) return null;
+  if (activeSandboxes.has(image)) return activeSandboxes.get(image);
   if (!dockerImageAvailable(image)) {
     console.error(`[optarena] Docker image '${image}' not found - check_command will run on the host. Run \`optarena docker build\`.`);
     return null;
@@ -179,16 +187,50 @@ export function startDockerSandbox(root, image) {
     console.error(`[optarena] could not start docker sandbox: ${e.message}`);
     return null;
   }
-  activeSandbox = { name, root: resolvedRoot, image };
-  console.log(`[optarena] docker sandbox: ${name} (image ${image}) - one container for this whole run`);
-  return activeSandbox;
+  const sandbox = { name, root: resolvedRoot, image };
+  activeSandboxes.set(image, sandbox);
+  console.log(`[optarena] docker sandbox: ${name} (image ${image}) - one container per image for this whole run`);
+  return sandbox;
 }
 
-/** Stop the shared sandbox container (safe to call with null/already-stopped). */
+/**
+ * Start one shared sandbox per distinct image the given cases need (their
+ * `docker_image` field, defaulting to the base image). Returns the started
+ * handles - pass the array to stopDockerSandboxes() when the run ends.
+ */
+export function startDockerSandboxes(root, cases) {
+  const images = new Set(
+    (cases || [])
+      .filter((c) => c.check_command)
+      .map((c) => c.docker_image || process.env.OPTARENA_DOCKER_IMAGE || DOCKER_IMAGE_DEFAULT),
+  );
+  return [...images].map((image) => startDockerSandbox(root, image)).filter(Boolean);
+}
+
+/** Stop a shared sandbox container (safe to call with null/already-stopped). */
 export function stopDockerSandbox(sandbox) {
   if (!sandbox) return;
   try { execFileSync('docker', ['stop', '-t', '2', sandbox.name], { stdio: 'pipe' }); } catch { /* already gone */ }
-  if (activeSandbox === sandbox) activeSandbox = null;
+  if (activeSandboxes.get(sandbox.image) === sandbox) activeSandboxes.delete(sandbox.image);
+}
+
+/** Stop every sandbox in the given array (from startDockerSandboxes). */
+export function stopDockerSandboxes(sandboxes) {
+  for (const s of sandboxes || []) stopDockerSandbox(s);
+}
+
+/**
+ * Kill stray processes left in a shared container after a check_command
+ * timeout (`timeout` TERMs the sh/test process, but a TERM'd Python test
+ * never runs its `finally:`, so a server it spawned survives and holds its
+ * port for every later case in this container). PID 1 (`sleep infinity`)
+ * is excluded by `kill -1` semantics, so the container itself stays up.
+ */
+function reapSandbox(sandbox) {
+  try {
+    execFileSync('docker', ['exec', sandbox.name, 'sh', '-c', 'kill -9 -1 2>/dev/null; true'],
+      { stdio: 'pipe', timeout: 10000 });
+  } catch { /* best-effort */ }
 }
 
 function runInSandbox(cmd, root, timeoutMs, sandbox, info) {
@@ -214,6 +256,9 @@ function runInSandbox(cmd, root, timeoutMs, sandbox, info) {
     info.ran = true;
     info.exit_code = e.status ?? null;
     info.output = `${e.stdout || ''}${e.stderr || ''}`.slice(-400).trim();
+    if (e.status === 124 || e.status == null) {   // in-container timeout, or outer kill
+      reapSandbox(sandbox);
+    }
     if (e.status === 124) {
       return { failures: [`check_command timed out after ${timeoutS}s (docker exec): ${cmd}`], oracle: info };
     }
@@ -236,11 +281,14 @@ export function runCheckCommand(testCase, root) {
   if (!cmd) return { failures: [], oracle: info };
   const timeout = (testCase.check_command_timeout || 60) * 1000;
 
-  if (process.env.OPTARENA_NO_DOCKER !== '1' && activeSandbox) {
-    return runInSandbox(cmd, root, timeout, activeSandbox, info);
+  // Route to the shared sandbox that has THIS case's toolchain - a Java case
+  // must exec into the jvm image, not whatever single sandbox happens to be
+  // up. Mirrors run_check_command's `_active_sandboxes[image]` lookup.
+  const image = testCase.docker_image || process.env.OPTARENA_DOCKER_IMAGE || DOCKER_IMAGE_DEFAULT;
+  const sandbox = activeSandboxes.get(image);
+  if (process.env.OPTARENA_NO_DOCKER !== '1' && sandbox) {
+    return runInSandbox(cmd, root, timeout, sandbox, info);
   }
-
-  const image = process.env.OPTARENA_DOCKER_IMAGE || DOCKER_IMAGE_DEFAULT;
   let useDocker = process.env.OPTARENA_NO_DOCKER !== '1' && dockerAvailable();
   if (useDocker && !dockerImageAvailable(image)) {
     useDocker = false;
@@ -278,7 +326,7 @@ export function runCheckCommand(testCase, root) {
   info.container = name;
   const dockerArgs = [
     'run', '--rm', '--name', name,
-    '--network', 'none', '--memory', '512m', '--cpus', '1',
+    '--network', 'none', '--memory', '2g', '--cpus', '2',
     '-v', `${path.resolve(root)}:/workspace`, '-w', '/workspace',
     image, 'sh', '-c', cmd,
   ];

@@ -66,6 +66,13 @@ def cmd_run(args) -> int:
     if args.cases_dir:
         for sc in scenarios:
             sc.cases_dir = sc.cases_dir or args.cases_dir
+    # --language/--framework must narrow file scenarios too, not just inline
+    # ones (previously they were silently ignored alongside --scenario).
+    if getattr(args, "language", None) or getattr(args, "framework", None):
+        for sc in scenarios:
+            loaded = load_cases(sc.cases, cases_dir=sc.cases_dir)
+            sc.cases = [c["name"] for c in filter_cases(
+                loaded, language=args.language, framework=args.framework)]
     matrix_drivers = (args.matrix_drivers or "").split(",") if args.matrix_drivers else []
     matrix_models = (args.matrix_models or "").split(",") if args.matrix_models else []
     if matrix_drivers or matrix_models:

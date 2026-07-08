@@ -135,6 +135,11 @@ def snapshot(root: Path) -> dict[str, str]:
             continue
         if any(part in IGNORE_DIRS for part in p.relative_to(root).parts):
             continue
+        # aider writes .aider.chat.history.md etc. as FILES (IGNORE_DIRS only
+        # covers directories) - tool bookkeeping, not model output; keep them
+        # out of the diff so they don't inflate the files/lines metrics.
+        if p.name.startswith(".aider"):
+            continue
         st = p.stat()
         out[p.relative_to(root).as_posix()] = f"{st.st_size}:{st.st_mtime_ns}"
     return out
@@ -311,6 +316,23 @@ class DockerSandbox:
             timeout=timeout + 10, encoding="utf-8", errors="replace",
         )
 
+    def reap(self) -> None:
+        """
+        Kill every stray process left in the shared container (except its
+        PID-1 `sleep infinity`). Needed after a check_command timeout:
+        `timeout` TERMs the `sh`/test process, but SIGTERM does NOT run a
+        Python test script's `finally:` block, so a server it Popen'd (java
+        -jar, a cargo binary...) survives and keeps holding its port - which
+        would cascade failures into every later case that reuses the port in
+        this same long-lived container. On Linux, `kill -9 -1` signals every
+        process the caller may signal except PID 1 and itself.
+        """
+        if self.active:
+            subprocess.run(
+                ["docker", "exec", self.name, "sh", "-c", "kill -9 -1 2>/dev/null; true"],
+                capture_output=True, timeout=10,
+            )
+
 
 def _new_oracle_info(cmd: str | None) -> dict:
     return {
@@ -394,6 +416,7 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
         proc = sandbox.exec(cmd, root, timeout)
     except subprocess.TimeoutExpired:
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        sandbox.reap()
         return [f'check_command timed out after {timeout}s (docker exec): {cmd}'], info
     except (OSError, ValueError) as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
@@ -403,6 +426,7 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
     info["exit_code"] = proc.returncode
     info["output"] = ((proc.stdout or "") + (proc.stderr or ""))[-400:].strip()
     if proc.returncode == 124:
+        sandbox.reap()
         return [f'check_command timed out after {timeout}s (docker exec): {cmd}'], info
     if proc.returncode != 0:
         return ([f'check_command failed in docker (exit {proc.returncode}): {cmd}'
@@ -443,7 +467,9 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
     docker_cmd = [
         "docker", "run", "--rm", "--name", name,
         "--network", "none",
-        "--memory", "512m", "--cpus", "1",
+        # Same resources as the shared DockerSandbox - a Spring Boot app under
+        # 512m would OOM here but pass in the shared container, and vice versa.
+        "--memory", "2g", "--cpus", "2",
         "-v", f"{root.resolve()}:/workspace",
         "-w", "/workspace",
         image,
@@ -488,8 +514,18 @@ def classify_failure(oracle_info: dict) -> str | None:
     cmd_lower = (oracle_info.get("check_command") or "").lower()
     if any(s in output_lower for s in ("syntaxerror", "indentationerror", "unterminated", "unexpected token")):
         return "syntax_error"
-    if "gcc" in cmd_lower and any(
-        s in output_lower for s in ("error:", "undefined reference", "collect2:", "calledprocesserror")
+    # Compiler signatures across the toolchains the corpus actually uses -
+    # not just gcc: rustc ("error[E0308]"), csc ("error CS1002"), javac via
+    # maven ("compilation error" / "cannot find symbol"), go, and linkers.
+    if any(s in output_lower for s in (
+        "undefined reference", "collect2:", "compilation error",
+        "cannot find symbol", "error cs", "error[e",
+        "undefined:",              # go compiler
+        "could not compile",       # cargo's summary line
+    )):
+        return "compile_error"
+    if any(t in cmd_lower for t in ("gcc", "g++", "cc ")) and any(
+        s in output_lower for s in ("error:", "calledprocesserror")
     ):
         return "compile_error"
     if "assertionerror" in output_lower or "assert " in output_lower:

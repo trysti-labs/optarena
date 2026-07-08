@@ -21,6 +21,7 @@ from pathlib import Path
 from ..cases import changed_files, evaluate_case, snapshot, write_setup_files
 from ..scenario import Scenario
 from .base import CaseResult, Driver
+from .openai_chat import concrete_target
 
 _CODE_BLOCK = re.compile(r"```(?:\w+[^\n]*)?\n(.*?)```", re.DOTALL)
 
@@ -43,7 +44,7 @@ class CrewAIDriver(Driver):
         before = snapshot(workspace)
 
         expected = case.get("expected_files", [])
-        target = Path(expected[0]["path_pattern"]) if expected else Path("output.txt")
+        target = concrete_target(expected[0]["path_pattern"] if expected else None)
 
         os.environ.setdefault("OPENAI_API_KEY", backend.api_key)
         llm = LLM(

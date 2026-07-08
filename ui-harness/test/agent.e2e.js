@@ -20,7 +20,7 @@ import path from 'node:path';
 import { WORKSPACE, BACKEND_URL, API_MODE, MODEL_ID, DESCRIPTOR, RESULTS_FILE } from '../src/paths.js';
 import {
   snapshot, changedFiles, checkExpected, evaluateCase, writeSetupFiles, loadCases,
-  startDockerSandbox, stopDockerSandbox,
+  startDockerSandboxes, stopDockerSandboxes,
 } from '../src/oracle.js';
 
 const CASE_TIMEOUT = Number(process.env.CASE_TIMEOUT || 150) * 1000;
@@ -297,24 +297,23 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
   const cases = loadCases().filter((c) =>
     (only ? c.name === only : true) && (casesFilter.length ? casesFilter.includes(c.name) : true));
 
-  let sandbox = null;
+  let sandboxes = [];
 
   before(async function () {
-    this.timeout(60000);
+    this.timeout(120000);
     if (!(await backendReachable())) {
       throw new Error(`Backend not reachable at ${BACKEND_URL} (API=${API_MODE}). Start it first.`);
     }
-    // One shared container for every case in this run, not one per
-    // check_command call - see startDockerSandbox in oracle.js.
-    if (cases.some((c) => c.check_command)) {
-      sandbox = startDockerSandbox(WORKSPACE);
-    }
+    // One shared container PER DISTINCT IMAGE the selected cases need (their
+    // docker_image field), not one per check_command call and not a single
+    // default-image container - a Java case must exec into the jvm image.
+    sandboxes = startDockerSandboxes(WORKSPACE, cases);
     await freshWebview(); // open the extension view once up front
     console.log(`  [setup] ${DESCRIPTOR.label} webview is open`);
   });
 
   after(function () {
-    stopDockerSandbox(sandbox);
+    stopDockerSandboxes(sandboxes);
   });
 
   /** Append one JSON line per case for machine consumers (arena driver). */

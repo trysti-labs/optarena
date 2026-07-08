@@ -9,6 +9,7 @@ printed as a terminal table.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -54,7 +55,10 @@ def _cheaper(a_label: str, b_label: str, sa: dict, sb: dict) -> str | None:
 def save_comparison(cmp: dict) -> Path:
     out_dir = RESULTS_DIR / "comparisons"
     out_dir.mkdir(parents=True, exist_ok=True)
-    name = f"{time.strftime('%Y%m%d-%H%M%S')}_{cmp['a']['label']}_vs_{cmp['b']['label']}.json"
+    # Labels are scenario names, which can embed model ids with "/" or ":" -
+    # sanitize so the comparison file lands where intended on every platform.
+    safe = lambda s: re.sub(r"[^\w.\-+]+", "-", s)  # noqa: E731
+    name = f"{time.strftime('%Y%m%d-%H%M%S')}_{safe(cmp['a']['label'])}_vs_{safe(cmp['b']['label'])}.json"
     path = out_dir / name
     from .store import _write_atomic
     _write_atomic(path, json.dumps(cmp, indent=2))

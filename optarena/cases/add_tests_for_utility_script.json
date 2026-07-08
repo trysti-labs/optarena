@@ -5,7 +5,10 @@
   "domain": "devops",
   "difficulty": 2,
   "task_type": "testing",
-  "tags": ["shell", "testing"],
+  "tags": [
+    "shell",
+    "testing"
+  ],
   "prompts": [
     "The script wordcount.sh in this repo (already working correctly - do not modify it) takes a single directory path as its only argument and prints, to stdout, the total word count across all regular files directly inside that directory (non-recursive), followed by a newline. Write a shell test script named test_wordcount.sh that exercises wordcount.sh against several inputs you set up yourself (for example using temporary directories created with mktemp -d), and asserts on the results. Cover at least: (1) a normal directory containing multiple files with a known total word count, (2) the edge case of an empty directory (expected total word count 0), and (3) a directory containing a single file. The test script should print a clear result for each case it checks, and must exit with a non-zero status if any assertion fails, or exit 0 if everything passes."
   ],
@@ -15,13 +18,20 @@
   "expected_files": [
     {
       "path_pattern": "test_wordcount.sh",
-      "content_patterns": ["wordcount.sh", "empty"],
-      "regex_patterns": ["mktemp"],
+      "content_patterns": [
+        "wordcount.sh",
+        "empty"
+      ],
+      "regex_patterns": [
+        "mktemp"
+      ],
       "min_lines": 10
     }
   ],
-  "test_setup_files": {},
-  "check_command": "sh test_wordcount.sh",
-  "check_command_timeout": 60,
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('wordcount.sh')\nTEST_CMD = 'sh test_wordcount.sh'\n# Each entry is one mutant: a list of (original, replacement) edits applied\n# together. Every `original` anchor must appear exactly once in the pristine\n# implementation - which also enforces the prompt's \"do not modify it\".\nMUTANTS = [ [ [ \"echo \\\"$total\\\" # end\", \"echo $((total + 1)) # end\" ] ] ]\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "check_command_timeout": 90,
   "timeout": 150
 }

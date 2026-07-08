@@ -21,9 +21,10 @@ from optarena.cases import (
 from optarena.compare import compare_runs, format_regression, regression_summary
 from optarena.drivers import DRIVERS, get_driver
 from optarena.drivers.base import CaseResult
+from optarena.drivers.openai_chat import concrete_target
 from optarena.metrics import aggregate
 from optarena.pricing import estimate_cost, is_local_backend, price_for
-from optarena.runner import _merge_trials
+from optarena.runner import _merge_trials, safe_run_name
 from optarena.scenario import Backend, Scenario
 
 
@@ -325,6 +326,41 @@ class TrialMergeTests(unittest.TestCase):
         self.assertEqual(merged.error, "boom")
 
 
+class SafeRunNameTests(unittest.TestCase):
+    """Model-derived scenario names must survive becoming filenames."""
+
+    def test_openrouter_slash_and_ollama_colon_squashed(self):
+        self.assertEqual(safe_run_name("ollama-chat-qwen/qwen-2.5"), "ollama-chat-qwen-qwen-2.5")
+        self.assertEqual(safe_run_name("ollama-chat-qwen3-coder:30b"), "ollama-chat-qwen3-coder-30b")
+
+    def test_plain_names_unchanged(self):
+        self.assertEqual(safe_run_name("cline-selfopt"), "cline-selfopt")
+        self.assertEqual(safe_run_name("baseline_v1.2+rc"), "baseline_v1.2+rc")
+
+
+class ConcreteTargetTests(unittest.TestCase):
+    """Baseline drivers write to the first expected path themselves - glob
+    patterns must become concrete, writable, cross-platform paths (a literal
+    `**` directory is ugly on POSIX and an outright crash on Windows)."""
+
+    def test_literal_paths_pass_through(self):
+        self.assertEqual(concrete_target("factorial.py"), Path("factorial.py"))
+        self.assertEqual(concrete_target("src/main.rs"), Path("src/main.rs"))
+
+    def test_glob_dirs_dropped_and_glob_names_filled(self):
+        self.assertEqual(concrete_target("**/HealthController.java"), Path("HealthController.java"))
+        self.assertEqual(concrete_target("*_test.go"), Path("output_test.go"))
+        self.assertEqual(concrete_target("*.tf"), Path("output.tf"))
+
+    def test_filled_name_still_matches_the_original_glob(self):
+        import fnmatch
+        for pattern in ("*_test.go", "*.tf"):
+            self.assertTrue(fnmatch.fnmatch(concrete_target(pattern).name, pattern))
+
+    def test_none_defaults(self):
+        self.assertEqual(concrete_target(None), Path("output.txt"))
+
+
 class RegistryTests(unittest.TestCase):
     def test_all_registered_drivers_instantiate(self):
         for name, meta in DRIVERS.items():
@@ -554,6 +590,16 @@ class RichMetricsTests(unittest.TestCase):
     def test_classify_failure_assertion(self):
         info = {"ran": True, "exit_code": 1, "output": "AssertionError: expected 5 got 4", "check_command": "python3 t.py"}
         self.assertEqual(classify_failure(info), "assertion_failure")
+
+    def test_classify_failure_non_gcc_compilers(self):
+        for output, cmd in (
+            ("error[E0308]: mismatched types", "cargo test --offline"),
+            ("Program.cs(3,7): error CS1002: ; expected", "dotnet test tests/tests.csproj"),
+            ("[ERROR] COMPILATION ERROR : cannot find symbol", "mvn -o -q test"),
+            ("./main.go:7:2: undefined: ClasifyOrderPriority", "go test ./..."),
+        ):
+            info = {"ran": True, "exit_code": 1, "output": output, "check_command": cmd}
+            self.assertEqual(classify_failure(info), "compile_error", output)
 
     def test_classify_failure_none_when_passed(self):
         info = {"ran": True, "exit_code": 0, "output": "PASS", "check_command": "python3 t.py"}
