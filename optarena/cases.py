@@ -33,6 +33,14 @@ decides pass/fail - the JSON schema shared with the original cline harness:
                                              # defaults to DOCKER_IMAGE_DEFAULT
       "timeout":        int,                 # seconds
 
+      # Corpus self-verification (optarena verify-corpus; see verify.py).
+      # Not used at run time - they prove the oracle discriminates.
+      "reference_solution": {relpath: content},   # must PASS the full oracle
+      "broken_solutions": [{                      # each must FAIL it
+          "name":  str,                           # e.g. "vacuous-tests"
+          "files": {relpath: content}
+      }],
+
       # Benchmark-corpus metadata (OptArena_Benchmark_Corpus_Specification.md).
       # All optional, free-form (not validated against a fixed enum) - they
       # power `--language`/`--framework` filters and `optarena list cases`
@@ -225,6 +233,55 @@ def docker_image_available(image: str = DOCKER_IMAGE_DEFAULT) -> bool:
         return False
 
 
+# Published copies of the sandbox images, so first-run users pull in minutes
+# instead of building ~7GB of toolchains locally. Local tags stay the plain
+# `optarena-tester*` names; the pull tags the remote image back to that name.
+GHCR_PREFIX = "ghcr.io/trysti-labs/optarena/"
+_pull_attempted: set[str] = set()
+
+
+def docker_image_pull(image: str) -> bool:
+    """Pull GHCR_PREFIX+image and tag it as the local name. One attempt per
+    image per process; disable entirely with OPTARENA_NO_PULL=1."""
+    if image in _pull_attempted or os.environ.get("OPTARENA_NO_PULL") == "1":
+        return False
+    _pull_attempted.add(image)
+    remote = GHCR_PREFIX + image
+    print(f"[optarena] image '{image}' not built locally - trying `docker pull {remote}` ...",
+          file=sys.stderr)
+    try:
+        # 5-minute cap: this is a first-run convenience, not a build step. A
+        # registry that can't serve the image by then (unpublished repo, slow
+        # link, waking Docker VM) must not stall the whole run - explicit
+        # `optarena docker pull` / `optarena docker build` remain available.
+        proc = subprocess.run(["docker", "pull", remote], capture_output=True, timeout=300)
+        if proc.returncode != 0:
+            tail = (proc.stderr or b"").decode(errors="replace").strip()[-200:]
+            print(f"[optarena] pull failed ({tail}) - build locally with `optarena docker build`",
+                  file=sys.stderr)
+            return False
+        subprocess.run(["docker", "tag", remote, image], capture_output=True, timeout=30)
+        print(f"[optarena] pulled {remote} -> {image}", file=sys.stderr)
+        return True
+    except (OSError, subprocess.TimeoutExpired):
+        print(f"[optarena] pull of {remote} timed out - build locally with "
+              f"`optarena docker build`", file=sys.stderr)
+        return False
+
+
+def ensure_image(image: str) -> bool:
+    """Local image, or a successful GHCR pull tagged to the local name.
+
+    The availability probe is retried once: right after Docker Desktop wakes
+    from resource-saver, the first `docker image inspect` can exceed its
+    timeout, and misreading that as "image missing" would trigger a pointless
+    (and possibly slow) registry pull for an image that's already local.
+    """
+    if docker_image_available(image) or docker_image_available(image):
+        return True
+    return docker_image_pull(image) and docker_image_available(image)
+
+
 # Keyed by Docker image tag rather than a single slot - a run whose cases
 # span multiple languages (e.g. --cases includes both a Python and a Go
 # case) needs one long-lived container PER distinct image, not one overall.
@@ -262,7 +319,7 @@ class DockerSandbox:
     def start(self) -> bool:
         if os.environ.get("OPTARENA_NO_DOCKER") == "1" or not _docker_available():
             return False
-        if not docker_image_available(self.image):
+        if not ensure_image(self.image):
             print(
                 f"[optarena] Docker image '{self.image}' not found - check_command "
                 f"will run on the host. Run `optarena docker build` to build the "
@@ -383,7 +440,7 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     # opted out - it must not shell out to `docker info` in that case.
     use_docker = (not docker_disabled) and _docker_available()
 
-    if use_docker and not docker_image_available(image):
+    if use_docker and not ensure_image(image):
         use_docker = False
         if not _docker_warned:
             print(

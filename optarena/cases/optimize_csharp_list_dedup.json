@@ -35,5 +35,8 @@
   },
   "check_command": "dotnet test tests/tests.csproj",
   "check_command_timeout": 120,
-  "timeout": 200
+  "timeout": 200,
+  "reference_solution": {
+    "Dedup.cs": "using System.Collections.Generic;\n\npublic static class Dedup\n{\n    public static List<int> RemoveDuplicates(List<int> input)\n    {\n        var result = new List<int>();\n        var seen = new HashSet<int>();\n        foreach (var item in input)\n        {\n            if (seen.Add(item))\n            {\n                result.Add(item);\n            }\n        }\n        return result;\n    }\n}\n"
+  }
 }

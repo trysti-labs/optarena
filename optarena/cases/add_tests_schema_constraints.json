@@ -32,9 +32,20 @@
     }
   ],
   "test_setup_files": {
-    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('schema.sql')\nTEST_CMD = 'python3 test_constraints.py'\n# Each entry is one mutant: a list of (original, replacement) edits applied\n# together. Every `original` anchor must appear exactly once in the pristine\n# implementation - which also enforces the prompt's \"do not modify it\".\nMUTANTS = [ [ [ \"(3, 2, 5.00)\", \"(3, 99, 5.00)\" ] ], [ [ \"(2, 1, 19.99)\", \"(2, 1, -19.99)\" ] ], [ [ \"email TEXT UNIQUE NOT NULL\", \"email TEXT NOT NULL\" ], [ \"(2, 'bob@example.com')\", \"(2, 'alice@example.com')\" ] ] ]\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path('schema.sql')\nTEST_CMD = 'python3 test_constraints.py'\n# Each entry is one mutant: a list of (original, replacement) edits applied\n# together. Every `original` anchor must appear exactly once in the pristine\n# implementation - which also enforces the prompt's \"do not modify it\".\nMUTANTS = [ [ [ \"(3, 2, 5.00)\", \"(3, 99, 5.00)\" ] ], [ [ \"(2, 1, 19.99)\", \"(2, 1, -19.99)\" ] ], [ [ \"email TEXT UNIQUE NOT NULL\", \"email TEXT NOT NULL\" ], [ \"(2, 'bob@example.com')\", \"(2, 'alice@example.com')\" ] ] ]\n\ndef run_tests():\n    # Python caches bytecode by (mtime-seconds, size); a same-length\n    # mutant written within the same second would run the STALE pyc of\n    # the unmutated source. Clear the cache so every run compiles fresh.\n    shutil.rmtree('__pycache__', ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
   },
   "check_command": "python3 mutation_check.py",
   "check_command_timeout": 120,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "test_constraints.py": "import sqlite3\nconn = sqlite3.connect(':memory:')\nconn.executescript(open('schema.sql').read())\nemails = [r[0] for r in conn.execute('SELECT email FROM customers')]\nassert len(emails) == len(set(emails)), 'duplicate emails'\norphans = conn.execute('SELECT COUNT(*) FROM orders o LEFT JOIN customers c ON o.customer_id=c.id WHERE c.id IS NULL').fetchone()[0]\nassert orphans == 0, 'orphan orders'\nbad = conn.execute('SELECT COUNT(*) FROM orders WHERE amount <= 0').fetchone()[0]\nassert bad == 0, 'non-positive amounts'\nprint('PASS')\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_constraints.py": "print('PASS')\n"
+      }
+    }
+  ]
 }

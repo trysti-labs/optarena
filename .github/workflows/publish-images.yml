@@ -1,0 +1,59 @@
+# Build and publish the optarena-tester sandbox images to GHCR so first-run
+# users `optarena docker pull` in minutes instead of building ~7GB locally.
+# The tool's pull fallback (optarena/cases.py ensure_image) expects
+# ghcr.io/trysti-labs/optarena/<local image name>:latest.
+name: publish-images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/**"
+      - ".github/workflows/publish-images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lang: base
+            image: optarena-tester
+            context: docker
+          - lang: python
+            image: optarena-tester-python
+            context: docker/python
+          - lang: node
+            image: optarena-tester-node
+            context: docker/node
+          - lang: jvm
+            image: optarena-tester-jvm
+            context: docker/jvm
+          - lang: go
+            image: optarena-tester-go
+            context: docker/go
+          - lang: rust
+            image: optarena-tester-rust
+            context: docker/rust
+          - lang: dotnet
+            image: optarena-tester-dotnet
+            context: docker/dotnet
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          TAG=ghcr.io/trysti-labs/optarena/${{ matrix.image }}:latest
+          docker build -t "$TAG" -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }}
+          docker push "$TAG"

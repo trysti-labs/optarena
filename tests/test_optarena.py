@@ -21,11 +21,14 @@ from optarena.cases import (
 from optarena.compare import compare_runs, format_regression, regression_summary
 from optarena.drivers import DRIVERS, get_driver
 from optarena.drivers.base import CaseResult
+from optarena.drivers.aider_cli import parse_aider_metrics
+from optarena.drivers.cli_agents import parse_claude_json_metrics
 from optarena.drivers.openai_chat import concrete_target
-from optarena.metrics import aggregate
+from optarena.metrics import aggregate, case_deltas
 from optarena.pricing import estimate_cost, is_local_backend, price_for
 from optarena.runner import _merge_trials, safe_run_name
 from optarena.scenario import Backend, Scenario
+from optarena.verify import variants_for, verify_cases
 
 
 class OracleTests(unittest.TestCase):
@@ -324,6 +327,149 @@ class TrialMergeTests(unittest.TestCase):
         merged = _merge_trials("c", [self._result(False, error="boom"),
                                      self._result(False, error="boom")])
         self.assertEqual(merged.error, "boom")
+
+
+class StabilityMetricsTests(unittest.TestCase):
+    """--trials stability surfaced in aggregate/compare, not hidden behind the majority verdict."""
+
+    @staticmethod
+    def _case(name, passed, trials=None, passes=None, duration=1.0):
+        extra = {}
+        if trials:
+            extra = {"trials": trials, "passes": passes}
+        return {"name": name, "passed": passed, "duration_s": duration,
+                "files": [], "failures": [], "extra": extra}
+
+    def test_aggregate_counts_flaky_cases(self):
+        cases = [
+            self._case("a", True, trials=3, passes=3),   # unanimous pass
+            self._case("b", True, trials=3, passes=2),   # flaky
+            self._case("c", False, trials=3, passes=1),  # flaky
+            self._case("d", False),                      # single trial
+        ]
+        self.assertEqual(aggregate(cases)["flaky_cases"], 2)
+
+    def test_aggregate_percentiles(self):
+        cases = [self._case(str(i), True, duration=float(i)) for i in range(1, 11)]
+        s = aggregate(cases)
+        self.assertEqual(s["p95_duration_s"], 10.0)
+        one = aggregate([self._case("x", True, duration=7.0)])
+        self.assertEqual(one["p95_duration_s"], 7.0)
+
+    def test_case_deltas_carry_trials_marker(self):
+        run_a = {"cases": [self._case("x", True, trials=3, passes=2)]}
+        run_b = {"cases": [self._case("x", True)]}
+        row = case_deltas(run_a, run_b)[0]
+        self.assertEqual(row["a_trials"], "2/3")
+        self.assertIsNone(row["b_trials"])
+
+    def test_regression_summary_lists_flaky_cases(self):
+        run = lambda name, passes: {  # noqa: E731
+            "run_id": name, "scenario": {"name": name},
+            "cases": [self._case("x", passes >= 2, trials=3, passes=passes)],
+            "summary": {"cases": 1, "passed": 1, "failed": 0, "pass_rate": 1.0,
+                        "mean_duration_s": 1.0},
+        }
+        summary = regression_summary(compare_runs(run("a", 3), run("b", 2)))
+        self.assertEqual(summary["flaky_cases"], ["x"])
+
+
+class TelemetryParsingTests(unittest.TestCase):
+    """Real token/cost/turn metrics for aider and claude-code, not duration-only."""
+
+    def test_aider_metrics_k_suffix_and_session_cost(self):
+        out = ("Aider v0.86\n"
+               "Tokens: 4.5k sent, 431 received. Cost: $0.0042 message, $0.0084 session.\n"
+               "Applied edit to utils.py\n"
+               "Tokens: 6.2k sent, 1.1k received. Cost: $0.006 message, $0.0144 session.\n")
+        m = parse_aider_metrics(out)
+        self.assertEqual(m["prompt_tokens"], 10700)
+        self.assertEqual(m["completion_tokens"], 1531)
+        self.assertAlmostEqual(m["cost_usd"], 0.0144)
+
+    def test_aider_metrics_comma_format_no_cost(self):
+        m = parse_aider_metrics("Tokens: 8,975 sent, 431 received.\n")
+        self.assertEqual(m["prompt_tokens"], 8975)
+        self.assertEqual(m["completion_tokens"], 431)
+        self.assertNotIn("cost_usd", m)   # absent stays absent, never fabricated
+
+    def test_aider_metrics_empty_on_quiet_output(self):
+        self.assertEqual(parse_aider_metrics("no usage lines here"), {})
+
+    def test_claude_json_metrics(self):
+        payload = json.dumps({
+            "type": "result", "subtype": "success", "num_turns": 4,
+            "total_cost_usd": 0.0731,
+            "usage": {"input_tokens": 12, "output_tokens": 345,
+                      "cache_creation_input_tokens": 1000,
+                      "cache_read_input_tokens": 5000},
+            "result": "done",
+        })
+        m = parse_claude_json_metrics("some banner\n" + payload + "\n")
+        self.assertEqual(m["prompt_tokens"], 6012)
+        self.assertEqual(m["completion_tokens"], 345)
+        self.assertEqual(m["cache_read_tokens"], 5000)
+        self.assertEqual(m["turns"], 4)
+        self.assertAlmostEqual(m["cost_usd"], 0.0731)
+
+    def test_claude_json_metrics_empty_on_non_json(self):
+        self.assertEqual(parse_claude_json_metrics("plain text output"), {})
+
+
+class VerifyCorpusTests(unittest.TestCase):
+    """verify-corpus: reference must pass the real oracle, broken must fail."""
+
+    def setUp(self):
+        self._env = mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
+    CASE = {
+        "name": "verify_demo",
+        "task_type": "bug_fix",
+        "prompts": ["fix add"],
+        "setup_files": {"add.py": "def add(a, b):\n    return a - b\n"},
+        "expected_files": [{"path_pattern": "add.py", "content_patterns": ["def add"]}],
+        "test_setup_files": {"test_add.py": "import add\nassert add.add(2, 3) == 5\nprint('PASS')\n"},
+        "check_command": "python test_add.py",
+        "reference_solution": {"add.py": "def add(a, b):\n    return a + b\n"},
+        "broken_solutions": [
+            {"name": "still-subtracts", "files": {"add.py": "def add(a, b):\n    return a - b - 0\n"}},
+        ],
+    }
+
+    def test_variants_include_reference_broken_and_unmodified(self):
+        names = [n for n, _f, _p in variants_for(self.CASE)]
+        self.assertEqual(names, ["reference", "still-subtracts", "unmodified"])
+
+    def test_good_case_verifies_clean(self):
+        violations, checked, skipped = verify_cases([dict(self.CASE)])
+        self.assertEqual(violations, [])
+        self.assertEqual(checked, 3)
+        self.assertEqual(skipped, 0)
+
+    def test_broken_oracle_is_reported(self):
+        # An oracle that can't fail (no real assertion) must be flagged by the
+        # broken variant "passing" it. (The unmodified variant still fails
+        # honestly - it changed no files, so the expected-file check trips.)
+        bad = dict(self.CASE)
+        bad["test_setup_files"] = {"test_add.py": "print('PASS')\n"}
+        violations, _checked, _skipped = verify_cases([bad])
+        self.assertEqual(len(violations), 1)
+        self.assertIn("still-subtracts", violations[0])
+        self.assertIn("must fail", violations[0])
+
+    def test_failing_reference_is_reported(self):
+        bad = dict(self.CASE)
+        bad["reference_solution"] = {"add.py": "def add(a, b):\n    return a * b\n"}
+        violations, _checked, _skipped = verify_cases([bad])
+        self.assertTrue(any("reference solution FAILED" in v for v in violations))
+
+    def test_case_without_variants_is_skipped(self):
+        plain = {"name": "plain", "task_type": "feature", "prompts": ["x"],
+                 "expected_files": []}
+        violations, checked, skipped = verify_cases([plain])
+        self.assertEqual((violations, checked, skipped), ([], 0, 1))
 
 
 class SafeRunNameTests(unittest.TestCase):

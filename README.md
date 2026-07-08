@@ -121,12 +121,17 @@ optarena compare cline-selfopt cline-ollama-direct
 # Dashboard at http://localhost:8300/dashboard/
 optarena serve
 
-# Build the base sandbox image (gcc + python3 + node) - check_command runs inside it
-optarena docker build
+# Sandbox images - check_command runs inside them. Pull the published images
+# (ghcr.io/trysti-labs/optarena/*, minutes) or build locally (~30 min):
+optarena docker pull --all       # every registered image, from GHCR
+optarena docker build            # base image (gcc + python3 + node), locally
+optarena docker build --lang go  # one per-language track
+optarena docker build --all      # everything, locally
+# (a run also auto-pulls a missing image on first use; OPTARENA_NO_PULL=1 disables)
 
-# Build a per-language image for the benchmark-corpus tracks (python/node/jvm/go/rust/dotnet)
-optarena docker build --lang go
-optarena docker build --all      # every registered image
+# Corpus self-verification (CI gate): reference solutions must PASS the real
+# oracle, broken/unmodified variants must FAIL it
+optarena verify-corpus
 
 # Preflight: which drivers/extensions/backends are ready on this machine
 optarena doctor
@@ -277,8 +282,21 @@ Per-case metrics: pass/fail, failure reasons and class, wall time, files
 created/changed, an approximate diff size, tokens and USD cost (where the
 backend reports usage - local Ollama/LM Studio backends are always free,
 paid models are priced from a built-in table, `optarena/pricing.py`,
-overridable via `~/.optarena/pricing.json`). `compare` adds per-case deltas
-and a verdict (more-accurate / faster / cheaper).
+overridable via `~/.optarena/pricing.json`). The aider and claude-code
+drivers report real token/cost figures parsed from their own output
+(claude-code adds `turns`), so agent-vs-agent cost comparisons don't
+silently degrade to duration-only. `compare` adds per-case deltas and a
+verdict (more-accurate / faster / cheaper), p95 duration, and - with
+`--trials N` - a per-case stability marker (`PASS 2/3`) plus a flaky-case
+list, so a majority verdict with dissenting trials is never presented as a
+unanimous one.
+
+Cases can also declare a `reference_solution` (must PASS the full oracle)
+and `broken_solutions` (each must FAIL it); `optarena verify-corpus` replays
+them through the real sandboxed oracle and exits non-zero on any violation -
+the CI gate that keeps the corpus honest as cases evolve. For bug_fix/
+refactoring/performance/security cases it also auto-checks that an untouched
+workspace fails ("the model changed nothing" must never score a pass).
 
 Cases can also declare `"language"`/`"framework"` tags, plus free-form
 benchmark-corpus metadata (`domain`, `difficulty`, `task_type`, `tags` - see
