@@ -1,0 +1,48 @@
+{
+  "name": "fix_csharp_sequential_tasks",
+  "language": "csharp",
+  "framework": "tpl",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "tags": [
+    "csharp",
+    "tpl",
+    "concurrency"
+  ],
+  "description": "Parallelizes sequential awaits with Task.WhenAll",
+  "difficulty": 2,
+  "task_type": "performance",
+  "prompts": [
+    "Fetcher.FetchAll in Fetcher.cs is documented to fetch CONCURRENTLY but awaits each FetchOne inside the loop - 6 ids take ~600ms instead of ~100ms. Fix Fetcher.cs to start all fetches and await Task.WhenAll, keeping results in input order. Don't change FetchOne or the signatures. Do not create or modify Program.cs."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n",
+    "Fetcher.cs": "namespace Fetching;\n\npublic static class Fetcher\n{\n    private static async Task<int> FetchOne(int id)\n    {\n        await Task.Delay(100);   // simulated network call\n        return id * 2;\n    }\n\n    /// <summary>Fetch all ids CONCURRENTLY; results in input order.</summary>\n    public static async Task<int[]> FetchAll(int[] ids)\n    {\n        var results = new List<int>();\n        foreach (var id in ids)\n        {\n            results.Add(await FetchOne(id));   // BUG: one at a time\n        }\n        return results.ToArray();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Fetcher.cs",
+      "content_patterns": [
+        "whenall",
+        "fetchall"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "using System.Diagnostics;\nusing Fetching;\n\nvar sw = Stopwatch.StartNew();\nint[] results = await Fetcher.FetchAll(new[] { 1, 2, 3, 4, 5, 6 });\nsw.Stop();\n\nif (!results.SequenceEqual(new[] { 2, 4, 6, 8, 10, 12 }))\n{\n    Console.Error.WriteLine($\"results/order wrong: [{string.Join(\",\", results)}]\");\n    Environment.Exit(1);\n}\n\n// sequential: ~600ms; concurrent: ~100ms. Margin 3x.\nif (sw.ElapsedMilliseconds >= 350)\n{\n    Console.Error.WriteLine($\"6 x 100ms fetches took {sw.ElapsedMilliseconds}ms - still sequential\");\n    Environment.Exit(1);\n}\n\nint[] empty = await Fetcher.FetchAll(Array.Empty<int>());\nif (empty.Length != 0) { Console.Error.WriteLine(\"empty input broken\"); Environment.Exit(1); }\n\nConsole.WriteLine($\"PASS ({sw.ElapsedMilliseconds}ms)\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Fetcher.cs": "namespace Fetching;\n\npublic static class Fetcher\n{\n    private static async Task<int> FetchOne(int id)\n    {\n        await Task.Delay(100);   // simulated network call\n        return id * 2;\n    }\n\n    /// <summary>Fetch all ids CONCURRENTLY; results in input order.</summary>\n    public static async Task<int[]> FetchAll(int[] ids)\n    {\n        var tasks = ids.Select(FetchOne).ToArray();\n        return await Task.WhenAll(tasks);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "whenall-but-reversed",
+      "files": {
+        "Fetcher.cs": "namespace Fetching;\n\npublic static class Fetcher\n{\n    private static async Task<int> FetchOne(int id)\n    {\n        await Task.Delay(100);\n        return id * 2;\n    }\n\n    public static async Task<int[]> FetchAll(int[] ids)\n    {\n        var tasks = ids.Reverse().Select(FetchOne).ToArray();\n        return await Task.WhenAll(tasks);\n    }\n}\n"
+      }
+    }
+  ]
+}

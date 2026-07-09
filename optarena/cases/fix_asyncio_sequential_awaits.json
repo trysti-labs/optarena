@@ -1,0 +1,46 @@
+{
+  "name": "fix_asyncio_sequential_awaits",
+  "language": "python",
+  "framework": "asyncio",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "tags": [
+    "python",
+    "asyncio",
+    "concurrency"
+  ],
+  "description": "Parallelizes awaits that run one after another with asyncio.gather",
+  "difficulty": 2,
+  "task_type": "performance",
+  "prompts": [
+    "fetch_all in fetching.py is documented to fetch pages CONCURRENTLY, but it awaits each fetch_page inside the loop, so 6 pages take ~600ms instead of ~100ms. Fix fetching.py using asyncio.gather (or TaskGroup) so all fetches run concurrently and the results come back in input order. Don't change fetch_page or the signatures."
+  ],
+  "setup_files": {
+    "fetching.py": "import asyncio\n\n\nasync def fetch_page(page_id):\n    \"\"\"Simulated 100ms network fetch.\"\"\"\n    await asyncio.sleep(0.1)\n    return page_id * 2\n\n\nasync def fetch_all(page_ids):\n    \"\"\"Fetch every page CONCURRENTLY; results in input order.\"\"\"\n    results = []\n    for page_id in page_ids:\n        results.append(await fetch_page(page_id))\n    return results\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "fetching.py",
+      "content_patterns": [
+        "fetch_all"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_fetching.py": "import asyncio\nimport time\n\nfrom fetching import fetch_all\n\n\nasync def main():\n    t0 = time.monotonic()\n    results = await fetch_all([1, 2, 3, 4, 5, 6])\n    elapsed = time.monotonic() - t0\n\n    assert results == [2, 4, 6, 8, 10, 12], f'results/order wrong: {results}'\n    # sequential: ~0.6s; concurrent: ~0.1s. Margin 3x.\n    assert elapsed < 0.35, f'6 x 100ms fetches took {elapsed:.2f}s - still sequential'\n\n    assert await fetch_all([]) == []\n    print(f'PASS ({elapsed:.2f}s)')\n\n\nasyncio.run(main())\n"
+  },
+  "check_command": "python3 test_fetching.py",
+  "reference_solution": {
+    "fetching.py": "import asyncio\n\n\nasync def fetch_page(page_id):\n    \"\"\"Simulated 100ms network fetch.\"\"\"\n    await asyncio.sleep(0.1)\n    return page_id * 2\n\n\nasync def fetch_all(page_ids):\n    \"\"\"Fetch every page CONCURRENTLY; results in input order.\"\"\"\n    return list(await asyncio.gather(*(fetch_page(p) for p in page_ids)))\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "gather-but-sorted-results",
+      "files": {
+        "fetching.py": "import asyncio\n\n\nasync def fetch_page(page_id):\n    \"\"\"Simulated 100ms network fetch.\"\"\"\n    await asyncio.sleep(0.1)\n    return page_id * 2\n\n\nasync def fetch_all(page_ids):\n    results = await asyncio.gather(*(fetch_page(p) for p in page_ids))\n    return sorted(results, reverse=True)\n"
+      }
+    }
+  ]
+}

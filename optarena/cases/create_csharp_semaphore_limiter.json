@@ -1,0 +1,47 @@
+{
+  "name": "create_csharp_semaphore_limiter",
+  "language": "csharp",
+  "framework": "tpl",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "tags": [
+    "csharp",
+    "tpl",
+    "concurrency"
+  ],
+  "description": "Implements a max-concurrency async task runner with SemaphoreSlim",
+  "difficulty": 2,
+  "task_type": "feature",
+  "prompts": [
+    "Create Limiter.cs with namespace Throttling and a static class Limiter exposing: public static async Task<T[]> RunLimited<T>(IReadOnlyList<Func<Task<T>>> taskFactories, int maxConcurrency). It starts the factories so that AT MOST maxConcurrency tasks are in flight at once (SemaphoreSlim is the standard tool - remember to release in a finally), awaits them all, and returns their results in factory order. All factories must run even if some of them throw - collect the first exception and rethrow it AFTER every started task has settled. Do not create or modify Program.cs."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Limiter.cs",
+      "content_patterns": [
+        "semaphoreslim",
+        "runlimited"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "using Throttling;\n\nint inFlight = 0;\nint maxObserved = 0;\nobject gate = new();\n\nFunc<Task<int>> Make(int i) => async () =>\n{\n    lock (gate) { inFlight++; maxObserved = Math.Max(maxObserved, inFlight); }\n    await Task.Delay(100);\n    lock (gate) { inFlight--; }\n    return i * 10;\n};\n\nvar factories = new List<Func<Task<int>>>();\nfor (int i = 0; i < 9; i++) factories.Add(Make(i));\n\nvar sw = System.Diagnostics.Stopwatch.StartNew();\nint[] results = await Limiter.RunLimited(factories, 3);\nsw.Stop();\n\nif (maxObserved > 3)\n{\n    Console.Error.WriteLine($\"observed {maxObserved} concurrent tasks, limit was 3\");\n    Environment.Exit(1);\n}\nif (maxObserved < 2)\n{\n    Console.Error.WriteLine($\"observed only {maxObserved} concurrent task(s) - not actually parallel\");\n    Environment.Exit(1);\n}\nfor (int i = 0; i < 9; i++)\n{\n    if (results[i] != i * 10)\n    {\n        Console.Error.WriteLine($\"results[{i}] = {results[i]}, want {i * 10} (factory order)\");\n        Environment.Exit(1);\n    }\n}\n// 9 tasks x 100ms at limit 3 => ~300ms; sequential would be ~900ms.\nif (sw.ElapsedMilliseconds >= 700)\n{\n    Console.Error.WriteLine($\"took {sw.ElapsedMilliseconds}ms - limiter is serializing everything\");\n    Environment.Exit(1);\n}\n\n// throwing factories must RELEASE their permit - two throws at limit 2\n// would otherwise exhaust the semaphore and deadlock the remaining tasks.\nint completed = 0;\nvar mixed = new List<Func<Task<int>>>\n{\n    async () => { await Task.Delay(10); throw new InvalidOperationException(\"boom-1\"); },\n    async () => { await Task.Delay(10); throw new InvalidOperationException(\"boom-2\"); },\n    async () => { await Task.Delay(10); Interlocked.Increment(ref completed); return 3; },\n    async () => { await Task.Delay(10); Interlocked.Increment(ref completed); return 4; },\n};\nvar run = Limiter.RunLimited(mixed, 2);\nvar winner = await Task.WhenAny(run, Task.Delay(5000));\nif (winner != run)\n{\n    Console.Error.WriteLine(\"RunLimited deadlocked after throwing factories - permits are not released on throw\");\n    Environment.Exit(1);\n}\ntry\n{\n    await run;\n    Console.Error.WriteLine(\"expected the exception to be rethrown\");\n    Environment.Exit(1);\n}\ncatch (InvalidOperationException)\n{\n    if (completed != 2)\n    {\n        Console.Error.WriteLine($\"only {completed} non-throwing factories completed - a failure must not cancel the rest\");\n        Environment.Exit(1);\n    }\n}\n\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Limiter.cs": "namespace Throttling;\n\npublic static class Limiter\n{\n    public static async Task<T[]> RunLimited<T>(IReadOnlyList<Func<Task<T>>> taskFactories, int maxConcurrency)\n    {\n        using var semaphore = new SemaphoreSlim(maxConcurrency);\n        var tasks = new Task<T>[taskFactories.Count];\n        for (int i = 0; i < taskFactories.Count; i++)\n        {\n            var factory = taskFactories[i];\n            tasks[i] = Run(factory);\n        }\n\n        Exception? first = null;\n        var results = new T[tasks.Length];\n        for (int i = 0; i < tasks.Length; i++)\n        {\n            try\n            {\n                results[i] = await tasks[i];\n            }\n            catch (Exception e)\n            {\n                first ??= e;\n            }\n        }\n        if (first != null) throw first;\n        return results;\n\n        async Task<T> Run(Func<Task<T>> factory)\n        {\n            await semaphore.WaitAsync();\n            try\n            {\n                return await factory();\n            }\n            finally\n            {\n                semaphore.Release();\n            }\n        }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "release-skipped-on-throw",
+      "files": {
+        "Limiter.cs": "namespace Throttling;\n\npublic static class Limiter\n{\n    public static async Task<T[]> RunLimited<T>(IReadOnlyList<Func<Task<T>>> taskFactories, int maxConcurrency)\n    {\n        using var semaphore = new SemaphoreSlim(maxConcurrency);\n        var tasks = new Task<T>[taskFactories.Count];\n        for (int i = 0; i < taskFactories.Count; i++)\n        {\n            var factory = taskFactories[i];\n            tasks[i] = Run(factory);\n        }\n\n        Exception? first = null;\n        var results = new T[tasks.Length];\n        for (int i = 0; i < tasks.Length; i++)\n        {\n            try\n            {\n                results[i] = await tasks[i];\n            }\n            catch (Exception e)\n            {\n                first ??= e;\n            }\n        }\n        if (first != null) throw first;\n        return results;\n\n        async Task<T> Run(Func<Task<T>> factory)\n        {\n            await semaphore.WaitAsync();\n            var result = await factory();   // a throw skips the release below\n            semaphore.Release();\n            return result;\n        }\n    }\n}\n"
+      }
+    }
+  ]
+}
