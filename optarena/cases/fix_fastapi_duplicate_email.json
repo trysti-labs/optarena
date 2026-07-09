@@ -1,0 +1,59 @@
+{
+  "name": "fix_fastapi_duplicate_email",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Enforces unique email across a repository check and a 409 in the router",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "fastapi",
+    "multi-file",
+    "validation"
+  ],
+  "prompts": [
+    "Registration should reject duplicate email addresses, but two layers are broken: UserRepository.email_exists in app/repository.py always returns False, and create_user in app/routers/users.py never checks it. Fix BOTH: make email_exists correctly report whether an email is already registered, and have create_user raise HTTP 409 (Conflict) with a JSON error when the email is taken, before adding. A first registration for an email returns 201; a second with the same email returns 409 and does not create a second user. Different emails still work."
+  ],
+  "setup_files": {
+    "app/__init__.py": "",
+    "app/routers/__init__.py": "",
+    "app/schemas.py": "from pydantic import BaseModel\n\n\nclass UserCreate(BaseModel):\n    username: str\n    email: str\n\n\nclass UserOut(BaseModel):\n    id: int\n    username: str\n    email: str\n",
+    "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def email_exists(self, email):\n        # BUG: always reports \"not taken\", so duplicate emails slip through.\n        return False\n\n    def add(self, username, email):\n        uid = self._next_id\n        self._next_id += 1\n        self._users[uid] = {\"id\": uid, \"username\": username, \"email\": email}\n        return self._users[uid]\n\n    def list(self):\n        return list(self._users.values())\n",
+    "app/routers/users.py": "from fastapi import APIRouter\n\nfrom app import schemas\nfrom app.repository import UserRepository\n\nrouter = APIRouter()\nrepo = UserRepository()\n\n\n@router.post(\"/users\", response_model=schemas.UserOut, status_code=201)\ndef create_user(payload: schemas.UserCreate):\n    # BUG: never checks email_exists, so duplicate emails are accepted.\n    return repo.add(payload.username, payload.email)\n",
+    "app/main.py": "from fastapi import FastAPI\n\nfrom app.routers import users\n\napp = FastAPI()\napp.include_router(users.router)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app/repository.py",
+      "content_patterns": [
+        "def email_exists"
+      ]
+    },
+    {
+      "path_pattern": "app/routers/users.py",
+      "content_patterns": [
+        "409"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_dup.py": "from fastapi.testclient import TestClient\n\nfrom app.main import app\n\nclient = TestClient(app)\n\nr = client.post(\"/users\", json={\"username\": \"ada\", \"email\": \"a@x.io\"})\nassert r.status_code == 201, r.text\nassert r.json()[\"id\"] == 1, r.json()\n\n# same email -> 409, and it must NOT consume an id (nothing added)\nr = client.post(\"/users\", json={\"username\": \"ada2\", \"email\": \"a@x.io\"})\nassert r.status_code == 409, f\"duplicate email must be 409, got {r.status_code} {r.text}\"\n\n# a different email still works and gets the NEXT id (2), proving the\n# rejected duplicate created nothing\nr = client.post(\"/users\", json={\"username\": \"bob\", \"email\": \"b@x.io\"})\nassert r.status_code == 201, r.text\nassert r.json()[\"id\"] == 2, f\"the rejected duplicate consumed an id: bob got {r.json()['id']}, want 2\"\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_dup.py",
+  "reference_solution": {
+    "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def email_exists(self, email):\n        return any(u[\"email\"] == email for u in self._users.values())\n\n    def add(self, username, email):\n        uid = self._next_id\n        self._next_id += 1\n        self._users[uid] = {\"id\": uid, \"username\": username, \"email\": email}\n        return self._users[uid]\n\n    def list(self):\n        return list(self._users.values())\n",
+    "app/routers/users.py": "from fastapi import APIRouter, HTTPException\n\nfrom app import schemas\nfrom app.repository import UserRepository\n\nrouter = APIRouter()\nrepo = UserRepository()\n\n\n@router.post(\"/users\", response_model=schemas.UserOut, status_code=201)\ndef create_user(payload: schemas.UserCreate):\n    if repo.email_exists(payload.email):\n        raise HTTPException(status_code=409, detail=\"email already registered\")\n    return repo.add(payload.username, payload.email)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "checks-but-adds-before-raising",
+      "files": {
+        "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def email_exists(self, email):\n        return any(u[\"email\"] == email for u in self._users.values())\n\n    def add(self, username, email):\n        uid = self._next_id\n        self._next_id += 1\n        self._users[uid] = {\"id\": uid, \"username\": username, \"email\": email}\n        return self._users[uid]\n\n    def list(self):\n        return list(self._users.values())\n",
+        "app/routers/users.py": "from fastapi import APIRouter, HTTPException\n\nfrom app import schemas\nfrom app.repository import UserRepository\n\nrouter = APIRouter()\nrepo = UserRepository()\n\n\n@router.post(\"/users\", response_model=schemas.UserOut, status_code=201)\ndef create_user(payload: schemas.UserCreate):\n    user = repo.add(payload.username, payload.email)\n    if repo.email_exists(payload.email) and sum(\n        1 for u in repo.list() if u[\"email\"] == payload.email) > 1:\n        raise HTTPException(status_code=409, detail=\"email already registered\")\n    return user\n"
+      }
+    }
+  ]
+}
