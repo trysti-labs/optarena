@@ -114,11 +114,41 @@ amount of one-time schema/harness support (noted):
 8. **Migration families** - callback→promise/async, React class→hooks,
    Python 2-isms, `var`→`const`. No schema change.
 
+## Progress (updated 2026-07-09)
+
+**Wave A shipped in full (+70) plus a devops rebalance batch (+9): corpus
+120 → 199**, every new case carrying a `reference_solution` and a
+behaviorally-failing `broken_solution`, all green through `verify-corpus`
+against the real sandboxes before commit. The legacy 7 untagged cases were
+also tagged, closing the `untagged` bucket. Batches landed:
+
+| Batch | +n | Track | Verify notes |
+|---|--:|---|---|
+| A1 | 12 | Django (in-process test.Client, portless) | 32 variants |
+| A2 | 12 | TypeScript-strict (@ts-expect-error + behavior) | 33 |
+| A3 | 8 | Node core (streams/events/fs/url) | 25 |
+| A4 | 8 | Data engineering (pandas/csv/sqlite; +image pandas/alembic) | 20 |
+| A5 | 16 | Concurrency: Go race/deadlock/vet, Rust tokio/scope, asyncio, C# TPL | 46 |
+| A6 | 14 | SQL windows+migrations (9) + shell (5) | 36 |
+| 7 | 9 | DevOps: Makefile (real `make`), Dockerfile+CI (structural) | 25 |
+
+Reference-solution coverage rose 16 → 95 (48% of the corpus, 100% of new
+cases). `verify-corpus` earned its keep in-flight: it caught ~8 authoring
+defects across the batches — a `@types/node` import the image lacks, a
+missing `T: Send + Sync` bound, a migration fixture that accidentally
+reproduced original ids, a `.PHONY` test where `make clean` masked the
+distinction, and several broken variants that shape checks were shadowing —
+every one fixed and re-verified, none shipped.
+
+Difficulty now tilts L2 (107 vs 85 L1); devops rebalanced 8 → 10; data
+engineering, TypeScript, Django, and cross-language concurrency all went
+from zero to real coverage.
+
 ## The waves (380 cases, ordered by machinery dependencies)
 
 | Wave | Cases | Contents | Prereqs |
 |---|---:|---|---|
-| **A** | +70 | Quick wins inside existing images, L1-2: Django (12), TypeScript-strict (12), Node core (8), concurrency families across Go/Rust/Python/C# (16), SQL windows+migrations (9), shell (5), data-eng (8) | pandas+alembic added to python image |
+| **A** ✅ | +70 done | Quick wins inside existing images, L1-2: Django (12), TypeScript-strict (12), Node core (8), concurrency families across Go/Rust/Python/C# (16), SQL windows+migrations (9), shell (5), data-eng (8) | pandas+alembic added to python image |
 | **B** | +80 | The L2 shift: 4-15-file cases across all 7 existing tracks - cross-layer features, cross-module refactors, failing-test-driven fixes, multi-prompt sessions | None (schema already supports) |
 | **C** | +60 | New tracks #1: Kotlin (20), PHP/Laravel (20), Ruby/Rails (20) | 2 new images + jvm image extension; each track lands with ≥4 categories covered |
 | **D** | +50 | Level 3: 8 starter repos (FastAPI+SQLAlchemy+alembic, Express+TS, Spring multi-module, Gin, Axum, ASP.NET, Rails, Laravel) × ~6 tasks; suite tags (Lite/Standard/Extended) + `--suite` filter | `setup_repo` + `git_init` schema fields |
