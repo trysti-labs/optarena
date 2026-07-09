@@ -1,0 +1,53 @@
+{
+  "name": "refactor_ts_enum_to_union",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Replaces a string enum with a string-literal union type, behavior identical",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "typescript",
+    "union-types",
+    "enum"
+  ],
+  "prompts": [
+    "Refactor status.ts to replace the Status enum with a string-literal union type (export type Status = 'pending' | 'active' | 'closed') - the idiomatic modern TypeScript style that erases at compile time. canTransition and label keep the same names and runtime behavior, comparing plain string literals instead of enum members. The file must compile under `tsc --strict`, must no longer contain any enum, and invalid status strings must still be compile errors."
+  ],
+  "setup_files": {
+    "status.ts": "export enum Status {\n  Pending = 'pending',\n  Active = 'active',\n  Closed = 'closed',\n}\n\nexport function canTransition(from: Status, to: Status): boolean {\n  if (from === Status.Pending && to === Status.Active) return true;\n  if (from === Status.Active && to === Status.Closed) return true;\n  return false;\n}\n\nexport function label(status: Status): string {\n  return status.toUpperCase();\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "status.ts",
+      "content_patterns": [
+        "type status",
+        "cantransition",
+        "label"
+      ],
+      "not_content_patterns": [
+        "enum "
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit status.ts type_tests.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build status.ts\nnode behavior_test.js\n",
+    "type_tests.ts": "import { canTransition, label, Status } from './status';\n\nconst s: Status = 'pending';\ncanTransition('pending', 'active');\nlabel('closed');\n\n// @ts-expect-error - invalid status strings must not typecheck\ncanTransition('pending', 'archived');\n\n// @ts-expect-error\nconst bad: Status = 'deleted';\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { canTransition, label } = require('./build/status.js');\nassert.strictEqual(canTransition('pending', 'active'), true);\nassert.strictEqual(canTransition('active', 'closed'), true);\nassert.strictEqual(canTransition('pending', 'closed'), false);\nassert.strictEqual(canTransition('closed', 'active'), false);\nassert.strictEqual(label('active'), 'ACTIVE');\nconsole.log('PASS');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "status.ts": "export type Status = 'pending' | 'active' | 'closed';\n\nexport function canTransition(from: Status, to: Status): boolean {\n  if (from === 'pending' && to === 'active') return true;\n  if (from === 'active' && to === 'closed') return true;\n  return false;\n}\n\nexport function label(status: Status): string {\n  return status.toUpperCase();\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "union-but-transition-inverted",
+      "files": {
+        "status.ts": "export type Status = 'pending' | 'active' | 'closed';\n\nexport function canTransition(from: Status, to: Status): boolean {\n  if (from === 'active' && to === 'pending') return true;\n  if (from === 'closed' && to === 'active') return true;\n  return false;\n}\n\nexport function label(status: Status): string {\n  return status.toUpperCase();\n}\n"
+      }
+    }
+  ]
+}

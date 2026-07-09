@@ -1,0 +1,51 @@
+{
+  "name": "fix_ts_readonly_mutation",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Removes a cast that lets sort() mutate the caller's readonly array",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "typescript",
+    "readonly",
+    "immutability"
+  ],
+  "prompts": [
+    "topScores in scores.ts takes a readonly number[] but defeats the type system with `as number[]` and calls .sort() on it - mutating the caller's array in place, which is exactly what readonly was supposed to prevent. Fix scores.ts so the input array is never mutated (sort a copy), the cast is gone, the readonly parameter type stays, and it still compiles under `tsc --strict`. Behavior: return the `count` highest scores in descending order."
+  ],
+  "setup_files": {
+    "scores.ts": "export function topScores(scores: readonly number[], count: number): number[] {\n  const sorted = (scores as number[]).sort((a, b) => b - a);\n  return sorted.slice(0, count);\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "scores.ts",
+      "content_patterns": [
+        "readonly",
+        "topscores"
+      ],
+      "not_content_patterns": [
+        "as number[]"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit scores.ts \ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build scores.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { topScores } = require('./build/scores.js');\nconst scores = [10, 90, 40, 70, 20];\nconst snapshot = [...scores];\nconst top = topScores(scores, 3);\nassert.deepStrictEqual(top, [90, 70, 40]);\nassert.deepStrictEqual(scores, snapshot, \"caller's array must NOT be mutated\");\nassert.deepStrictEqual(topScores([5], 3), [5]);\nassert.deepStrictEqual(topScores([], 2), []);\nconsole.log('PASS');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "scores.ts": "export function topScores(scores: readonly number[], count: number): number[] {\n  const sorted = [...scores].sort((a, b) => b - a);\n  return sorted.slice(0, count);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "copies-but-ascending",
+      "files": {
+        "scores.ts": "export function topScores(scores: readonly number[], count: number): number[] {\n  const sorted = [...scores].sort((a, b) => a - b);\n  return sorted.slice(0, count);\n}\n"
+      }
+    }
+  ]
+}

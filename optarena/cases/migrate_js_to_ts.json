@@ -1,0 +1,53 @@
+{
+  "name": "migrate_js_to_ts",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Ports a CommonJS utility module to strict TypeScript with identical behavior",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "typescript",
+    "migration",
+    "javascript"
+  ],
+  "prompts": [
+    "Port mathutils.js to TypeScript: create mathutils.ts with the same three functions - mean(values), clamp(value, min, max), and range(start, end, step) where step is optional and defaults to 1 - as typed ES module exports (export function ...), all numbers/number-arrays, compiling cleanly under `tsc --strict` (no any). Behavior must be identical to the JavaScript version, including mean([]) === 0. Passing a string where a number is expected must be a compile error. Leave mathutils.js in place."
+  ],
+  "setup_files": {
+    "mathutils.js": "function mean(values) {\n  if (values.length === 0) {\n    return 0;\n  }\n  return values.reduce((a, b) => a + b, 0) / values.length;\n}\n\nfunction clamp(value, min, max) {\n  return Math.min(Math.max(value, min), max);\n}\n\nfunction range(start, end, step) {\n  step = step || 1;\n  const out = [];\n  for (let i = start; i < end; i += step) {\n    out.push(i);\n  }\n  return out;\n}\n\nmodule.exports = { mean, clamp, range };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "mathutils.ts",
+      "content_patterns": [
+        "export function mean",
+        "clamp",
+        "range"
+      ],
+      "not_content_patterns": [
+        ": any"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit mathutils.ts type_tests.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build mathutils.ts\nnode behavior_test.js\n",
+    "type_tests.ts": "import { clamp, mean, range } from './mathutils';\n\nconst m: number = mean([1, 2, 3]);\nclamp(5, 0, 10);\nrange(0, 5);\nrange(0, 10, 2);\n\n// @ts-expect-error - strings must not be accepted\nmean(['1', '2']);\n\n// @ts-expect-error\nclamp('5', 0, 10);\n",
+    "behavior_test.js": "const assert = require('assert');\nconst ts = require('./build/mathutils.js');\nconst js = require('./mathutils.js');\n// identical behavior to the JS original, spot-checked against it\nfor (const values of [[], [4], [1, 2, 3, 4]]) {\n  assert.strictEqual(ts.mean(values), js.mean(values), `mean(${JSON.stringify(values)})`);\n}\nassert.strictEqual(ts.clamp(-5, 0, 10), 0);\nassert.strictEqual(ts.clamp(15, 0, 10), 10);\nassert.strictEqual(ts.clamp(5, 0, 10), 5);\nassert.deepStrictEqual(ts.range(0, 5), [0, 1, 2, 3, 4], 'default step must be 1');\nassert.deepStrictEqual(ts.range(0, 10, 3), [0, 3, 6, 9]);\nassert.deepStrictEqual(ts.range(3, 3), []);\nconsole.log('PASS');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "mathutils.ts": "export function mean(values: number[]): number {\n  if (values.length === 0) {\n    return 0;\n  }\n  return values.reduce((a, b) => a + b, 0) / values.length;\n}\n\nexport function clamp(value: number, min: number, max: number): number {\n  return Math.min(Math.max(value, min), max);\n}\n\nexport function range(start: number, end: number, step: number = 1): number[] {\n  const out: number[] = [];\n  for (let i = start; i < end; i += step) {\n    out.push(i);\n  }\n  return out;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "mean-empty-throws-nan",
+      "files": {
+        "mathutils.ts": "export function mean(values: number[]): number {\n  return values.reduce((a, b) => a + b, 0) / values.length;\n}\n\nexport function clamp(value: number, min: number, max: number): number {\n  return Math.min(Math.max(value, min), max);\n}\n\nexport function range(start: number, end: number, step: number = 1): number[] {\n  const out: number[] = [];\n  for (let i = start; i < end; i += step) {\n    out.push(i);\n  }\n  return out;\n}\n"
+      }
+    }
+  ]
+}

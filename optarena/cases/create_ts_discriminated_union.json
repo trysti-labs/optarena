@@ -1,0 +1,50 @@
+{
+  "name": "create_ts_discriminated_union",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Models shapes as a discriminated union with an exhaustive area()",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "discriminated-union",
+    "exhaustiveness"
+  ],
+  "prompts": [
+    "Create shapes.ts exporting: a discriminated union type Shape with three variants discriminated by a `kind` field - {kind: 'circle', radius: number}, {kind: 'rect', width: number, height: number}, and {kind: 'triangle', base: number, height: number} - and a function area(shape: Shape): number returning pi*r^2 for circles, width*height for rects, and base*height/2 for triangles. The switch over kind must be exhaustive under `tsc --strict` (use a never-typed default so adding a fourth variant later becomes a compile error), and passing an object with an unknown kind must be a type error."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "shapes.ts",
+      "content_patterns": [
+        "kind",
+        "circle",
+        "rect",
+        "triangle",
+        "export"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit shapes.ts type_tests.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build shapes.ts\nnode behavior_test.js\n",
+    "type_tests.ts": "import { area, Shape } from './shapes';\n\nconst ok: Shape = { kind: 'circle', radius: 2 };\narea(ok);\narea({ kind: 'rect', width: 2, height: 3 });\n\n// @ts-expect-error - unknown discriminant must not typecheck\narea({ kind: 'hexagon', side: 2 });\n\n// @ts-expect-error - missing variant fields must not typecheck\narea({ kind: 'circle' });\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { area } = require('./build/shapes.js');\nassert.ok(Math.abs(area({ kind: 'circle', radius: 2 }) - Math.PI * 4) < 1e-9);\nassert.strictEqual(area({ kind: 'rect', width: 3, height: 4 }), 12);\nassert.strictEqual(area({ kind: 'triangle', base: 10, height: 3 }), 15);\nconsole.log('PASS');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "shapes.ts": "export type Shape =\n  | { kind: 'circle'; radius: number }\n  | { kind: 'rect'; width: number; height: number }\n  | { kind: 'triangle'; base: number; height: number };\n\nexport function area(shape: Shape): number {\n  switch (shape.kind) {\n    case 'circle':\n      return Math.PI * shape.radius * shape.radius;\n    case 'rect':\n      return shape.width * shape.height;\n    case 'triangle':\n      return (shape.base * shape.height) / 2;\n    default: {\n      const exhaustive: never = shape;\n      throw new Error(`unhandled shape: ${exhaustive}`);\n    }\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "triangle-without-half",
+      "files": {
+        "shapes.ts": "export type Shape =\n  | { kind: 'circle'; radius: number }\n  | { kind: 'rect'; width: number; height: number }\n  | { kind: 'triangle'; base: number; height: number };\n\nexport function area(shape: Shape): number {\n  switch (shape.kind) {\n    case 'circle':\n      return Math.PI * shape.radius * shape.radius;\n    case 'rect':\n      return shape.width * shape.height;\n    case 'triangle':\n      return shape.base * shape.height;\n    default: {\n      const exhaustive: never = shape;\n      throw new Error(`unhandled shape: ${exhaustive}`);\n    }\n  }\n}\n"
+      }
+    }
+  ]
+}

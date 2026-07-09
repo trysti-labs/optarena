@@ -1,0 +1,51 @@
+{
+  "name": "add_tests_ts_utility",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 150,
+  "timeout": 180,
+  "description": "Asks the model to write typed tests for string utilities; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "typescript",
+    "testing",
+    "unit-tests"
+  ],
+  "prompts": [
+    "textutils.ts (already correct, do not modify it) exports slugify(title) - lowercases, trims, converts runs of non-alphanumerics to single hyphens, and strips leading/trailing hyphens - and truncate(text, maxLength) - returns text unchanged when its length is <= maxLength, otherwise cuts it so the result INCLUDING a trailing \u2026 (U+2026) ellipsis character is exactly maxLength long. Write tests in a file named exactly test_textutils.ts. It must import ONLY from './textutils' (no node typings are installed, so do not import 'assert' - define a small local helper like `function check(cond: boolean, msg: string): void { if (!cond) throw new Error(msg); }` and use it for every assertion). Cover at least: a title with punctuation and spaces; a title whose leading AND trailing separators must be stripped; a text exactly at maxLength (must be unchanged); and a text over maxLength (must end with the \u2026 character and have length exactly maxLength). The file must compile under tsc --strict, throw on any failed check, and log PASS at the end (console.log is fine)."
+  ],
+  "setup_files": {
+    "textutils.ts": "export function slugify(title: string): string {\n  return title\n    .toLowerCase()\n    .trim()\n    .replace(/[^a-z0-9]+/g, '-')\n    .replace(/^-+|-+$/g, '');\n}\n\nexport function truncate(text: string, maxLength: number): string {\n  if (text.length <= maxLength) {\n    return text;\n  }\n  return text.slice(0, Math.max(0, maxLength - 1)) + '\u2026';\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_textutils.ts",
+      "content_patterns": [
+        "slugify",
+        "truncate"
+      ],
+      "regex_patterns": [
+        "throw\\s+new\\s+Error"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path('textutils.ts')\nTEST_CMD = (\"tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build \"\n            \"textutils.ts test_textutils.ts && node build/test_textutils.js\")\nMUTANTS = [[[\"    .replace(/^-+|-+$/g, '');\", \"    .replace(/^-+/g, '');\"]], [[\"  if (text.length <= maxLength) {\", \"  if (text.length <= maxLength + 1) {\"]]]\n\ndef run_tests():\n    shutil.rmtree('build', ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_textutils.ts": "import { slugify, truncate } from './textutils';\n\nfunction check(cond: boolean, msg: string): void {\n  if (!cond) {\n    throw new Error(msg);\n  }\n}\n\n// slugify\ncheck(slugify('Hello, World!') === 'hello-world', 'punctuation + spaces');\ncheck(slugify('  Already-Clean  ') === 'already-clean', 'trim');\ncheck(slugify('--Trim Edges!!') === 'trim-edges', 'leading AND trailing separators stripped');\ncheck(slugify('A  B   C') === 'a-b-c', 'runs collapse to single hyphen');\n\n// truncate\ncheck(truncate('short', 10) === 'short', 'shorter than max unchanged');\ncheck(truncate('exactly-ten', 11) === 'exactly-ten', 'length == max must NOT truncate');\ncheck(truncate('this is far too long', 8) === 'this is\u2026', 'cut with ellipsis');\ncheck(truncate('this is far too long', 8).length === 8, 'result length is exactly max');\ncheck(truncate('abcd', 3) === 'ab\u2026', 'tight truncation');\n\nconsole.log('PASS');\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_textutils.ts": "import { slugify, truncate } from './textutils';\n\nfunction check(cond: boolean, msg: string): void {\n  if (!cond) {\n    throw new Error(msg);\n  }\n}\n\n// covers slugify truncate edge cases: punctuation, stripped edges, maxLength\ncheck(slugify('Hello').length > 0, 'slugify returns something');\ncheck(truncate('abc', 10).length > 0, 'truncate returns something');\n\nconsole.log('PASS');\n"
+      }
+    }
+  ]
+}
