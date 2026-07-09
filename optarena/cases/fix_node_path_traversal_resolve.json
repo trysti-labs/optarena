@@ -1,0 +1,47 @@
+{
+  "name": "fix_node_path_traversal_resolve",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Hardens a path resolver that lets ../ escape the base directory",
+  "difficulty": 1,
+  "task_type": "security",
+  "tags": [
+    "node",
+    "path-traversal",
+    "security"
+  ],
+  "prompts": [
+    "resolveSafe(baseDir, userPath) in safepath.js is documented to never escape baseDir, but path.join happily follows '../' segments, so userPath '../../etc/passwd' walks right out. Fix safepath.js so the resolved absolute path is returned when it stays inside baseDir, and an Error is thrown (message containing 'outside') when the user path would escape it - including tricky cases like '..', 'a/../../b', and absolute user paths. Normal nested paths like 'docs/guide.md' must keep working."
+  ],
+  "setup_files": {
+    "safepath.js": "const path = require('path');\n\n/**\n * Resolve a user-supplied relative path inside baseDir.\n * Must never escape baseDir.\n */\nfunction resolveSafe(baseDir, userPath) {\n  return path.join(baseDir, userPath);\n}\n\nmodule.exports = { resolveSafe };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "safepath.js",
+      "content_patterns": [
+        "resolvesafe",
+        "module.exports"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('assert');\nconst path = require('path');\nconst { resolveSafe } = require('./safepath.js');\n\nconst base = path.resolve('data');\n\nconst ok = resolveSafe(base, 'docs/guide.md');\nassert.strictEqual(path.resolve(ok), path.join(base, 'docs', 'guide.md'));\n\n// internal ../ that stays inside must be fine\nconst okUp = resolveSafe(base, 'docs/../readme.md');\nassert.strictEqual(path.resolve(okUp), path.join(base, 'readme.md'));\n\nfor (const evil of ['../secret.txt', '..', 'a/../../b', '../../etc/passwd']) {\n  assert.throws(() => resolveSafe(base, evil), /outside/i, `must reject ${evil}`);\n}\n// absolute user paths must not bypass the base\nassert.throws(() => resolveSafe(base, '/etc/passwd'), /outside/i, 'absolute path must be rejected');\nconsole.log('PASS');\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "safepath.js": "const path = require('path');\n\n/**\n * Resolve a user-supplied relative path inside baseDir.\n * Must never escape baseDir.\n */\nfunction resolveSafe(baseDir, userPath) {\n  const root = path.resolve(baseDir);\n  const resolved = path.resolve(root, userPath);\n  if (resolved !== root && !resolved.startsWith(root + path.sep)) {\n    throw new Error(`path escapes outside base directory: ${userPath}`);\n  }\n  return resolved;\n}\n\nmodule.exports = { resolveSafe };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "blocklists-dotdot-prefix-only",
+      "files": {
+        "safepath.js": "const path = require('path');\n\nfunction resolveSafe(baseDir, userPath) {\n  if (userPath.startsWith('..')) {\n    throw new Error(`path escapes outside base directory: ${userPath}`);\n  }\n  return path.join(baseDir, userPath);\n}\n\nmodule.exports = { resolveSafe };\n"
+      }
+    }
+  ]
+}

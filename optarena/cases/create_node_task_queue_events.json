@@ -1,0 +1,46 @@
+{
+  "name": "create_node_task_queue_events",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Builds a sequential async task queue on EventEmitter",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "node",
+    "events",
+    "async"
+  ],
+  "prompts": [
+    "Create taskqueue.js exporting a class TaskQueue (module.exports = { TaskQueue }) extending require('events').EventEmitter. add(fn) enqueues an async function and returns the queue; tasks run STRICTLY one at a time in add order, starting automatically. For each task the queue emits 'result' with (index, value) when it resolves, or 'failure' with (index, error) when it rejects - a rejection must NOT stop later tasks. After the last queued task settles, emit 'drain' with an array of all resolved values (failed slots as null). Indices are 0-based add order."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "taskqueue.js",
+      "content_patterns": [
+        "eventemitter",
+        "module.exports",
+        "taskqueue"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('assert');\nconst { TaskQueue } = require('./taskqueue.js');\n\nconst sleep = (ms) => new Promise((r) => setTimeout(r, ms));\n\n(async () => {\n  const q = new TaskQueue();\n  const events = [];\n  let running = 0;\n  let maxConcurrent = 0;\n  q.on('result', (i, v) => events.push(['result', i, v]));\n  q.on('failure', (i, e) => events.push(['failure', i, e.message]));\n\n  const drained = new Promise((resolve) => q.on('drain', resolve));\n\n  const track = (fn) => async () => {\n    running += 1;\n    maxConcurrent = Math.max(maxConcurrent, running);\n    try { return await fn(); } finally { running -= 1; }\n  };\n\n  q.add(track(async () => { await sleep(30); return 'a'; }));\n  q.add(track(async () => { throw new Error('boom'); }));\n  q.add(track(async () => 'c'));\n\n  const values = await drained;\n  assert.strictEqual(maxConcurrent, 1, 'tasks must run one at a time');\n  assert.deepStrictEqual(events, [\n    ['result', 0, 'a'],\n    ['failure', 1, 'boom'],\n    ['result', 2, 'c'],\n  ], `event order/payloads wrong: ${JSON.stringify(events)}`);\n  assert.deepStrictEqual(values, ['a', null, 'c'], 'drain payload wrong');\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "taskqueue.js": "const { EventEmitter } = require('events');\n\nclass TaskQueue extends EventEmitter {\n  constructor() {\n    super();\n    this._tasks = [];\n    this._results = [];\n    this._running = false;\n  }\n\n  add(fn) {\n    this._tasks.push(fn);\n    if (!this._running) {\n      this._running = true;\n      setImmediate(() => this._run());\n    }\n    return this;\n  }\n\n  async _run() {\n    let index = 0;\n    while (index < this._tasks.length) {\n      const fn = this._tasks[index];\n      try {\n        const value = await fn();\n        this._results[index] = value;\n        this.emit('result', index, value);\n      } catch (err) {\n        this._results[index] = null;\n        this.emit('failure', index, err);\n      }\n      index += 1;\n    }\n    this._running = false;\n    this.emit('drain', this._results);\n  }\n}\n\nmodule.exports = { TaskQueue };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "runs-concurrently",
+      "files": {
+        "taskqueue.js": "const { EventEmitter } = require('events');\n\nclass TaskQueue extends EventEmitter {\n  constructor() {\n    super();\n    this._pending = [];\n    this._results = [];\n    this._count = 0;\n  }\n\n  add(fn) {\n    const index = this._count++;\n    const p = Promise.resolve()\n      .then(fn)\n      .then((value) => {\n        this._results[index] = value;\n        this.emit('result', index, value);\n      })\n      .catch((err) => {\n        this._results[index] = null;\n        this.emit('failure', index, err);\n      });\n    this._pending.push(p);\n    setImmediate(() => {\n      Promise.all(this._pending).then(() => {\n        if (!this._drained) {\n          this._drained = true;\n          this.emit('drain', this._results);\n        }\n      });\n    });\n    return this;\n  }\n}\n\nmodule.exports = { TaskQueue };\n"
+      }
+    }
+  ]
+}

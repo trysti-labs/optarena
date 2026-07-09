@@ -1,0 +1,48 @@
+{
+  "name": "fix_node_buffer_encoding",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Fixes Buffer-to-string coercion that corrupts multi-byte utf8 text",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "node",
+    "buffer",
+    "encoding",
+    "utf8"
+  ],
+  "prompts": [
+    "combineFiles in combine.js reads files WITHOUT an encoding, so fs.readFileSync returns Buffers that get implicitly stringified during concatenation. That happens to work for ASCII but is the classic encoding bug: the function must read the files as utf8 text explicitly. Fix combine.js to read with the 'utf8' encoding (behavior otherwise unchanged: contents joined with a single newline between files, no trailing newline). Multi-byte characters like 'h\u00e9llo \u2192 w\u00f6rld' must come through intact."
+  ],
+  "setup_files": {
+    "combine.js": "const fs = require('fs');\n\n/**\n * Read every file in `paths` and return their combined text content,\n * joined with a single newline between files.\n */\nfunction combineFiles(paths) {\n  let combined = '';\n  for (const p of paths) {\n    combined += fs.readFileSync(p) + '\\n';\n  }\n  return combined.trimEnd();\n}\n\nmodule.exports = { combineFiles };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "combine.js",
+      "content_patterns": [
+        "utf8",
+        "combinefiles"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('assert');\nconst fs = require('fs');\nconst { combineFiles } = require('./combine.js');\n\nfs.writeFileSync('a.txt', 'h\u00e9llo \u2192 w\u00f6rld', 'utf8');\nfs.writeFileSync('b.txt', 'ascii line', 'utf8');\nfs.writeFileSync('c.txt', '\u65e5\u672c\u8a9e\u30c6\u30b9\u30c8', 'utf8');\n\nconst out = combineFiles(['a.txt', 'b.txt', 'c.txt']);\nassert.strictEqual(out, 'h\u00e9llo \u2192 w\u00f6rld\\nascii line\\n\u65e5\u672c\u8a9e\u30c6\u30b9\u30c8');\n\n// single file, no trailing newline\nassert.strictEqual(combineFiles(['b.txt']), 'ascii line');\n\n// the classic symptom check: reading utf8 as latin1 corrupts these\nassert.ok(!out.includes('\u00c3'), 'multi-byte characters were corrupted (mojibake detected)');\nconsole.log('PASS');\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "combine.js": "const fs = require('fs');\n\n/**\n * Read every file in `paths` and return their combined text content,\n * joined with a single newline between files.\n */\nfunction combineFiles(paths) {\n  let combined = '';\n  for (const p of paths) {\n    combined += fs.readFileSync(p, 'utf8') + '\\n';\n  }\n  return combined.trimEnd();\n}\n\nmodule.exports = { combineFiles };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "latin1-mojibake",
+      "files": {
+        "combine.js": "const fs = require('fs');\n\n/**\n * Read every file in `paths` and return their combined text content,\n * joined with a single newline between files.\n */\nfunction combineFiles(paths) {\n  // note: files are utf8 on disk\n  let combined = '';\n  for (const p of paths) {\n    combined += fs.readFileSync(p, 'latin1') + '\\n';\n  }\n  return combined.trimEnd();\n}\n\nmodule.exports = { combineFiles };\n"
+      }
+    }
+  ]
+}

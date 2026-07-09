@@ -1,0 +1,47 @@
+{
+  "name": "fix_node_url_query_parsing",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Replaces naive query-string splitting with proper URL decoding",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "node",
+    "url",
+    "parsing"
+  ],
+  "prompts": [
+    "parseQuery in query.js hand-rolls query-string parsing with string splits: percent-encoded values stay encoded ('caf%C3%A9' instead of 'caf\u00e9'), '+' is not decoded to a space, values containing '=' get truncated, and a '#fragment' after the query leaks into the last value. Fix query.js using Node's built-in URL/URLSearchParams (parse relative URLs against a dummy base like 'http://x'), keeping the same contract: an object of decoded key -> value strings, later duplicate keys overwriting earlier ones, and '' for valueless keys."
+  ],
+  "setup_files": {
+    "query.js": "/**\n * Parse the query string of a URL into an object.\n * Must handle percent-encoded values and '+' as space.\n */\nfunction parseQuery(url) {\n  const q = url.split('?')[1] || '';\n  const out = {};\n  for (const pair of q.split('&')) {\n    if (!pair) continue;\n    const [key, value] = pair.split('=');\n    out[key] = value || '';\n  }\n  return out;\n}\n\nmodule.exports = { parseQuery };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.js",
+      "content_patterns": [
+        "parsequery",
+        "module.exports"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('assert');\nconst { parseQuery } = require('./query.js');\n\nassert.deepStrictEqual(parseQuery('/search?q=hello&page=2'), { q: 'hello', page: '2' });\nassert.deepStrictEqual(parseQuery('/p?name=caf%C3%A9'), { name: 'caf\u00e9' }, 'percent-decoding');\nassert.deepStrictEqual(parseQuery('/p?msg=a+b'), { msg: 'a b' }, \"'+' must decode to space\");\n// value containing '=' must not be truncated\nassert.strictEqual(parseQuery('/p?expr=1=2')['expr'], '1=2');\n// fragment must not leak into values\nassert.deepStrictEqual(parseQuery('/p?a=1#section'), { a: '1' });\n// valueless key, duplicates, empty query\nassert.deepStrictEqual(parseQuery('/p?flag'), { flag: '' });\nassert.deepStrictEqual(parseQuery('/p?x=1&x=2'), { x: '2' }, 'later duplicate wins');\nassert.deepStrictEqual(parseQuery('/plain'), {});\nconsole.log('PASS');\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "query.js": "/**\n * Parse the query string of a URL into an object.\n * Must handle percent-encoded values and '+' as space.\n */\nfunction parseQuery(url) {\n  const parsed = new URL(url, 'http://x');\n  const out = {};\n  for (const [key, value] of parsed.searchParams) {\n    out[key] = value;\n  }\n  return out;\n}\n\nmodule.exports = { parseQuery };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "decodes-but-keeps-fragment",
+      "files": {
+        "query.js": "function parseQuery(url) {\n  const q = url.split('?')[1] || '';\n  const out = {};\n  for (const pair of q.split('&')) {\n    if (!pair) continue;\n    const eq = pair.indexOf('=');\n    const key = eq === -1 ? pair : pair.slice(0, eq);\n    const value = eq === -1 ? '' : pair.slice(eq + 1);\n    out[key] = decodeURIComponent(value.replace(/\\+/g, ' '));\n  }\n  return out;\n}\n\nmodule.exports = { parseQuery };\n"
+      }
+    }
+  ]
+}

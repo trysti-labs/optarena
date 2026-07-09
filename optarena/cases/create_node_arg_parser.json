@@ -1,0 +1,45 @@
+{
+  "name": "create_node_arg_parser",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Writes a small argv parser for flags, options, and positionals",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "node",
+    "cli",
+    "parsing"
+  ],
+  "prompts": [
+    "Create args.js exporting parseArgs(argv) (module.exports = { parseArgs }) that parses an array of CLI arguments into {flags, options, positionals}: '--name=value' tokens become options entries {name: 'value'}; bare '--name' tokens become flags entries (a Set or array of names); everything else is a positional, in order. A '--' token stops all parsing - every later token is a positional even if it starts with '--'. Return flags as an array of names in first-seen order."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "args.js",
+      "content_patterns": [
+        "parseargs",
+        "module.exports"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('assert');\nconst { parseArgs } = require('./args.js');\n\nassert.deepStrictEqual(parseArgs(['--verbose', '--out=dist', 'input.txt']), {\n  flags: ['verbose'],\n  options: { out: 'dist' },\n  positionals: ['input.txt'],\n});\n\nassert.deepStrictEqual(parseArgs(['a', 'b']), { flags: [], options: {}, positionals: ['a', 'b'] });\n\n// value containing '=' splits only on the first\nassert.deepStrictEqual(parseArgs(['--query=a=b']).options, { query: 'a=b' });\n\n// -- terminator: everything after is positional\nassert.deepStrictEqual(parseArgs(['--x', '--', '--not-a-flag', '--y=1']), {\n  flags: ['x'],\n  options: {},\n  positionals: ['--not-a-flag', '--y=1'],\n});\n\nassert.deepStrictEqual(parseArgs([]), { flags: [], options: {}, positionals: [] });\nconsole.log('PASS');\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "args.js": "function parseArgs(argv) {\n  const flags = [];\n  const options = {};\n  const positionals = [];\n  let raw = false;\n  for (const token of argv) {\n    if (raw) {\n      positionals.push(token);\n    } else if (token === '--') {\n      raw = true;\n    } else if (token.startsWith('--')) {\n      const body = token.slice(2);\n      const eq = body.indexOf('=');\n      if (eq === -1) {\n        flags.push(body);\n      } else {\n        options[body.slice(0, eq)] = body.slice(eq + 1);\n      }\n    } else {\n      positionals.push(token);\n    }\n  }\n  return { flags, options, positionals };\n}\n\nmodule.exports = { parseArgs };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "splits-on-every-equals",
+      "files": {
+        "args.js": "function parseArgs(argv) {\n  const flags = [];\n  const options = {};\n  const positionals = [];\n  let raw = false;\n  for (const token of argv) {\n    if (raw) {\n      positionals.push(token);\n    } else if (token === '--') {\n      raw = true;\n    } else if (token.startsWith('--')) {\n      const body = token.slice(2);\n      if (!body.includes('=')) {\n        flags.push(body);\n      } else {\n        const parts = body.split('=');\n        options[parts[0]] = parts[parts.length - 1];\n      }\n    } else {\n      positionals.push(token);\n    }\n  }\n  return { flags, options, positionals };\n}\n\nmodule.exports = { parseArgs };\n"
+      }
+    }
+  ]
+}

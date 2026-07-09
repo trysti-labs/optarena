@@ -1,0 +1,52 @@
+{
+  "name": "refactor_node_fs_promises",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Migrates nested fs callbacks to fs/promises async-await",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "node",
+    "fs-promises",
+    "async-await",
+    "migration"
+  ],
+  "prompts": [
+    "copytext.js implements copyTextFiles with three levels of nested fs callbacks and hand-rolled completion counting. Refactor it to modern style: export an async function copyTextFiles(srcDir, destDir) using require('fs').promises (or 'fs/promises') and await, which resolves to the number of .txt files copied and rejects on error. Same behavior: destDir created recursively, only names ending in .txt copied, non-txt files ignored, empty source resolves to 0. Remove the callback parameter entirely - the export is promise-based now."
+  ],
+  "setup_files": {
+    "copytext.js": "const fs = require('fs');\nconst path = require('path');\n\n/**\n * Copy every .txt file from srcDir into destDir (creating destDir if\n * needed) and call done(err, copiedCount) when finished.\n */\nfunction copyTextFiles(srcDir, destDir, done) {\n  fs.mkdir(destDir, { recursive: true }, (mkErr) => {\n    if (mkErr) return done(mkErr);\n    fs.readdir(srcDir, (rdErr, names) => {\n      if (rdErr) return done(rdErr);\n      const txt = names.filter((n) => n.endsWith('.txt'));\n      let remaining = txt.length;\n      if (remaining === 0) return done(null, 0);\n      let failed = false;\n      for (const name of txt) {\n        fs.copyFile(path.join(srcDir, name), path.join(destDir, name), (cpErr) => {\n          if (failed) return;\n          if (cpErr) { failed = true; return done(cpErr); }\n          remaining -= 1;\n          if (remaining === 0) done(null, txt.length);\n        });\n      }\n    });\n  });\n}\n\nmodule.exports = { copyTextFiles };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "copytext.js",
+      "content_patterns": [
+        "async",
+        "await",
+        "copytextfiles"
+      ],
+      "not_content_patterns": [
+        "done("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('assert');\nconst fs = require('fs');\nconst path = require('path');\nconst { copyTextFiles } = require('./copytext.js');\n\n(async () => {\n  fs.mkdirSync('src', { recursive: true });\n  fs.writeFileSync('src/a.txt', 'alpha');\n  fs.writeFileSync('src/b.txt', 'beta');\n  fs.writeFileSync('src/ignore.md', 'nope');\n\n  const result = copyTextFiles('src', 'dest');\n  assert.ok(result && typeof result.then === 'function', 'must return a promise');\n  const count = await result;\n  assert.strictEqual(count, 2, `copied count: ${count}`);\n  assert.strictEqual(fs.readFileSync(path.join('dest', 'a.txt'), 'utf8'), 'alpha');\n  assert.strictEqual(fs.readFileSync(path.join('dest', 'b.txt'), 'utf8'), 'beta');\n  assert.ok(!fs.existsSync(path.join('dest', 'ignore.md')), 'non-txt must not be copied');\n\n  fs.mkdirSync('empty', { recursive: true });\n  assert.strictEqual(await copyTextFiles('empty', 'dest2'), 0);\n\n  await assert.rejects(() => copyTextFiles('no-such-dir', 'dest3'), 'missing source must reject');\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "copytext.js": "const fsp = require('fs').promises;\nconst path = require('path');\n\n/**\n * Copy every .txt file from srcDir into destDir (creating destDir if\n * needed). Resolves to the number of files copied.\n */\nasync function copyTextFiles(srcDir, destDir) {\n  await fsp.mkdir(destDir, { recursive: true });\n  const names = await fsp.readdir(srcDir);\n  const txt = names.filter((n) => n.endsWith('.txt'));\n  for (const name of txt) {\n    await fsp.copyFile(path.join(srcDir, name), path.join(destDir, name));\n  }\n  return txt.length;\n}\n\nmodule.exports = { copyTextFiles };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "copies-everything",
+      "files": {
+        "copytext.js": "const fsp = require('fs').promises;\nconst path = require('path');\n\nasync function copyTextFiles(srcDir, destDir) {\n  await fsp.mkdir(destDir, { recursive: true });\n  const names = await fsp.readdir(srcDir);\n  for (const name of names) {\n    await fsp.copyFile(path.join(srcDir, name), path.join(destDir, name));\n  }\n  return names.length;\n}\n\nmodule.exports = { copyTextFiles };\n"
+      }
+    }
+  ]
+}
