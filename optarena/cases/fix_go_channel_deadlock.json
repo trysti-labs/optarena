@@ -1,0 +1,46 @@
+{
+  "name": "fix_go_channel_deadlock",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 150,
+  "timeout": 180,
+  "tags": [
+    "go",
+    "concurrency"
+  ],
+  "description": "Fixes a worker/channel pattern that deadlocks on an unbuffered channel",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "prompts": [
+    "Process in pool.go deadlocks: the workers send into an UNBUFFERED channel that nothing reads until after wg.Wait(), so every worker blocks on its send, Wait never returns, and the runtime kills the program with 'all goroutines are asleep - deadlock!'. Fix pool.go so Process returns every doubled item (order doesn't matter) without deadlocking - buffer the channel to len(items), or drain it concurrently with a collector goroutine; either idiom is fine. Keep the signature."
+  ],
+  "setup_files": {
+    "go.mod": "module gocase\n\ngo 1.22.12\n",
+    "pool.go": "package pool\n\nimport \"sync\"\n\n// Process doubles every item concurrently and returns the results\n// (order not guaranteed).\nfunc Process(items []int) []int {\n\tresults := make(chan int)\n\tvar wg sync.WaitGroup\n\tfor _, it := range items {\n\t\twg.Add(1)\n\t\tgo func(v int) {\n\t\t\tdefer wg.Done()\n\t\t\tresults <- v * 2\n\t\t}(it)\n\t}\n\twg.Wait()\n\tclose(results)\n\tout := []int{}\n\tfor r := range results {\n\t\tout = append(out, r)\n\t}\n\treturn out\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pool.go",
+      "content_patterns": [
+        "func process"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "pool_deadlock_test.go": "package pool\n\nimport (\n\t\"sort\"\n\t\"testing\"\n)\n\nfunc TestProcessAll(t *testing.T) {\n\tgot := Process([]int{1, 2, 3, 4, 5, 6, 7, 8})\n\tsort.Ints(got)\n\twant := []int{2, 4, 6, 8, 10, 12, 14, 16}\n\tif len(got) != len(want) {\n\t\tt.Fatalf(\"got %d results, want %d: %v\", len(got), len(want), got)\n\t}\n\tfor i := range want {\n\t\tif got[i] != want[i] {\n\t\t\tt.Fatalf(\"sorted results = %v, want %v\", got, want)\n\t\t}\n\t}\n}\n\nfunc TestProcessEmpty(t *testing.T) {\n\tif got := Process(nil); len(got) != 0 {\n\t\tt.Fatalf(\"Process(nil) = %v, want empty\", got)\n\t}\n}\n"
+  },
+  "check_command": "go test -race -timeout 60s ./...",
+  "reference_solution": {
+    "pool.go": "package pool\n\nimport \"sync\"\n\n// Process doubles every item concurrently and returns the results\n// (order not guaranteed).\nfunc Process(items []int) []int {\n\tresults := make(chan int, len(items))\n\tvar wg sync.WaitGroup\n\tfor _, it := range items {\n\t\twg.Add(1)\n\t\tgo func(v int) {\n\t\t\tdefer wg.Done()\n\t\t\tresults <- v * 2\n\t\t}(it)\n\t}\n\twg.Wait()\n\tclose(results)\n\tout := []int{}\n\tfor r := range results {\n\t\tout = append(out, r)\n\t}\n\treturn out\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "buffer-off-by-one",
+      "files": {
+        "pool.go": "package pool\n\nimport \"sync\"\n\n// Process doubles every item concurrently and returns the results\n// (order not guaranteed).\nfunc Process(items []int) []int {\n\tresults := make(chan int, len(items)-1)\n\tvar wg sync.WaitGroup\n\tfor _, it := range items {\n\t\twg.Add(1)\n\t\tgo func(v int) {\n\t\t\tdefer wg.Done()\n\t\t\tresults <- v * 2\n\t\t}(it)\n\t}\n\twg.Wait()\n\tclose(results)\n\tout := []int{}\n\tfor r := range results {\n\t\tout = append(out, r)\n\t}\n\treturn out\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "name": "create_ts_generic_dedupe",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Writes a generic key-based dedupe preserving first occurrence, fully typed",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "generics"
+  ],
+  "prompts": [
+    "Create dedupe.ts exporting a generic function dedupeBy<T, K>(items: T[], key: (item: T) => K): T[] that returns the items with duplicates removed, keeping the FIRST occurrence of each key, in original order. It must compile under `tsc --strict`, preserve the element type T (no any), and not mutate the input array."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "dedupe.ts",
+      "content_patterns": [
+        "dedupeby",
+        "export"
+      ],
+      "not_content_patterns": [
+        ": any"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit dedupe.ts type_tests.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build dedupe.ts\nnode behavior_test.js\n",
+    "type_tests.ts": "import { dedupeBy } from './dedupe';\n\ninterface Row { id: number; label: string }\nconst rows: Row[] = [];\n\n// element type must flow through as Row, not any/unknown\nconst out: Row[] = dedupeBy(rows, (r) => r.id);\nout.map((r) => r.label.toUpperCase());\n\n// @ts-expect-error - key function must take the element type\ndedupeBy(rows, (r: string) => r);\n\n// @ts-expect-error - result is Row[], not string[]\nconst bad: string[] = dedupeBy(rows, (r) => r.id);\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { dedupeBy } = require('./build/dedupe.js');\nconst input = [\n  { id: 1, v: 'first-1' },\n  { id: 2, v: 'first-2' },\n  { id: 1, v: 'second-1' },\n  { id: 3, v: 'first-3' },\n  { id: 2, v: 'second-2' },\n];\nconst snapshot = JSON.stringify(input);\nconst out = dedupeBy(input, (r) => r.id);\nassert.deepStrictEqual(out.map((r) => r.v), ['first-1', 'first-2', 'first-3'],\n  'must keep FIRST occurrence per key, in order');\nassert.strictEqual(JSON.stringify(input), snapshot, 'input must not be mutated');\nassert.deepStrictEqual(dedupeBy([], (x) => x), []);\nconsole.log('PASS');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "dedupe.ts": "export function dedupeBy<T, K>(items: T[], key: (item: T) => K): T[] {\n  const seen = new Set<K>();\n  const out: T[] = [];\n  for (const item of items) {\n    const k = key(item);\n    if (!seen.has(k)) {\n      seen.add(k);\n      out.push(item);\n    }\n  }\n  return out;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "keeps-last-occurrence",
+      "files": {
+        "dedupe.ts": "export function dedupeBy<T, K>(items: T[], key: (item: T) => K): T[] {\n  const byKey = new Map<K, T>();\n  for (const item of items) {\n    byKey.set(key(item), item);\n  }\n  return [...byKey.values()];\n}\n"
+      }
+    }
+  ]
+}

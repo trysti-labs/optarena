@@ -1,0 +1,47 @@
+{
+  "name": "create_ts_partial_update",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Writes a typed immutable merge using Partial<T>",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "mapped-types",
+    "immutability"
+  ],
+  "prompts": [
+    "Create update.ts exporting a generic function applyUpdates<T extends object>(obj: T, updates: Partial<T>): T that returns a NEW object with the updates merged over obj - the original object must not be mutated. Updating a field with a value of the wrong type must be a compile error under `tsc --strict`. Fields explicitly set to undefined in updates should not overwrite existing values (skip undefined values when merging)."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "update.ts",
+      "content_patterns": [
+        "applyupdates",
+        "partial<"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit update.ts type_tests.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build update.ts\nnode behavior_test.js\n",
+    "type_tests.ts": "import { applyUpdates } from './update';\n\ninterface Profile { name: string; age: number }\nconst p: Profile = { name: 'ada', age: 36 };\n\nconst updated: Profile = applyUpdates(p, { age: 37 });\n\n// @ts-expect-error - wrong-typed field must not compile\napplyUpdates(p, { age: 'old' });\n\n// @ts-expect-error - unknown fields must not compile\napplyUpdates(p, { nickname: 'a' });\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { applyUpdates } = require('./build/update.js');\nconst original = { name: 'ada', age: 36 };\nconst updated = applyUpdates(original, { age: 37 });\nassert.deepStrictEqual(updated, { name: 'ada', age: 37 });\nassert.deepStrictEqual(original, { name: 'ada', age: 36 }, 'original must NOT be mutated');\nassert.notStrictEqual(updated, original, 'must return a new object');\nconst kept = applyUpdates(original, { name: undefined });\nassert.strictEqual(kept.name, 'ada', 'explicit undefined must not clobber existing values');\nconsole.log('PASS');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "update.ts": "export function applyUpdates<T extends object>(obj: T, updates: Partial<T>): T {\n  const out = { ...obj };\n  for (const key of Object.keys(updates) as (keyof T)[]) {\n    const value = updates[key];\n    if (value !== undefined) {\n      out[key] = value as T[keyof T];\n    }\n  }\n  return out;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "spread-clobbers-with-undefined",
+      "files": {
+        "update.ts": "export function applyUpdates<T extends object>(obj: T, updates: Partial<T>): T {\n  return { ...obj, ...updates };\n}\n"
+      }
+    }
+  ]
+}

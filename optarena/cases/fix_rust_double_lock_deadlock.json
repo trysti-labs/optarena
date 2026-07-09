@@ -1,0 +1,46 @@
+{
+  "name": "fix_rust_double_lock_deadlock",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 240,
+  "tags": [
+    "rust",
+    "concurrency"
+  ],
+  "description": "Fixes a self-deadlock from re-locking a non-reentrant Mutex",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "prompts": [
+    "Inventory::add_unique in src/lib.rs deadlocks on first use: it calls self.add() while STILL HOLDING the items mutex guard, and std::sync::Mutex is not reentrant - the second lock() blocks forever. Fix src/lib.rs so add_unique performs the contains-check and the push atomically under ONE lock acquisition (push directly through the guard you already hold). Same semantics: returns true and adds when absent, false and unchanged when present."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"conc_case\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::sync::Mutex;\n\npub struct Inventory {\n    items: Mutex<Vec<String>>,\n}\n\nimpl Inventory {\n    pub fn new() -> Self {\n        Inventory { items: Mutex::new(Vec::new()) }\n    }\n\n    pub fn add(&self, item: &str) {\n        self.items.lock().unwrap().push(item.to_string());\n    }\n\n    pub fn count(&self) -> usize {\n        self.items.lock().unwrap().len()\n    }\n\n    /// Add the item only if it isn't present yet; returns whether it was added.\n    pub fn add_unique(&self, item: &str) -> bool {\n        let items = self.items.lock().unwrap();\n        if items.contains(&item.to_string()) {\n            return false;\n        }\n        // BUG: self.add() locks the SAME mutex we're still holding -\n        // std::sync::Mutex is not reentrant, so this deadlocks forever.\n        self.add(item);\n        true\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "add_unique"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/deadlock_test.rs": "use conc_case::Inventory;\nuse std::sync::mpsc;\nuse std::thread;\nuse std::time::Duration;\n\n#[test]\nfn add_unique_does_not_deadlock() {\n    let (tx, rx) = mpsc::channel();\n    thread::spawn(move || {\n        let inv = Inventory::new();\n        assert!(inv.add_unique(\"hammer\"));\n        assert!(!inv.add_unique(\"hammer\"));\n        assert!(inv.add_unique(\"nail\"));\n        assert_eq!(inv.count(), 2);\n        tx.send(inv.count()).unwrap();\n    });\n    // watchdog: a deadlocked add_unique never sends, and we fail fast\n    match rx.recv_timeout(Duration::from_secs(5)) {\n        Ok(count) => assert_eq!(count, 2),\n        Err(_) => panic!(\"add_unique deadlocked (watchdog fired after 5s)\"),\n    }\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "use std::sync::Mutex;\n\npub struct Inventory {\n    items: Mutex<Vec<String>>,\n}\n\nimpl Inventory {\n    pub fn new() -> Self {\n        Inventory { items: Mutex::new(Vec::new()) }\n    }\n\n    pub fn add(&self, item: &str) {\n        self.items.lock().unwrap().push(item.to_string());\n    }\n\n    pub fn count(&self) -> usize {\n        self.items.lock().unwrap().len()\n    }\n\n    /// Add the item only if it isn't present yet; returns whether it was added.\n    pub fn add_unique(&self, item: &str) -> bool {\n        let mut items = self.items.lock().unwrap();\n        if items.contains(&item.to_string()) {\n            return false;\n        }\n        items.push(item.to_string());\n        true\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "returns-true-without-inserting",
+      "files": {
+        "src/lib.rs": "use std::sync::Mutex;\n\npub struct Inventory {\n    items: Mutex<Vec<String>>,\n}\n\nimpl Inventory {\n    pub fn new() -> Self {\n        Inventory { items: Mutex::new(Vec::new()) }\n    }\n\n    pub fn add(&self, item: &str) {\n        self.items.lock().unwrap().push(item.to_string());\n    }\n\n    pub fn count(&self) -> usize {\n        self.items.lock().unwrap().len()\n    }\n\n    /// Add the item only if it isn't present yet; returns whether it was added.\n    pub fn add_unique(&self, item: &str) -> bool {\n        let items = self.items.lock().unwrap();\n        if items.contains(&item.to_string()) {\n            return false;\n        }\n        true\n    }\n}\n"
+      }
+    }
+  ]
+}

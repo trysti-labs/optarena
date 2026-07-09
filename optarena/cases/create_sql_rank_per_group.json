@@ -1,0 +1,47 @@
+{
+  "name": "create_sql_rank_per_group",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Ranks reps within each region by total sales using window functions",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "sql",
+    "window-functions",
+    "rank"
+  ],
+  "prompts": [
+    "The database has a sales table: sales(id, rep, region, month, amount) - see seed.sql. Write query.sql containing ONE SELECT that returns each rep's region, rep name, total amount (across all their rows), and their rank WITHIN their region by that total (highest total = rank 1; use RANK() so ties share a rank). Columns exactly: region, rep, total, rank_in_region. Order the output by region ASC, then rank_in_region ASC, then rep ASC."
+  ],
+  "setup_files": {
+    "seed.sql": "CREATE TABLE sales (\n    id INTEGER PRIMARY KEY,\n    rep TEXT NOT NULL,\n    region TEXT NOT NULL,\n    month TEXT NOT NULL,\n    amount REAL NOT NULL\n);\nINSERT INTO sales (rep, region, month, amount) VALUES\n    ('ada',   'west', '2026-01', 100),\n    ('ada',   'west', '2026-02', 300),\n    ('ada',   'west', '2026-03', 200),\n    ('bob',   'west', '2026-01', 500),\n    ('bob',   'west', '2026-02', 100),\n    ('carol', 'east', '2026-01', 400),\n    ('carol', 'east', '2026-02', 400),\n    ('dave',  'east', '2026-01', 250),\n    ('dave',  'east', '2026-02', 350);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.sql",
+      "content_patterns": [
+        "rank() over",
+        "partition by"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_query.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript(open('seed.sql').read())\nrows = conn.execute(open('query.sql').read()).fetchall()\n\nwant = [\n    ('east', 'carol', 800.0, 1),\n    ('east', 'dave', 600.0, 2),\n    ('west', 'bob', 600.0, 1),\n    ('west', 'ada', 600.0, 1),   # tie at 600 shares rank 1\n]\n# ada/bob tie: both rank 1 in west, rep ASC puts ada first\nwant = [\n    ('east', 'carol', 800.0, 1),\n    ('east', 'dave', 600.0, 2),\n    ('west', 'ada', 600.0, 1),\n    ('west', 'bob', 600.0, 1),\n]\nassert [tuple(r) for r in rows] == want, f'got: {rows}\\nwant: {want}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_query.py",
+  "reference_solution": {
+    "query.sql": "SELECT region,\n       rep,\n       SUM(amount) AS total,\n       RANK() OVER (PARTITION BY region ORDER BY SUM(amount) DESC) AS rank_in_region\nFROM sales\nGROUP BY region, rep\nORDER BY region ASC, rank_in_region ASC, rep ASC;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "row-number-breaks-ties",
+      "files": {
+        "query.sql": "SELECT region,\n       rep,\n       SUM(amount) AS total,\n       ROW_NUMBER() OVER (PARTITION BY region ORDER BY SUM(amount) DESC) AS rank_in_region\nFROM sales\nGROUP BY region, rep\nORDER BY region ASC, rank_in_region ASC, rep ASC;\n"
+      }
+    }
+  ]
+}

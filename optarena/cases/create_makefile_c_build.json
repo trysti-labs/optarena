@@ -1,0 +1,48 @@
+{
+  "name": "create_makefile_c_build",
+  "domain": "devops",
+  "task_type": "devops",
+  "docker_image": "optarena-tester:latest",
+  "framework": "make",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Writes a Makefile that compiles, cleans, and tests a C program",
+  "difficulty": 2,
+  "tags": [
+    "make",
+    "c",
+    "build"
+  ],
+  "prompts": [
+    "This directory has main.c and greet.c (main calls greet(), which prints 'hello from make'). Write a Makefile with three targets: `make` (or `make all`) compiles both sources into an executable named `app` (use gcc); `make clean` removes `app` and any object files; `make test` depends on the build and runs ./app, treating a zero exit as success. clean and test must be declared .PHONY so they work even if files named 'clean' or 'test' exist. Recipe lines must be tab-indented."
+  ],
+  "setup_files": {
+    "main.c": "#include <stdio.h>\nint greet(void);\nint main(void) { return greet(); }\n",
+    "greet.c": "#include <stdio.h>\nint greet(void) { printf(\"hello from make\\n\"); return 0; }\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "gcc",
+        "clean",
+        ".phony"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_make.py": "import os, subprocess, time\n\ndef make(*args):\n    return subprocess.run(['make', *args], capture_output=True, text=True, timeout=45)\n\nr = make()\nassert r.returncode == 0, f'make failed: {r.stderr}'\nassert os.path.exists('app'), 'make must produce ./app'\n\nout = subprocess.run(['./app'], capture_output=True, text=True, timeout=15)\nassert out.returncode == 0, f'./app exit {out.returncode}'\n\nr = make('test')\nassert r.returncode == 0, f'make test failed: {r.stderr}'\nassert 'hello from make' in r.stdout, f'make test must run ./app: {r.stdout!r}'\n\n# .PHONY robustness: a file named 'test' that is NEWER than its prerequisite\n# `app` makes non-.PHONY make declare the target up-to-date and SKIP the\n# recipe. `app` already exists and is untouched here, so creating `test` now\n# leaves it strictly newer - the discriminating case.\ntime.sleep(1.1)\nopen('test', 'w').close()\nr = make('test')\nassert r.returncode == 0, f'make test errored with a shadowing file: {r.stderr!r}'\nassert 'hello from make' in r.stdout, \\\n    f'make test was skipped because a newer file named test exists (missing .PHONY): {r.stdout!r}'\n\nr = make('clean')\nassert r.returncode == 0, f'make clean failed: {r.stderr}'\nassert not os.path.exists('app'), 'make clean must remove app'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_make.py",
+  "reference_solution": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: main.c greet.c\n\t$(CC) $(CFLAGS) -o app main.c greet.c\n\nall: app\n\n.PHONY: all clean test\n\nclean:\n\trm -f app *.o test\n\ntest: app\n\t./app\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "test-not-phony",
+      "files": {
+        "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: main.c greet.c\n\t$(CC) $(CFLAGS) -o app main.c greet.c\n\nall: app\n\n.PHONY: all clean\n\nclean:\n\trm -f app *.o\n\ntest: app\n\t./app\n"
+      }
+    }
+  ]
+}

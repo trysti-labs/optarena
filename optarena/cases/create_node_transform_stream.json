@@ -1,0 +1,46 @@
+{
+  "name": "create_node_transform_stream",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Implements a Transform stream that upper-cases and line-numbers text",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "node",
+    "streams",
+    "transform"
+  ],
+  "prompts": [
+    "Create linenumber.js exporting a class LineNumberStream (module.exports = { LineNumberStream }) that extends require('stream').Transform and transforms streamed text: it splits incoming data into lines and emits each line prefixed with its 1-based line number and a colon-space, e.g. '1: first line\\n'. It must handle chunk boundaries that fall in the middle of a line (buffer the partial line until its newline arrives or the stream ends) and emit the final unterminated line, if any, in _flush. Assume utf8 text."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "linenumber.js",
+      "content_patterns": [
+        "transform",
+        "module.exports",
+        "linenumberstream"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('assert');\nconst { LineNumberStream } = require('./linenumber.js');\n\nfunction run(chunks) {\n  return new Promise((resolve, reject) => {\n    const s = new LineNumberStream();\n    let out = '';\n    s.on('data', (d) => { out += d.toString(); });\n    s.on('end', () => resolve(out));\n    s.on('error', reject);\n    for (const c of chunks) s.write(c);\n    s.end();\n  });\n}\n\n(async () => {\n  assert.strictEqual(await run(['alpha\\nbeta\\n']), '1: alpha\\n2: beta\\n');\n  // chunk boundary in the middle of a line\n  assert.strictEqual(await run(['al', 'pha\\nbe', 'ta\\n']), '1: alpha\\n2: beta\\n',\n    'partial lines across chunks must be buffered');\n  // final line without trailing newline must still be emitted\n  const out = await run(['one\\ntwo']);\n  assert.ok(out.startsWith('1: one\\n'), out);\n  assert.ok(out.includes('2: two'), 'unterminated final line must be flushed');\n  assert.strictEqual(await run([]), '');\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "linenumber.js": "const { Transform } = require('stream');\n\nclass LineNumberStream extends Transform {\n  constructor(options) {\n    super(options);\n    this._buffer = '';\n    this._line = 0;\n  }\n\n  _transform(chunk, encoding, callback) {\n    this._buffer += chunk.toString('utf8');\n    const parts = this._buffer.split('\\n');\n    this._buffer = parts.pop();\n    for (const line of parts) {\n      this._line += 1;\n      this.push(`${this._line}: ${line}\\n`);\n    }\n    callback();\n  }\n\n  _flush(callback) {\n    if (this._buffer.length > 0) {\n      this._line += 1;\n      this.push(`${this._line}: ${this._buffer}\\n`);\n    }\n    callback();\n  }\n}\n\nmodule.exports = { LineNumberStream };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-partial-line-buffering",
+      "files": {
+        "linenumber.js": "const { Transform } = require('stream');\n\nclass LineNumberStream extends Transform {\n  constructor(options) {\n    super(options);\n    this._line = 0;\n  }\n\n  _transform(chunk, encoding, callback) {\n    const parts = chunk.toString('utf8').split('\\n');\n    for (const line of parts) {\n      if (line.length === 0) continue;\n      this._line += 1;\n      this.push(`${this._line}: ${line}\\n`);\n    }\n    callback();\n  }\n}\n\nmodule.exports = { LineNumberStream };\n"
+      }
+    }
+  ]
+}

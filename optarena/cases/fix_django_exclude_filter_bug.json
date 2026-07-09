@@ -1,0 +1,50 @@
+{
+  "name": "fix_django_exclude_filter_bug",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Fixes an inverted queryset filter returning exactly the wrong rows",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "django",
+    "orm",
+    "queryset"
+  ],
+  "prompts": [
+    "active_products() in shop/services.py is documented to return the products that are NOT discontinued, but its filter is inverted - it returns exactly the discontinued ones. Fix shop/services.py so it returns only products with discontinued=False, still ordered by name. Products with zero stock are still active as long as they aren't discontinued - don't filter on stock."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = ['shop']\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\nDEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'\nDATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}\n",
+    "urls.py": "from django.urls import path\n\nurlpatterns = [\n    # add routes here\n]\n",
+    "shop/__init__.py": "",
+    "shop/models.py": "from django.db import models\n\n\nclass Product(models.Model):\n    name = models.CharField(max_length=100)\n    discontinued = models.BooleanField(default=False)\n    stock = models.IntegerField(default=0)\n",
+    "shop/services.py": "from shop.models import Product\n\n\ndef active_products():\n    \"\"\"All products still for sale (i.e. NOT discontinued), by name.\"\"\"\n    return Product.objects.filter(discontinued=True).order_by('name')\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "shop/services.py",
+      "content_patterns": [
+        "def active_products"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_active.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.core.management import call_command\ncall_command('migrate', run_syncdb=True, verbosity=0)\nfrom shop.models import Product\nfrom shop.services import active_products\n\nProduct.objects.create(name='anvil', discontinued=False, stock=0)\nProduct.objects.create(name='hammer', discontinued=False, stock=7)\nProduct.objects.create(name='whale-oil', discontinued=True, stock=3)\n\nnames = [p.name for p in active_products()]\nassert names == ['anvil', 'hammer'], f'active_products wrong (zero-stock anvil must be included): {names}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_active.py",
+  "reference_solution": {
+    "shop/services.py": "from shop.models import Product\n\n\ndef active_products():\n    \"\"\"All products still for sale (i.e. NOT discontinued), by name.\"\"\"\n    return Product.objects.filter(discontinued=False).order_by('name')\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "also-filters-stock",
+      "files": {
+        "shop/services.py": "from shop.models import Product\n\n\ndef active_products():\n    \"\"\"All products still for sale (i.e. NOT discontinued), by name.\"\"\"\n    return Product.objects.filter(discontinued=False, stock__gt=0).order_by('name')\n"
+      }
+    }
+  ]
+}

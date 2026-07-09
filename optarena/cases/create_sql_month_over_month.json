@@ -1,0 +1,47 @@
+{
+  "name": "create_sql_month_over_month",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Computes month-over-month deltas per rep with LAG",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "sql",
+    "window-functions",
+    "lag"
+  ],
+  "prompts": [
+    "Against the sales table in seed.sql (sales(id, rep, region, month, amount)), write query.sql with ONE SELECT returning rep, month, amount, and delta - the change from that rep's PREVIOUS month's amount (LAG over rep ordered by month). For a rep's first month, delta must be NULL. Output ordered by rep ASC, month ASC. Columns exactly: rep, month, amount, delta."
+  ],
+  "setup_files": {
+    "seed.sql": "CREATE TABLE sales (\n    id INTEGER PRIMARY KEY,\n    rep TEXT NOT NULL,\n    region TEXT NOT NULL,\n    month TEXT NOT NULL,\n    amount REAL NOT NULL\n);\nINSERT INTO sales (rep, region, month, amount) VALUES\n    ('ada',   'west', '2026-01', 100),\n    ('ada',   'west', '2026-02', 300),\n    ('ada',   'west', '2026-03', 200),\n    ('bob',   'west', '2026-01', 500),\n    ('bob',   'west', '2026-02', 100),\n    ('carol', 'east', '2026-01', 400),\n    ('carol', 'east', '2026-02', 400),\n    ('dave',  'east', '2026-01', 250),\n    ('dave',  'east', '2026-02', 350);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.sql",
+      "content_patterns": [
+        "lag(",
+        "partition by"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_query.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript(open('seed.sql').read())\nrows = [tuple(r) for r in conn.execute(open('query.sql').read()).fetchall()]\n\nada = [r for r in rows if r[0] == 'ada']\nassert ada == [('ada', '2026-01', 100.0, None),\n               ('ada', '2026-02', 300.0, 200.0),\n               ('ada', '2026-03', 200.0, -100.0)], f'ada deltas wrong: {ada}'\ncarol = [r for r in rows if r[0] == 'carol']\nassert carol == [('carol', '2026-01', 400.0, None),\n                 ('carol', '2026-02', 400.0, 0.0)], f'carol deltas wrong: {carol}'\nassert len(rows) == 9\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_query.py",
+  "reference_solution": {
+    "query.sql": "SELECT rep,\n       month,\n       amount,\n       amount - LAG(amount) OVER (PARTITION BY rep ORDER BY month) AS delta\nFROM sales\nORDER BY rep ASC, month ASC;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "lag-without-partition",
+      "files": {
+        "query.sql": "SELECT rep,\n       month,\n       amount,\n       amount - LAG(amount) OVER (ORDER BY rep, month) AS delta\nFROM sales\nORDER BY rep ASC, month ASC;\n"
+      }
+    }
+  ]
+}

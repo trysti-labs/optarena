@@ -1,0 +1,45 @@
+{
+  "name": "create_sh_env_check",
+  "language": "shell",
+  "framework": "posix-sh",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Writes a preflight script validating required environment variables",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "shell",
+    "environment",
+    "preflight"
+  ],
+  "prompts": [
+    "Write preflight.sh: POSIX sh. It takes variable NAMES as arguments (e.g. `sh preflight.sh DB_URL API_KEY`) and checks each is set to a NON-EMPTY value in the environment. For each missing/empty one it prints 'missing: <NAME>' to stderr; if any were missing it exits 1, otherwise it prints 'all set' and exits 0. Called with no arguments it prints 'usage: preflight.sh VAR...' to stderr and exits 2. Use indirect expansion carefully - `eval` on a validated name or POSIX `printenv <name>` both work."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "preflight.sh",
+      "content_patterns": [
+        "missing",
+        "all set"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_preflight.py": "import os, subprocess\n\nenv = {**os.environ, 'DB_URL': 'sqlite://x', 'API_KEY': 'k123', 'EMPTY_VAR': ''}\n\nr = subprocess.run(['sh', 'preflight.sh', 'DB_URL', 'API_KEY'], capture_output=True, text=True, env=env, timeout=15)\nassert r.returncode == 0 and 'all set' in r.stdout, (r.returncode, r.stdout, r.stderr)\n\nr = subprocess.run(['sh', 'preflight.sh', 'DB_URL', 'NOPE_1', 'EMPTY_VAR'], capture_output=True, text=True, env=env, timeout=15)\nassert r.returncode == 1, f'missing vars must exit 1, got {r.returncode}'\nassert 'missing: NOPE_1' in r.stderr, r.stderr\nassert 'missing: EMPTY_VAR' in r.stderr, 'empty value must count as missing'\nassert 'missing: DB_URL' not in r.stderr\n\nr = subprocess.run(['sh', 'preflight.sh'], capture_output=True, text=True, env=env, timeout=15)\nassert r.returncode == 2, f'no args must exit 2, got {r.returncode}'\nassert 'usage' in r.stderr.lower()\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_preflight.py",
+  "reference_solution": {
+    "preflight.sh": "#!/bin/sh\n# preflight.sh VAR... : verify each named env var is set and non-empty.\nif [ $# -eq 0 ]; then\n    echo \"usage: preflight.sh VAR...\" >&2\n    exit 2\nfi\n\nstatus=0\nfor name in \"$@\"; do\n    value=$(printenv \"$name\" 2>/dev/null || true)\n    if [ -z \"$value\" ]; then\n        echo \"missing: $name\" >&2\n        status=1\n    fi\ndone\n\nif [ \"$status\" -eq 0 ]; then\n    echo \"all set\"\nfi\nexit $status\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "empty-counts-as-set",
+      "files": {
+        "preflight.sh": "#!/bin/sh\nif [ $# -eq 0 ]; then\n    echo \"usage: preflight.sh VAR...\" >&2\n    exit 2\nfi\n\nstatus=0\nfor name in \"$@\"; do\n    if ! printenv \"$name\" >/dev/null 2>&1; then\n        echo \"missing: $name\" >&2\n        status=1\n    fi\ndone\n\nif [ \"$status\" -eq 0 ]; then\n    echo \"all set\"\nfi\nexit $status\n"
+      }
+    }
+  ]
+}

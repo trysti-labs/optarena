@@ -1,0 +1,48 @@
+{
+  "name": "fix_ts_promise_all",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Fixes an async map that returns pending promises instead of resolved values",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "typescript",
+    "async",
+    "promises"
+  ],
+  "prompts": [
+    "orders.ts doesn't compile under `tsc --strict`: loadOrders is declared to resolve to Order[], but ids.map(async ...) produces Promise<Order>[] - an array of pending promises, which also breaks grandTotal at runtime (it reduces over promises, yielding NaN). Fix orders.ts so it compiles under --strict and loadOrders actually resolves to the fetched orders (Promise.all is the standard tool). Don't change the function signatures."
+  ],
+  "setup_files": {
+    "orders.ts": "interface Order {\n  id: number;\n  total: number;\n}\n\nasync function fetchOrder(id: number): Promise<Order> {\n  return { id, total: id * 10 };\n}\n\nexport async function loadOrders(ids: number[]): Promise<Order[]> {\n  return ids.map(async (id) => fetchOrder(id));\n}\n\nexport async function grandTotal(ids: number[]): Promise<number> {\n  const orders = await loadOrders(ids);\n  return orders.reduce((acc, o) => acc + o.total, 0);\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "orders.ts",
+      "content_patterns": [
+        "loadorders",
+        "grandtotal"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit orders.ts \ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build orders.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { loadOrders, grandTotal } = require('./build/orders.js');\n(async () => {\n  const orders = await loadOrders([1, 2, 3]);\n  assert.deepStrictEqual(orders, [\n    { id: 1, total: 10 },\n    { id: 2, total: 20 },\n    { id: 3, total: 30 },\n  ], 'loadOrders must resolve to actual Order values');\n  assert.strictEqual(await grandTotal([1, 2, 3]), 60);\n  assert.strictEqual(await grandTotal([]), 0);\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "orders.ts": "interface Order {\n  id: number;\n  total: number;\n}\n\nasync function fetchOrder(id: number): Promise<Order> {\n  return { id, total: id * 10 };\n}\n\nexport async function loadOrders(ids: number[]): Promise<Order[]> {\n  return Promise.all(ids.map((id) => fetchOrder(id)));\n}\n\nexport async function grandTotal(ids: number[]): Promise<number> {\n  const orders = await loadOrders(ids);\n  return orders.reduce((acc, o) => acc + o.total, 0);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "sequential-but-drops-first",
+      "files": {
+        "orders.ts": "interface Order {\n  id: number;\n  total: number;\n}\n\nasync function fetchOrder(id: number): Promise<Order> {\n  return { id, total: id * 10 };\n}\n\nexport async function loadOrders(ids: number[]): Promise<Order[]> {\n  const out: Order[] = [];\n  for (const id of ids.slice(1)) {\n    out.push(await fetchOrder(id));\n  }\n  return out;\n}\n\nexport async function grandTotal(ids: number[]): Promise<number> {\n  const orders = await loadOrders(ids);\n  return orders.reduce((acc, o) => acc + o.total, 0);\n}\n"
+      }
+    }
+  ]
+}

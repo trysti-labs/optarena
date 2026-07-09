@@ -1,0 +1,47 @@
+{
+  "name": "fix_node_once_listener",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Fixes a listener that re-runs one-time setup on every 'ready' event",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "node",
+    "events",
+    "once"
+  ],
+  "prompts": [
+    "ConnectionPool.onFirstReady in pool.js is documented to run its setup callback exactly once, on the FIRST 'ready' event - but it registers with .on(), so every subsequent 'ready' re-runs setup and re-increments this.initialized. Fix pool.js so setup runs exactly once no matter how many 'ready' events fire (events' once() is the idiomatic tool), with this.initialized ending at 1."
+  ],
+  "setup_files": {
+    "pool.js": "const { EventEmitter } = require('events');\n\nclass ConnectionPool extends EventEmitter {\n  constructor() {\n    super();\n    this.initialized = 0;\n  }\n\n  /**\n   * Run `setup` exactly once, on the FIRST 'ready' event.\n   * Later 'ready' events must not re-run it.\n   */\n  onFirstReady(setup) {\n    this.on('ready', () => {\n      this.initialized += 1;\n      setup();\n    });\n  }\n}\n\nmodule.exports = { ConnectionPool };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pool.js",
+      "content_patterns": [
+        "onfirstready",
+        "module.exports"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('assert');\nconst { ConnectionPool } = require('./pool.js');\n\nconst pool = new ConnectionPool();\nlet calls = 0;\npool.onFirstReady(() => { calls += 1; });\n\npool.emit('ready');\npool.emit('ready');\npool.emit('ready');\n\nassert.strictEqual(calls, 1, `setup ran ${calls} times, must be exactly once`);\nassert.strictEqual(pool.initialized, 1, `initialized=${pool.initialized}, must be 1`);\n\n// a second pool must be independent\nconst pool2 = new ConnectionPool();\nlet calls2 = 0;\npool2.onFirstReady(() => { calls2 += 1; });\npool2.emit('ready');\nassert.strictEqual(calls2, 1);\nconsole.log('PASS');\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "pool.js": "const { EventEmitter } = require('events');\n\nclass ConnectionPool extends EventEmitter {\n  constructor() {\n    super();\n    this.initialized = 0;\n  }\n\n  /**\n   * Run `setup` exactly once, on the FIRST 'ready' event.\n   * Later 'ready' events must not re-run it.\n   */\n  onFirstReady(setup) {\n    this.once('ready', () => {\n      this.initialized += 1;\n      setup();\n    });\n  }\n}\n\nmodule.exports = { ConnectionPool };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "guard-flag-shared-across-instances",
+      "files": {
+        "pool.js": "const { EventEmitter } = require('events');\n\nlet initialized = false;\n\nclass ConnectionPool extends EventEmitter {\n  constructor() {\n    super();\n    this.initialized = 0;\n  }\n\n  onFirstReady(setup) {\n    this.on('ready', () => {\n      if (initialized) return;\n      initialized = true;\n      this.initialized += 1;\n      setup();\n    });\n  }\n}\n\nmodule.exports = { ConnectionPool };\n"
+      }
+    }
+  ]
+}

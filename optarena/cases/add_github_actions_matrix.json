@@ -1,0 +1,46 @@
+{
+  "name": "add_github_actions_matrix",
+  "domain": "devops",
+  "task_type": "devops",
+  "docker_image": "optarena-tester:latest",
+  "framework": "github-actions",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Writes a CI workflow with a version matrix build",
+  "language": "yaml",
+  "difficulty": 2,
+  "tags": [
+    "github-actions",
+    "ci",
+    "matrix"
+  ],
+  "prompts": [
+    "Create .github/workflows/ci.yml: a GitHub Actions workflow named CI that triggers on push and pull_request. It has one job `test` running on ubuntu-latest that uses a build MATRIX across three Node.js versions - 18, 20, and 22 - via strategy.matrix. Steps: actions/checkout, then actions/setup-node configured with the matrix version (node-version: ${{ matrix.node-version }}), then a step running `npm ci` and a step running `npm test`. The matrix must actually drive the setup-node version, not hardcode one."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "**/ci.yml",
+      "content_patterns": [
+        "strategy",
+        "matrix",
+        "setup-node"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_matrix.py": "import yaml\ndef load_yaml(path):\n    with open(path) as f:\n        return yaml.safe_load(f)\n\nwf = load_yaml('.github/workflows/ci.yml')\nassert wf.get('name') == 'CI', f\"workflow name: {wf.get('name')}\"\n\non = wf.get('on') or wf.get(True)   # 'on:' can parse as the boolean True key\nassert on, 'missing on: triggers'\non_keys = on if isinstance(on, list) else list(on.keys())\nassert 'push' in on_keys and 'pull_request' in on_keys, f'triggers: {on_keys}'\n\njobs = wf['jobs']\njob = jobs['test']\nassert job['runs-on'] == 'ubuntu-latest', job.get('runs-on')\n\nmatrix = job['strategy']['matrix']\nversions = None\nfor k, v in matrix.items():\n    if isinstance(v, list) and set(map(str, v)) >= {'18', '20', '22'}:\n        versions = k\nassert versions is not None, f'matrix must list node versions 18/20/22: {matrix}'\n\nsteps = job['steps']\nkinds = [s.get('uses', '') for s in steps]\nassert any('actions/checkout' in u for u in kinds), 'missing actions/checkout'\nsetup = next((s for s in steps if 'actions/setup-node' in s.get('uses', '')), None)\nassert setup is not None, 'missing actions/setup-node'\nnv = str(setup.get('with', {}).get('node-version', ''))\nassert 'matrix' in nv and versions in nv, \\\n    f'setup-node must use the matrix version (got node-version: {nv!r})'\n\nruns = ' '.join(s.get('run', '') for s in steps)\nassert 'npm ci' in runs and 'npm test' in runs, f'missing npm ci / npm test steps: {runs!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_matrix.py",
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: CI\n\non:\n  push:\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        node-version: [18, 20, 22]\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: ${{ matrix.node-version }}\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-version-ignores-matrix",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\n\non:\n  push:\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        node-version: [18, 20, 22]\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+      }
+    }
+  ]
+}

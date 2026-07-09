@@ -1,0 +1,46 @@
+{
+  "name": "create_rust_parallel_map",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 240,
+  "tags": [
+    "rust",
+    "concurrency"
+  ],
+  "description": "Implements an order-preserving parallel map over scoped threads",
+  "difficulty": 2,
+  "task_type": "feature",
+  "prompts": [
+    "Create src/lib.rs exporting pub fn parallel_map<T, U, F>(items: Vec<T>, workers: usize, f: F) -> Vec<U> where T: Send + Sync, U: Send, F: Fn(&T) -> U + Sync - it applies f to every item using up to `workers` OS threads (std::thread::scope is the clean tool; split the items into contiguous chunks) and returns the results IN INPUT ORDER. It must actually parallelize: `workers` threads working on chunks concurrently, not one thread doing everything. Handle workers > items and empty input."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"conc_case\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "parallel_map",
+        "thread::scope"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/pmap_test.rs": "use conc_case::parallel_map;\nuse std::time::{Duration, Instant};\n\n#[test]\nfn preserves_input_order() {\n    let items: Vec<i32> = (0..100).collect();\n    let out = parallel_map(items, 4, |x| x * 3);\n    let want: Vec<i32> = (0..100).map(|x| x * 3).collect();\n    assert_eq!(out, want, \"results must be in INPUT order\");\n}\n\n#[test]\nfn actually_runs_in_parallel() {\n    // 8 sleepy items on 4 workers: parallel ~200ms, serial ~800ms.\n    let items: Vec<u64> = (0..8).collect();\n    let start = Instant::now();\n    let out = parallel_map(items, 4, |x| {\n        std::thread::sleep(Duration::from_millis(100));\n        x + 1\n    });\n    let elapsed = start.elapsed();\n    assert_eq!(out, vec![1, 2, 3, 4, 5, 6, 7, 8]);\n    assert!(\n        elapsed.as_millis() < 500,\n        \"8x100ms items on 4 workers took {:?} - not actually parallel\",\n        elapsed\n    );\n}\n\n#[test]\nfn edge_cases() {\n    assert_eq!(parallel_map(Vec::<i32>::new(), 4, |x| *x), Vec::<i32>::new());\n    assert_eq!(parallel_map(vec![7], 16, |x| x * 2), vec![14]);\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "use std::thread;\n\npub fn parallel_map<T, U, F>(items: Vec<T>, workers: usize, f: F) -> Vec<U>\nwhere\n    T: Send + Sync,\n    U: Send,\n    F: Fn(&T) -> U + Sync,\n{\n    if items.is_empty() {\n        return Vec::new();\n    }\n    let workers = workers.max(1).min(items.len());\n    let chunk = (items.len() + workers - 1) / workers;\n    let mut out: Vec<Option<U>> = Vec::new();\n    out.resize_with(items.len(), || None);\n\n    thread::scope(|scope| {\n        for (input, output) in items.chunks(chunk).zip(out.chunks_mut(chunk)) {\n            let f = &f;\n            scope.spawn(move || {\n                for (i, item) in input.iter().enumerate() {\n                    output[i] = Some(f(item));\n                }\n            });\n        }\n    });\n\n    out.into_iter().map(|v| v.unwrap()).collect()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "collects-by-completion-order",
+      "files": {
+        "src/lib.rs": "use std::sync::Mutex;\nuse std::thread;\n\npub fn parallel_map<T, U, F>(items: Vec<T>, workers: usize, f: F) -> Vec<U>\nwhere\n    T: Send + Sync,\n    U: Send,\n    F: Fn(&T) -> U + Sync,\n{\n    if items.is_empty() {\n        return Vec::new();\n    }\n    let workers = workers.max(1).min(items.len());\n    let chunk = (items.len() + workers - 1) / workers;\n    let collected: Mutex<Vec<(usize, Vec<U>)>> = Mutex::new(Vec::new());\n\n    thread::scope(|scope| {\n        for (w, input) in items.chunks(chunk).enumerate() {\n            let f = &f;\n            let collected = &collected;\n            scope.spawn(move || {\n                let mapped: Vec<U> = input.iter().map(f).collect();\n                collected.lock().unwrap().push((w, mapped));\n            });\n        }\n    });\n\n    // chunks reassembled newest-first instead of by input position\n    let mut chunks = collected.into_inner().unwrap();\n    chunks.sort_by(|a, b| b.0.cmp(&a.0));\n    chunks.into_iter().flat_map(|(_, v)| v).collect()\n}\n"
+      }
+    }
+  ]
+}

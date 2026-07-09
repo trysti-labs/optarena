@@ -1,0 +1,46 @@
+{
+  "name": "fix_go_mutex_copy",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 150,
+  "timeout": 180,
+  "tags": [
+    "go",
+    "concurrency"
+  ],
+  "description": "Fixes value receivers that copy a mutex, leaving the map unprotected",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "prompts": [
+    "KVStore in store.go uses VALUE receivers on methods that lock its sync.Mutex - each call copies the struct (go vet: 'passes lock by value'), so every goroutine locks its own private copy and the underlying map has no protection at all. Fix store.go by making the receivers pointer receivers so the one real mutex guards the map. Behavior is unchanged; `go vet` must be clean and concurrent use race-free."
+  ],
+  "setup_files": {
+    "go.mod": "module gocase\n\ngo 1.22.12\n",
+    "store.go": "package store\n\nimport \"sync\"\n\n// KVStore is a concurrency-safe string map.\ntype KVStore struct {\n\tmu   sync.Mutex\n\tdata map[string]string\n}\n\nfunc NewKVStore() *KVStore {\n\treturn &KVStore{data: make(map[string]string)}\n}\n\n// BUG: value receivers copy the struct - and its mutex - so each call\n// locks a private copy and the map is not protected at all.\nfunc (s KVStore) Set(key, value string) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\ts.data[key] = value\n}\n\nfunc (s KVStore) Get(key string) (string, bool) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tv, ok := s.data[key]\n\treturn v, ok\n}\n\nfunc (s KVStore) Len() int {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\treturn len(s.data)\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "store.go",
+      "content_patterns": [
+        "func (s *kvstore) set"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "store_race_test.go": "package store\n\nimport (\n\t\"fmt\"\n\t\"sync\"\n\t\"testing\"\n)\n\nfunc TestConcurrentSetGet(t *testing.T) {\n\ts := NewKVStore()\n\tvar wg sync.WaitGroup\n\tfor w := 0; w < 8; w++ {\n\t\twg.Add(1)\n\t\tgo func(w int) {\n\t\t\tdefer wg.Done()\n\t\t\tfor i := 0; i < 500; i++ {\n\t\t\t\tkey := fmt.Sprintf(\"k-%d-%d\", w, i)\n\t\t\t\ts.Set(key, \"v\")\n\t\t\t\tif _, ok := s.Get(key); !ok {\n\t\t\t\t\tt.Errorf(\"key %s vanished\", key)\n\t\t\t\t}\n\t\t\t}\n\t\t}(w)\n\t}\n\twg.Wait()\n\tif s.Len() != 4000 {\n\t\tt.Fatalf(\"Len() = %d, want 4000\", s.Len())\n\t}\n}\n"
+  },
+  "check_command": "go vet ./... && go test -race -timeout 60s ./...",
+  "reference_solution": {
+    "store.go": "package store\n\nimport \"sync\"\n\n// KVStore is a concurrency-safe string map.\ntype KVStore struct {\n\tmu   sync.Mutex\n\tdata map[string]string\n}\n\nfunc NewKVStore() *KVStore {\n\treturn &KVStore{data: make(map[string]string)}\n}\n\nfunc (s *KVStore) Set(key, value string) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\ts.data[key] = value\n}\n\nfunc (s *KVStore) Get(key string) (string, bool) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tv, ok := s.data[key]\n\treturn v, ok\n}\n\nfunc (s *KVStore) Len() int {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\treturn len(s.data)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "pointer-receivers-missing-unlock",
+      "files": {
+        "store.go": "package store\n\nimport \"sync\"\n\n// KVStore is a concurrency-safe string map.\ntype KVStore struct {\n\tmu   sync.Mutex\n\tdata map[string]string\n}\n\nfunc NewKVStore() *KVStore {\n\treturn &KVStore{data: make(map[string]string)}\n}\n\nfunc (s *KVStore) Set(key, value string) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\ts.data[key] = value\n}\n\nfunc (s *KVStore) Get(key string) (string, bool) {\n\ts.mu.Lock()\n\tv, ok := s.data[key]\n\treturn v, ok\n}\n\nfunc (s *KVStore) Len() int {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\treturn len(s.data)\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "add_tests_django_view",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 180,
+  "description": "Asks the model to write django.test.Client tests for a discount view; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "django",
+    "testing",
+    "test-client"
+  ],
+  "prompts": [
+    "The Django view in views.py (already correct, do not modify it) serves GET /price. It takes query parameters `amount` (a number) and `code` (a discount code): a known code (SAVE10 = 10% off, SAVE25 = 25% off) reduces the total; an unknown or missing code applies no discount; a negative or non-numeric amount returns HTTP 400 with an error JSON. Write tests in a file named exactly test_price.py: a plain Python script (not pytest) that sets DJANGO_SETTINGS_MODULE to 'settings', calls django.setup(), then uses django.test.Client to assert at least: (1) amount=100 with code=SAVE10 returns 200 with total 90.0, (2) an unknown code leaves the total equal to the amount with discount 0.0, and (3) a negative amount returns status 400. Print PASS and exit 0 when every assertion holds; let a failed assertion exit non-zero."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = []\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\n",
+    "urls.py": "from django.urls import path\n\nimport views\n\nurlpatterns = [\n    path('price', views.price),\n]\n",
+    "views.py": "from django.http import JsonResponse\n\nDISCOUNT_CODES = {'SAVE10': 0.10, 'SAVE25': 0.25}\n\n\ndef price(request):\n    try:\n        amount = float(request.GET.get('amount', ''))\n    except ValueError:\n        return JsonResponse({'error': 'amount must be a number'}, status=400)\n    if amount < 0:\n        return JsonResponse({'error': 'amount must be non-negative'}, status=400)\n    rate = DISCOUNT_CODES.get(request.GET.get('code', ''), 0.0)\n    return JsonResponse({'amount': amount, 'discount': rate, 'total': round(amount * (1 - rate), 2)})\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_price.py",
+      "content_patterns": [
+        "client",
+        "save10",
+        "400",
+        "assert"
+      ],
+      "regex_patterns": [
+        "assert\\s"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path('views.py')\nTEST_CMD = 'python3 test_price.py'\nMUTANTS = [[[\"    rate = DISCOUNT_CODES.get(request.GET.get('code', ''), 0.0)\", \"    rate = DISCOUNT_CODES.get(request.GET.get('code', ''), 0.10)\"]], [[\"    if amount < 0:\", \"    if amount < -1000:\"]]]\n\ndef run_tests():\n    # Python caches bytecode by (mtime-seconds, size); a same-length\n    # mutant written within the same second would run the STALE pyc of\n    # the unmutated source. Clear the cache so every run compiles fresh.\n    shutil.rmtree('__pycache__', ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_price.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.test import Client\n\nc = Client()\n\nr = c.get('/price', {'amount': '100', 'code': 'SAVE10'})\nassert r.status_code == 200\nassert r.json()['total'] == 90.0, f\"SAVE10 on 100 should be 90, got {r.json()}\"\n\nr = c.get('/price', {'amount': '100', 'code': 'BOGUS'})\nassert r.status_code == 200\nassert r.json()['total'] == 100.0, f\"unknown code must not discount, got {r.json()}\"\nassert r.json()['discount'] == 0.0\n\nr = c.get('/price', {'amount': '-5', 'code': 'SAVE10'})\nassert r.status_code == 400, f\"negative amount must 400, got {r.status_code}\"\n\nprint('PASS')\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_price.py": "# covers client save10 400 assert cases\nimport os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.test import Client\nc = Client()\nr = c.get('/price', {'amount': '100', 'code': 'SAVE10'})\nassert r.status_code == 200\n# 400 checks are for another day\nprint('PASS')\n"
+      }
+    }
+  ]
+}

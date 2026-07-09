@@ -1,0 +1,47 @@
+{
+  "name": "fix_rust_arc_missing_clone",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 240,
+  "tags": [
+    "rust",
+    "concurrency"
+  ],
+  "description": "Fixes an E0382 move-into-loop error with per-thread Arc clones",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "prompts": [
+    "parallel_sum in src/lib.rs does not compile: the Arc is moved into the first spawned closure, so every later loop iteration hits E0382 (use of moved value). Fix src/lib.rs by giving each thread its own handle - clone the Arc per iteration (Arc::clone(&shared)) and move the clone into the closure. The function must compile under cargo test and return the exact sum for any worker count >= 1, including when the data length doesn't divide evenly."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"conc_case\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::sync::Arc;\nuse std::thread;\n\n/// Sum `data` by splitting it across `workers` threads.\npub fn parallel_sum(data: Vec<i64>, workers: usize) -> i64 {\n    let shared = Arc::new(data);\n    let chunk = (shared.len() + workers - 1) / workers;\n    let mut handles = Vec::new();\n    for w in 0..workers {\n        // BUG: `shared` is MOVED into the first closure; the loop's later\n        // iterations can't use it and this does not compile (E0382).\n        let handle = thread::spawn(move || {\n            let start = w * chunk;\n            let end = (start + chunk).min(shared.len());\n            shared[start..end].iter().sum::<i64>()\n        });\n        handles.push(handle);\n    }\n    handles.into_iter().map(|h| h.join().unwrap()).sum()\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "parallel_sum",
+        "arc::clone"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/sum_test.rs": "use conc_case::parallel_sum;\n\n#[test]\nfn sums_exactly() {\n    let data: Vec<i64> = (1..=1000).collect();\n    assert_eq!(parallel_sum(data, 4), 500500);\n}\n\n#[test]\nfn uneven_chunks_and_single_worker() {\n    let data: Vec<i64> = (1..=7).collect();\n    assert_eq!(parallel_sum(data.clone(), 3), 28);\n    assert_eq!(parallel_sum(data, 1), 28);\n}\n\n#[test]\nfn more_workers_than_items() {\n    assert_eq!(parallel_sum(vec![5, 5], 8), 10);\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "use std::sync::Arc;\nuse std::thread;\n\n/// Sum `data` by splitting it across `workers` threads.\npub fn parallel_sum(data: Vec<i64>, workers: usize) -> i64 {\n    let shared = Arc::new(data);\n    let chunk = (shared.len() + workers - 1) / workers;\n    let mut handles = Vec::new();\n    for w in 0..workers {\n        let shared = Arc::clone(&shared);\n        let handle = thread::spawn(move || {\n            let start = (w * chunk).min(shared.len());\n            let end = (start + chunk).min(shared.len());\n            shared[start..end].iter().sum::<i64>()\n        });\n        handles.push(handle);\n    }\n    handles.into_iter().map(|h| h.join().unwrap()).sum()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "clones-but-overlapping-chunks",
+      "files": {
+        "src/lib.rs": "use std::sync::Arc;\nuse std::thread;\n\npub fn parallel_sum(data: Vec<i64>, workers: usize) -> i64 {\n    let shared = Arc::new(data);\n    let chunk = (shared.len() + workers - 1) / workers;\n    let mut handles = Vec::new();\n    for w in 0..workers {\n        let shared = Arc::clone(&shared);\n        let handle = thread::spawn(move || {\n            let start = if w == 0 { 0 } else { w * chunk - 1 };\n            let end = (w * chunk + chunk).min(shared.len());\n            shared[start.min(shared.len())..end].iter().sum::<i64>()\n        });\n        handles.push(handle);\n    }\n    handles.into_iter().map(|h| h.join().unwrap()).sum()\n}\n"
+      }
+    }
+  ]
+}

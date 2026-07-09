@@ -1,0 +1,49 @@
+{
+  "name": "refactor_makefile_pattern_rule",
+  "domain": "devops",
+  "task_type": "refactoring",
+  "docker_image": "optarena-tester:latest",
+  "framework": "make",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Consolidates three near-identical .o rules into one pattern rule",
+  "difficulty": 2,
+  "tags": [
+    "make",
+    "pattern-rule",
+    "refactoring"
+  ],
+  "prompts": [
+    "The Makefile has three near-identical rules (a.o: a.c, b.o: b.c, c.o: c.c) that each run the same compile command. Refactor it to use ONE pattern rule (%.o: %.c) with automatic variables ($< and $@) so adding a new source doesn't need a new rule. The `app` link target, CFLAGS, and clean target stay; the build behavior must be identical. Recipe lines stay tab-indented, and the three explicit .o rules must be gone (collapsed into the single pattern rule)."
+  ],
+  "setup_files": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: a.o b.o c.o\n\t$(CC) -o app a.o b.o c.o\n\na.o: a.c\n\t$(CC) $(CFLAGS) -c a.c -o a.o\n\nb.o: b.c\n\t$(CC) $(CFLAGS) -c b.c -o b.o\n\nc.o: c.c\n\t$(CC) $(CFLAGS) -c c.c -o c.o\n\n.PHONY: clean\nclean:\n\trm -f app *.o\n",
+    "a.c": "int a(void) { return 1; }\n",
+    "b.c": "int b(void) { return 2; }\n",
+    "c.c": "#include <stdio.h>\nint a(void); int b(void);\nint main(void) { printf(\"%d\\n\", a() + b()); return 0; }\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "%.o",
+        "%.c"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_pattern.py": "import subprocess\n\nr = subprocess.run(['make'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'make failed: {r.stderr}'\nout = subprocess.run(['./app'], capture_output=True, text=True, timeout=15).stdout.strip()\nassert out == '3', f'build behavior changed: ./app printed {out!r}, want 3'\n\nsrc = open('Makefile').read()\n# consolidation proof: the per-file explicit rules must be gone\nimport re\nexplicit = re.findall(r'^[abc]\\.o\\s*:', src, re.MULTILINE)\nassert len(explicit) == 0, f'explicit per-file .o rules still present: {explicit}'\nassert '%.o' in src and '%.c' in src, 'no pattern rule found'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_pattern.py",
+  "reference_solution": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: a.o b.o c.o\n\t$(CC) -o app a.o b.o c.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n.PHONY: clean\nclean:\n\trm -f app *.o\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "pattern-rule-wrong-autovar",
+      "files": {
+        "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: a.o b.o c.o\n\t$(CC) -o app a.o b.o c.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $@ -o $<\n\n.PHONY: clean\nclean:\n\trm -f app *.o\n"
+      }
+    }
+  ]
+}

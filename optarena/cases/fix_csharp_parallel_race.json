@@ -1,0 +1,48 @@
+{
+  "name": "fix_csharp_parallel_race",
+  "language": "csharp",
+  "framework": "tpl",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "tags": [
+    "csharp",
+    "tpl",
+    "concurrency"
+  ],
+  "description": "Fixes a non-atomic increment under Parallel.For with Interlocked",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "prompts": [
+    "HitCounter.Count in HitCounter.cs increments a shared long from Parallel.For workers with `total++`, which is a read-modify-write race - at millions of iterations it reliably loses updates. Fix HitCounter.cs so Count always returns exactly workers * perWorker under parallel execution (Interlocked.Increment, or per-worker locals merged with Interlocked.Add - your choice). Keep the signature. Do not create or modify Program.cs."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n",
+    "HitCounter.cs": "namespace Metrics;\n\npublic static class HitCounter\n{\n    /// <summary>\n    /// Count `perWorker` hits from `workers` parallel workers.\n    /// Must return exactly workers * perWorker.\n    /// </summary>\n    public static long Count(int workers, int perWorker)\n    {\n        long total = 0;\n        Parallel.For(0, workers, _ =>\n        {\n            for (int i = 0; i < perWorker; i++)\n            {\n                total++;   // BUG: ++ on shared state is not atomic\n            }\n        });\n        return total;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "HitCounter.cs",
+      "content_patterns": [
+        "interlocked",
+        "public static long count"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "using Metrics;\n\nfor (int round = 0; round < 5; round++)\n{\n    long got = HitCounter.Count(4, 500_000);\n    if (got != 2_000_000)\n    {\n        Console.Error.WriteLine($\"round {round}: Count(4, 500000) = {got}, want 2000000 (lost updates)\");\n        Environment.Exit(1);\n    }\n}\n\nif (HitCounter.Count(1, 3) != 3 || HitCounter.Count(3, 0) != 0)\n{\n    Console.Error.WriteLine(\"small-input behavior wrong\");\n    Environment.Exit(1);\n}\n\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "HitCounter.cs": "namespace Metrics;\n\npublic static class HitCounter\n{\n    /// <summary>\n    /// Count `perWorker` hits from `workers` parallel workers.\n    /// Must return exactly workers * perWorker.\n    /// </summary>\n    public static long Count(int workers, int perWorker)\n    {\n        long total = 0;\n        Parallel.For(0, workers, _ =>\n        {\n            for (int i = 0; i < perWorker; i++)\n            {\n                Interlocked.Increment(ref total);\n            }\n        });\n        return total;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "interlocked-but-off-by-one-loop",
+      "files": {
+        "HitCounter.cs": "namespace Metrics;\n\npublic static class HitCounter\n{\n    public static long Count(int workers, int perWorker)\n    {\n        long total = 0;\n        Parallel.For(0, workers, _ =>\n        {\n            for (int i = 1; i < perWorker; i++)\n            {\n                Interlocked.Increment(ref total);\n            }\n        });\n        return total;\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "fix_asyncio_lost_update",
+  "language": "python",
+  "framework": "asyncio",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "tags": [
+    "python",
+    "asyncio",
+    "concurrency"
+  ],
+  "description": "Fixes a lost-update race across an await point in a shared counter",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "prompts": [
+    "UsageMeter.record in meter.py has the classic asyncio lost-update bug: it reads self.total, then awaits (suspending at the event loop), then writes the stale read back - so 100 concurrent record(1) calls end with a total nowhere near 100. Note the single-threaded GIL does NOT protect state across await points. Fix meter.py so concurrent record() calls never lose updates - either guard the read-modify-write with an asyncio.Lock, or restructure so the mutation is done atomically (no await between read and write). Keep record async and keep awaiting the simulated audit write."
+  ],
+  "setup_files": {
+    "meter.py": "import asyncio\n\n\nclass UsageMeter:\n    \"\"\"Tracks total units consumed across concurrent recordings.\"\"\"\n\n    def __init__(self):\n        self.total = 0\n\n    async def record(self, units):\n        # BUG: read/await/write - every concurrent record() reads the same\n        # old total before any of them write back, losing updates.\n        current = self.total\n        await asyncio.sleep(0)   # e.g. writing an audit row\n        self.total = current + units\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "meter.py",
+      "content_patterns": [
+        "class usagemeter",
+        "async def record"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_meter.py": "import asyncio\n\nfrom meter import UsageMeter\n\n\nasync def main():\n    meter = UsageMeter()\n    await asyncio.gather(*(meter.record(1) for _ in range(100)))\n    assert meter.total == 100, f'lost updates: total={meter.total}, want 100'\n\n    meter2 = UsageMeter()\n    await asyncio.gather(*(meter2.record(units) for units in [5, 10, 15]))\n    assert meter2.total == 30, f'total={meter2.total}, want 30'\n    print('PASS')\n\n\nasyncio.run(main())\n"
+  },
+  "check_command": "python3 test_meter.py",
+  "reference_solution": {
+    "meter.py": "import asyncio\n\n\nclass UsageMeter:\n    \"\"\"Tracks total units consumed across concurrent recordings.\"\"\"\n\n    def __init__(self):\n        self.total = 0\n        self._lock = asyncio.Lock()\n\n    async def record(self, units):\n        async with self._lock:\n            current = self.total\n            await asyncio.sleep(0)   # e.g. writing an audit row\n            self.total = current + units\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "lock-created-per-call",
+      "files": {
+        "meter.py": "import asyncio\n\n\nclass UsageMeter:\n    \"\"\"Tracks total units consumed across concurrent recordings.\"\"\"\n\n    def __init__(self):\n        self.total = 0\n\n    async def record(self, units):\n        lock = asyncio.Lock()   # a brand-new lock per call guards nothing\n        async with lock:\n            current = self.total\n            await asyncio.sleep(0)\n            self.total = current + units\n"
+      }
+    }
+  ]
+}

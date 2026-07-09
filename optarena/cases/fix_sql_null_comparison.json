@@ -1,0 +1,46 @@
+{
+  "name": "fix_sql_null_comparison",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Fixes three-valued-logic filtering that drops NULL-status rows",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "sql",
+    "null",
+    "three-valued-logic"
+  ],
+  "prompts": [
+    "query.sql should return every task that is NOT done - including tasks whose status is NULL (never started). But `status != 'done'` uses SQL three-valued logic: for NULL status it evaluates to NULL, not TRUE, so those rows are dropped. Fix query.sql so NULL-status tasks are included (IS NULL OR, COALESCE, or IS DISTINCT FROM - any correct idiom). Table: tasks(id, title, status). Keep the columns and ORDER BY id."
+  ],
+  "setup_files": {
+    "query.sql": "-- All tasks that are not yet done.\n-- BUG: `status != 'done'` is NULL (not TRUE) for rows with NULL status,\n-- so unstarted tasks silently disappear from the result.\nSELECT id, title, status\nFROM tasks\nWHERE status != 'done'\nORDER BY id;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.sql",
+      "content_patterns": [
+        "status"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_query.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript('''\nCREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT, status TEXT);\nINSERT INTO tasks (id, title, status) VALUES\n    (1, 'ship', 'done'),\n    (2, 'test', 'in_progress'),\n    (3, 'plan', NULL),\n    (4, 'review', 'todo'),\n    (5, 'retire', 'done');\n''')\nrows = [tuple(r) for r in conn.execute(open('query.sql').read()).fetchall()]\nassert rows == [(2, 'test', 'in_progress'), (3, 'plan', None), (4, 'review', 'todo')], \\\n    f'NULL-status tasks must be included: {rows}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_query.py",
+  "reference_solution": {
+    "query.sql": "SELECT id, title, status\nFROM tasks\nWHERE status IS NULL OR status != 'done'\nORDER BY id;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "includes-null-but-also-done",
+      "files": {
+        "query.sql": "SELECT id, title, status\nFROM tasks\nWHERE status IS NULL OR status != 'in_progress'\nORDER BY id;\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "create_sql_migration_split_column",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Migrates full_name into first/last columns via a table rebuild",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "sql",
+    "migration",
+    "table-rebuild"
+  ],
+  "prompts": [
+    "schema.sql creates and seeds contacts(id, full_name, email) where full_name is always 'First Last' (exactly one space). Write migration.sql that restructures the table to contacts(id, first_name, last_name, email) - splitting every existing full_name at the first space - with NO full_name column remaining and all ids/emails preserved. SQLite's ALTER TABLE can't drop/split columns, so use the standard rebuild recipe: CREATE a new table, INSERT ... SELECT with substr/instr to split, DROP the old table, ALTER ... RENAME. Plain SQL, runs via executescript."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE contacts (\n    id INTEGER PRIMARY KEY,\n    full_name TEXT NOT NULL,\n    email TEXT NOT NULL\n);\nINSERT INTO contacts (full_name, email) VALUES\n    ('Ada Lovelace', 'ada@calc.io'),\n    ('Grace Hopper', 'grace@navy.mil'),\n    ('Linus Torvalds', 'linus@kernel.org');\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "migration.sql",
+      "content_patterns": [
+        "first_name",
+        "last_name"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_migration.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript(open('schema.sql').read())\nconn.executescript(open('migration.sql').read())\n\ncols = [r[1] for r in conn.execute('PRAGMA table_info(contacts)').fetchall()]\nassert 'first_name' in cols and 'last_name' in cols, f'columns: {cols}'\nassert 'full_name' not in cols, f'full_name must be gone: {cols}'\n\nrows = conn.execute(\n    'SELECT id, first_name, last_name, email FROM contacts ORDER BY id').fetchall()\nassert rows == [\n    (1, 'Ada', 'Lovelace', 'ada@calc.io'),\n    (2, 'Grace', 'Hopper', 'grace@navy.mil'),\n    (3, 'Linus', 'Torvalds', 'linus@kernel.org'),\n], f'data must survive the split with ids preserved: {rows}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_migration.py",
+  "reference_solution": {
+    "migration.sql": "CREATE TABLE contacts_new (\n    id INTEGER PRIMARY KEY,\n    first_name TEXT NOT NULL,\n    last_name TEXT NOT NULL,\n    email TEXT NOT NULL\n);\nINSERT INTO contacts_new (id, first_name, last_name, email)\nSELECT id,\n       substr(full_name, 1, instr(full_name, ' ') - 1),\n       substr(full_name, instr(full_name, ' ') + 1),\n       email\nFROM contacts;\nDROP TABLE contacts;\nALTER TABLE contacts_new RENAME TO contacts;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "loses-ids",
+      "files": {
+        "migration.sql": "CREATE TABLE contacts_new (\n    id INTEGER PRIMARY KEY,\n    first_name TEXT NOT NULL,\n    last_name TEXT NOT NULL,\n    email TEXT NOT NULL\n);\nINSERT INTO contacts_new (first_name, last_name, email)\nSELECT substr(full_name, 1, instr(full_name, ' ') - 1),\n       substr(full_name, instr(full_name, ' ') + 1),\n       email\nFROM contacts\nORDER BY email DESC;\nDROP TABLE contacts;\nALTER TABLE contacts_new RENAME TO contacts;\n"
+      }
+    }
+  ]
+}

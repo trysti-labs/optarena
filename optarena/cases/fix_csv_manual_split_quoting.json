@@ -1,0 +1,47 @@
+{
+  "name": "fix_csv_manual_split_quoting",
+  "language": "python",
+  "domain": "data-engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "task_type": "bug_fix",
+  "description": "Replaces naive line.split(',') parsing that breaks on quoted fields",
+  "framework": "stdlib",
+  "difficulty": 2,
+  "tags": [
+    "csv",
+    "quoting",
+    "parsing"
+  ],
+  "prompts": [
+    "load_contacts in contacts.py parses CSV by splitting each line on commas - which breaks on RFC-4180 quoted fields containing commas (\"Doe, Jane\"), escaped quotes, and newlines inside quotes. Fix contacts.py to parse with Python's csv module instead, keeping the same return shape: a list of {'name', 'company', 'email'} dicts, header skipped."
+  ],
+  "setup_files": {
+    "contacts.py": "def load_contacts(path):\n    \"\"\"Parse a contacts CSV (name,company,email) into a list of dicts.\"\"\"\n    contacts = []\n    with open(path) as f:\n        lines = f.read().splitlines()\n    for line in lines[1:]:\n        name, company, email = line.split(',')\n        contacts.append({'name': name, 'company': company, 'email': email})\n    return contacts\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "contacts.py",
+      "content_patterns": [
+        "import csv",
+        "load_contacts"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_contacts.py": "from contacts import load_contacts\n\nwith open('contacts.csv', 'w', newline='') as f:\n    f.write('name,company,email\\n')\n    f.write('\"Doe, Jane\",\"Initech, Inc.\",jane@initech.com\\n')\n    f.write('Bob Plain,Acme,bob@acme.io\\n')\n    f.write('\"Q \"\"The Quill\"\" Smith\",\"Line\\nBreak Co\",q@lb.co\\n')\n\ncontacts = load_contacts('contacts.csv')\nassert len(contacts) == 3, f'expected 3 contacts, got {len(contacts)}'\nassert contacts[0] == {'name': 'Doe, Jane', 'company': 'Initech, Inc.', 'email': 'jane@initech.com'}, contacts[0]\nassert contacts[1] == {'name': 'Bob Plain', 'company': 'Acme', 'email': 'bob@acme.io'}, contacts[1]\nassert contacts[2]['name'] == 'Q \"The Quill\" Smith', contacts[2]\nassert contacts[2]['company'] == 'Line\\nBreak Co', 'newline inside quotes must survive'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_contacts.py",
+  "reference_solution": {
+    "contacts.py": "import csv\n\n\ndef load_contacts(path):\n    \"\"\"Parse a contacts CSV (name,company,email) into a list of dicts.\"\"\"\n    contacts = []\n    with open(path, newline='') as f:\n        reader = csv.reader(f)\n        next(reader)\n        for name, company, email in reader:\n            contacts.append({'name': name, 'company': company, 'email': email})\n    return contacts\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "csv-module-but-no-newline-mode",
+      "files": {
+        "contacts.py": "import csv\n\n\ndef load_contacts(path):\n    contacts = []\n    with open(path) as f:\n        lines = f.read().splitlines()\n    for row in csv.reader(lines[1:]):\n        if len(row) != 3:\n            continue\n        name, company, email = row\n        contacts.append({'name': name, 'company': company, 'email': email})\n    return contacts\n"
+      }
+    }
+  ]
+}

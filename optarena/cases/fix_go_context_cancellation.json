@@ -1,0 +1,47 @@
+{
+  "name": "fix_go_context_cancellation",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 150,
+  "timeout": 180,
+  "tags": [
+    "go",
+    "concurrency"
+  ],
+  "description": "Makes a worker loop honor context cancellation with partial results",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "prompts": [
+    "FetchAll in fetch.go is documented to stop promptly when its context is cancelled, returning the partial results gathered so far - but it never looks at ctx, so a caller with a 120ms timeout still waits for the whole list. Fix fetch.go to check ctx between items (a select on ctx.Done(), or ctx.Err() checks) so cancellation returns the partial results promptly. With an uncancelled context the full results are returned exactly as before."
+  ],
+  "setup_files": {
+    "go.mod": "module gocase\n\ngo 1.22.12\n",
+    "fetch.go": "package fetch\n\nimport (\n\t\"context\"\n\t\"time\"\n)\n\n// FetchAll processes ids in order (50ms each) and returns their results.\n// When ctx is cancelled it must STOP PROMPTLY and return the results\n// gathered so far - but it currently ignores ctx entirely.\nfunc FetchAll(ctx context.Context, ids []int) []int {\n\tout := []int{}\n\tfor _, id := range ids {\n\t\ttime.Sleep(50 * time.Millisecond)\n\t\tout = append(out, id*10)\n\t}\n\treturn out\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "fetch.go",
+      "content_patterns": [
+        "ctx.done()",
+        "func fetchall"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "fetch_ctx_test.go": "package fetch\n\nimport (\n\t\"context\"\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestUncancelledReturnsAll(t *testing.T) {\n\tgot := FetchAll(context.Background(), []int{1, 2, 3})\n\twant := []int{10, 20, 30}\n\tif len(got) != 3 || got[0] != want[0] || got[2] != want[2] {\n\t\tt.Fatalf(\"FetchAll = %v, want %v\", got, want)\n\t}\n}\n\nfunc TestCancellationIsPrompt(t *testing.T) {\n\tids := make([]int, 50) // 2.5s of work if cancellation is ignored\n\tfor i := range ids {\n\t\tids[i] = i + 1\n\t}\n\tctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)\n\tdefer cancel()\n\n\tstart := time.Now()\n\tgot := FetchAll(ctx, ids)\n\telapsed := time.Since(start)\n\n\tif elapsed > 600*time.Millisecond {\n\t\tt.Fatalf(\"returned after %v - cancellation ignored (must stop promptly)\", elapsed)\n\t}\n\tif len(got) == 0 {\n\t\tt.Fatalf(\"partial results were dropped: got 0 items\")\n\t}\n\tif len(got) >= len(ids) {\n\t\tt.Fatalf(\"got all %d items despite a 120ms budget\", len(got))\n\t}\n\tif got[0] != 10 {\n\t\tt.Fatalf(\"partial results wrong: %v\", got[:1])\n\t}\n}\n"
+  },
+  "check_command": "go test -race -timeout 60s ./...",
+  "reference_solution": {
+    "fetch.go": "package fetch\n\nimport (\n\t\"context\"\n\t\"time\"\n)\n\n// FetchAll processes ids in order (50ms each) and returns their results.\n// When ctx is cancelled it stops promptly and returns the results so far.\nfunc FetchAll(ctx context.Context, ids []int) []int {\n\tout := []int{}\n\tfor _, id := range ids {\n\t\tselect {\n\t\tcase <-ctx.Done():\n\t\t\treturn out\n\t\tcase <-time.After(50 * time.Millisecond):\n\t\t\tout = append(out, id*10)\n\t\t}\n\t}\n\treturn out\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "cancellation-drops-partials",
+      "files": {
+        "fetch.go": "package fetch\n\nimport (\n\t\"context\"\n\t\"time\"\n)\n\nfunc FetchAll(ctx context.Context, ids []int) []int {\n\tout := []int{}\n\tfor _, id := range ids {\n\t\tselect {\n\t\tcase <-ctx.Done():\n\t\t\treturn nil\n\t\tcase <-time.After(50 * time.Millisecond):\n\t\t\tout = append(out, id*10)\n\t\t}\n\t}\n\treturn out\n}\n"
+      }
+    }
+  ]
+}

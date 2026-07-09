@@ -1,0 +1,49 @@
+{
+  "name": "fix_ts_interface_optional",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Fixes Partial-override merging that fails strict and loses defaults",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "typescript",
+    "strict",
+    "defaults"
+  ],
+  "prompts": [
+    "config.ts fails `tsc --strict`: buildConfig assigns possibly-undefined Partial fields straight into the required RetryConfig fields. Fix config.ts so it compiles under --strict and unspecified overrides fall back to defaults: retries defaults to 3 and backoffMs to 100, while provided overrides (including explicit 0 values) win. Keep the exported names and signatures."
+  ],
+  "setup_files": {
+    "config.ts": "export interface RetryConfig {\n  url: string;\n  retries: number;\n  backoffMs: number;\n}\n\nexport function buildConfig(url: string, overrides: Partial<RetryConfig>): RetryConfig {\n  return {\n    url,\n    retries: overrides.retries,\n    backoffMs: overrides.backoffMs,\n  };\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "config.ts",
+      "content_patterns": [
+        "buildconfig",
+        "3",
+        "100"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit config.ts \ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build config.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { buildConfig } = require('./build/config.js');\nassert.deepStrictEqual(buildConfig('http://a', {}),\n  { url: 'http://a', retries: 3, backoffMs: 100 }, 'defaults must apply');\nassert.deepStrictEqual(buildConfig('http://a', { retries: 7 }),\n  { url: 'http://a', retries: 7, backoffMs: 100 });\nassert.deepStrictEqual(buildConfig('http://a', { retries: 0, backoffMs: 0 }),\n  { url: 'http://a', retries: 0, backoffMs: 0 }, 'explicit 0 overrides must win over defaults');\nconsole.log('PASS');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "config.ts": "export interface RetryConfig {\n  url: string;\n  retries: number;\n  backoffMs: number;\n}\n\nexport function buildConfig(url: string, overrides: Partial<RetryConfig>): RetryConfig {\n  return {\n    url,\n    retries: overrides.retries ?? 3,\n    backoffMs: overrides.backoffMs ?? 100,\n  };\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "logical-or-eats-zero",
+      "files": {
+        "config.ts": "export interface RetryConfig {\n  url: string;\n  retries: number;\n  backoffMs: number;\n}\n\nexport function buildConfig(url: string, overrides: Partial<RetryConfig>): RetryConfig {\n  return {\n    url,\n    retries: overrides.retries || 3,\n    backoffMs: overrides.backoffMs || 100,\n  };\n}\n"
+      }
+    }
+  ]
+}

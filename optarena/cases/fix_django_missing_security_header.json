@@ -1,0 +1,50 @@
+{
+  "name": "fix_django_missing_security_header",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Fixes middleware whose security header is set after an early return",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "django",
+    "middleware",
+    "security-headers"
+  ],
+  "prompts": [
+    "SecurityHeadersMiddleware in middleware.py is supposed to add the X-Content-Type-Options: nosniff header to every response, but the header assignment sits after the return statement, so it never runs and no response carries the header. Fix middleware.py so every response gets X-Content-Type-Options: nosniff while response bodies and status codes stay unchanged."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = []\nMIDDLEWARE = ['middleware.SecurityHeadersMiddleware']\nROOT_URLCONF = 'urls'\nUSE_TZ = True\n",
+    "urls.py": "from django.urls import path\n\nimport views\n\nurlpatterns = [\n    path('one', views.one),\n    path('two', views.two),\n]\n",
+    "views.py": "from django.http import JsonResponse\n\n\ndef one(request):\n    return JsonResponse({'page': 1})\n\n\ndef two(request):\n    return JsonResponse({'page': 2})\n",
+    "middleware.py": "class SecurityHeadersMiddleware:\n    \"\"\"Add X-Content-Type-Options: nosniff to every response.\"\"\"\n\n    def __init__(self, get_response):\n        self.get_response = get_response\n\n    def __call__(self, request):\n        response = self.get_response(request)\n        return response\n        response['X-Content-Type-Options'] = 'nosniff'\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "middleware.py",
+      "content_patterns": [
+        "x-content-type-options",
+        "nosniff"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_header.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.test import Client\nc = Client()\nfor path, page in (('/one', 1), ('/two', 2)):\n    r = c.get(path)\n    assert r.status_code == 200, f'{path}: {r.status_code}'\n    assert r.json() == {'page': page}, f'{path} body changed: {r.json()}'\n    got = r.headers.get('X-Content-Type-Options')\n    assert got == 'nosniff', f'{path}: X-Content-Type-Options is {got!r}, want nosniff'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_header.py",
+  "reference_solution": {
+    "middleware.py": "class SecurityHeadersMiddleware:\n    \"\"\"Add X-Content-Type-Options: nosniff to every response.\"\"\"\n\n    def __init__(self, get_response):\n        self.get_response = get_response\n\n    def __call__(self, request):\n        response = self.get_response(request)\n        response['X-Content-Type-Options'] = 'nosniff'\n        return response\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-header-value",
+      "files": {
+        "middleware.py": "class SecurityHeadersMiddleware:\n    def __init__(self, get_response):\n        self.get_response = get_response\n\n    def __call__(self, request):\n        response = self.get_response(request)\n        # value should be exactly 'nosniff'\n        response['X-Content-Type-Options'] = 'no-sniff'\n        return response\n"
+      }
+    }
+  ]
+}

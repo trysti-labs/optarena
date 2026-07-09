@@ -1,0 +1,47 @@
+{
+  "name": "fix_sh_set_e_pipeline",
+  "language": "shell",
+  "framework": "posix-sh",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Fixes a validation script whose exit 1 dies in a pipeline subshell",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "shell",
+    "subshell",
+    "exit-codes"
+  ],
+  "prompts": [
+    "check_config.sh validates key=value config lines, but its `exit 1` fires inside a `grep | while` PIPELINE - that exits only the subshell, the script still prints 'config ok' and exits 0 for malformed files. It also doesn't handle a missing file argument or nonexistent file. Fix check_config.sh (stay POSIX sh) so it: exits 1 with a message on a missing/nonexistent file; exits 1 printing 'malformed line: <line>' to stderr when any non-comment, non-empty line lacks '='; exits 0 printing 'config ok' only when every line is valid. Avoid the subshell trap (e.g. read from a redirect instead of a pipe, or propagate a status)."
+  ],
+  "setup_files": {
+    "check_config.sh": "#!/bin/sh\n# check_config.sh <file>: validate a key=value config file.\n# Must exit 1 with a message when the file is missing or contains a\n# malformed line; exit 0 and print \"config ok\" otherwise.\n\nfile=$1\n\ngrep -v '^#' \"$file\" | while IFS= read -r line; do\n    [ -z \"$line\" ] && continue\n    case $line in\n        *=*) ;;\n        *)\n            echo \"malformed line: $line\" >&2\n            exit 1   # BUG: exits only the pipeline subshell, not the script\n            ;;\n    esac\ndone\n\necho \"config ok\"\nexit 0\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "check_config.sh",
+      "content_patterns": [
+        "malformed",
+        "config ok"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_check.py": "import subprocess\n\ndef run(*args):\n    return subprocess.run(['sh', 'check_config.sh', *args], capture_output=True, text=True, timeout=15)\n\nwith open('good.conf', 'w') as f:\n    f.write('# comment\\nname=optarena\\n\\nport=8300\\n')\nwith open('bad.conf', 'w') as f:\n    f.write('name=optarena\\nthis line has no equals\\nport=8300\\n')\n\nr = run('good.conf')\nassert r.returncode == 0 and 'config ok' in r.stdout, (r.returncode, r.stdout, r.stderr)\n\nr = run('bad.conf')\nassert r.returncode == 1, f'malformed file must exit 1, got {r.returncode} (stdout: {r.stdout!r})'\nassert 'malformed line' in r.stderr, r.stderr\nassert 'config ok' not in r.stdout, 'must not report ok for a malformed file'\n\nr = run('missing.conf')\nassert r.returncode == 1, f'missing file must exit 1, got {r.returncode}'\n\nr = subprocess.run(['sh', 'check_config.sh'], capture_output=True, text=True, timeout=15)\nassert r.returncode == 1, 'missing argument must exit 1'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_check.py",
+  "reference_solution": {
+    "check_config.sh": "#!/bin/sh\n# check_config.sh <file>: validate a key=value config file.\n\nfile=$1\nif [ -z \"$file\" ] || [ ! -f \"$file\" ]; then\n    echo \"usage: check_config.sh <existing config file>\" >&2\n    exit 1\nfi\n\nstatus=0\nwhile IFS= read -r line; do\n    case $line in\n        '#'*|'') continue ;;\n        *=*) ;;\n        *)\n            echo \"malformed line: $line\" >&2\n            status=1\n            ;;\n    esac\ndone < \"$file\"\n\nif [ \"$status\" -ne 0 ]; then\n    exit 1\nfi\necho \"config ok\"\nexit 0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "validates-but-wrong-ok-exit",
+      "files": {
+        "check_config.sh": "#!/bin/sh\nfile=$1\nif [ -z \"$file\" ] || [ ! -f \"$file\" ]; then\n    echo \"usage: check_config.sh <existing config file>\" >&2\n    exit 1\nfi\n\nstatus=0\nwhile IFS= read -r line; do\n    case $line in\n        '#'*|'') continue ;;\n        *=*) ;;\n        *)\n            echo \"malformed line: $line\" >&2\n            status=1\n            ;;\n    esac\ndone < \"$file\"\n\necho \"config ok\"\nexit $status\n"
+      }
+    }
+  ]
+}

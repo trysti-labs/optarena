@@ -1,0 +1,46 @@
+{
+  "name": "fix_sql_left_join_filter",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Moves a right-table filter from WHERE into the LEFT JOIN condition",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "sql",
+    "left-join",
+    "where-vs-on"
+  ],
+  "prompts": [
+    "query.sql should list EVERY customer with their 2026 order count, zero included - but filtering the right table in WHERE (o.year = 2026) silently converts the LEFT JOIN into an inner join, dropping customers with no 2026 orders. Fix query.sql by moving the year filter into the JOIN's ON condition so customers without matching orders still appear with orders_2026 = 0. Tables: customers(id, name), orders(id, customer_id, year). Keep columns and ORDER BY c.name."
+  ],
+  "setup_files": {
+    "query.sql": "-- Every customer with their 2026 order count (0 if none).\n-- BUG: the WHERE clause on the right table turns the LEFT JOIN into an\n-- INNER JOIN - customers without 2026 orders vanish instead of showing 0.\nSELECT c.name, COUNT(o.id) AS orders_2026\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nWHERE o.year = 2026\nGROUP BY c.id, c.name\nORDER BY c.name;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.sql",
+      "content_patterns": [
+        "left join"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_query.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript('''\nCREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT);\nCREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER, year INTEGER);\nINSERT INTO customers (id, name) VALUES (1, 'ada'), (2, 'bob'), (3, 'carol');\nINSERT INTO orders (customer_id, year) VALUES\n    (1, 2026), (1, 2026), (1, 2025),\n    (2, 2025);                       -- bob: old orders only\n                                     -- carol: no orders at all\n''')\nrows = [tuple(r) for r in conn.execute(open('query.sql').read()).fetchall()]\nassert rows == [('ada', 2), ('bob', 0), ('carol', 0)], \\\n    f'customers without 2026 orders must appear with 0: {rows}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_query.py",
+  "reference_solution": {
+    "query.sql": "SELECT c.name, COUNT(o.id) AS orders_2026\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id AND o.year = 2026\nGROUP BY c.id, c.name\nORDER BY c.name;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "counts-all-years",
+      "files": {
+        "query.sql": "SELECT c.name, COUNT(o.id) AS orders_2026\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nGROUP BY c.id, c.name\nORDER BY c.name;\n"
+      }
+    }
+  ]
+}

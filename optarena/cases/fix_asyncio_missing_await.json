@@ -1,0 +1,47 @@
+{
+  "name": "fix_asyncio_missing_await",
+  "language": "python",
+  "framework": "asyncio",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "tags": [
+    "python",
+    "asyncio",
+    "concurrency"
+  ],
+  "description": "Fixes a coroutine called without await, silently dropping work",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "prompts": [
+    "transfer in ledger.py calls write_audit(...) without await - that just creates a coroutine object and discards it (Python even warns 'coroutine was never awaited'), so the audit log stays empty. Fix ledger.py so every transfer's audit entry is actually written. Everything else stays the same."
+  ],
+  "setup_files": {
+    "ledger.py": "audit_log = []\n\n\nasync def write_audit(entry):\n    \"\"\"Append an entry to the audit log (simulated async I/O).\"\"\"\n    audit_log.append(entry)\n\n\nasync def transfer(accounts, src, dst, amount):\n    \"\"\"Move `amount` between accounts and audit the transfer.\"\"\"\n    accounts[src] -= amount\n    accounts[dst] += amount\n    # BUG: calling a coroutine function without await creates a coroutine\n    # object and throws it away - the audit entry is never written.\n    write_audit(f'{src}->{dst}:{amount}')\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ledger.py",
+      "content_patterns": [
+        "await write_audit",
+        "async def transfer"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_ledger.py": "import asyncio\nimport warnings\n\nimport ledger\n\n\nasync def main():\n    accounts = {'a': 100, 'b': 0}\n    with warnings.catch_warnings():\n        warnings.simplefilter('error', RuntimeWarning)\n        await ledger.transfer(accounts, 'a', 'b', 30)\n        await ledger.transfer(accounts, 'a', 'b', 20)\n\n    assert accounts == {'a': 50, 'b': 50}, accounts\n    assert ledger.audit_log == ['a->b:30', 'a->b:20'], \\\n        f'audit entries missing/wrong: {ledger.audit_log}'\n    print('PASS')\n\n\nasyncio.run(main())\n"
+  },
+  "check_command": "python3 test_ledger.py",
+  "reference_solution": {
+    "ledger.py": "audit_log = []\n\n\nasync def write_audit(entry):\n    \"\"\"Append an entry to the audit log (simulated async I/O).\"\"\"\n    audit_log.append(entry)\n\n\nasync def transfer(accounts, src, dst, amount):\n    \"\"\"Move `amount` between accounts and audit the transfer.\"\"\"\n    accounts[src] -= amount\n    accounts[dst] += amount\n    await write_audit(f'{src}->{dst}:{amount}')\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "awaits-but-wrong-entry-format",
+      "files": {
+        "ledger.py": "audit_log = []\n\n\nasync def write_audit(entry):\n    \"\"\"Append an entry to the audit log (simulated async I/O).\"\"\"\n    audit_log.append(entry)\n\n\nasync def transfer(accounts, src, dst, amount):\n    \"\"\"Move `amount` between accounts and audit the transfer.\"\"\"\n    accounts[src] -= amount\n    accounts[dst] += amount\n    await write_audit(f'{src}:{dst}:{amount}')\n"
+      }
+    }
+  ]
+}

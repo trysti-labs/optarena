@@ -1,0 +1,44 @@
+{
+  "name": "create_sh_rotate_logs",
+  "language": "shell",
+  "framework": "posix-sh",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Writes a log-rotation script keeping the N newest files",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "shell",
+    "log-rotation"
+  ],
+  "prompts": [
+    "Write rotate.sh: POSIX sh, invoked as `sh rotate.sh <dir> <keep>`. It looks at the *.log files directly inside <dir> and DELETES all but the <keep> newest ones (by modification time). Fewer than <keep> log files: delete nothing. It must only touch *.log files (never other files), handle filenames with spaces, print one line 'deleted: <filename>' (basename) per removed file, and exit 0. Exit 1 with a usage message if arguments are missing."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "rotate.sh",
+      "content_patterns": [
+        "deleted"
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {
+    "test_rotate.py": "import os, subprocess, time\n\nos.makedirs('logs', exist_ok=True)\nnames = ['old.log', 'mid dle.log', 'new.log', 'newest.log']\nfor i, n in enumerate(names):\n    with open(f'logs/{n}', 'w') as f:\n        f.write(n)\n    t = time.time() - (400 - i * 100)\n    os.utime(f'logs/{n}', (t, t))\nwith open('logs/keep.txt', 'w') as f:\n    f.write('not a log')\n\nr = subprocess.run(['sh', 'rotate.sh', 'logs', '2'], capture_output=True, text=True, timeout=15)\nassert r.returncode == 0, f'exit {r.returncode}: {r.stderr}'\nleft = sorted(os.listdir('logs'))\nassert left == ['keep.txt', 'new.log', 'newest.log'], f'kept wrong files: {left}'\nassert 'deleted: old.log' in r.stdout, r.stdout\nassert 'deleted: mid dle.log' in r.stdout, f'spaced filename mishandled: {r.stdout!r}'\n\n# fewer than keep: no deletions\nr2 = subprocess.run(['sh', 'rotate.sh', 'logs', '5'], capture_output=True, text=True, timeout=15)\nassert r2.returncode == 0\nassert sorted(os.listdir('logs')) == ['keep.txt', 'new.log', 'newest.log']\n\n# missing args -> usage + exit 1\nr3 = subprocess.run(['sh', 'rotate.sh'], capture_output=True, text=True, timeout=15)\nassert r3.returncode == 1, f'missing args must exit 1, got {r3.returncode}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_rotate.py",
+  "reference_solution": {
+    "rotate.sh": "#!/bin/sh\n# rotate.sh <dir> <keep>: delete all but the <keep> newest *.log files.\nif [ -z \"$1\" ] || [ -z \"$2\" ]; then\n    echo \"usage: rotate.sh <dir> <keep>\" >&2\n    exit 1\nfi\ndir=$1\nkeep=$2\n\n# newest first; -t sorts by mtime. Filenames with spaces survive because we\n# read line-by-line (log names contain no newlines).\nls -t \"$dir\"/*.log 2>/dev/null | awk -v k=\"$keep\" 'NR > k' | while IFS= read -r f; do\n    rm -f \"$f\"\n    echo \"deleted: $(basename \"$f\")\"\ndone\nexit 0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "keeps-oldest-instead",
+      "files": {
+        "rotate.sh": "#!/bin/sh\nif [ -z \"$1\" ] || [ -z \"$2\" ]; then\n    echo \"usage: rotate.sh <dir> <keep>\" >&2\n    exit 1\nfi\ndir=$1\nkeep=$2\nls -tr \"$dir\"/*.log 2>/dev/null | awk -v k=\"$keep\" 'NR > k' | while IFS= read -r f; do\n    rm -f \"$f\"\n    echo \"deleted: $(basename \"$f\")\"\ndone\nexit 0\n"
+      }
+    }
+  ]
+}

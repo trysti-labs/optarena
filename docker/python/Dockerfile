@@ -21,6 +21,8 @@ RUN pip install --no-cache-dir --break-system-packages \
         flask \
         django \
         sqlalchemy \
+        alembic \
+        pandas \
         typer \
         pyyaml
 

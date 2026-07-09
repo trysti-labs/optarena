@@ -1,0 +1,46 @@
+{
+  "name": "fix_sql_groupwise_max",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Fixes the classic groupwise-max bug (bare column beside MAX)",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "sql",
+    "groupwise-max",
+    "window-functions"
+  ],
+  "prompts": [
+    "query.sql is meant to return each sensor's LATEST reading (sensor, ts, value of the row with the max ts), but it commits the classic groupwise-max bug: selecting a bare `value` column alongside MAX(ts) with GROUP BY, which does not pick the value from the max-ts row. Fix query.sql so the value genuinely comes from each sensor's latest row - a window function (ROW_NUMBER over sensor ordered by ts DESC) or a correlated/join subquery both work. Keep columns sensor, ts, value; order by sensor ASC. The readings table is readings(id, sensor, ts, value)."
+  ],
+  "setup_files": {
+    "query.sql": "-- Latest reading per sensor. BUG: in SQLite this \"bare column with\n-- GROUP BY\" pattern picks an arbitrary row's value, and in standard SQL it\n-- is simply invalid - `value` is not guaranteed to come from the row with\n-- MAX(ts).\nSELECT sensor, MAX(ts) AS ts, value\nFROM readings\nGROUP BY sensor\nORDER BY sensor;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.sql",
+      "content_patterns": [
+        "sensor"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_query.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript('''\nCREATE TABLE readings (id INTEGER PRIMARY KEY, sensor TEXT, ts INTEGER, value REAL);\n-- deliberately inserted so the max-ts row is NOT the last row per group\nINSERT INTO readings (sensor, ts, value) VALUES\n    ('a', 30, 3.3), ('a', 10, 1.1), ('a', 20, 2.2),\n    ('b', 200, 22.0), ('b', 300, 33.0), ('b', 100, 11.0);\n''')\nrows = [tuple(r) for r in conn.execute(open('query.sql').read()).fetchall()]\nassert rows == [('a', 30, 3.3), ('b', 300, 33.0)], \\\n    f'latest-per-sensor wrong (value must come from the max-ts row): {rows}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_query.py",
+  "reference_solution": {
+    "query.sql": "SELECT sensor, ts, value\nFROM (\n    SELECT sensor, ts, value,\n           ROW_NUMBER() OVER (PARTITION BY sensor ORDER BY ts DESC) AS rn\n    FROM readings\n)\nWHERE rn = 1\nORDER BY sensor ASC;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "orders-ascending",
+      "files": {
+        "query.sql": "SELECT sensor, ts, value\nFROM (\n    SELECT sensor, ts, value,\n           ROW_NUMBER() OVER (PARTITION BY sensor ORDER BY ts ASC) AS rn\n    FROM readings\n)\nWHERE rn = 1\nORDER BY sensor ASC;\n"
+      }
+    }
+  ]
+}

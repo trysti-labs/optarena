@@ -1,0 +1,47 @@
+{
+  "name": "fix_csharp_dictionary_race",
+  "language": "csharp",
+  "framework": "tpl",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "tags": [
+    "csharp",
+    "tpl",
+    "concurrency"
+  ],
+  "description": "Replaces racy Dictionary writes under Parallel.ForEach with ConcurrentDictionary",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "prompts": [
+    "WordTally.Tally in WordTally.cs writes to a plain Dictionary from Parallel.ForEach - Dictionary is not thread-safe, so concurrent writers lose counts or throw. Fix WordTally.cs so parallel tallying is exact: ConcurrentDictionary with AddOrUpdate (note that `dict[word]++` on a ConcurrentDictionary is STILL a racy read-modify-write) - or lock around a plain Dictionary if you prefer. Return type stays Dictionary<string, int> (construct one from the concurrent state at the end). Do not create or modify Program.cs."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n",
+    "WordTally.cs": "namespace Analytics;\n\npublic static class WordTally\n{\n    /// <summary>\n    /// Tally how often each word occurs, counting in parallel.\n    /// </summary>\n    public static Dictionary<string, int> Tally(IEnumerable<string> words)\n    {\n        var counts = new Dictionary<string, int>();\n        Parallel.ForEach(words, word =>\n        {\n            // BUG: Dictionary is not thread-safe - concurrent writers corrupt\n            // it (lost counts or InvalidOperationException).\n            if (counts.ContainsKey(word))\n                counts[word] = counts[word] + 1;\n            else\n                counts[word] = 1;\n        });\n        return counts;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "WordTally.cs",
+      "content_patterns": [
+        "tally"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "using Analytics;\n\nstring[] vocab = { \"alpha\", \"beta\", \"gamma\", \"delta\" };\nfor (int round = 0; round < 5; round++)\n{\n    // 400k words, 4 hot keys - plain Dictionary loses counts or throws.\n    var words = new List<string>(400_000);\n    for (int i = 0; i < 400_000; i++) words.Add(vocab[i % 4]);\n\n    Dictionary<string, int> counts;\n    try\n    {\n        counts = WordTally.Tally(words);\n    }\n    catch (Exception e)\n    {\n        Console.Error.WriteLine($\"round {round}: Tally threw {e.GetType().Name} - not thread-safe\");\n        Environment.Exit(1);\n        return;\n    }\n\n    foreach (var v in vocab)\n    {\n        if (!counts.TryGetValue(v, out int n) || n != 100_000)\n        {\n            Console.Error.WriteLine($\"round {round}: counts[{v}] = {(counts.ContainsKey(v) ? counts[v] : 0)}, want 100000 (lost updates)\");\n            Environment.Exit(1);\n        }\n    }\n}\n\nvar single = WordTally.Tally(new[] { \"x\", \"x\", \"y\" });\nif (single[\"x\"] != 2 || single[\"y\"] != 1) { Console.Error.WriteLine(\"small-input tally wrong\"); Environment.Exit(1); }\n\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "WordTally.cs": "using System.Collections.Concurrent;\n\nnamespace Analytics;\n\npublic static class WordTally\n{\n    /// <summary>\n    /// Tally how often each word occurs, counting in parallel.\n    /// </summary>\n    public static Dictionary<string, int> Tally(IEnumerable<string> words)\n    {\n        var counts = new ConcurrentDictionary<string, int>();\n        Parallel.ForEach(words, word =>\n        {\n            counts.AddOrUpdate(word, 1, (_, current) => current + 1);\n        });\n        return new Dictionary<string, int>(counts);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "concurrent-dict-racy-indexer",
+      "files": {
+        "WordTally.cs": "using System.Collections.Concurrent;\n\nnamespace Analytics;\n\npublic static class WordTally\n{\n    public static Dictionary<string, int> Tally(IEnumerable<string> words)\n    {\n        var counts = new ConcurrentDictionary<string, int>();\n        Parallel.ForEach(words, word =>\n        {\n            counts.TryAdd(word, 0);\n            counts[word] = counts[word] + 1;   // still a racy read-modify-write\n        });\n        return new Dictionary<string, int>(counts);\n    }\n}\n"
+      }
+    }
+  ]
+}

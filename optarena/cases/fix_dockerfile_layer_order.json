@@ -1,0 +1,44 @@
+{
+  "name": "fix_dockerfile_layer_order",
+  "domain": "devops",
+  "task_type": "performance",
+  "docker_image": "optarena-tester:latest",
+  "framework": "dockerfile",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Reorders Dockerfile so dependency install is cached across code changes",
+  "difficulty": 1,
+  "tags": [
+    "dockerfile",
+    "layer-caching"
+  ],
+  "prompts": [
+    "This Dockerfile copies the entire build context (COPY . .) BEFORE running npm install, so any source change invalidates the cache and reinstalls all dependencies. Fix Dockerfile to copy only the dependency manifest(s) first (package.json, and package-lock.json if present), run npm install, and THEN copy the rest of the source - the standard cache-friendly ordering. Keep the base image, WORKDIR, and CMD unchanged."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM node:20-slim\nWORKDIR /app\n# BUG: copying the whole context before installing deps busts the layer\n# cache on every source change - npm install re-runs even when only app\n# code changed.\nCOPY . .\nRUN npm install\nCMD [\"node\", \"server.js\"]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "npm install"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_layers.py": "def parse_dockerfile(path):\n    lines = open(path, encoding=\"utf-8\").read().splitlines()\n    joined = []\n    buf = \"\"\n    for raw in lines:\n        s = raw.rstrip()\n        stripped = s.strip()\n        if not stripped or stripped.startswith(\"#\"):\n            if not buf:\n                continue\n        if s.endswith(\"\\\\\"):\n            buf += s[:-1] + \" \"\n            continue\n        buf += s\n        if buf.strip():\n            joined.append(buf.strip())\n        buf = \"\"\n    if buf.strip():\n        joined.append(buf.strip())\n    out = []\n    for line in joined:\n        if line.startswith(\"#\"):\n            continue\n        parts = line.split(None, 1)\n        if not parts:\n            continue\n        instr = parts[0].upper()\n        args = parts[1] if len(parts) > 1 else \"\"\n        out.append((instr, args))\n    return out\n\ninstrs = parse_dockerfile('Dockerfile')\nseq = [(i, a) for i, a in instrs]\n\n# find the package.json COPY, the npm install RUN, and the full 'COPY . .'\npkg_copy = full_copy = install = None\nfor idx, (instr, args) in enumerate(seq):\n    if instr == 'COPY':\n        srcs = args.split()[:-1]\n        if any('package' in s for s in srcs):\n            if pkg_copy is None:\n                pkg_copy = idx\n        if srcs == ['.']:\n            full_copy = idx\n    if instr == 'RUN' and 'npm install' in args:\n        install = idx\n\nassert pkg_copy is not None, 'must COPY the package manifest before installing'\nassert install is not None, 'npm install RUN missing'\nassert full_copy is not None, 'must still COPY the rest of the source'\nassert pkg_copy < install < full_copy, \\\n    f'order must be: copy manifest ({pkg_copy}) -> npm install ({install}) -> copy source ({full_copy})'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_layers.py",
+  "reference_solution": {
+    "Dockerfile": "FROM node:20-slim\nWORKDIR /app\nCOPY package*.json ./\nRUN npm install\nCOPY . .\nCMD [\"node\", \"server.js\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "manifest-copied-after-install",
+      "files": {
+        "Dockerfile": "FROM node:20-slim\nWORKDIR /app\nRUN npm install\nCOPY package*.json ./\nCOPY . .\nCMD [\"node\", \"server.js\"]\n"
+      }
+    }
+  ]
+}

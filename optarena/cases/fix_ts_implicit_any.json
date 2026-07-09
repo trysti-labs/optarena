@@ -1,0 +1,51 @@
+{
+  "name": "fix_ts_implicit_any",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Adds proper types to a module that fails tsc --strict with implicit any",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "typescript",
+    "strict",
+    "no-implicit-any"
+  ],
+  "prompts": [
+    "cart.ts fails to compile under `tsc --strict` because every parameter is implicitly `any`. Add proper type annotations (an interface for the line items - objects with name: string, price: number, quantity: number - and typed parameters/returns) so it compiles cleanly under --strict. Do NOT change the runtime behavior: total(items, taxRate) still sums price*quantity and applies the tax rate rounded to 2 decimals, and describe(item) still returns the same template string."
+  ],
+  "setup_files": {
+    "cart.ts": "export function total(items, taxRate) {\n  const sum = items.reduce((acc, item) => acc + item.price * item.quantity, 0);\n  return Math.round(sum * (1 + taxRate) * 100) / 100;\n}\n\nexport function describe(item) {\n  return `${item.name} x${item.quantity} @ ${item.price}`;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "cart.ts",
+      "content_patterns": [
+        "export function total",
+        ": number"
+      ],
+      "not_content_patterns": [
+        ": any"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit cart.ts \ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build cart.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { total, describe } = require('./build/cart.js');\nconst items = [\n  { name: 'pen', price: 2.5, quantity: 4 },\n  { name: 'pad', price: 5.0, quantity: 1 },\n];\nassert.strictEqual(total(items, 0.1), 16.5, 'total with 10% tax');\nassert.strictEqual(total([], 0.2), 0, 'empty cart');\nassert.strictEqual(describe(items[0]), 'pen x4 @ 2.5');\nconsole.log('PASS');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "cart.ts": "export interface LineItem {\n  name: string;\n  price: number;\n  quantity: number;\n}\n\nexport function total(items: LineItem[], taxRate: number): number {\n  const sum = items.reduce((acc, item) => acc + item.price * item.quantity, 0);\n  return Math.round(sum * (1 + taxRate) * 100) / 100;\n}\n\nexport function describe(item: LineItem): string {\n  return `${item.name} x${item.quantity} @ ${item.price}`;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "typed-but-behavior-changed",
+      "files": {
+        "cart.ts": "export interface LineItem {\n  name: string;\n  price: number;\n  quantity: number;\n}\n\nexport function total(items: LineItem[], taxRate: number): number {\n  const sum = items.reduce((acc, item) => acc + item.price * item.quantity, 0);\n  return Math.round(sum * taxRate * 100) / 100;\n}\n\nexport function describe(item: LineItem): string {\n  return `${item.name} x${item.quantity} @ ${item.price}`;\n}\n"
+      }
+    }
+  ]
+}

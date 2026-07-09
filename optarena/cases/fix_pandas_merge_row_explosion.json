@@ -1,0 +1,46 @@
+{
+  "name": "fix_pandas_merge_row_explosion",
+  "language": "python",
+  "domain": "data-engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "task_type": "bug_fix",
+  "description": "Fixes a merge that duplicates order rows when the lookup table has duplicate keys",
+  "framework": "pandas",
+  "difficulty": 2,
+  "tags": [
+    "pandas",
+    "merge",
+    "duplicates"
+  ],
+  "prompts": [
+    "enrich_orders in enrich.py left-joins orders to a customers lookup CSV - but the customers file can contain duplicate customer_id rows (re-registrations; the LAST occurrence is the current record). The naive merge then duplicates order rows, inflating totals. Fix enrich.py so each order appears exactly once, joined against each customer's LAST row in the customers file. Keep the returned columns and their order unchanged."
+  ],
+  "setup_files": {
+    "enrich.py": "import pandas as pd\n\n\ndef enrich_orders(orders_csv, customers_csv):\n    \"\"\"Return orders joined with customer name and tier, one row per order.\"\"\"\n    orders = pd.read_csv(orders_csv)\n    customers = pd.read_csv(customers_csv)\n    merged = orders.merge(customers, on='customer_id', how='left')\n    return merged[['order_id', 'customer_id', 'name', 'tier', 'amount']]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "enrich.py",
+      "content_patterns": [
+        "enrich_orders"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_enrich.py": "import csv\nfrom enrich import enrich_orders\n\nwith open('orders.csv', 'w', newline='') as f:\n    w = csv.writer(f)\n    w.writerow(['order_id', 'customer_id', 'amount'])\n    w.writerows([[1, 'c1', 100], [2, 'c2', 50], [3, 'c1', 25]])\n\nwith open('customers.csv', 'w', newline='') as f:\n    w = csv.writer(f)\n    w.writerow(['customer_id', 'name', 'tier'])\n    w.writerows([\n        ['c1', 'Ada (old)', 'bronze'],\n        ['c2', 'Grace', 'silver'],\n        ['c1', 'Ada', 'gold'],          # re-registration: LAST row wins\n    ])\n\ndf = enrich_orders('orders.csv', 'customers.csv')\nassert list(df.columns) == ['order_id', 'customer_id', 'name', 'tier', 'amount'], list(df.columns)\nassert len(df) == 3, f'row explosion: {len(df)} rows for 3 orders'\nassert df['amount'].sum() == 175, f\"amounts inflated: {df['amount'].sum()}\"\nc1 = df[df['customer_id'] == 'c1']\nassert set(c1['name']) == {'Ada'} and set(c1['tier']) == {'gold'}, \\\n    f\"must join against the LAST customer record: {c1.to_dict('records')}\"\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_enrich.py",
+  "reference_solution": {
+    "enrich.py": "import pandas as pd\n\n\ndef enrich_orders(orders_csv, customers_csv):\n    \"\"\"Return orders joined with customer name and tier, one row per order.\"\"\"\n    orders = pd.read_csv(orders_csv)\n    customers = pd.read_csv(customers_csv)\n    current = customers.drop_duplicates('customer_id', keep='last')\n    merged = orders.merge(current, on='customer_id', how='left')\n    return merged[['order_id', 'customer_id', 'name', 'tier', 'amount']]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "keeps-first-registration",
+      "files": {
+        "enrich.py": "import pandas as pd\n\n\ndef enrich_orders(orders_csv, customers_csv):\n    \"\"\"Return orders joined with customer name and tier, one row per order.\"\"\"\n    orders = pd.read_csv(orders_csv)\n    customers = pd.read_csv(customers_csv).drop_duplicates('customer_id', keep='first')\n    merged = orders.merge(customers, on='customer_id', how='left')\n    return merged[['order_id', 'customer_id', 'name', 'tier', 'amount']]\n"
+      }
+    }
+  ]
+}
