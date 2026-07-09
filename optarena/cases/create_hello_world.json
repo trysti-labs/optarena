@@ -9,12 +9,16 @@
   "expected_files": [
     {
       "path_pattern": "hello.py",
-      "content_patterns": ["print"]
+      "content_patterns": [
+        "print"
+      ]
     }
   ],
   "test_setup_files": {
     "test_hello.py": "import subprocess, sys\nout = subprocess.check_output([sys.executable, 'hello.py'], text=True)\nassert 'Hello, World!' in out, f'expected \"Hello, World!\" in stdout, got {out!r}'\nprint('PASS')\n"
   },
   "check_command": "python3 test_hello.py",
-  "timeout": 90
+  "timeout": 90,
+  "difficulty": 1,
+  "task_type": "feature"
 }

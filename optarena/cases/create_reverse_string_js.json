@@ -9,12 +9,17 @@
   "expected_files": [
     {
       "path_pattern": "reverse.js",
-      "content_patterns": ["reverseString", "module.exports"]
+      "content_patterns": [
+        "reverseString",
+        "module.exports"
+      ]
     }
   ],
   "test_setup_files": {
     "test_reverse.js": "const { reverseString } = require('./reverse.js');\nconst assert = require('assert');\nassert.strictEqual(reverseString('hello'), 'olleh');\nassert.strictEqual(reverseString(''), '');\nassert.strictEqual(reverseString('a'), 'a');\nassert.strictEqual(reverseString('race car'), 'rac ecar');\nconsole.log('PASS');\n"
   },
   "check_command": "node test_reverse.js",
-  "timeout": 90
+  "timeout": 90,
+  "difficulty": 1,
+  "task_type": "feature"
 }

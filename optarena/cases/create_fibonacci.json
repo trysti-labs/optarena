@@ -9,12 +9,17 @@
   "expected_files": [
     {
       "path_pattern": "fibonacci.py",
-      "content_patterns": ["fibonacci", "def "]
+      "content_patterns": [
+        "fibonacci",
+        "def "
+      ]
     }
   ],
   "test_setup_files": {
     "test_fibonacci.py": "import importlib.util\nspec = importlib.util.spec_from_file_location('fibonacci_mod', 'fibonacci.py')\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nexpected = [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]\nresult = list(mod.fibonacci(10))\nassert result == expected, f'fibonacci(10) = {result}, expected {expected}'\nassert list(mod.fibonacci(1)) == [0], f'fibonacci(1) = {mod.fibonacci(1)}, expected [0]'\nassert list(mod.fibonacci(2)) == [0, 1], f'fibonacci(2) = {mod.fibonacci(2)}, expected [0, 1]'\nprint('PASS')\n"
   },
   "check_command": "python3 test_fibonacci.py",
-  "timeout": 120
+  "timeout": 120,
+  "difficulty": 1,
+  "task_type": "feature"
 }

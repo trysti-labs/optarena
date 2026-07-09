@@ -9,7 +9,9 @@
   "expected_files": [
     {
       "path_pattern": "factorial.c",
-      "content_patterns": ["int main"]
+      "content_patterns": [
+        "int main"
+      ]
     }
   ],
   "test_setup_files": {
@@ -17,5 +19,7 @@
   },
   "check_command": "python3 test_factorial.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "difficulty": 1,
+  "task_type": "feature"
 }
