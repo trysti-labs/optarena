@@ -1,0 +1,50 @@
+{
+  "name": "fix_tokio_blocking_sleep",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 240,
+  "tags": [
+    "rust",
+    "concurrency"
+  ],
+  "description": "Replaces a blocking sleep inside async tasks with tokio::time::sleep",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "prompts": [
+    "fetch_all in src/lib.rs spawns n tokio tasks that are supposed to run concurrently, but each one calls std::thread::sleep - which BLOCKS the runtime's worker thread instead of yielding, so on a small worker pool the tasks largely serialize (8 tasks x 100ms take ~400ms on 2 workers instead of ~100ms). Fix src/lib.rs to use tokio::time::sleep(...).await so the tasks genuinely overlap. Results stay in task order: index i yields i*2."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"conc_case\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\ntokio = { version = \"1\", features = [\"full\"] }\n",
+    "src/lib.rs": "use std::time::Duration;\n\n/// Run `n` simulated fetches CONCURRENTLY (each takes ~100ms) and return\n/// their results in task order.\npub async fn fetch_all(n: usize) -> Vec<u64> {\n    let mut handles = Vec::new();\n    for i in 0..n {\n        handles.push(tokio::spawn(async move {\n            // BUG: std::thread::sleep BLOCKS the runtime worker thread -\n            // tasks serialize onto the worker pool instead of overlapping.\n            std::thread::sleep(Duration::from_millis(100));\n            (i as u64) * 2\n        }));\n    }\n    let mut out = Vec::new();\n    for h in handles {\n        out.push(h.await.unwrap());\n    }\n    out\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "tokio::time::sleep",
+        "fetch_all"
+      ],
+      "not_content_patterns": [
+        "std::thread::sleep"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/timing_test.rs": "use conc_case::fetch_all;\nuse std::time::Instant;\n\n#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]\nasync fn tasks_overlap() {\n    let start = Instant::now();\n    let out = fetch_all(8).await;\n    let elapsed = start.elapsed();\n\n    assert_eq!(out, vec![0, 2, 4, 6, 8, 10, 12, 14], \"results/order wrong: {:?}\", out);\n    // blocking sleeps serialize onto 2 workers: >= 400ms. Async sleeps: ~100ms.\n    assert!(\n        elapsed.as_millis() < 250,\n        \"8 concurrent 100ms tasks took {:?} - still blocking the runtime\",\n        elapsed\n    );\n}\n\n#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]\nasync fn empty_is_fine() {\n    assert!(fetch_all(0).await.is_empty());\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "use std::time::Duration;\n\n/// Run `n` simulated fetches CONCURRENTLY (each takes ~100ms) and return\n/// their results in task order.\npub async fn fetch_all(n: usize) -> Vec<u64> {\n    let mut handles = Vec::new();\n    for i in 0..n {\n        handles.push(tokio::spawn(async move {\n            tokio::time::sleep(Duration::from_millis(100)).await;\n            (i as u64) * 2\n        }));\n    }\n    let mut out = Vec::new();\n    for h in handles {\n        out.push(h.await.unwrap());\n    }\n    out\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "async-sleep-but-sequential-awaits",
+      "files": {
+        "src/lib.rs": "use std::time::Duration;\n\npub async fn fetch_all(n: usize) -> Vec<u64> {\n    // tokio::time::sleep, but awaited one after another - no concurrency\n    let mut out = Vec::new();\n    for i in 0..n {\n        tokio::time::sleep(Duration::from_millis(100)).await;\n        out.push((i as u64) * 2);\n    }\n    out\n}\n"
+      }
+    }
+  ]
+}

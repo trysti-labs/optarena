@@ -1,0 +1,46 @@
+{
+  "name": "fix_go_counter_race",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 150,
+  "timeout": 180,
+  "tags": [
+    "go",
+    "concurrency"
+  ],
+  "description": "Fixes a data race on a shared counter, verified by the race detector",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "prompts": [
+    "Count in counter.go increments a shared int from n goroutines with no synchronization - a data race that the race detector flags and that loses updates under load. Fix counter.go so Count(n, per) always returns exactly n*per and is race-free (a sync.Mutex around the increment, or sync/atomic - your choice). Keep the function signature."
+  ],
+  "setup_files": {
+    "go.mod": "module gocase\n\ngo 1.22.12\n",
+    "counter.go": "package counter\n\nimport \"sync\"\n\n// Count runs n workers, each incrementing the shared total `per` times.\n// Must return exactly n*per.\nfunc Count(n, per int) int {\n\ttotal := 0\n\tvar wg sync.WaitGroup\n\tfor w := 0; w < n; w++ {\n\t\twg.Add(1)\n\t\tgo func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor i := 0; i < per; i++ {\n\t\t\t\ttotal++\n\t\t\t}\n\t\t}()\n\t}\n\twg.Wait()\n\treturn total\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "counter.go",
+      "content_patterns": [
+        "func count"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "counter_race_test.go": "package counter\n\nimport \"testing\"\n\nfunc TestCountExact(t *testing.T) {\n\tfor round := 0; round < 3; round++ {\n\t\tgot := Count(8, 20000)\n\t\tif got != 160000 {\n\t\t\tt.Fatalf(\"round %d: Count(8, 20000) = %d, want 160000 (lost updates)\", round, got)\n\t\t}\n\t}\n}\n\nfunc TestCountSmall(t *testing.T) {\n\tif got := Count(1, 5); got != 5 {\n\t\tt.Fatalf(\"Count(1, 5) = %d, want 5\", got)\n\t}\n\tif got := Count(4, 0); got != 0 {\n\t\tt.Fatalf(\"Count(4, 0) = %d, want 0\", got)\n\t}\n}\n"
+  },
+  "check_command": "go test -race ./...",
+  "reference_solution": {
+    "counter.go": "package counter\n\nimport \"sync\"\n\n// Count runs n workers, each incrementing the shared total `per` times.\n// Must return exactly n*per.\nfunc Count(n, per int) int {\n\tvar mu sync.Mutex\n\ttotal := 0\n\tvar wg sync.WaitGroup\n\tfor w := 0; w < n; w++ {\n\t\twg.Add(1)\n\t\tgo func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor i := 0; i < per; i++ {\n\t\t\t\tmu.Lock()\n\t\t\t\ttotal++\n\t\t\t\tmu.Unlock()\n\t\t\t}\n\t\t}()\n\t}\n\twg.Wait()\n\treturn total\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "rlock-for-writes",
+      "files": {
+        "counter.go": "package counter\n\nimport \"sync\"\n\n// Count runs n workers, each incrementing the shared total `per` times.\nfunc Count(n, per int) int {\n\tvar mu sync.RWMutex\n\ttotal := 0\n\tvar wg sync.WaitGroup\n\tfor w := 0; w < n; w++ {\n\t\twg.Add(1)\n\t\tgo func() {\n\t\t\tdefer wg.Done()\n\t\t\tfor i := 0; i < per; i++ {\n\t\t\t\tmu.RLock()\n\t\t\t\ttotal++\n\t\t\t\tmu.RUnlock()\n\t\t\t}\n\t\t}()\n\t}\n\twg.Wait()\n\treturn total\n}\n"
+      }
+    }
+  ]
+}
