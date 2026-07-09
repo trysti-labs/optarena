@@ -1,0 +1,45 @@
+{
+  "name": "fix_dockerfile_pinned_base",
+  "domain": "devops",
+  "task_type": "bug_fix",
+  "docker_image": "optarena-tester:latest",
+  "framework": "dockerfile",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Pins a floating :latest base image to a specific version",
+  "difficulty": 1,
+  "tags": [
+    "dockerfile",
+    "reproducibility",
+    "pinning"
+  ],
+  "prompts": [
+    "This Dockerfile uses `FROM python:latest`, a floating tag - builds are not reproducible and can break without warning when 'latest' moves. Fix Dockerfile to pin the base image to a specific Python version tag (for example python:3.11-slim or python:3.12 - any concrete version, not 'latest' and not an untagged image). Everything else stays the same."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM python:latest\nWORKDIR /app\nCOPY . .\nRUN pip install --no-cache-dir flask\nCMD [\"python\", \"app.py\"]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "from python:"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_pinned.py": "def parse_dockerfile(path):\n    lines = open(path, encoding=\"utf-8\").read().splitlines()\n    joined = []\n    buf = \"\"\n    for raw in lines:\n        s = raw.rstrip()\n        stripped = s.strip()\n        if not stripped or stripped.startswith(\"#\"):\n            if not buf:\n                continue\n        if s.endswith(\"\\\\\"):\n            buf += s[:-1] + \" \"\n            continue\n        buf += s\n        if buf.strip():\n            joined.append(buf.strip())\n        buf = \"\"\n    if buf.strip():\n        joined.append(buf.strip())\n    out = []\n    for line in joined:\n        if line.startswith(\"#\"):\n            continue\n        parts = line.split(None, 1)\n        if not parts:\n            continue\n        instr = parts[0].upper()\n        args = parts[1] if len(parts) > 1 else \"\"\n        out.append((instr, args))\n    return out\n\ninstrs = parse_dockerfile('Dockerfile')\nfroms = [a for i, a in instrs if i == 'FROM']\nassert froms, 'no FROM instruction'\nbase = froms[0].split()[0]   # strip any AS alias\nassert ':' in base, f'base image is untagged (implicitly latest): {base!r}'\nimage, tag = base.rsplit(':', 1)\nassert image.split('/')[-1].startswith('python'), f'base should still be python: {base}'\nassert tag != 'latest', 'tag is still :latest - pin a concrete version'\nassert any(ch.isdigit() for ch in tag), f'tag {tag!r} does not look like a version'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_pinned.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nRUN pip install --no-cache-dir flask\nCMD [\"python\", \"app.py\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-untagged",
+      "files": {
+        "Dockerfile": "FROM python\nWORKDIR /app\nCOPY . .\nRUN pip install --no-cache-dir flask\nCMD [\"python\", \"app.py\"]\n"
+      }
+    }
+  ]
+}

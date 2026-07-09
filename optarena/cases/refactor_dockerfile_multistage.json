@@ -1,0 +1,45 @@
+{
+  "name": "refactor_dockerfile_multistage",
+  "domain": "devops",
+  "task_type": "refactoring",
+  "docker_image": "optarena-tester:latest",
+  "framework": "dockerfile",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Converts a single-stage Go build into a lean multi-stage image",
+  "difficulty": 2,
+  "tags": [
+    "dockerfile",
+    "multi-stage"
+  ],
+  "prompts": [
+    "This Dockerfile builds a Go binary but ships the entire golang toolchain in the final image. Refactor it into a MULTI-STAGE build: a first stage (name it `builder`) based on the golang image that compiles the binary, and a small final stage (e.g. debian:bookworm-slim, or alpine, or gcr.io/distroless) that COPYs the built binary from the builder stage with COPY --from=builder and runs it. The final stage must NOT contain the Go compiler. Keep the CMD running the server binary."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM golang:1.22\nWORKDIR /src\nCOPY . .\nRUN go build -o /bin/server .\n# BUG: the final image is the full golang toolchain (~800MB) - the compiler\n# and source ship to production.\nCMD [\"/bin/server\"]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "as builder",
+        "copy --from"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_multistage.py": "def parse_dockerfile(path):\n    lines = open(path, encoding=\"utf-8\").read().splitlines()\n    joined = []\n    buf = \"\"\n    for raw in lines:\n        s = raw.rstrip()\n        stripped = s.strip()\n        if not stripped or stripped.startswith(\"#\"):\n            if not buf:\n                continue\n        if s.endswith(\"\\\\\"):\n            buf += s[:-1] + \" \"\n            continue\n        buf += s\n        if buf.strip():\n            joined.append(buf.strip())\n        buf = \"\"\n    if buf.strip():\n        joined.append(buf.strip())\n    out = []\n    for line in joined:\n        if line.startswith(\"#\"):\n            continue\n        parts = line.split(None, 1)\n        if not parts:\n            continue\n        instr = parts[0].upper()\n        args = parts[1] if len(parts) > 1 else \"\"\n        out.append((instr, args))\n    return out\n\ninstrs = parse_dockerfile('Dockerfile')\nfroms = [a for i, a in instrs if i == 'FROM']\nassert len(froms) >= 2, f'multi-stage needs >= 2 FROM lines, got {len(froms)}: {froms}'\n\n# a builder stage on golang\nassert any('golang' in f.lower() and ' as ' in f.lower() for f in froms), \\\n    f'need a named golang builder stage (FROM golang... AS builder): {froms}'\n\n# final stage is NOT the golang toolchain\nfinal_base = froms[-1].lower()\nassert 'golang' not in final_base, f'final stage still uses the golang image: {froms[-1]}'\n\n# artifact copied from the builder\ncopies = [a for i, a in instrs if i == 'COPY']\nassert any('--from=' in c for c in copies), 'final stage must COPY --from the builder'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_multistage.py",
+  "reference_solution": {
+    "Dockerfile": "FROM golang:1.22 AS builder\nWORKDIR /src\nCOPY . .\nRUN go build -o /bin/server .\n\nFROM debian:bookworm-slim\nCOPY --from=builder /bin/server /bin/server\nCMD [\"/bin/server\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "two-stages-but-final-is-golang",
+      "files": {
+        "Dockerfile": "FROM golang:1.22 AS builder\nWORKDIR /src\nCOPY . .\nRUN go build -o /bin/server .\n\nFROM golang:1.22\nCOPY --from=builder /bin/server /bin/server\nCMD [\"/bin/server\"]\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "name": "fix_github_actions_missing_checkout",
+  "domain": "devops",
+  "task_type": "bug_fix",
+  "docker_image": "optarena-tester:latest",
+  "framework": "github-actions",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Adds the missing actions/checkout so the workflow has source to build",
+  "language": "yaml",
+  "difficulty": 1,
+  "tags": [
+    "github-actions",
+    "ci",
+    "checkout"
+  ],
+  "prompts": [
+    "This workflow (.github/workflows/ci.yml) sets up Node and runs `npm ci` / `npm test`, but it never checks out the repository - so there's no package.json or source in the runner and every run fails. Fix the workflow by adding an actions/checkout step as the FIRST step of the build job, before setup-node and the npm commands. Keep everything else the same."
+  ],
+  "setup_files": {
+    ".github/workflows/ci.yml": "name: CI\n\non: [push]\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      # BUG: no actions/checkout - the repo is never cloned, so npm ci\n      # fails with 'no package.json'.\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/ci.yml",
+      "content_patterns": [
+        "actions/checkout"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_checkout.py": "import yaml\ndef load_yaml(path):\n    with open(path) as f:\n        return yaml.safe_load(f)\n\nwf = load_yaml('.github/workflows/ci.yml')\nsteps = wf['jobs']['build']['steps']\nuses = [s.get('uses', '') for s in steps]\n\ncheckout_idx = next((i for i, u in enumerate(uses) if 'actions/checkout' in u), None)\nassert checkout_idx is not None, 'actions/checkout still missing'\n\nsetup_idx = next((i for i, u in enumerate(uses) if 'actions/setup-node' in u), None)\nassert setup_idx is not None, 'setup-node vanished'\nassert checkout_idx < setup_idx, 'checkout must come before setup-node'\n\n# checkout must precede any npm command\nnpm_idx = next((i for i, s in enumerate(steps) if 'npm' in s.get('run', '')), None)\nassert npm_idx is not None and checkout_idx < npm_idx, 'checkout must precede the npm steps'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_checkout.py",
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: CI\n\non: [push]\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "checkout-after-npm",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\n\non: [push]\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n      - uses: actions/checkout@v4\n"
+      }
+    }
+  ]
+}

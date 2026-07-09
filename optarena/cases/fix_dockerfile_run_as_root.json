@@ -1,0 +1,45 @@
+{
+  "name": "fix_dockerfile_run_as_root",
+  "domain": "devops",
+  "task_type": "security",
+  "docker_image": "optarena-tester:latest",
+  "framework": "dockerfile",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Adds a non-root user so the container does not run as root",
+  "difficulty": 1,
+  "tags": [
+    "dockerfile",
+    "non-root",
+    "security"
+  ],
+  "prompts": [
+    "This Dockerfile has no USER directive, so the container process runs as root - a privilege-escalation risk if the app is compromised. Fix Dockerfile to create a non-root user (any name, e.g. appuser) and switch to it with a USER directive BEFORE the CMD, so the application runs unprivileged. Create the user after installing dependencies (which need root); the app files should be runnable by the new user. Keep the base image and CMD."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY . .\n# BUG: no USER directive - the container runs as root.\nCMD [\"python\", \"app.py\"]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "user "
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_nonroot.py": "def parse_dockerfile(path):\n    lines = open(path, encoding=\"utf-8\").read().splitlines()\n    joined = []\n    buf = \"\"\n    for raw in lines:\n        s = raw.rstrip()\n        stripped = s.strip()\n        if not stripped or stripped.startswith(\"#\"):\n            if not buf:\n                continue\n        if s.endswith(\"\\\\\"):\n            buf += s[:-1] + \" \"\n            continue\n        buf += s\n        if buf.strip():\n            joined.append(buf.strip())\n        buf = \"\"\n    if buf.strip():\n        joined.append(buf.strip())\n    out = []\n    for line in joined:\n        if line.startswith(\"#\"):\n            continue\n        parts = line.split(None, 1)\n        if not parts:\n            continue\n        instr = parts[0].upper()\n        args = parts[1] if len(parts) > 1 else \"\"\n        out.append((instr, args))\n    return out\n\ninstrs = parse_dockerfile('Dockerfile')\n\nuser_idx = [idx for idx, (i, a) in enumerate(instrs) if i == 'USER']\nassert user_idx, 'no USER directive - container still runs as root'\n\n# the effective USER must not be root and must precede CMD\nlast_user = instrs[user_idx[-1]][1].strip().split(':')[0].lower()\nassert last_user not in ('root', '0'), f'USER is still root: {last_user!r}'\n\ncmd_idx = [idx for idx, (i, a) in enumerate(instrs) if i in ('CMD', 'ENTRYPOINT')]\nassert cmd_idx, 'no CMD/ENTRYPOINT'\nassert user_idx[-1] < cmd_idx[-1], 'USER must be set before CMD so the app runs unprivileged'\n\n# the user has to actually exist (created via useradd/adduser/groupadd)\nruns = ' '.join(a for i, a in instrs if i == 'RUN').lower()\nassert any(tool in runs for tool in ('useradd', 'adduser', 'groupadd', 'addgroup')), \\\n    'the non-root user is referenced but never created'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_nonroot.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY . .\nRUN useradd --create-home appuser && chown -R appuser /app\nUSER appuser\nCMD [\"python\", \"app.py\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "switches-back-to-root",
+      "files": {
+        "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY . .\nRUN useradd --create-home appuser && chown -R appuser /app\nUSER appuser\nUSER root\nCMD [\"python\", \"app.py\"]\n"
+      }
+    }
+  ]
+}

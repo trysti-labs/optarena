@@ -1,0 +1,48 @@
+{
+  "name": "fix_makefile_incremental_rebuild",
+  "domain": "devops",
+  "task_type": "bug_fix",
+  "docker_image": "optarena-tester:latest",
+  "framework": "make",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Fixes a Makefile rule with no prerequisites that never rebuilds",
+  "difficulty": 2,
+  "tags": [
+    "make",
+    "incremental",
+    "prerequisites"
+  ],
+  "prompts": [
+    "The Makefile builds `app` from calc.c and main.c, but the `app` target lists NO prerequisites - so after the first build, editing calc.c doesn't trigger a rebuild (make sees `app` exists and stops). Fix the Makefile so `app` depends on calc.c and main.c and is rebuilt whenever either changes. Keep the executable name `app` and the clean target. Recipe lines stay tab-indented."
+  ],
+  "setup_files": {
+    "Makefile": "CC = gcc\n\n# BUG: the `app` rule has NO prerequisites, so once app exists make thinks it\n# is up to date and never recompiles when calc.c changes.\napp:\n\t$(CC) -o app calc.c main.c\n\n.PHONY: clean\nclean:\n\trm -f app\n",
+    "calc.c": "int compute(void) { return 1; }\n",
+    "main.c": "#include <stdio.h>\nint compute(void);\nint main(void) { printf(\"%d\\n\", compute()); return 0; }\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "app",
+        "calc.c"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_rebuild.py": "import os, subprocess, time\n\ndef make(*args):\n    return subprocess.run(['make', *args], capture_output=True, text=True, timeout=45)\n\nr = make()\nassert r.returncode == 0, r.stderr\nout = subprocess.run(['./app'], capture_output=True, text=True, timeout=15).stdout.strip()\nassert out == '1', f'initial build should print 1, got {out!r}'\n\n# change calc.c; make must rebuild and the new behavior must show\ntime.sleep(1.1)  # ensure a strictly newer mtime for make's comparison\nwith open('calc.c', 'w') as f:\n    f.write('int compute(void) { return 42; }\\n')\n\nr = make()\nassert r.returncode == 0, f'rebuild failed: {r.stderr}'\nout = subprocess.run(['./app'], capture_output=True, text=True, timeout=15).stdout.strip()\nassert out == '42', f'make did NOT rebuild after calc.c changed (still prints {out!r})'\n\n# no spurious rebuild when nothing changed\nr = make()\nassert 'up to date' in (r.stdout + r.stderr).lower() or r.returncode == 0\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_rebuild.py",
+  "reference_solution": {
+    "Makefile": "CC = gcc\n\napp: calc.c main.c\n\t$(CC) -o app calc.c main.c\n\n.PHONY: clean\nclean:\n\trm -f app\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "depends-on-main-only",
+      "files": {
+        "Makefile": "CC = gcc\n\napp: main.c\n\t$(CC) -o app calc.c main.c\n\n.PHONY: clean\nclean:\n\trm -f app\n"
+      }
+    }
+  ]
+}
