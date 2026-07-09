@@ -1,0 +1,49 @@
+{
+  "name": "optimize_pandas_iterrows",
+  "language": "python",
+  "domain": "data-engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 180,
+  "timeout": 180,
+  "task_type": "performance",
+  "description": "Vectorizes a per-row iterrows loop over a large frame",
+  "framework": "pandas",
+  "difficulty": 2,
+  "tags": [
+    "pandas",
+    "vectorization",
+    "iterrows"
+  ],
+  "prompts": [
+    "score_transactions in scoring.py computes a risk column by looping over the frame with iterrows() - the slowest way to touch every row in pandas, painful at hundreds of thousands of rows. Rewrite it vectorized (numpy/pandas column operations, e.g. numpy.where or Series.where - no iterrows, no apply over rows) with identical results: risk = amount*2 for foreign rows else amount*0.5, plus an extra +100 when amount > 5000."
+  ],
+  "setup_files": {
+    "scoring.py": "import pandas as pd\n\n\ndef score_transactions(csv_path):\n    \"\"\"Return the DataFrame with a `risk` column added:\n    risk = amount * 2 if the transaction is foreign, else amount * 0.5,\n    and an extra +100 for amounts over 5000.\"\"\"\n    df = pd.read_csv(csv_path)\n    risks = []\n    for _, row in df.iterrows():\n        risk = row['amount'] * (2.0 if row['foreign'] else 0.5)\n        if row['amount'] > 5000:\n            risk += 100\n        risks.append(risk)\n    df['risk'] = risks\n    return df\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "scoring.py",
+      "content_patterns": [
+        "score_transactions"
+      ],
+      "not_content_patterns": [
+        "iterrows"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_scoring.py": "import csv, random, time\nfrom scoring import score_transactions\n\nrandom.seed(7)\nn = 400_000\nwith open('tx.csv', 'w', newline='') as f:\n    w = csv.writer(f)\n    w.writerow(['tx_id', 'amount', 'foreign'])\n    for i in range(n):\n        w.writerow([i, random.randint(1, 10_000), random.random() < 0.3])\n\nt0 = time.monotonic()\ndf = score_transactions('tx.csv')\nelapsed = time.monotonic() - t0\n\nassert len(df) == n\n# correctness spot-checks against the scalar formula\nsample = df.sample(200, random_state=1)\nfor _, row in sample.iterrows():\n    expected = row['amount'] * (2.0 if row['foreign'] else 0.5)\n    if row['amount'] > 5000:\n        expected += 100\n    assert abs(row['risk'] - expected) < 1e-9, f\"risk wrong at tx {row['tx_id']}: {row['risk']} != {expected}\"\n\n# calibration: iterrows over 400k rows takes >20s in this sandbox; vectorized ~<1s\nassert elapsed < 8.0, f'{elapsed:.1f}s for {n} rows - still row-at-a-time (vectorized is well under 8s)'\nprint(f'PASS ({elapsed:.2f}s)')\n"
+  },
+  "check_command": "python3 test_scoring.py",
+  "reference_solution": {
+    "scoring.py": "import numpy as np\nimport pandas as pd\n\n\ndef score_transactions(csv_path):\n    \"\"\"Return the DataFrame with a `risk` column added.\"\"\"\n    df = pd.read_csv(csv_path)\n    risk = np.where(df['foreign'], df['amount'] * 2.0, df['amount'] * 0.5)\n    risk = risk + np.where(df['amount'] > 5000, 100.0, 0.0)\n    df['risk'] = risk\n    return df\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vectorized-but-bonus-for-all",
+      "files": {
+        "scoring.py": "import numpy as np\nimport pandas as pd\n\n\ndef score_transactions(csv_path):\n    df = pd.read_csv(csv_path)\n    risk = np.where(df['foreign'], df['amount'] * 2.0, df['amount'] * 0.5) + 100.0\n    df['risk'] = risk\n    return df\n"
+      }
+    }
+  ]
+}

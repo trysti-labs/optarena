@@ -1,0 +1,51 @@
+{
+  "name": "add_tests_pandas_cleaning",
+  "language": "python",
+  "domain": "data-engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 150,
+  "timeout": 180,
+  "task_type": "testing",
+  "description": "Asks the model to write tests for a pandas cleaning function; mutation-checked",
+  "framework": "pandas",
+  "difficulty": 2,
+  "tags": [
+    "pandas",
+    "testing",
+    "data-cleaning"
+  ],
+  "prompts": [
+    "cleaning.py (already correct, do not modify it) exports clean_readings(df), documented in its docstring: drops rows with NaN value, clips value into [0, 100], lowercases/strips sensor ids, drops duplicate (sensor, ts) pairs keeping the FIRST occurrence, and returns a new frame with the index reset. Write tests in a file named exactly test_cleaning.py: a plain Python script building small DataFrames inline, asserting at least: a NaN-value row is dropped; an out-of-range value is clipped (cover a value ABOVE 100); sensor ids like '  A1 ' normalize to 'a1'; and two rows that collide on (sensor, ts) after normalization collapse to one, keeping the first one's value. Plain asserts; print PASS at the end."
+  ],
+  "setup_files": {
+    "cleaning.py": "import pandas as pd\n\n\ndef clean_readings(df):\n    \"\"\"Sensor-reading cleanup:\n    - drop rows where `value` is NaN\n    - clip `value` into [0, 100]\n    - normalize `sensor` ids to lowercase with surrounding whitespace stripped\n    - drop duplicate (sensor, ts) pairs, keeping the FIRST occurrence\n    Returns a new DataFrame with the index reset.\"\"\"\n    out = df.dropna(subset=['value']).copy()\n    out['value'] = out['value'].clip(0, 100)\n    out['sensor'] = out['sensor'].str.strip().str.lower()\n    out = out.drop_duplicates(subset=['sensor', 'ts'], keep='first')\n    return out.reset_index(drop=True)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_cleaning.py",
+      "content_patterns": [
+        "clean_readings",
+        "assert"
+      ],
+      "regex_patterns": [
+        "assert\\s"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path('cleaning.py')\nTEST_CMD = 'python3 test_cleaning.py'\nMUTANTS = [[[\"    out['value'] = out['value'].clip(0, 100)\", \"    out['value'] = out['value'].clip(0, 1000)\"]], [[\"    out = out.drop_duplicates(subset=['sensor', 'ts'], keep='first')\", \"    out = out.drop_duplicates(subset=['sensor', 'ts'], keep='last')\"]]]\n\ndef run_tests():\n    shutil.rmtree('__pycache__', ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_cleaning.py": "import pandas as pd\nfrom cleaning import clean_readings\n\ndf = pd.DataFrame({\n    'sensor': ['  A1 ', 'a1', 'B2', 'b2', 'C3'],\n    'ts': [1, 1, 2, 3, 4],\n    'value': [150.0, 70.0, -5.0, None, 42.0],\n})\n\nout = clean_readings(df)\n\n# NaN row dropped\nassert len(out) == 3, f'expected 3 rows, got {len(out)}'\n\n# clipping into [0, 100]\na1 = out[(out['sensor'] == 'a1') & (out['ts'] == 1)]\nassert len(a1) == 1, 'duplicate (sensor, ts) must collapse to one row'\nassert a1.iloc[0]['value'] == 100.0, f\"150 must clip to 100, got {a1.iloc[0]['value']} (and FIRST occurrence wins)\"\nb2 = out[out['sensor'] == 'b2']\nassert b2.iloc[0]['value'] == 0.0, '-5 must clip to 0'\n\n# normalization\nassert set(out['sensor']) == {'a1', 'b2', 'c3'}, set(out['sensor'])\n\n# index reset\nassert list(out.index) == [0, 1, 2]\nprint('PASS')\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_cleaning.py": "import pandas as pd\nfrom cleaning import clean_readings\n\n# checks clean_readings drops NaN, clips, normalizes, dedupes - assert basics\ndf = pd.DataFrame({'sensor': ['a1'], 'ts': [1], 'value': [50.0]})\nout = clean_readings(df)\nassert len(out) == 1\nprint('PASS')\n"
+      }
+    }
+  ]
+}

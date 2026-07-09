@@ -1,0 +1,47 @@
+{
+  "name": "create_sqlite_csv_pipeline",
+  "language": "python",
+  "domain": "data-engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "task_type": "data_engineering",
+  "description": "Builds a CSV -> clean -> sqlite -> query ETL pipeline",
+  "framework": "sqlite3",
+  "difficulty": 2,
+  "tags": [
+    "sqlite",
+    "csv",
+    "etl",
+    "pipeline"
+  ],
+  "prompts": [
+    "Create pipeline.py exporting load_events(csv_path, db_path) and top_pages(db_path, limit). load_events reads an events CSV with columns ts,page,user_id where malformed rows must be SKIPPED (empty page or user_id, or a non-integer user_id), creates table events(ts TEXT, page TEXT, user_id INTEGER) in the sqlite database (dropping it first if it exists, so reloads are idempotent), bulk-inserts the clean rows, and returns the number of rows loaded. top_pages returns a list of (page, views) tuples of the `limit` most-viewed pages, most views first, ties broken by page name ascending."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "pipeline.py",
+      "content_patterns": [
+        "load_events",
+        "top_pages",
+        "sqlite3"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_pipeline.py": "import csv\nfrom pipeline import load_events, top_pages\n\nrows = [\n    ['2026-01-01T10:00', '/home', '1'],\n    ['2026-01-01T10:01', '/docs', '2'],\n    ['2026-01-01T10:02', '/home', '3'],\n    ['2026-01-01T10:03', '', '4'],            # malformed: empty page\n    ['2026-01-01T10:04', '/docs', ''],        # malformed: empty user\n    ['2026-01-01T10:05', '/pricing', 'abc'],  # malformed: non-integer user\n    ['2026-01-01T10:06', '/home', '5'],\n    ['2026-01-01T10:07', '/pricing', '6'],\n]\nwith open('events.csv', 'w', newline='') as f:\n    w = csv.writer(f)\n    w.writerow(['ts', 'page', 'user_id'])\n    w.writerows(rows)\n\nn = load_events('events.csv', 'events.db')\nassert n == 5, f'expected 5 clean rows loaded, got {n}'\n\ntop = top_pages('events.db', 2)\nassert top == [('/home', 3), ('/docs', 1)] or top == [('/home', 3), ('/pricing', 1)], top\n# tie between /docs and /pricing at 1 view: page-name ascending wins\nassert top == [('/home', 3), ('/docs', 1)], f'tie must break by page name ascending: {top}'\n\n# idempotent reload: same file loaded again must not double-count\nn2 = load_events('events.csv', 'events.db')\nassert n2 == 5\nassert top_pages('events.db', 1) == [('/home', 3)], 'reload must not duplicate rows'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_pipeline.py",
+  "reference_solution": {
+    "pipeline.py": "import csv\nimport sqlite3\n\n\ndef load_events(csv_path, db_path):\n    clean = []\n    with open(csv_path, newline='') as f:\n        reader = csv.DictReader(f)\n        for row in reader:\n            page = (row.get('page') or '').strip()\n            user = (row.get('user_id') or '').strip()\n            if not page or not user:\n                continue\n            try:\n                user_id = int(user)\n            except ValueError:\n                continue\n            clean.append((row.get('ts', ''), page, user_id))\n    conn = sqlite3.connect(db_path)\n    try:\n        conn.execute('DROP TABLE IF EXISTS events')\n        conn.execute('CREATE TABLE events (ts TEXT, page TEXT, user_id INTEGER)')\n        conn.executemany('INSERT INTO events VALUES (?, ?, ?)', clean)\n        conn.commit()\n    finally:\n        conn.close()\n    return len(clean)\n\n\ndef top_pages(db_path, limit):\n    conn = sqlite3.connect(db_path)\n    try:\n        rows = conn.execute(\n            'SELECT page, COUNT(*) AS views FROM events '\n            'GROUP BY page ORDER BY views DESC, page ASC LIMIT ?', (limit,)\n        ).fetchall()\n    finally:\n        conn.close()\n    return [(page, views) for page, views in rows]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-drop-double-counts",
+      "files": {
+        "pipeline.py": "import csv\nimport sqlite3\n\n\ndef load_events(csv_path, db_path):\n    clean = []\n    with open(csv_path, newline='') as f:\n        reader = csv.DictReader(f)\n        for row in reader:\n            page = (row.get('page') or '').strip()\n            user = (row.get('user_id') or '').strip()\n            if not page or not user:\n                continue\n            try:\n                user_id = int(user)\n            except ValueError:\n                continue\n            clean.append((row.get('ts', ''), page, user_id))\n    conn = sqlite3.connect(db_path)\n    try:\n        conn.execute('CREATE TABLE IF NOT EXISTS events (ts TEXT, page TEXT, user_id INTEGER)')\n        conn.executemany('INSERT INTO events VALUES (?, ?, ?)', clean)\n        conn.commit()\n    finally:\n        conn.close()\n    return len(clean)\n\n\ndef top_pages(db_path, limit):\n    conn = sqlite3.connect(db_path)\n    try:\n        rows = conn.execute(\n            'SELECT page, COUNT(*) AS views FROM events '\n            'GROUP BY page ORDER BY views DESC, page ASC LIMIT ?', (limit,)\n        ).fetchall()\n    finally:\n        conn.close()\n    return [(page, views) for page, views in rows]\n"
+      }
+    }
+  ]
+}

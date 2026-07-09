@@ -1,0 +1,47 @@
+{
+  "name": "create_json_to_csv_flatten",
+  "language": "python",
+  "domain": "data-engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "task_type": "data_engineering",
+  "description": "Flattens nested JSON records into a CSV with dotted column names",
+  "framework": "stdlib",
+  "difficulty": 1,
+  "tags": [
+    "json",
+    "csv",
+    "etl"
+  ],
+  "prompts": [
+    "Create flatten.py exporting flatten_to_csv(json_path, csv_path): read a JSON file containing a list of objects whose values may be flat scalars or one level of nested object (e.g. {\"id\": 1, \"user\": {\"name\": \"ada\", \"city\": \"london\"}}), and write a CSV where nested keys become dotted columns (user.name, user.city). Columns: the union across all records, sorted alphabetically; records missing a key get an empty cell. Scalars are written as-is. Use only the standard library."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "flatten.py",
+      "content_patterns": [
+        "flatten_to_csv"
+      ],
+      "not_content_patterns": [
+        "import pandas"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_flatten.py": "import csv, json\nfrom flatten import flatten_to_csv\n\nrecords = [\n    {'id': 1, 'user': {'name': 'ada', 'city': 'london'}, 'score': 9.5},\n    {'id': 2, 'user': {'name': 'grace'}, 'active': True},\n]\njson.dump(records, open('in.json', 'w'))\n\nflatten_to_csv('in.json', 'out.csv')\n\nrows = list(csv.reader(open('out.csv')))\nassert rows[0] == ['active', 'id', 'score', 'user.city', 'user.name'], f'columns wrong: {rows[0]}'\nassert rows[1] == ['', '1', '9.5', 'london', 'ada'], f'row 1 wrong: {rows[1]}'\nassert rows[2] == ['True', '2', '', '', 'grace'], f'row 2 wrong: {rows[2]}'\nassert len(rows) == 3\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_flatten.py",
+  "reference_solution": {
+    "flatten.py": "import csv\nimport json\n\n\ndef _flatten(record):\n    flat = {}\n    for key, value in record.items():\n        if isinstance(value, dict):\n            for sub, subvalue in value.items():\n                flat[f'{key}.{sub}'] = subvalue\n        else:\n            flat[key] = value\n    return flat\n\n\ndef flatten_to_csv(json_path, csv_path):\n    with open(json_path) as f:\n        records = json.load(f)\n    flat = [_flatten(r) for r in records]\n    columns = sorted({k for r in flat for k in r})\n    with open(csv_path, 'w', newline='') as f:\n        writer = csv.writer(f)\n        writer.writerow(columns)\n        for r in flat:\n            writer.writerow([r.get(c, '') for c in columns])\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unsorted-columns-drop-missing",
+      "files": {
+        "flatten.py": "import csv\nimport json\n\n\ndef flatten_to_csv(json_path, csv_path):\n    with open(json_path) as f:\n        records = json.load(f)\n    flat = []\n    for record in records:\n        row = {}\n        for key, value in record.items():\n            if isinstance(value, dict):\n                for sub, subvalue in value.items():\n                    row[f'{key}.{sub}'] = subvalue\n            else:\n                row[key] = value\n        flat.append(row)\n    columns = list(flat[0].keys())\n    with open(csv_path, 'w', newline='') as f:\n        writer = csv.writer(f)\n        writer.writerow(columns)\n        for r in flat:\n            writer.writerow([r.get(c, '') for c in columns])\n"
+      }
+    }
+  ]
+}

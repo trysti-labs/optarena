@@ -1,0 +1,45 @@
+{
+  "name": "create_pandas_sales_summary",
+  "language": "python",
+  "domain": "data-engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "task_type": "data_engineering",
+  "description": "Aggregates a sales CSV into per-region totals with pandas",
+  "framework": "pandas",
+  "difficulty": 1,
+  "tags": [
+    "pandas",
+    "csv",
+    "groupby"
+  ],
+  "prompts": [
+    "Create summarize.py exporting a function summarize_sales(input_csv, output_csv) that reads a sales CSV with columns region,product,units,unit_price, computes per-region totals (revenue = units * unit_price summed over the region's rows, plus total units), and writes a CSV with header region,total_units,revenue sorted by region ascending. Revenue must be written without floating-point artifacts (round to 2 decimals). Use pandas."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "summarize.py",
+      "content_patterns": [
+        "summarize_sales",
+        "pandas"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_summary.py": "import csv\nfrom summarize import summarize_sales\n\nwith open('sales.csv', 'w', newline='') as f:\n    w = csv.writer(f)\n    w.writerow(['region', 'product', 'units', 'unit_price'])\n    w.writerows([\n        ['west', 'widget', 10, 2.5],\n        ['east', 'widget', 4, 2.5],\n        ['west', 'gadget', 2, 10.0],\n        ['east', 'gadget', 1, 10.0],\n        ['north', 'widget', 3, 2.5],\n    ])\n\nsummarize_sales('sales.csv', 'out.csv')\n\nrows = list(csv.reader(open('out.csv')))\nassert rows[0] == ['region', 'total_units', 'revenue'], f'header wrong: {rows[0]}'\nbody = rows[1:]\nassert [r[0] for r in body] == ['east', 'north', 'west'], f'must be sorted by region: {body}'\ndata = {r[0]: (int(r[1]), float(r[2])) for r in body}\nassert data['west'] == (12, 45.0), f\"west wrong: {data['west']}\"\nassert data['east'] == (5, 20.0), f\"east wrong: {data['east']}\"\nassert data['north'] == (3, 7.5), f\"north wrong: {data['north']}\"\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_summary.py",
+  "reference_solution": {
+    "summarize.py": "import pandas as pd\n\n\ndef summarize_sales(input_csv, output_csv):\n    df = pd.read_csv(input_csv)\n    df['revenue'] = df['units'] * df['unit_price']\n    out = (df.groupby('region')\n             .agg(total_units=('units', 'sum'), revenue=('revenue', 'sum'))\n             .reset_index()\n             .sort_values('region'))\n    out['revenue'] = out['revenue'].round(2)\n    out.to_csv(output_csv, index=False)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "sums-price-not-revenue",
+      "files": {
+        "summarize.py": "import pandas as pd\n\n\ndef summarize_sales(input_csv, output_csv):\n    df = pd.read_csv(input_csv)\n    out = (df.groupby('region')\n             .agg(total_units=('units', 'sum'), revenue=('unit_price', 'sum'))\n             .reset_index()\n             .sort_values('region'))\n    out['revenue'] = out['revenue'].round(2)\n    out.to_csv(output_csv, index=False)\n"
+      }
+    }
+  ]
+}

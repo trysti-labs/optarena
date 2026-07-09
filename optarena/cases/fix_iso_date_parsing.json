@@ -1,0 +1,48 @@
+{
+  "name": "fix_iso_date_parsing",
+  "language": "python",
+  "domain": "data-engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "task_type": "bug_fix",
+  "description": "Fixes string-sliced ISO timestamp handling that ignores timezone offsets",
+  "framework": "stdlib",
+  "difficulty": 1,
+  "tags": [
+    "datetime",
+    "timezone",
+    "iso8601"
+  ],
+  "prompts": [
+    "dates.py hand-parses ISO-8601 timestamps by string slicing, which silently IGNORES timezone offsets: hours_between('...T23:00:00+05:00', '...T23:00:00Z') is wrong by five hours, and 'Z' suffixes aren't understood at all. Fix dates.py using datetime.fromisoformat (Python 3.11+ accepts 'Z' directly; otherwise replace a trailing 'Z' with '+00:00'): day_of_week returns the weekday name of the timestamp's LOCAL date exactly as written, and hours_between must account for offsets - naive timestamps (no offset) are compared as-is, and mixing naive with aware may raise."
+  ],
+  "setup_files": {
+    "dates.py": "def day_of_week(timestamp):\n    \"\"\"Return the weekday name ('Monday'..'Sunday') for an ISO-8601\n    timestamp like '2026-07-09T14:30:00', '2026-07-09T14:30:00+05:30'\n    or '2026-07-09T14:30:00Z'.\"\"\"\n    import datetime\n    date_part = timestamp[:10]\n    year, month, day = date_part.split('-')\n    return datetime.date(int(year), int(month), int(day)).strftime('%A')\n\n\ndef hours_between(start, end):\n    \"\"\"Whole hours from `start` to `end` (ISO-8601, possibly with offsets).\"\"\"\n    import datetime\n    fmt = '%Y-%m-%dT%H:%M:%S'\n    s = datetime.datetime.strptime(start[:19], fmt)\n    e = datetime.datetime.strptime(end[:19], fmt)\n    return int((e - s).total_seconds() // 3600)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dates.py",
+      "content_patterns": [
+        "fromisoformat",
+        "day_of_week",
+        "hours_between"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_dates.py": "from dates import day_of_week, hours_between\n\nassert day_of_week('2026-07-09T14:30:00') == 'Thursday'\nassert day_of_week('2026-07-09T14:30:00Z') == 'Thursday', \"'Z' suffix must be handled\"\nassert day_of_week('2026-01-01T00:00:00+05:30') == 'Thursday'\n\nassert hours_between('2026-07-09T10:00:00', '2026-07-09T15:30:00') == 5\n# the offset bug: 23:00+05:00 is 18:00 UTC, so this is exactly 5 hours\nassert hours_between('2026-07-09T23:00:00+05:00', '2026-07-09T23:00:00Z') == 5, \\\n    'timezone offsets must be accounted for'\nassert hours_between('2026-07-09T00:00:00Z', '2026-07-10T00:00:00Z') == 24\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_dates.py",
+  "reference_solution": {
+    "dates.py": "import datetime\n\n\ndef _parse(timestamp):\n    if timestamp.endswith('Z'):\n        timestamp = timestamp[:-1] + '+00:00'\n    return datetime.datetime.fromisoformat(timestamp)\n\n\ndef day_of_week(timestamp):\n    \"\"\"Return the weekday name for an ISO-8601 timestamp, as written.\"\"\"\n    return _parse(timestamp).strftime('%A')\n\n\ndef hours_between(start, end):\n    \"\"\"Whole hours from `start` to `end`, honoring timezone offsets.\"\"\"\n    delta = _parse(end) - _parse(start)\n    return int(delta.total_seconds() // 3600)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fromisoformat-but-strips-offset",
+      "files": {
+        "dates.py": "import datetime\n\n\ndef _parse(timestamp):\n    if timestamp.endswith('Z'):\n        timestamp = timestamp[:-1]\n    return datetime.datetime.fromisoformat(timestamp[:19])\n\n\ndef day_of_week(timestamp):\n    return _parse(timestamp).strftime('%A')\n\n\ndef hours_between(start, end):\n    delta = _parse(end) - _parse(start)\n    return int(delta.total_seconds() // 3600)\n"
+      }
+    }
+  ]
+}
