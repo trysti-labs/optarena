@@ -1,0 +1,53 @@
+{
+  "name": "fix_django_sql_injection_raw",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Parametrizes a raw SQL query built with an f-string (SQL injection)",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "django",
+    "sql-injection",
+    "raw-sql"
+  ],
+  "prompts": [
+    "The search view in shop/views.py builds a raw SQL query by interpolating the q parameter directly into the SQL string, which is a SQL injection vulnerability. Fix shop/views.py so the lookup is safely parametrized (pass params to .raw(), or use the ORM's exact-match filter) while keeping the behavior for normal values identical: an exact name match returning the matching products' name and price. An empty or non-matching q must return an empty results list."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = ['shop']\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\nDEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'\nDATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}\n",
+    "urls.py": "from django.urls import path\n\nfrom shop import views\n\nurlpatterns = [\n    path('search', views.search),\n]\n",
+    "shop/__init__.py": "",
+    "shop/models.py": "from django.db import models\n\n\nclass Product(models.Model):\n    name = models.CharField(max_length=100)\n    price = models.IntegerField()\n",
+    "shop/views.py": "from django.http import JsonResponse\n\nfrom shop.models import Product\n\n\ndef search(request):\n    q = request.GET.get('q', '')\n    rows = Product.objects.raw(\n        f\"SELECT * FROM shop_product WHERE name = '{q}'\"\n    )\n    return JsonResponse({'results': [{'name': p.name, 'price': p.price} for p in rows]})\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "shop/views.py",
+      "content_patterns": [
+        "def search"
+      ],
+      "not_content_patterns": [
+        "f\"select * from shop_product where name = '{q}'\""
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_injection.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.core.management import call_command\ncall_command('migrate', run_syncdb=True, verbosity=0)\nfrom django.test import Client\nfrom shop.models import Product\n\nProduct.objects.create(name='hammer', price=25)\nProduct.objects.create(name='screwdriver', price=12)\n\nc = Client()\nr = c.get('/search', {'q': 'hammer'})\nassert r.status_code == 200\nassert r.json()['results'] == [{'name': 'hammer', 'price': 25}], f\"exact match broken: {r.json()}\"\n\npayload = \"x' OR '1'='1\"\nr = c.get('/search', {'q': payload})\nassert r.status_code == 200, f'injection payload must not crash the view (got {r.status_code})'\nassert r.json()['results'] == [], f'injection payload matched rows - still injectable: {r.json()}'\n\nr = c.get('/search', {'q': ''})\nassert r.json()['results'] == [], f'empty q must return no rows: {r.json()}'\n\nassert Product.objects.count() == 2, 'products table was altered'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_injection.py",
+  "reference_solution": {
+    "shop/views.py": "from django.http import JsonResponse\n\nfrom shop.models import Product\n\n\ndef search(request):\n    q = request.GET.get('q', '')\n    rows = Product.objects.filter(name=q)\n    return JsonResponse({'results': [{'name': p.name, 'price': p.price} for p in rows]})\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "icontains-changes-semantics",
+      "files": {
+        "shop/views.py": "from django.http import JsonResponse\n\nfrom shop.models import Product\n\n\ndef search(request):\n    q = request.GET.get('q', '')\n    rows = Product.objects.filter(name__icontains=q)\n    return JsonResponse({'results': [{'name': p.name, 'price': p.price} for p in rows]})\n"
+      }
+    }
+  ]
+}

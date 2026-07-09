@@ -1,0 +1,51 @@
+{
+  "name": "create_django_book_model",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Defines a Django ORM model with a filtered, ordered classmethod query",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "django",
+    "orm",
+    "models"
+  ],
+  "prompts": [
+    "The Django app 'shop' (already in INSTALLED_APPS; shop/models.py is an empty placeholder) needs a Book model in shop/models.py with fields: title (CharField, max_length 200), author (CharField, max_length 100), published_year (IntegerField), and created_at (DateTimeField with auto_now_add=True). Also give Book a classmethod recent(cls, year) that returns a queryset of books with published_year greater than or equal to `year`, ordered newest published_year first."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = ['shop']\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\nDEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'\nDATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}\n",
+    "urls.py": "from django.urls import path\n\nurlpatterns = [\n    # add routes here\n]\n",
+    "shop/__init__.py": "",
+    "shop/models.py": "# Define the Book model here\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "shop/models.py",
+      "content_patterns": [
+        "class book",
+        "models.model",
+        "recent"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_book.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.core.management import call_command\ncall_command('migrate', run_syncdb=True, verbosity=0)\nfrom shop.models import Book\nBook.objects.create(title='Old', author='A', published_year=1999)\nBook.objects.create(title='Mid', author='B', published_year=2001)\nBook.objects.create(title='New', author='C', published_year=2010)\ntitles = [b.title for b in Book.recent(2000)]\nassert titles == ['New', 'Mid'], f'recent(2000) wrong (want newest first, >= year): {titles}'\nassert Book.recent(2011).count() == 0, 'recent past the newest year should be empty'\nb = Book.objects.get(title='New')\nassert b.created_at is not None, 'created_at must be auto-populated'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_book.py",
+  "reference_solution": {
+    "shop/models.py": "from django.db import models\n\n\nclass Book(models.Model):\n    title = models.CharField(max_length=200)\n    author = models.CharField(max_length=100)\n    published_year = models.IntegerField()\n    created_at = models.DateTimeField(auto_now_add=True)\n\n    @classmethod\n    def recent(cls, year):\n        return cls.objects.filter(published_year__gte=year).order_by('-published_year')\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "ascending-order",
+      "files": {
+        "shop/models.py": "from django.db import models\n\n\nclass Book(models.Model):\n    title = models.CharField(max_length=200)\n    author = models.CharField(max_length=100)\n    published_year = models.IntegerField()\n    created_at = models.DateTimeField(auto_now_add=True)\n\n    @classmethod\n    def recent(cls, year):\n        return cls.objects.filter(published_year__gte=year).order_by('published_year')\n"
+      }
+    }
+  ]
+}

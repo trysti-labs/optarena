@@ -1,0 +1,50 @@
+{
+  "name": "optimize_django_bulk_create",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Replaces a per-row INSERT loop with one bulk_create",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "django",
+    "orm",
+    "bulk-create"
+  ],
+  "prompts": [
+    "import_products in shop/services.py inserts rows one INSERT at a time inside a Python loop - for a 400-row import that is 400 round-trips to the database. Rewrite it to use a single Product.objects.bulk_create call (a constant number of queries) while preserving the exact behavior: every (name, stock) tuple becomes a Product row with those field values, and the function still returns the number of rows inserted."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = ['shop']\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\nDEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'\nDATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}\n",
+    "urls.py": "from django.urls import path\n\nurlpatterns = [\n    # add routes here\n]\n",
+    "shop/__init__.py": "",
+    "shop/models.py": "from django.db import models\n\n\nclass Product(models.Model):\n    name = models.CharField(max_length=100)\n    stock = models.IntegerField()\n",
+    "shop/services.py": "from shop.models import Product\n\n\ndef import_products(rows):\n    \"\"\"rows: iterable of (name, stock) tuples. Insert them all; return count.\"\"\"\n    count = 0\n    for name, stock in rows:\n        Product.objects.create(name=name, stock=stock)\n        count += 1\n    return count\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "shop/services.py",
+      "content_patterns": [
+        "bulk_create"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_bulk.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.core.management import call_command\ncall_command('migrate', run_syncdb=True, verbosity=0)\nfrom django.db import connection\nfrom django.test.utils import CaptureQueriesContext\nfrom shop.models import Product\nfrom shop.services import import_products\n\nrows = [(f'item-{i:03d}', i % 20) for i in range(400)]\nwith CaptureQueriesContext(connection) as ctx:\n    inserted = import_products(rows)\n\nassert inserted == 400, f'must return the inserted count, got {inserted!r}'\nn = len(ctx.captured_queries)\nassert n <= 5, f'{n} queries for 400 rows - still row-at-a-time (expected one bulk_create)'\nassert Product.objects.count() == 400\np = Product.objects.get(name='item-007')\nassert p.stock == 7, f'field mapping broken: item-007 stock={p.stock}'\nprint(f'PASS ({n} queries)')\n"
+  },
+  "check_command": "python3 test_bulk.py",
+  "reference_solution": {
+    "shop/services.py": "from shop.models import Product\n\n\ndef import_products(rows):\n    \"\"\"rows: iterable of (name, stock) tuples. Insert them all; return count.\"\"\"\n    products = [Product(name=name, stock=stock) for name, stock in rows]\n    Product.objects.bulk_create(products)\n    return len(products)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "swapped-field-mapping",
+      "files": {
+        "shop/services.py": "from shop.models import Product\n\n\ndef import_products(rows):\n    products = [Product(name=str(stock), stock=len(name)) for name, stock in rows]\n    Product.objects.bulk_create(products)\n    return len(products)\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "name": "fix_django_orm_n_plus_one",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Fixes an N+1 ORM query pattern with select_related",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "django",
+    "orm",
+    "n-plus-one"
+  ],
+  "prompts": [
+    "The view books_with_authors in shop/views.py returns every book with its author's name, but it triggers the classic N+1 query problem: one query for the books, then one more query per book to fetch its author. Fix shop/views.py so the same JSON output is produced with a constant number of queries regardless of how many books exist (use select_related). Do not change the response format or the ordering."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = ['shop']\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\nDEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'\nDATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}\n",
+    "urls.py": "from django.urls import path\n\nfrom shop import views\n\nurlpatterns = [\n    path('books', views.books_with_authors),\n]\n",
+    "shop/__init__.py": "",
+    "shop/models.py": "from django.db import models\n\n\nclass Author(models.Model):\n    name = models.CharField(max_length=100)\n\n\nclass Book(models.Model):\n    title = models.CharField(max_length=200)\n    author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name='books')\n",
+    "shop/views.py": "from django.http import JsonResponse\n\nfrom shop.models import Book\n\n\ndef books_with_authors(request):\n    books = Book.objects.all().order_by('title')\n    data = [{'title': b.title, 'author': b.author.name} for b in books]\n    return JsonResponse({'books': data})\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "shop/views.py",
+      "content_patterns": [
+        "select_related"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_n_plus_one.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.core.management import call_command\ncall_command('migrate', run_syncdb=True, verbosity=0)\nfrom django.db import connection\nfrom django.test.utils import CaptureQueriesContext\nfrom django.test import Client\nfrom shop.models import Author, Book\n\nfor i in range(10):\n    a = Author.objects.create(name=f'author{i}')\n    for j in range(3):\n        Book.objects.create(title=f'book-{i:02d}-{j}', author=a)\n\nc = Client()\nwith CaptureQueriesContext(connection) as ctx:\n    r = c.get('/books')\nassert r.status_code == 200\nbooks = r.json()['books']\nassert len(books) == 30, f'expected 30 books, got {len(books)}'\nassert books[0] == {'title': 'book-00-0', 'author': 'author0'}, f'payload wrong: {books[0]}'\nassert books[-1]['author'] == 'author9', f'payload wrong: {books[-1]}'\nn = len(ctx.captured_queries)\nassert n <= 3, f'{n} queries for 30 books - still N+1 (expected a constant few via select_related)'\nprint(f'PASS ({n} queries)')\n"
+  },
+  "check_command": "python3 test_n_plus_one.py",
+  "reference_solution": {
+    "shop/views.py": "from django.http import JsonResponse\n\nfrom shop.models import Book\n\n\ndef books_with_authors(request):\n    books = Book.objects.select_related('author').order_by('title')\n    data = [{'title': b.title, 'author': b.author.name} for b in books]\n    return JsonResponse({'books': data})\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "right-queries-wrong-payload",
+      "files": {
+        "shop/views.py": "from django.http import JsonResponse\n\nfrom shop.models import Book\n\n\ndef books_with_authors(request):\n    books = Book.objects.select_related('author').order_by('title')\n    data = [{'title': b.title, 'author': b.author_id} for b in books]\n    return JsonResponse({'books': data})\n"
+      }
+    }
+  ]
+}

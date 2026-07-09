@@ -1,0 +1,51 @@
+{
+  "name": "refactor_django_duplicate_views",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Consolidates two copy-pasted CSV export views into one helper",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "django",
+    "refactoring",
+    "csv"
+  ],
+  "prompts": [
+    "shop/views.py has two CSV export views (export_books_csv and export_authors_csv) that duplicate the same response-building boilerplate: constructing the HttpResponse with the text/csv content type, setting the Content-Disposition attachment header, creating the csv writer, and writing the header row. Refactor shop/views.py to extract that shared scaffolding into ONE helper function that both views call with their filename, header row, and rows; each view should become a thin wrapper. The HTTP behavior of both endpoints must stay byte-for-byte identical (same columns, same ordering, same headers)."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = ['shop']\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\nDEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'\nDATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}\n",
+    "urls.py": "from django.urls import path\n\nfrom shop import views\n\nurlpatterns = [\n    path('export/books.csv', views.export_books_csv),\n    path('export/authors.csv', views.export_authors_csv),\n]\n",
+    "shop/__init__.py": "",
+    "shop/models.py": "from django.db import models\n\n\nclass Book(models.Model):\n    title = models.CharField(max_length=200)\n    year = models.IntegerField()\n\n\nclass Author(models.Model):\n    name = models.CharField(max_length=100)\n    country = models.CharField(max_length=50)\n",
+    "shop/views.py": "import csv\n\nfrom django.http import HttpResponse\n\nfrom shop.models import Author, Book\n\n\ndef export_books_csv(request):\n    response = HttpResponse(content_type='text/csv')\n    response['Content-Disposition'] = 'attachment; filename=\"books.csv\"'\n    writer = csv.writer(response)\n    writer.writerow(['title', 'year'])\n    for b in Book.objects.order_by('title'):\n        writer.writerow([b.title, b.year])\n    return response\n\n\ndef export_authors_csv(request):\n    response = HttpResponse(content_type='text/csv')\n    response['Content-Disposition'] = 'attachment; filename=\"authors.csv\"'\n    writer = csv.writer(response)\n    writer.writerow(['name', 'country'])\n    for a in Author.objects.order_by('name'):\n        writer.writerow([a.name, a.country])\n    return response\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "shop/views.py",
+      "content_patterns": [
+        "export_books_csv",
+        "export_authors_csv"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_refactor.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.core.management import call_command\ncall_command('migrate', run_syncdb=True, verbosity=0)\nfrom pathlib import Path\nfrom django.test import Client\nfrom shop.models import Author, Book\n\nBook.objects.create(title='Zen', year=2001)\nBook.objects.create(title='Art', year=1999)\nAuthor.objects.create(name='Woolf', country='UK')\nAuthor.objects.create(name='Borges', country='AR')\n\nc = Client()\nr = c.get('/export/books.csv')\nassert r.status_code == 200 and r['Content-Type'].startswith('text/csv')\nassert r['Content-Disposition'] == 'attachment; filename=\"books.csv\"', r['Content-Disposition']\nassert r.content.decode().replace('\\r\\n', '\\n').strip() == 'title,year\\nArt,1999\\nZen,2001', \\\n    f'books csv changed: {r.content!r}'\n\nr = c.get('/export/authors.csv')\nassert r['Content-Disposition'] == 'attachment; filename=\"authors.csv\"', r['Content-Disposition']\nassert r.content.decode().replace('\\r\\n', '\\n').strip() == 'name,country\\nBorges,AR\\nWoolf,UK', \\\n    f'authors csv changed: {r.content!r}'\n\n# Consolidation proof: the duplicated response-scaffolding literals must now\n# appear at most once in the source (a do-nothing submission keeps two).\nsrc = Path('shop/views.py').read_text()\nassert src.count(\"content_type='text/csv'\") <= 1, 'text/csv response construction still duplicated'\nassert src.count('attachment; filename=') <= 1, 'Content-Disposition construction still duplicated'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_refactor.py",
+  "reference_solution": {
+    "shop/views.py": "import csv\n\nfrom django.http import HttpResponse\n\nfrom shop.models import Author, Book\n\n\ndef _csv_export(filename, header, rows):\n    response = HttpResponse(content_type='text/csv')\n    response['Content-Disposition'] = f'attachment; filename=\"{filename}\"'\n    writer = csv.writer(response)\n    writer.writerow(header)\n    for row in rows:\n        writer.writerow(row)\n    return response\n\n\ndef export_books_csv(request):\n    return _csv_export('books.csv', ['title', 'year'],\n                       ((b.title, b.year) for b in Book.objects.order_by('title')))\n\n\ndef export_authors_csv(request):\n    return _csv_export('authors.csv', ['name', 'country'],\n                       ((a.name, a.country) for a in Author.objects.order_by('name')))\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "consolidated-but-unordered-authors",
+      "files": {
+        "shop/views.py": "import csv\n\nfrom django.http import HttpResponse\n\nfrom shop.models import Author, Book\n\n\ndef _csv_export(filename, header, rows):\n    response = HttpResponse(content_type='text/csv')\n    response['Content-Disposition'] = f'attachment; filename=\"{filename}\"'\n    writer = csv.writer(response)\n    writer.writerow(header)\n    for row in rows:\n        writer.writerow(row)\n    return response\n\n\ndef export_books_csv(request):\n    return _csv_export('books.csv', ['title', 'year'],\n                       ((b.title, b.year) for b in Book.objects.order_by('title')))\n\n\ndef export_authors_csv(request):\n    return _csv_export('authors.csv', ['name', 'country'],\n                       ((a.name, a.country) for a in Author.objects.all()))\n"
+      }
+    }
+  ]
+}

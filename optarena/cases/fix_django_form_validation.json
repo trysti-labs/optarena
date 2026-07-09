@@ -1,0 +1,48 @@
+{
+  "name": "fix_django_form_validation",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Fixes a Django form clean method that misses the lower age bound",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "django",
+    "forms",
+    "validation"
+  ],
+  "prompts": [
+    "SignupForm in forms.py is supposed to accept ages from 13 to 120 inclusive, but its clean_age only rejects ages above 120 - a 10-year-old currently validates fine. Fix forms.py so ages below 13 are also rejected with a ValidationError, ages 13 through 120 inclusive remain valid, and the cleaned value is still returned."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = []\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\n",
+    "forms.py": "from django import forms\n\n\nclass SignupForm(forms.Form):\n    username = forms.CharField(max_length=30)\n    age = forms.IntegerField()\n\n    def clean_age(self):\n        age = self.cleaned_data['age']\n        if age > 120:\n            raise forms.ValidationError('unrealistic age')\n        return age\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "forms.py",
+      "content_patterns": [
+        "clean_age",
+        "13"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_form.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom forms import SignupForm\n\ndef valid(age):\n    return SignupForm({'username': 'user', 'age': age}).is_valid()\n\nassert not valid(10), 'age 10 must be rejected'\nassert not valid(12), 'age 12 must be rejected'\nassert valid(13), 'age 13 (boundary) must be accepted'\nassert valid(25), 'age 25 must be accepted'\nassert valid(120), 'age 120 (boundary) must be accepted'\nassert not valid(130), 'age 130 must still be rejected'\nf = SignupForm({'username': 'user', 'age': 30})\nassert f.is_valid() and f.cleaned_data['age'] == 30, 'clean_age must return the value'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_form.py",
+  "reference_solution": {
+    "forms.py": "from django import forms\n\n\nclass SignupForm(forms.Form):\n    username = forms.CharField(max_length=30)\n    age = forms.IntegerField()\n\n    def clean_age(self):\n        age = self.cleaned_data['age']\n        if age > 120:\n            raise forms.ValidationError('unrealistic age')\n        if age < 13:\n            raise forms.ValidationError('must be at least 13')\n        return age\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "boundary-13-rejected",
+      "files": {
+        "forms.py": "from django import forms\n\n\nclass SignupForm(forms.Form):\n    username = forms.CharField(max_length=30)\n    age = forms.IntegerField()\n\n    def clean_age(self):\n        age = self.cleaned_data['age']\n        if age > 120:\n            raise forms.ValidationError('unrealistic age')\n        # intended minimum is 13, but this comparison is wrong\n        if age <= 13:\n            raise forms.ValidationError('must be at least 13')\n        return age\n"
+      }
+    }
+  ]
+}

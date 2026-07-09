@@ -1,0 +1,55 @@
+{
+  "name": "create_django_management_command",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Creates a custom Django management command with an option flag",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "django",
+    "management-command",
+    "cli"
+  ],
+  "prompts": [
+    "Add a Django management command named stock_report to the shop app (create shop/management/__init__.py, shop/management/commands/__init__.py, and shop/management/commands/stock_report.py). The command must print one line per Product, sorted by name ascending, in the exact format '<name>: <stock>' - and when a product's stock is strictly below a threshold, append ' LOW' to its line. The threshold comes from an optional --min integer argument that defaults to 5. Write output via self.stdout.write, not print."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = ['shop']\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\nDEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'\nDATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}\n",
+    "urls.py": "from django.urls import path\n\nurlpatterns = [\n    # add routes here\n]\n",
+    "shop/__init__.py": "",
+    "shop/models.py": "from django.db import models\n\n\nclass Product(models.Model):\n    name = models.CharField(max_length=100)\n    stock = models.IntegerField()\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "shop/management/commands/stock_report.py",
+      "content_patterns": [
+        "basecommand",
+        "def handle",
+        "--min"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_command.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.core.management import call_command\ncall_command('migrate', run_syncdb=True, verbosity=0)\nimport io\nfrom django.core.management import call_command\nfrom shop.models import Product\n\nProduct.objects.create(name='nail', stock=4)\nProduct.objects.create(name='hammer', stock=12)\nProduct.objects.create(name='bolt', stock=3)\n\nbuf = io.StringIO()\ncall_command('stock_report', stdout=buf)\nlines = buf.getvalue().strip().splitlines()\nassert lines == ['bolt: 3 LOW', 'hammer: 12', 'nail: 4 LOW'], f'default threshold output wrong: {lines}'\n\nbuf = io.StringIO()\ncall_command('stock_report', min=15, stdout=buf)\nlines = buf.getvalue().strip().splitlines()\nassert lines == ['bolt: 3 LOW', 'hammer: 12 LOW', 'nail: 4 LOW'], f'--min 15 output wrong: {lines}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_command.py",
+  "reference_solution": {
+    "shop/management/__init__.py": "",
+    "shop/management/commands/__init__.py": "",
+    "shop/management/commands/stock_report.py": "from django.core.management.base import BaseCommand\n\nfrom shop.models import Product\n\n\nclass Command(BaseCommand):\n    help = 'Print a stock report'\n\n    def add_arguments(self, parser):\n        parser.add_argument('--min', type=int, default=5)\n\n    def handle(self, *args, **options):\n        threshold = options['min']\n        for p in Product.objects.order_by('name'):\n            line = f'{p.name}: {p.stock}'\n            if p.stock < threshold:\n                line += ' LOW'\n            self.stdout.write(line)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unsorted-output",
+      "files": {
+        "shop/management/__init__.py": "",
+        "shop/management/commands/__init__.py": "",
+        "shop/management/commands/stock_report.py": "from django.core.management.base import BaseCommand\n\nfrom shop.models import Product\n\n\nclass Command(BaseCommand):\n    help = 'Print a stock report'\n\n    def add_arguments(self, parser):\n        parser.add_argument('--min', type=int, default=5)\n\n    def handle(self, *args, **options):\n        threshold = options['min']\n        for p in Product.objects.all():\n            line = f'{p.name}: {p.stock}'\n            if p.stock < threshold:\n                line += ' LOW'\n            self.stdout.write(line)\n"
+      }
+    }
+  ]
+}

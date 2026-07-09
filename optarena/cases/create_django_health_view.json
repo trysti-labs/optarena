@@ -1,0 +1,56 @@
+{
+  "name": "create_django_health_view",
+  "language": "python",
+  "framework": "django",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 180,
+  "description": "Creates a Django JSON health view and wires the URL route",
+  "difficulty": 1,
+  "task_type": "feature",
+  "tags": [
+    "django",
+    "rest",
+    "health-check"
+  ],
+  "prompts": [
+    "This minimal Django project (settings.py and urls.py at the repo root; no database) needs a health endpoint. Create views.py at the repo root with a view function health(request) that returns a django.http.JsonResponse with exactly the JSON body {\"status\": \"ok\"} for GET /health, and wire it into urls.py so the path 'health' (no leading slash in the path() route) serves it."
+  ],
+  "setup_files": {
+    "settings.py": "SECRET_KEY = 'optarena-test-key'\nDEBUG = True\nALLOWED_HOSTS = ['*']\nINSTALLED_APPS = []\nMIDDLEWARE = []\nROOT_URLCONF = 'urls'\nUSE_TZ = True\n",
+    "urls.py": "from django.urls import path\n\nurlpatterns = [\n    # add routes here\n]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "views.py",
+      "content_patterns": [
+        "jsonresponse",
+        "def health"
+      ]
+    },
+    {
+      "path_pattern": "urls.py",
+      "content_patterns": [
+        "health"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_health.py": "import os, django\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\ndjango.setup()\nfrom django.test import Client\nc = Client()\nr = c.get('/health')\nassert r.status_code == 200, f'GET /health: expected 200, got {r.status_code}'\ndata = r.json()\nassert data == {'status': 'ok'}, f'unexpected body: {data!r}'\nr2 = c.get('/definitely-not-a-route')\nassert r2.status_code == 404, f'unknown path should 404, got {r2.status_code}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_health.py",
+  "reference_solution": {
+    "views.py": "from django.http import JsonResponse\n\n\ndef health(request):\n    return JsonResponse({'status': 'ok'})\n",
+    "urls.py": "from django.urls import path\n\nimport views\n\nurlpatterns = [\n    path('health', views.health),\n]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-body",
+      "files": {
+        "views.py": "from django.http import JsonResponse\n\n\ndef health(request):\n    return JsonResponse({'status': 'up'})\n",
+        "urls.py": "from django.urls import path\n\nimport views\n\nurlpatterns = [\n    path('health', views.health),\n]\n"
+      }
+    }
+  ]
+}
