@@ -1,0 +1,57 @@
+{
+  "name": "add_express_query_filter",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Adds ANDed name/category/price filtering across repository and route",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "express",
+    "multi-file",
+    "query-params"
+  ],
+  "prompts": [
+    "GET /products currently returns all products. Add filtering across both layers: (1) add a search method to ProductRepository in src/repository/productRepository.js taking an options object { q, category, maxPrice } - q is a case-insensitive substring match on name, category is exact, maxPrice is an inclusive upper bound - returning matches (all products when no options); (2) wire q, category, and maxPrice as optional query parameters on GET /products in src/routes/products.js (maxPrice arrives as a string - convert it to a number). Combining filters ANDs them. Keep the response shape {id, name, category, price} and the original order."
+  ],
+  "setup_files": {
+    "src/app.js": "const express = require('express');\nconst productsRouter = require('./routes/products');\n\nconst app = express();\napp.use(express.json());\napp.use('/products', productsRouter);\n\nmodule.exports = app;\n",
+    "src/routes/products.js": "const express = require('express');\nconst ProductRepository = require('../repository/productRepository');\n\nconst router = express.Router();\nconst repo = new ProductRepository();\n\nrouter.get('/', (req, res) => {\n  res.json(repo.list());\n});\n\nmodule.exports = router;\n",
+    "src/repository/productRepository.js": "class ProductRepository {\n  constructor() {\n    this._products = [\n      { id: 1, name: 'Steel Hammer', category: 'tools', price: 25 },\n      { id: 2, name: 'Rubber Mallet', category: 'tools', price: 15 },\n      { id: 3, name: 'Garden Hose', category: 'garden', price: 40 },\n      { id: 4, name: 'Steel Rake', category: 'garden', price: 30 },\n    ];\n  }\n\n  list() {\n    return [...this._products];\n  }\n}\n\nmodule.exports = ProductRepository;\n",
+    "server.js": "const app = require('./src/app');\napp.listen(3000);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/repository/productRepository.js",
+      "content_patterns": [
+        "search"
+      ]
+    },
+    {
+      "path_pattern": "src/routes/products.js",
+      "content_patterns": [
+        "category"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_filter.js": "const http = require('http');\nfunction request(app, method, path, body) {\n  return new Promise((resolve, reject) => {\n    const server = app.listen(0, () => {\n      const port = server.address().port;\n      const data = body === undefined ? null : JSON.stringify(body);\n      const headers = data\n        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }\n        : {};\n      const req = http.request(\n        { host: '127.0.0.1', port, path, method, headers, timeout: 4000 },\n        (res) => {\n          let buf = '';\n          res.on('data', (c) => (buf += c));\n          res.on('end', () => {\n            server.close();\n            let json = null;\n            try { json = JSON.parse(buf); } catch (e) { /* non-JSON */ }\n            resolve({ status: res.statusCode, body: json, raw: buf });\n          });\n        }\n      );\n      req.on('timeout', () => { req.destroy(new Error('request timed out (handler never responded)')); });\n      req.on('error', (e) => { server.close(); reject(e); });\n      if (data) req.write(data);\n      req.end();\n    });\n  });\n}\n\nconst assert = require('assert');\nconst app = require('./src/app');\n\nconst ids = (r) => r.body.map((p) => p.id).sort((a, b) => a - b);\n\n(async () => {\n  assert.deepStrictEqual(ids(await request(app, 'GET', '/products')), [1, 2, 3, 4]);\n  assert.deepStrictEqual(ids(await request(app, 'GET', '/products?q=steel')), [1, 4]);\n  assert.deepStrictEqual(ids(await request(app, 'GET', '/products?category=garden')), [3, 4]);\n  assert.deepStrictEqual(ids(await request(app, 'GET', '/products?maxPrice=25')), [1, 2]);\n  assert.deepStrictEqual(ids(await request(app, 'GET', '/products?category=garden&maxPrice=35')), [4]);\n  assert.deepStrictEqual(ids(await request(app, 'GET', '/products?q=steel&maxPrice=25')), [1]);\n\n  const one = (await request(app, 'GET', '/products?q=hammer')).body[0];\n  assert.deepStrictEqual(Object.keys(one).sort(), ['category', 'id', 'name', 'price']);\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "check_command": "node test_filter.js",
+  "reference_solution": {
+    "src/repository/productRepository.js": "class ProductRepository {\n  constructor() {\n    this._products = [\n      { id: 1, name: 'Steel Hammer', category: 'tools', price: 25 },\n      { id: 2, name: 'Rubber Mallet', category: 'tools', price: 15 },\n      { id: 3, name: 'Garden Hose', category: 'garden', price: 40 },\n      { id: 4, name: 'Steel Rake', category: 'garden', price: 30 },\n    ];\n  }\n\n  list() {\n    return [...this._products];\n  }\n\n  search({ q, category, maxPrice } = {}) {\n    return this._products.filter((p) => {\n      if (q !== undefined && !p.name.toLowerCase().includes(q.toLowerCase())) return false;\n      if (category !== undefined && p.category !== category) return false;\n      if (maxPrice !== undefined && p.price > maxPrice) return false;\n      return true;\n    });\n  }\n}\n\nmodule.exports = ProductRepository;\n",
+    "src/routes/products.js": "const express = require('express');\nconst ProductRepository = require('../repository/productRepository');\n\nconst router = express.Router();\nconst repo = new ProductRepository();\n\nrouter.get('/', (req, res) => {\n  const { q, category, maxPrice } = req.query;\n  res.json(repo.search({\n    q,\n    category,\n    maxPrice: maxPrice === undefined ? undefined : Number(maxPrice),\n  }));\n});\n\nmodule.exports = router;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "maxprice-exclusive",
+      "files": {
+        "src/repository/productRepository.js": "class ProductRepository {\n  constructor() {\n    this._products = [\n      { id: 1, name: 'Steel Hammer', category: 'tools', price: 25 },\n      { id: 2, name: 'Rubber Mallet', category: 'tools', price: 15 },\n      { id: 3, name: 'Garden Hose', category: 'garden', price: 40 },\n      { id: 4, name: 'Steel Rake', category: 'garden', price: 30 },\n    ];\n  }\n\n  list() {\n    return [...this._products];\n  }\n\n  search({ q, category, maxPrice } = {}) {\n    return this._products.filter((p) => {\n      if (q !== undefined && !p.name.toLowerCase().includes(q.toLowerCase())) return false;\n      if (category !== undefined && p.category !== category) return false;\n      if (maxPrice !== undefined && p.price >= maxPrice) return false;\n      return true;\n    });\n  }\n}\n\nmodule.exports = ProductRepository;\n",
+        "src/routes/products.js": "const express = require('express');\nconst ProductRepository = require('../repository/productRepository');\n\nconst router = express.Router();\nconst repo = new ProductRepository();\n\nrouter.get('/', (req, res) => {\n  const { q, category, maxPrice } = req.query;\n  res.json(repo.search({\n    q,\n    category,\n    maxPrice: maxPrice === undefined ? undefined : Number(maxPrice),\n  }));\n});\n\nmodule.exports = router;\n"
+      }
+    }
+  ]
+}
