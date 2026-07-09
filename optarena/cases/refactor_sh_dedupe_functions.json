@@ -1,0 +1,47 @@
+{
+  "name": "refactor_sh_dedupe_functions",
+  "language": "shell",
+  "framework": "posix-sh",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Consolidates two copy-pasted backup functions into one parameterized helper",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "shell",
+    "refactoring",
+    "functions"
+  ],
+  "prompts": [
+    "backup_dirs.sh contains backup_config and backup_data - identical 10-line bodies except for the directory name. Refactor it (POSIX sh) into ONE parameterized function, e.g. backup_dir <name>, called once per directory. Behavior must stay identical: same archive paths (backups/<name>-<stamp>.tar.gz), same 'backed up:' lines on stdout, same 'skip: <name> missing' to stderr with the script still exiting 0 when a directory doesn't exist."
+  ],
+  "setup_files": {
+    "backup_dirs.sh": "#!/bin/sh\n# backup_dirs.sh: tar up the config and data directories with a timestamp.\n\nstamp=$(date +%Y%m%d)\n\nbackup_config() {\n    src=\"config\"\n    dest=\"backups/config-$stamp.tar.gz\"\n    mkdir -p backups\n    if [ ! -d \"$src\" ]; then\n        echo \"skip: $src missing\" >&2\n        return 1\n    fi\n    tar -czf \"$dest\" \"$src\"\n    echo \"backed up: $dest\"\n}\n\nbackup_data() {\n    src=\"data\"\n    dest=\"backups/data-$stamp.tar.gz\"\n    mkdir -p backups\n    if [ ! -d \"$src\" ]; then\n        echo \"skip: $src missing\" >&2\n        return 1\n    fi\n    tar -czf \"$dest\" \"$src\"\n    echo \"backed up: $dest\"\n}\n\nbackup_config\nbackup_data\nexit 0\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "backup_dirs.sh",
+      "content_patterns": [
+        "backed up",
+        "skip"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_backup.py": "import os, re, subprocess, tarfile\n\nos.makedirs('config', exist_ok=True)\nos.makedirs('data', exist_ok=True)\nopen('config/app.conf', 'w').write('k=v')\nopen('data/rows.csv', 'w').write('1,2')\n\nr = subprocess.run(['sh', 'backup_dirs.sh'], capture_output=True, text=True, timeout=20)\nassert r.returncode == 0, f'exit {r.returncode}: {r.stderr}'\nlines = [l for l in r.stdout.splitlines() if l.startswith('backed up: ')]\nassert len(lines) == 2, f'expected 2 backed up lines: {r.stdout!r}'\narchives = sorted(os.listdir('backups'))\nassert len(archives) == 2, archives\nassert re.match(r'config-\\d{8}\\.tar\\.gz', archives[0]), archives\nassert re.match(r'data-\\d{8}\\.tar\\.gz', archives[1]), archives\nwith tarfile.open(f'backups/{archives[0]}') as t:\n    assert any(m.name.endswith('app.conf') for m in t.getmembers())\n\n# missing dir: skip to stderr, still exit 0\nos.rename('data', 'data-moved')\nr2 = subprocess.run(['sh', 'backup_dirs.sh'], capture_output=True, text=True, timeout=20)\nassert r2.returncode == 0, f'missing dir must not fail the script: {r2.returncode}'\nassert 'skip: data missing' in r2.stderr, r2.stderr\n\n# consolidation: the tar invocation must appear exactly once in the source\nsrc = open('backup_dirs.sh').read()\nassert src.count('tar -czf') <= 1, 'tar invocation still duplicated'\nassert src.count('skip:') <= 1, 'skip message still duplicated'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_backup.py",
+  "reference_solution": {
+    "backup_dirs.sh": "#!/bin/sh\n# backup_dirs.sh: tar up the config and data directories with a timestamp.\n\nstamp=$(date +%Y%m%d)\n\nbackup_dir() {\n    src=$1\n    dest=\"backups/$src-$stamp.tar.gz\"\n    mkdir -p backups\n    if [ ! -d \"$src\" ]; then\n        echo \"skip: $src missing\" >&2\n        return 1\n    fi\n    tar -czf \"$dest\" \"$src\"\n    echo \"backed up: $dest\"\n}\n\nbackup_dir config\nbackup_dir data\nexit 0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "consolidated-but-fails-on-missing",
+      "files": {
+        "backup_dirs.sh": "#!/bin/sh\nstamp=$(date +%Y%m%d)\n\nbackup_dir() {\n    src=$1\n    dest=\"backups/$src-$stamp.tar.gz\"\n    mkdir -p backups\n    if [ ! -d \"$src\" ]; then\n        echo \"skip: $src missing\" >&2\n        exit 1\n    fi\n    tar -czf \"$dest\" \"$src\"\n    echo \"backed up: $dest\"\n}\n\nbackup_dir config\nbackup_dir data\nexit 0\n"
+      }
+    }
+  ]
+}

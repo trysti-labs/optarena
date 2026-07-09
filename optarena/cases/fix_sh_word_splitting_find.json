@@ -1,0 +1,47 @@
+{
+  "name": "fix_sh_word_splitting_find",
+  "language": "shell",
+  "framework": "posix-sh",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Fixes for-loop-over-find word splitting that mangles spaced filenames",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "shell",
+    "word-splitting",
+    "find"
+  ],
+  "prompts": [
+    "archive_old.sh moves stale files into an archive subdirectory, but `for f in $(find ...)` word-splits the results - a file named 'annual report.txt' becomes two bogus tokens and the mv fails. Fix archive_old.sh (POSIX sh) so filenames with spaces work: `find ... -exec` or a `find | while IFS= read -r` loop are both fine. Keep the behavior: only regular files directly in <dir> older than <days> days move to <dir>/archive/, one 'archived: <basename>' line each, exit 0."
+  ],
+  "setup_files": {
+    "archive_old.sh": "#!/bin/sh\n# archive_old.sh <dir> <days>: move files not modified in <days> days\n# into <dir>/archive/. BUG: the for-loop over $(find ...) word-splits on\n# spaces, mangling filenames like \"annual report.txt\".\n\ndir=$1\ndays=$2\nmkdir -p \"$dir/archive\"\n\nfor f in $(find \"$dir\" -maxdepth 1 -type f -mtime +\"$days\"); do\n    mv \"$f\" \"$dir/archive/\"\n    echo \"archived: $(basename \"$f\")\"\ndone\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "archive_old.sh",
+      "content_patterns": [
+        "archived",
+        "find"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_archive.py": "import os, subprocess, time\n\nos.makedirs('data', exist_ok=True)\nold = time.time() - 10 * 86400\nfor name in ['annual report.txt', 'plain.txt']:\n    with open(f'data/{name}', 'w') as f:\n        f.write(name)\n    os.utime(f'data/{name}', (old, old))\nwith open('data/fresh.txt', 'w') as f:\n    f.write('new')\n\nr = subprocess.run(['sh', 'archive_old.sh', 'data', '5'], capture_output=True, text=True, timeout=15)\nassert r.returncode == 0, f'exit {r.returncode}: {r.stderr}'\n\narchived = sorted(os.listdir('data/archive'))\nassert archived == ['annual report.txt', 'plain.txt'], f'archive contents: {archived}'\nassert sorted(os.listdir('data')) == ['archive', 'fresh.txt'], sorted(os.listdir('data'))\nassert 'archived: annual report.txt' in r.stdout, f'stdout: {r.stdout!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_archive.py",
+  "reference_solution": {
+    "archive_old.sh": "#!/bin/sh\n# archive_old.sh <dir> <days>: move files not modified in <days> days\n# into <dir>/archive/.\n\ndir=$1\ndays=$2\nmkdir -p \"$dir/archive\"\n\nfind \"$dir\" -maxdepth 1 -type f -mtime +\"$days\" | while IFS= read -r f; do\n    mv \"$f\" \"$dir/archive/\"\n    echo \"archived: $(basename \"$f\")\"\ndone\nexit 0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "archives-fresh-files-too",
+      "files": {
+        "archive_old.sh": "#!/bin/sh\ndir=$1\ndays=$2\nmkdir -p \"$dir/archive\"\n\nfind \"$dir\" -maxdepth 1 -type f | while IFS= read -r f; do\n    mv \"$f\" \"$dir/archive/\"\n    echo \"archived: $(basename \"$f\")\"\ndone\nexit 0\n"
+      }
+    }
+  ]
+}

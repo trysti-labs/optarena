@@ -1,0 +1,46 @@
+{
+  "name": "optimize_sql_or_to_union",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 120,
+  "timeout": 180,
+  "description": "Rewrites an index-defeating OR across columns as a UNION of index scans",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "sql",
+    "indexing",
+    "union"
+  ],
+  "prompts": [
+    "query.sql finds all messages sent OR received by an address. Both sender and recipient are individually indexed, but the OR across two different columns makes SQLite scan the whole table. Rewrite query.sql as a UNION of two single-column lookups (one on sender, one on recipient) so each side uses its index; keep the exact output contract - columns id, sender, recipient, subject, ordered by id, no duplicate rows (self-messages where sender = recipient must appear once, which UNION's dedup handles)."
+  ],
+  "setup_files": {
+    "query.sql": "-- Find messages involving a user (as sender or recipient).\n-- Slow: OR across two different indexed columns defeats both indexes,\n-- forcing a full scan.\nSELECT id, sender, recipient, subject\nFROM messages\nWHERE sender = 'target@x.io' OR recipient = 'target@x.io'\nORDER BY id;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.sql",
+      "content_patterns": [
+        "union"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_query.py": "import sqlite3, time\n\nconn = sqlite3.connect(':memory:')\nconn.execute('CREATE TABLE messages (id INTEGER PRIMARY KEY, sender TEXT, recipient TEXT, subject TEXT)')\nrows = []\nfor i in range(300_000):\n    rows.append((i, f'user{i % 5000}@x.io', f'user{(i * 7) % 5000}@x.io', f's{i}'))\n# a handful involving the target, scattered\nrows[1000] = (1000, 'target@x.io', 'user1@x.io', 'sent-1')\nrows[200000] = (200000, 'user2@x.io', 'target@x.io', 'recv-1')\nrows[250000] = (250000, 'target@x.io', 'target@x.io', 'self-note')\nconn.executemany('INSERT INTO messages VALUES (?, ?, ?, ?)', rows)\nconn.execute('CREATE INDEX idx_sender ON messages(sender)')\nconn.execute('CREATE INDEX idx_recipient ON messages(recipient)')\nconn.commit()\n\nsql = open('query.sql').read()\n\ngot = [tuple(r) for r in conn.execute(sql).fetchall()]\nassert got == [\n    (1000, 'target@x.io', 'user1@x.io', 'sent-1'),\n    (200000, 'user2@x.io', 'target@x.io', 'recv-1'),\n    (250000, 'target@x.io', 'target@x.io', 'self-note'),\n], f'result set wrong (self-message must appear once): {got}'\n\n# both branches must be index searches, not table scans\nplan = ' '.join(str(r) for r in conn.execute('EXPLAIN QUERY PLAN ' + sql).fetchall())\nassert 'SCAN messages' not in plan or 'USING INDEX' in plan.replace('SCAN messages', '', 1), \\\n    f'query plan still scans the table: {plan}'\nassert plan.count('SEARCH') >= 2, f'expected two index searches, plan: {plan}'\n\nREPS = 300\nt0 = time.monotonic()\nfor _ in range(REPS):\n    conn.execute(sql).fetchall()\nelapsed = time.monotonic() - t0\n# full scans: ~0.03s x 300 = ~10s. Indexed: well under 1s.\nassert elapsed < 3.0, f'{REPS} lookups took {elapsed:.2f}s - still scanning'\nprint(f'PASS ({elapsed:.2f}s for {REPS} lookups)')\n"
+  },
+  "check_command": "python3 test_query.py",
+  "reference_solution": {
+    "query.sql": "SELECT id, sender, recipient, subject\nFROM messages\nWHERE sender = 'target@x.io'\nUNION\nSELECT id, sender, recipient, subject\nFROM messages\nWHERE recipient = 'target@x.io'\nORDER BY id;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "union-all-duplicates-self-messages",
+      "files": {
+        "query.sql": "SELECT id, sender, recipient, subject\nFROM messages\nWHERE sender = 'target@x.io'\nUNION ALL\nSELECT id, sender, recipient, subject\nFROM messages\nWHERE recipient = 'target@x.io'\nORDER BY id;\n"
+      }
+    }
+  ]
+}

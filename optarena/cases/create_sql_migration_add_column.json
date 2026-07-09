@@ -1,0 +1,47 @@
+{
+  "name": "create_sql_migration_add_column",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Writes a backfill migration adding a NOT NULL column to a live table",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "sql",
+    "migration",
+    "backfill"
+  ],
+  "prompts": [
+    "schema.sql defines the current users(id, email, name) table, which already holds data in production. Write migration.sql that adds a `status` TEXT column that must end up NOT NULL with every EXISTING row backfilled to 'active'. SQLite can't add a NOT NULL column without a default in one step, so do it as a real migration: ALTER TABLE ADD COLUMN with a temporary nullable form (or a DEFAULT), UPDATE the backfill, and ensure future inserts can't put NULL there (a NOT NULL DEFAULT 'active' column achieves this). The migration must be plain SQL statements that run via executescript against a database that already contains rows."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    email TEXT UNIQUE NOT NULL,\n    name TEXT NOT NULL\n);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "migration.sql",
+      "content_patterns": [
+        "alter table",
+        "status"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_migration.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript(open('schema.sql').read())\nconn.execute(\"INSERT INTO users (email, name) VALUES ('a@x.io', 'Ada')\")\nconn.execute(\"INSERT INTO users (email, name) VALUES ('b@x.io', 'Bob')\")\nconn.commit()\n\nconn.executescript(open('migration.sql').read())\n\nrows = conn.execute('SELECT email, status FROM users ORDER BY email').fetchall()\nassert rows == [('a@x.io', 'active'), ('b@x.io', 'active')], \\\n    f'existing rows must be backfilled to active: {rows}'\n\n# future inserts without a status must not become NULL\nconn.execute(\"INSERT INTO users (email, name) VALUES ('c@x.io', 'Cat')\")\nstatus = conn.execute(\"SELECT status FROM users WHERE email = 'c@x.io'\").fetchone()[0]\nassert status is not None, 'new rows must not get NULL status'\n\n# and the data must have survived the migration\nassert conn.execute('SELECT COUNT(*) FROM users').fetchone()[0] == 3\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_migration.py",
+  "reference_solution": {
+    "migration.sql": "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active';\nUPDATE users SET status = 'active' WHERE status IS NULL;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "nullable-no-default",
+      "files": {
+        "migration.sql": "ALTER TABLE users ADD COLUMN status TEXT;\nUPDATE users SET status = 'active';\n"
+      }
+    }
+  ]
+}
