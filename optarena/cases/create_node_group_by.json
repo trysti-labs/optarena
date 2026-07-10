@@ -1,0 +1,47 @@
+{
+  "name": "create_node_group_by",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Builds a generic groupBy (key -> array of items, order preserved) consumed by an existing sizes helper",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "javascript",
+    "node",
+    "data_engineering",
+    "multi-file"
+  ],
+  "prompts": [
+    "An existing stats.js requires groupBy from a group module and uses it, but group.js does not exist yet. Create group.js exporting groupBy(items, keyOf): it returns a plain object mapping each key produced by keyOf(item) to an array of the items that produced that key, preserving the original input order within each group. keyOf is a function from item to a string key. An empty items array returns an empty object {}. Every item must be placed in exactly one group (no items dropped, none duplicated). Do not modify stats.js. Export with module.exports = { groupBy }."
+  ],
+  "setup_files": {
+    "stats.js": "const { groupBy } = require('./group.js');\n\n// Map each group key to how many items it holds.\nfunction sizes(items, keyOf) {\n  const groups = groupBy(items, keyOf);\n  const out = {};\n  for (const key of Object.keys(groups)) {\n    out[key] = groups[key].length;\n  }\n  return out;\n}\n\nmodule.exports = { sizes };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "group.js",
+      "content_patterns": [
+        "groupby"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_group.js": "const assert = require('node:assert');\nconst { groupBy } = require('./group.js');\nconst { sizes } = require('./stats.js');\n\nassert.deepStrictEqual(\n  groupBy(['apple', 'ant', 'bee'], (w) => w[0]),\n  { a: ['apple', 'ant'], b: ['bee'] }\n);\n\nassert.deepStrictEqual(groupBy([], (x) => x), {});\n\n// order preserved within groups\nassert.deepStrictEqual(\n  groupBy([3, 1, 4, 1, 5], (n) => (n % 2 === 0 ? 'even' : 'odd')),\n  { odd: [3, 1, 1, 5], even: [4] }\n);\n\n// consumed by stats.sizes\nassert.deepStrictEqual(sizes(['apple', 'ant', 'bee'], (w) => w[0]), { a: 2, b: 1 });\n\nconsole.log('ok');\n"
+  },
+  "check_command": "node test_group.js",
+  "reference_solution": {
+    "group.js": "function groupBy(items, keyOf) {\n  const out = {};\n  for (const item of items) {\n    const key = keyOf(item);\n    if (!Object.prototype.hasOwnProperty.call(out, key)) {\n      out[key] = [];\n    }\n    out[key].push(item);\n  }\n  return out;\n}\n\nmodule.exports = { groupBy };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "overwrites-keeps-last",
+      "files": {
+        "group.js": "function groupBy(items, keyOf) {\n  // BUG: assigns a fresh single-element array each time, so each key keeps\n  // only its LAST item instead of accumulating.\n  const out = {};\n  for (const item of items) {\n    out[keyOf(item)] = [item];\n  }\n  return out;\n}\n\nmodule.exports = { groupBy };\n"
+      }
+    }
+  ]
+}
