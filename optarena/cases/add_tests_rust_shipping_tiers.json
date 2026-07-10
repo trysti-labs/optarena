@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_rust_shipping_tiers",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 360,
+  "description": "Asks the model to write Rust integration tests for a shipping-cost function; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "rust",
+    "testing",
+    "cargo-test"
+  ],
+  "prompts": [
+    "`cost(weight_g: u32, express: bool) -> u32` in src/lib.rs (already correct, do not modify it) returns a shipping cost in integer cents: it starts at a base of 500; for each FULL 1000g above the first 1000g it adds 100 (so 2500g adds 100, 3000g adds 200); and when express is true the whole total is doubled. Write a Rust integration test at exactly tests/cost_test.rs (bring the function into scope with `use shipping_tiers::cost;`) with at least 4 separate #[test] functions that pin the EXACT u32 cost for: a package at or below 1000g (base only); a package incurring one extra-kilo surcharge; a package incurring two extra-kilo surcharges; and an express package. Use assert_eq! with the exact expected cents."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"shipping_tiers\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "/// Shipping cost in cents: base 500; +100 per FULL 1000g over the first\n/// 1000g; doubled when express.\npub fn cost(weight_g: u32, express: bool) -> u32 {\n    let mut total = 500;\n    if weight_g > 1000 {\n        total += ((weight_g - 1000) / 1000) * 100;\n    }\n    if express {\n        total *= 2;\n    }\n    total\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "tests/cost_test.rs",
+      "content_patterns": [
+        "cost(",
+        "assert_eq!"
+      ],
+      "regex_patterns": [
+        "#\\[test\\][\\s\\S]*#\\[test\\][\\s\\S]*#\\[test\\][\\s\\S]*#\\[test\\]"
+      ],
+      "min_lines": 15
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('src/lib.rs')\nTEST_CMD = 'cargo test --offline'\nMUTANTS = [\n    ['let mut total = 500;', 'let mut total = 400;'],\n    ['total += ((weight_g - 1000) / 1000) * 100;', 'total += ((weight_g - 1000) / 1000) * 150;'],\n    ['total *= 2;', 'total *= 3;'],\n]\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (tests pass on correct impl and kill all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "tests/cost_test.rs": "use shipping_tiers::cost;\n\n#[test]\nfn base_under_one_kilo() {\n    assert_eq!(cost(500, false), 500);\n}\n\n#[test]\nfn one_extra_kilo_surcharge() {\n    // 2500g -> 1 full kg over 1000g -> 500 + 100 = 600\n    assert_eq!(cost(2500, false), 600);\n}\n\n#[test]\nfn two_extra_kilo_surcharges() {\n    // 3000g -> 2 full kg over 1000g -> 500 + 200 = 700\n    assert_eq!(cost(3000, false), 700);\n}\n\n#[test]\nfn express_doubles_total() {\n    assert_eq!(cost(500, true), 1000);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "tests/cost_test.rs": "use shipping_tiers::cost;\n\n#[test]\nfn returns_something() {\n    assert!(cost(500, false) >= 500);\n}\n\n#[test]\nfn express_not_cheaper() {\n    assert!(cost(500, true) >= cost(500, false));\n}\n\n#[test]\nfn heavier_not_cheaper() {\n    assert!(cost(3000, false) >= cost(500, false));\n}\n\n#[test]\nfn positive() {\n    assert!(cost(2500, false) > 0);\n}\n"
+      }
+    }
+  ]
+}
