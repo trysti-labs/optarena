@@ -1,0 +1,53 @@
+{
+  "name": "create_php_csv_dedupe_latest",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Builds a CSV importer that keeps the latest row per id by timestamp, consumed by an existing report",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "php",
+    "data_engineering",
+    "csv",
+    "multi-file"
+  ],
+  "prompts": [
+    "An existing src/DirectoryReport.php calls UserImporter::importLatest($csvText), but UserImporter does not exist yet. Create src/UserImporter.php defining namespace App, class UserImporter, and a static method importLatest(string $csvText): array that parses CSV text with the header row `id,name,updated_at` and returns an associative array mapping each id (string) to the name (string) from that id's most recent row - the row with the greatest integer updated_at. If the same id appears twice with the same updated_at, the row that comes later in the file wins. Skip any row whose id is empty/whitespace or whose updated_at is missing or not an integer. Input with only a header (or no valid rows) returns an empty array. Do not modify DirectoryReport.php."
+  ],
+  "setup_files": {
+    "src/DirectoryReport.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/UserImporter.php';\n\nclass DirectoryReport\n{\n    // Render the latest name per id, one line per id, sorted by id.\n    public static function render(string $csvText): string\n    {\n        $latest = UserImporter::importLatest($csvText);\n        ksort($latest);\n        $lines = [];\n        foreach ($latest as $id => $name) {\n            $lines[] = \"$id: $name\";\n        }\n        return implode(\"\\n\", $lines);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/UserImporter.php",
+      "content_patterns": [
+        "function importlatest"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/UserImporterTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/DirectoryReport.php';\n\nfinal class UserImporterTest extends TestCase\n{\n    public function testKeepsLatestByTimestamp(): void\n    {\n        $csv = \"id,name,updated_at\\n1,Alice,100\\n2,Bob,50\\n1,Alicia,200\\n\";\n        $this->assertSame(['1' => 'Alicia', '2' => 'Bob'], \\App\\UserImporter::importLatest($csv));\n    }\n\n    public function testLaterRowWinsOnTie(): void\n    {\n        $csv = \"id,name,updated_at\\n7,First,500\\n7,Second,500\\n\";\n        $this->assertSame(['7' => 'Second'], \\App\\UserImporter::importLatest($csv));\n    }\n\n    public function testSkipsInvalidRows(): void\n    {\n        $csv = \"id,name,updated_at\\n\" .\n            \"1,Keep,100\\n\" .\n            \",Blank,200\\n\" .\n            \"   ,Space,300\\n\" .\n            \"9,NoTime,\\n\" .\n            \"9,BadTime,notanumber\\n\";\n        $this->assertSame(['1' => 'Keep'], \\App\\UserImporter::importLatest($csv));\n    }\n\n    public function testHeaderOnlyIsEmpty(): void\n    {\n        $this->assertSame([], \\App\\UserImporter::importLatest(\"id,name,updated_at\\n\"));\n    }\n\n    public function testIntegratesWithReport(): void\n    {\n        $csv = \"id,name,updated_at\\n1,Alice,100\\n1,Alicia,200\\n2,Bob,50\\n\";\n        $this->assertSame(\"1: Alicia\\n2: Bob\", \\App\\DirectoryReport::render($csv));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/UserImporterTest.php",
+  "reference_solution": {
+    "src/UserImporter.php": "<?php\nnamespace App;\n\nclass UserImporter\n{\n    // Keep the latest name per id by integer updated_at; later row wins ties.\n    public static function importLatest(string $csvText): array\n    {\n        $lines = preg_split('/\\r\\n|\\r|\\n/', trim($csvText));\n        if (count($lines) <= 1) {\n            return [];\n        }\n        array_shift($lines); // drop header\n\n        $latest = [];   // id => name\n        $bestTs = [];   // id => updated_at\n        foreach ($lines as $line) {\n            if ($line === '') {\n                continue;\n            }\n            $cols = str_getcsv($line);\n            $id = trim((string) ($cols[0] ?? ''));\n            $name = (string) ($cols[1] ?? '');\n            $rawTs = trim((string) ($cols[2] ?? ''));\n            if ($id === '' || $rawTs === '' || !ctype_digit($rawTs)) {\n                continue;\n            }\n            $ts = (int) $rawTs;\n            if (!isset($bestTs[$id]) || $ts >= $bestTs[$id]) {\n                $bestTs[$id] = $ts;\n                $latest[$id] = $name;\n            }\n        }\n        return $latest;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "keeps-first-not-latest",
+      "files": {
+        "src/UserImporter.php": "<?php\nnamespace App;\n\nclass UserImporter\n{\n    // BUG: keeps the FIRST row seen per id, ignoring updated_at entirely.\n    public static function importLatest(string $csvText): array\n    {\n        $lines = preg_split('/\\r\\n|\\r|\\n/', trim($csvText));\n        if (count($lines) <= 1) {\n            return [];\n        }\n        array_shift($lines);\n        $latest = [];\n        foreach ($lines as $line) {\n            if ($line === '') {\n                continue;\n            }\n            $cols = str_getcsv($line);\n            $id = trim((string) ($cols[0] ?? ''));\n            if ($id === '') {\n                continue;\n            }\n            if (!isset($latest[$id])) {\n                $latest[$id] = (string) ($cols[1] ?? '');\n            }\n        }\n        return $latest;\n    }\n}\n"
+      }
+    },
+    {
+      "name": "does-not-skip-invalid",
+      "files": {
+        "src/UserImporter.php": "<?php\nnamespace App;\n\nclass UserImporter\n{\n    // BUG: does not skip blank ids or non-integer timestamps; (int) casts\n    // 'notanumber' to 0 and blank ids leak in as ''.\n    public static function importLatest(string $csvText): array\n    {\n        $lines = preg_split('/\\r\\n|\\r|\\n/', trim($csvText));\n        if (count($lines) <= 1) {\n            return [];\n        }\n        array_shift($lines);\n        $latest = [];\n        $bestTs = [];\n        foreach ($lines as $line) {\n            if ($line === '') {\n                continue;\n            }\n            $cols = str_getcsv($line);\n            $id = trim((string) ($cols[0] ?? ''));\n            $name = (string) ($cols[1] ?? '');\n            $ts = (int) ($cols[2] ?? 0);\n            if (!isset($bestTs[$id]) || $ts >= $bestTs[$id]) {\n                $bestTs[$id] = $ts;\n                $latest[$id] = $name;\n            }\n        }\n        return $latest;\n    }\n}\n"
+      }
+    }
+  ]
+}

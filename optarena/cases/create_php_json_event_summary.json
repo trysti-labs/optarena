@@ -1,0 +1,54 @@
+{
+  "name": "create_php_json_event_summary",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Builds a JSON event aggregator (per-type count and total cents, with cleaning) consumed by an existing printer",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "php",
+    "data_engineering",
+    "json",
+    "multi-file"
+  ],
+  "prompts": [
+    "An existing src/SummaryPrinter.php calls EventSummary::summarize($json), but EventSummary does not exist yet. Create src/EventSummary.php defining namespace App, class EventSummary, and a static method summarize(string $json): array. The input is a JSON array of event objects, each shaped like {\"type\": \"click\", \"amount_cents\": 100}. Return an associative array mapping each event type (string) to an inner array ['count' => <int>, 'total_cents' => <int>], counting the events and summing their amount_cents per type. Clean as you go: skip any event that is not an object, whose type is missing/blank/not-a-string, or whose amount_cents is missing or not an integer (a numeric string like \"100\" does NOT count as an integer). If the JSON is invalid or not an array, return an empty array. Do not modify SummaryPrinter.php."
+  ],
+  "setup_files": {
+    "src/SummaryPrinter.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/EventSummary.php';\n\nclass SummaryPrinter\n{\n    // One line per type, sorted by type: \"click: 2 events, 300 cents\".\n    public static function render(string $json): string\n    {\n        $summary = EventSummary::summarize($json);\n        ksort($summary);\n        $lines = [];\n        foreach ($summary as $type => $agg) {\n            $lines[] = sprintf('%s: %d events, %d cents', $type, $agg['count'], $agg['total_cents']);\n        }\n        return implode(\"\\n\", $lines);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/EventSummary.php",
+      "content_patterns": [
+        "function summarize",
+        "json_decode"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/EventSummaryTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/SummaryPrinter.php';\n\nfinal class EventSummaryTest extends TestCase\n{\n    public function testCountsAndSumsByType(): void\n    {\n        $json = '[{\"type\":\"click\",\"amount_cents\":100},{\"type\":\"view\",\"amount_cents\":50},{\"type\":\"click\",\"amount_cents\":200}]';\n        $this->assertSame(\n            [\n                'click' => ['count' => 2, 'total_cents' => 300],\n                'view' => ['count' => 1, 'total_cents' => 50],\n            ],\n            \\App\\EventSummary::summarize($json)\n        );\n    }\n\n    public function testSkipsDirtyEvents(): void\n    {\n        $json = '[' .\n            '{\"type\":\"buy\",\"amount_cents\":100},' .\n            '{\"type\":\"\",\"amount_cents\":10},' .\n            '{\"amount_cents\":10},' .\n            '{\"type\":\"buy\"},' .\n            '{\"type\":\"buy\",\"amount_cents\":\"200\"},' .\n            '\"not-an-object\"' .\n            ']';\n        $this->assertSame(['buy' => ['count' => 1, 'total_cents' => 100]], \\App\\EventSummary::summarize($json));\n    }\n\n    public function testInvalidJsonIsEmpty(): void\n    {\n        $this->assertSame([], \\App\\EventSummary::summarize('{ not json'));\n        $this->assertSame([], \\App\\EventSummary::summarize('[]'));\n    }\n\n    public function testIntegratesWithPrinter(): void\n    {\n        $json = '[{\"type\":\"click\",\"amount_cents\":100},{\"type\":\"click\",\"amount_cents\":200},{\"type\":\"view\",\"amount_cents\":50}]';\n        $this->assertSame(\"click: 2 events, 300 cents\\nview: 1 events, 50 cents\", \\App\\SummaryPrinter::render($json));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/EventSummaryTest.php",
+  "reference_solution": {
+    "src/EventSummary.php": "<?php\nnamespace App;\n\nclass EventSummary\n{\n    // Per-type count and total_cents over a JSON array of events, skipping\n    // malformed/blank/non-integer entries.\n    public static function summarize(string $json): array\n    {\n        $events = json_decode($json, true);\n        if (!is_array($events)) {\n            return [];\n        }\n        $summary = [];\n        foreach ($events as $event) {\n            if (!is_array($event)) {\n                continue;\n            }\n            $type = $event['type'] ?? null;\n            if (!is_string($type) || trim($type) === '') {\n                continue;\n            }\n            $type = trim($type);\n            $amount = $event['amount_cents'] ?? null;\n            if (!is_int($amount)) {\n                continue;\n            }\n            if (!isset($summary[$type])) {\n                $summary[$type] = ['count' => 0, 'total_cents' => 0];\n            }\n            $summary[$type]['count'] += 1;\n            $summary[$type]['total_cents'] += $amount;\n        }\n        return $summary;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "counts-but-drops-total",
+      "files": {
+        "src/EventSummary.php": "<?php\nnamespace App;\n\nclass EventSummary\n{\n    // BUG: counts events but never accumulates amount_cents.\n    public static function summarize(string $json): array\n    {\n        $events = json_decode($json, true);\n        if (!is_array($events)) {\n            return [];\n        }\n        $summary = [];\n        foreach ($events as $event) {\n            if (!is_array($event)) {\n                continue;\n            }\n            $type = $event['type'] ?? null;\n            if (!is_string($type) || trim($type) === '') {\n                continue;\n            }\n            $type = trim($type);\n            if (!is_int($event['amount_cents'] ?? null)) {\n                continue;\n            }\n            if (!isset($summary[$type])) {\n                $summary[$type] = ['count' => 0, 'total_cents' => 0];\n            }\n            $summary[$type]['count'] += 1;\n        }\n        return $summary;\n    }\n}\n"
+      }
+    },
+    {
+      "name": "accepts-numeric-strings",
+      "files": {
+        "src/EventSummary.php": "<?php\nnamespace App;\n\nclass EventSummary\n{\n    // BUG: uses is_numeric + (int) cast, so a numeric STRING like \"200\" is\n    // wrongly counted, and blank/missing amounts coerce loosely.\n    public static function summarize(string $json): array\n    {\n        $events = json_decode($json, true);\n        if (!is_array($events)) {\n            return [];\n        }\n        $summary = [];\n        foreach ($events as $event) {\n            if (!is_array($event)) {\n                continue;\n            }\n            $type = $event['type'] ?? null;\n            if (!is_string($type) || trim($type) === '') {\n                continue;\n            }\n            $type = trim($type);\n            $amount = $event['amount_cents'] ?? null;\n            if (!is_numeric($amount)) {\n                continue;\n            }\n            if (!isset($summary[$type])) {\n                $summary[$type] = ['count' => 0, 'total_cents' => 0];\n            }\n            $summary[$type]['count'] += 1;\n            $summary[$type]['total_cents'] += (int) $amount;\n        }\n        return $summary;\n    }\n}\n"
+      }
+    }
+  ]
+}
