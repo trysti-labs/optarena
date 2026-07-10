@@ -1,0 +1,70 @@
+{
+  "name": "refactor_php_extract_email_validator",
+  "language": "php",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Extracts duplicated inline email validation from two PHP controllers into a shared Validator, preserving behavior",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "php",
+    "refactoring",
+    "dry",
+    "multi-file"
+  ],
+  "prompts": [
+    "src/SignupController.php and src/ProfileController.php contain the exact same inline email-validation block (trim, then require the string is non-empty and contains both '@' and '.'). Refactor to remove the duplication: create src/Validator.php with a class App\\Validator exposing isValidEmail(string $email): bool that implements exactly the current rule, and change both controllers to use it instead of their inline copy. Do not change the observable behavior of register()/update() for any input - the same emails accepted before must still be accepted (e.g. \"a@b.c\" stays valid), and the returned strings must be unchanged. Neither controller should still contain the inline strpos-based validation."
+  ],
+  "setup_files": {
+    "src/SignupController.php": "<?php\nnamespace App;\n\nclass SignupController\n{\n    public function register(string $email): string\n    {\n        // inline validation (duplicated in ProfileController)\n        $email = trim($email);\n        if ($email === \"\" || strpos($email, \"@\") === false\n            || strpos($email, \".\") === false) {\n            return \"invalid\";\n        }\n        return \"registered:\" . strtolower($email);\n    }\n}\n",
+    "src/ProfileController.php": "<?php\nnamespace App;\n\nclass ProfileController\n{\n    public function update(string $email): string\n    {\n        // inline validation (duplicated in SignupController)\n        $email = trim($email);\n        if ($email === \"\" || strpos($email, \"@\") === false\n            || strpos($email, \".\") === false) {\n            return \"invalid\";\n        }\n        return \"updated:\" . strtolower($email);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Validator.php",
+      "content_patterns": [
+        "isvalidemail"
+      ]
+    },
+    {
+      "path_pattern": "**/SignupController.php",
+      "content_patterns": [
+        "validator"
+      ],
+      "not_content_patterns": [
+        "strpos($email"
+      ]
+    },
+    {
+      "path_pattern": "**/ProfileController.php",
+      "content_patterns": [
+        "validator"
+      ],
+      "not_content_patterns": [
+        "strpos($email"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/RefactorHiddenTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/SignupController.php';\nrequire_once __DIR__ . '/../src/ProfileController.php';\n\nfinal class RefactorHiddenTest extends TestCase\n{\n    public function testSignupValidLoose(): void\n    {\n        // The original loose rule accepts \"a@b.c\"; behavior must be preserved.\n        $this->assertSame(\"registered:a@b.c\", (new \\App\\SignupController())->register(\"A@B.C\"));\n    }\n\n    public function testSignupInvalidNoAt(): void\n    {\n        $this->assertSame(\"invalid\", (new \\App\\SignupController())->register(\"nope.example\"));\n    }\n\n    public function testProfileValidLoose(): void\n    {\n        $this->assertSame(\"updated:a@b.c\", (new \\App\\ProfileController())->update(\"  a@b.c  \"));\n    }\n\n    public function testProfileInvalidNoDot(): void\n    {\n        $this->assertSame(\"invalid\", (new \\App\\ProfileController())->update(\"a@bexample\"));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/RefactorHiddenTest.php",
+  "reference_solution": {
+    "src/Validator.php": "<?php\nnamespace App;\n\nclass Validator\n{\n    // Extracted shared rule: non-empty, contains '@' and '.'.\n    public function isValidEmail(string $email): bool\n    {\n        $email = trim($email);\n        return $email !== \"\" && strpos($email, \"@\") !== false\n            && strpos($email, \".\") !== false;\n    }\n}\n",
+    "src/SignupController.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/Validator.php';\n\nclass SignupController\n{\n    private Validator $validator;\n\n    public function __construct(?Validator $validator = null)\n    {\n        $this->validator = $validator ?? new Validator();\n    }\n\n    public function register(string $email): string\n    {\n        if (!$this->validator->isValidEmail($email)) {\n            return \"invalid\";\n        }\n        return \"registered:\" . strtolower(trim($email));\n    }\n}\n",
+    "src/ProfileController.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/Validator.php';\n\nclass ProfileController\n{\n    private Validator $validator;\n\n    public function __construct(?Validator $validator = null)\n    {\n        $this->validator = $validator ?? new Validator();\n    }\n\n    public function update(string $email): string\n    {\n        if (!$this->validator->isValidEmail($email)) {\n            return \"invalid\";\n        }\n        return \"updated:\" . strtolower(trim($email));\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "behavior-drifted-stricter",
+      "files": {
+        "src/Validator.php": "<?php\nnamespace App;\n\nclass Validator\n{\n    public function isValidEmail(string $email): bool\n    {\n        $email = trim($email);\n        // behavior drift: additionally demands a 2+ char TLD, so an address\n        // the original loose rule accepted (e.g. \"a@b.c\", TLD \"c\") is now\n        // wrongly rejected.\n        return preg_match('/^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$/i', $email) === 1;\n    }\n}\n",
+        "src/SignupController.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/Validator.php';\n\nclass SignupController\n{\n    private Validator $validator;\n\n    public function __construct(?Validator $validator = null)\n    {\n        $this->validator = $validator ?? new Validator();\n    }\n\n    public function register(string $email): string\n    {\n        if (!$this->validator->isValidEmail($email)) {\n            return \"invalid\";\n        }\n        return \"registered:\" . strtolower(trim($email));\n    }\n}\n",
+        "src/ProfileController.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/Validator.php';\n\nclass ProfileController\n{\n    private Validator $validator;\n\n    public function __construct(?Validator $validator = null)\n    {\n        $this->validator = $validator ?? new Validator();\n    }\n\n    public function update(string $email): string\n    {\n        if (!$this->validator->isValidEmail($email)) {\n            return \"invalid\";\n        }\n        return \"updated:\" . strtolower(trim($email));\n    }\n}\n"
+      }
+    }
+  ]
+}

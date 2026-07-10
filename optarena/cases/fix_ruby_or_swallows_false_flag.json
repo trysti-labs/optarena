@@ -1,0 +1,48 @@
+{
+  "name": "fix_ruby_or_swallows_false_flag",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "description": "Fixes a Ruby feature-flag lookup that uses `||` and wrongly returns the default for a stored false",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "ruby",
+    "truthiness"
+  ],
+  "prompts": [
+    "FeatureFlags#enabled? in lib/feature_flags.rb should return the stored boolean for a key, and return the caller's default: only when the key is ABSENT. It currently does `@flags[key] || default`, which treats a stored `false` (or nil) as missing - so enabled?(:beta, default: true) returns true even when the flag was explicitly set to false. Fix it (use Hash#fetch) so a key stored as false returns false, a key stored as true returns true, and an absent key returns the default. Keep the class and method signature."
+  ],
+  "setup_files": {
+    "lib/feature_flags.rb": "module App\n  class FeatureFlags\n    def initialize(flags = {})\n      @flags = flags\n    end\n\n    # Return the stored boolean for +key+. Only when +key+ is ABSENT should\n    # +default+ be returned; a stored +false+ must be returned as-is.\n    # BUG: `||` treats a stored false (and nil) as \"missing\" and returns\n    # +default+, so enabled?(:beta, default: true) yields true even though\n    # the flag was explicitly set to false.\n    def enabled?(key, default: false)\n      @flags[key] || default\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/feature_flags.rb",
+      "content_patterns": [
+        "def enabled?"
+      ],
+      "not_content_patterns": [
+        "@flags[key] || default"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/feature_flags_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/feature_flags\"\n\nclass FeatureFlagsHiddenTest < Minitest::Test\n  def test_stored_false_is_returned_not_default\n    flags = App::FeatureFlags.new(beta: false)\n    assert_equal false, flags.enabled?(:beta, default: true)\n  end\n\n  def test_stored_true_is_returned\n    flags = App::FeatureFlags.new(beta: true)\n    assert_equal true, flags.enabled?(:beta, default: false)\n  end\n\n  def test_absent_key_returns_default\n    flags = App::FeatureFlags.new({})\n    assert_equal true, flags.enabled?(:missing, default: true)\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/feature_flags_test.rb",
+  "reference_solution": {
+    "lib/feature_flags.rb": "module App\n  class FeatureFlags\n    def initialize(flags = {})\n      @flags = flags\n    end\n\n    # Return the stored boolean for +key+, or +default+ only when absent.\n    def enabled?(key, default: false)\n      @flags.fetch(key, default)\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-default-on-missing",
+      "files": {
+        "lib/feature_flags.rb": "module App\n  class FeatureFlags\n    def initialize(flags = {})\n      @flags = flags\n    end\n\n    def enabled?(key, default: false)\n      @flags[key]\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "add_tests_php_cart_total",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Asks the model to write PHPUnit tests for a PHP Cart total with coupon and shipping rules; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "php",
+    "testing",
+    "phpunit"
+  ],
+  "prompts": [
+    "Cart::total in src/Cart.php (already correct, do not modify it) computes an order total in integer cents: it sums priceCents*qty over $items; if $coupon === \"SAVE10\" it subtracts a 10% discount from the subtotal (floored to whole cents via intdiv); shipping is free when the (discounted) subtotal is >= 5000 cents, otherwise shipping costs 500 cents; the returned value is subtotal-after-discount plus shipping. Write PHPUnit tests at exactly tests/CartTest.php (class CartTest extends PHPUnit\\Framework\\TestCase) with at least 4 separate test methods that pin down the EXACT integer total for: an order with no coupon that pays shipping; an order where SAVE10 reduces the subtotal; an order at the free-shipping threshold; and an order where applying SAVE10 pushes the subtotal below the free-shipping cutoff so shipping is charged. Use assertSame with the exact expected cents. Begin the test file with `require_once __DIR__ . '/../src/Cart.php';`."
+  ],
+  "setup_files": {
+    "src/Cart.php": "<?php\nnamespace App;\n\nclass Cart\n{\n    // $items: list of [priceCents (int), qty (int)].\n    // $coupon: \"SAVE10\" applies a 10% discount to the subtotal (floored to\n    //   whole cents); any other value (or null) applies no discount.\n    // Shipping: free when the discounted subtotal is >= 5000 cents, else 500.\n    // Returns the final total in integer cents.\n    public function total(array $items, ?string $coupon = null): int\n    {\n        $subtotal = 0;\n        foreach ($items as [$price, $qty]) {\n            $subtotal += $price * $qty;\n        }\n        if ($coupon === \"SAVE10\") {\n            $subtotal -= intdiv($subtotal, 10);\n        }\n        $shipping = $subtotal >= 5000 ? 0 : 500;\n        return $subtotal + $shipping;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/CartTest.php",
+      "content_patterns": [
+        "extends",
+        "testcase",
+        "assertsame",
+        "->total("
+      ],
+      "regex_patterns": [
+        "function test[\\s\\S]*function test[\\s\\S]*function test[\\s\\S]*function test"
+      ],
+      "min_lines": 15
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.php": "<?php\n// PHP mutation harness (the php sandbox image has no python3). Confirms the\n// model's tests pass on the correct Cart, then that they FAIL on each of two\n// deliberately-broken mutants of Cart::total.\n$impl = __DIR__ . '/src/Cart.php';\n$src = file_get_contents($impl);\n\n$anchors = [\n    '$subtotal -= intdiv($subtotal, 10);',\n    '$shipping = $subtotal >= 5000 ? 0 : 500;',\n];\nforeach ($anchors as $a) {\n    if (substr_count($src, $a) !== 1) {\n        fwrite(STDERR, \"protected impl was modified (anchor missing: $a)\\n\");\n        exit(2);\n    }\n}\n\nfunction run_tests(): int {\n    $code = 0;\n    passthru('phpunit tests/CartTest.php', $code);\n    return $code;\n}\n\n$rc = run_tests();\nif ($rc !== 0) {\n    fwrite(STDERR, \"model tests FAILED against the correct implementation (exit $rc)\\n\");\n    exit(1);\n}\n\n$mutants = [\n    ['$subtotal -= intdiv($subtotal, 10);', '$subtotal -= intdiv($subtotal, 5);'],\n    ['$shipping = $subtotal >= 5000 ? 0 : 500;', '$shipping = $subtotal >= 4000 ? 0 : 500;'],\n];\n\n$exit = 0;\nforeach ($mutants as $i => [$old, $new]) {\n    file_put_contents($impl, str_replace($old, $new, $src));\n    $rc = run_tests();\n    if ($rc === 0) {\n        fwrite(STDERR, \"mutation \" . ($i + 1) . \" SURVIVED: tests pass on a broken impl\\n\");\n        $exit = 1;\n    }\n    file_put_contents($impl, $src); // restore before next mutant\n}\n\nif ($exit === 0) {\n    echo \"PASS (tests pass on correct impl and kill all \" . count($mutants) . \" mutants)\\n\";\n}\nexit($exit);\n"
+  },
+  "check_command": "php mutation_check.php",
+  "reference_solution": {
+    "tests/CartTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Cart.php';\n\nfinal class CartTest extends TestCase\n{\n    public function testSubtotalPlusShippingNoCoupon(): void\n    {\n        // 1000*2 = 2000 < 5000 -> +500 shipping = 2500\n        $this->assertSame(2500, (new \\App\\Cart())->total([[1000, 2]], null));\n    }\n\n    public function testSave10DiscountApplied(): void\n    {\n        // subtotal 3000; SAVE10 -> 3000 - 300 = 2700; +500 shipping = 3200\n        $this->assertSame(3200, (new \\App\\Cart())->total([[1500, 2]], \"SAVE10\"));\n    }\n\n    public function testFreeShippingAtThreshold(): void\n    {\n        // subtotal 5000 -> free shipping, no coupon -> 5000\n        $this->assertSame(5000, (new \\App\\Cart())->total([[5000, 1]], null));\n    }\n\n    public function testDiscountCanDropBelowFreeShippingCutoff(): void\n    {\n        // subtotal 5200; SAVE10 -> 5200 - 520 = 4680 < 5000 -> +500 = 5180\n        $this->assertSame(5180, (new \\App\\Cart())->total([[2600, 2]], \"SAVE10\"));\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "tests/CartTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Cart.php';\n\nfinal class CartTest extends TestCase\n{\n    public function testReturnsInt(): void\n    {\n        $this->assertIsInt((new \\App\\Cart())->total([[1000, 2]], null));\n    }\n\n    public function testNonNegative(): void\n    {\n        $this->assertGreaterThanOrEqual(0, (new \\App\\Cart())->total([[1500, 2]], \"SAVE10\"));\n    }\n\n    public function testDiscountNotLarger(): void\n    {\n        $cart = new \\App\\Cart();\n        $with = $cart->total([[2600, 2]], \"SAVE10\");\n        $without = $cart->total([[2600, 2]], null);\n        $this->assertLessThanOrEqual($without, $with);\n    }\n}\n"
+      }
+    }
+  ]
+}

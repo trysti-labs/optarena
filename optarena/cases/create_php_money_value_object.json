@@ -1,0 +1,54 @@
+{
+  "name": "create_php_money_value_object",
+  "language": "php",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Creates a cents-based PHP Money value object consumed by an existing Ledger (cross-file)",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "value-object",
+    "multi-file"
+  ],
+  "prompts": [
+    "src/Ledger.php already exists and calls App\\Money::fromDollars(float $dollars, string $currency), then ->add(Money $other), then ->format() on the running sum. Create src/Money.php defining a final class App\\Money that makes Ledger work correctly. Requirements: store the amount as an integer number of CENTS internally (not a float) so that summing 1.10 + 2.20 + 0.05 gives exactly 3.35; fromDollars must be a static factory rounding dollars to the nearest cent; add(Money $other) must return a new Money with the summed cents and must throw InvalidArgumentException when the two currencies differ; cents(): int returns the integer cents; format(): string returns the currency code, a space, and the amount with exactly two decimal places (e.g. \"USD 3.35\"). Do not modify src/Ledger.php."
+  ],
+  "setup_files": {
+    "src/Ledger.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/Money.php';\n\n// Sums a list of dollar amounts (floats) into a formatted money string,\n// relying on App\\Money to avoid binary floating-point drift.\nclass Ledger\n{\n    /** @param float[] $dollarAmounts */\n    public function total(array $dollarAmounts, string $currency): string\n    {\n        $sum = Money::fromDollars(0.0, $currency);\n        foreach ($dollarAmounts as $amount) {\n            $sum = $sum->add(Money::fromDollars($amount, $currency));\n        }\n        return $sum->format();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Money.php",
+      "content_patterns": [
+        "class money",
+        "function add",
+        "function format"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/MoneyHiddenTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Ledger.php';\n\nfinal class MoneyHiddenTest extends TestCase\n{\n    public function testLedgerSumFormatsWithoutFloatDrift(): void\n    {\n        $ledger = new \\App\\Ledger();\n        // 1.10 + 2.20 + 0.05 = 3.35 exactly in cents (110 + 220 + 5 = 335).\n        $this->assertSame(\"USD 3.35\", $ledger->total([1.10, 2.20, 0.05], \"USD\"));\n    }\n\n    public function testMoneyAddsCents(): void\n    {\n        $a = \\App\\Money::fromDollars(19.99, \"USD\");\n        $b = \\App\\Money::fromDollars(0.01, \"USD\");\n        $this->assertSame(2000, $a->add($b)->cents());\n    }\n\n    public function testFormatAlwaysTwoDecimals(): void\n    {\n        $m = \\App\\Money::fromDollars(5, \"EUR\");\n        $this->assertSame(\"EUR 5.00\", $m->format());\n    }\n\n    public function testAddRejectsCurrencyMismatch(): void\n    {\n        $this->expectException(\\InvalidArgumentException::class);\n        \\App\\Money::fromDollars(1, \"USD\")->add(\\App\\Money::fromDollars(1, \"EUR\"));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/MoneyHiddenTest.php",
+  "reference_solution": {
+    "src/Money.php": "<?php\nnamespace App;\n\n// Value object storing an integer number of cents to avoid float drift.\nfinal class Money\n{\n    private int $cents;\n    private string $currency;\n\n    public function __construct(int $cents, string $currency)\n    {\n        $this->cents = $cents;\n        $this->currency = $currency;\n    }\n\n    public static function fromDollars(float $dollars, string $currency): self\n    {\n        // round to nearest cent before casting to avoid 3.35 -> 334 drift.\n        return new self((int) round($dollars * 100), $currency);\n    }\n\n    public function add(Money $other): self\n    {\n        if ($other->currency !== $this->currency) {\n            throw new \\InvalidArgumentException(\n                \"currency mismatch: {$this->currency} vs {$other->currency}\"\n            );\n        }\n        return new self($this->cents + $other->cents, $this->currency);\n    }\n\n    public function cents(): int\n    {\n        return $this->cents;\n    }\n\n    public function format(): string\n    {\n        return $this->currency . \" \" . number_format($this->cents / 100, 2, \".\", \"\");\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "ignores-currency-mismatch",
+      "files": {
+        "src/Money.php": "<?php\nnamespace App;\n\n// Value object storing an integer number of cents to avoid float drift.\nfinal class Money\n{\n    private int $cents;\n    private string $currency;\n\n    public function __construct(int $cents, string $currency)\n    {\n        $this->cents = $cents;\n        $this->currency = $currency;\n    }\n\n    public static function fromDollars(float $dollars, string $currency): self\n    {\n        // round to nearest cent before casting to avoid 3.35 -> 334 drift.\n        return new self((int) round($dollars * 100), $currency);\n    }\n\n    public function add(Money $other): self\n    {\n        return new self($this->cents + $other->cents, $this->currency);\n    }\n\n    public function cents(): int\n    {\n        return $this->cents;\n    }\n\n    public function format(): string\n    {\n        return $this->currency . \" \" . number_format($this->cents / 100, 2, \".\", \"\");\n    }\n}\n"
+      }
+    },
+    {
+      "name": "naive-float-math",
+      "files": {
+        "src/Money.php": "<?php\nnamespace App;\n\nfinal class Money\n{\n    private float $dollars;\n    private string $currency;\n\n    public function __construct(float $dollars, string $currency)\n    {\n        $this->dollars = $dollars;\n        $this->currency = $currency;\n    }\n\n    public static function fromDollars(float $dollars, string $currency): self\n    {\n        return new self($dollars, $currency);\n    }\n\n    public function add(Money $other): self\n    {\n        return new self($this->dollars + $other->dollars, $this->currency);\n    }\n\n    public function cents(): int\n    {\n        return (int) ($this->dollars * 100);\n    }\n\n    public function format(): string\n    {\n        // no fixed precision -> \"USD 3.35\" is not guaranteed, mismatch never thrown\n        return $this->currency . \" \" . $this->dollars;\n    }\n}\n"
+      }
+    }
+  ]
+}

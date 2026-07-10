@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_ruby_shipping_cost",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Asks the model to write Minitest tests for a Ruby shipping-cost calculator; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "ruby",
+    "testing",
+    "minitest"
+  ],
+  "prompts": [
+    "Shipping#cost in lib/shipping.rb (already correct, do not modify it) returns a cost in integer cents: it starts at a base of 500; for each FULL 1000g above the first 1000g it adds 100 (so 2500g adds 100, 3000g adds 200); and when called with express: true the whole total is doubled. Write Minitest tests at exactly test/shipping_test.rb (class ShippingTest < Minitest::Test) with at least 4 test methods that pin the EXACT integer cost for: a package at or below 1000g (base only); a package that incurs one extra-kilo surcharge; a package that incurs two extra-kilo surcharges; and an express package. Use assert_equal with the exact expected cents. Begin the file with `require \\\"minitest/autorun\\\"` and `require_relative \\\"../lib/shipping\\\"`."
+  ],
+  "setup_files": {
+    "lib/shipping.rb": "module App\n  class Shipping\n    # Cost in cents: base 500; plus 100 for each FULL 1000g over the first\n    # 1000g; doubled when express. Returns an integer.\n    def cost(weight_g, express: false)\n      total = 500\n      if weight_g > 1000\n        total += ((weight_g - 1000) / 1000) * 100\n      end\n      total *= 2 if express\n      total\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/shipping_test.rb",
+      "content_patterns": [
+        "minitest",
+        "assert_equal",
+        ".cost("
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 15
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"lib/shipping.rb\")\nTEST_CMD = \"ruby -Itest -Ilib test/shipping_test.rb\"\nMUTANTS = [\n    [[\"      total = 500\", \"      total = 400\"]],\n    [[\"        total += ((weight_g - 1000) / 1000) * 100\",\n      \"        total += ((weight_g - 1000) / 1000) * 150\"]],\n    [[\"      total *= 2 if express\", \"      total *= 3 if express\"]],\n]\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f\"protected implementation file {IMPL} was modified - the task said not to change it \"\n            f\"(anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately broken \"\n            f\"implementation, so they do not actually verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(\"PASS (tests pass on correct impl and kill all {n} mutants)\".format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test/shipping_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/shipping\"\n\nclass ShippingTest < Minitest::Test\n  def setup\n    @shipping = App::Shipping.new\n  end\n\n  def test_base_under_one_kilo\n    assert_equal 500, @shipping.cost(500)\n  end\n\n  def test_surcharge_for_extra_kilo\n    # 2500g -> 1 full kg over 1000g -> 500 + 100 = 600\n    assert_equal 600, @shipping.cost(2500)\n  end\n\n  def test_two_extra_kilos\n    # 3000g -> 2 full kg over 1000g -> 500 + 200 = 700\n    assert_equal 700, @shipping.cost(3000)\n  end\n\n  def test_express_doubles_total\n    assert_equal 1000, @shipping.cost(500, express: true)\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test/shipping_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/shipping\"\n\nclass ShippingTest < Minitest::Test\n  def setup\n    @shipping = App::Shipping.new\n  end\n\n  def test_returns_integer\n    assert_kind_of Integer, @shipping.cost(500)\n  end\n\n  def test_positive\n    assert @shipping.cost(2500) > 0\n  end\n\n  def test_express_not_cheaper\n    assert @shipping.cost(500, express: true) >= @shipping.cost(500)\n  end\nend\n"
+      }
+    }
+  ]
+}

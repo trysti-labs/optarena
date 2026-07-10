@@ -1,0 +1,48 @@
+{
+  "name": "fix_ruby_each_instead_of_map",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "description": "Fixes a Ruby method that uses `each` (returning the receiver) where it must `map` to build a transformed array",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "ruby",
+    "enumerable"
+  ],
+  "prompts": [
+    "Doubler#doubled in lib/doubler.rb should return a NEW array with every element doubled, preserving order. It uses `nums.each { |n| n * 2 }`, but Enumerable#each returns the original array (the block's value is discarded), so the numbers are never doubled. Fix it to return the doubled array (use map). Keep the class and method signature."
+  ],
+  "setup_files": {
+    "lib/doubler.rb": "module App\n  class Doubler\n    # Return a NEW array with every element doubled, in the same order.\n    # BUG: `each` runs the block for its side effects and returns the\n    # ORIGINAL array, so the elements are never actually doubled.\n    def doubled(nums)\n      nums.each { |n| n * 2 }\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/doubler.rb",
+      "content_patterns": [
+        "def doubled"
+      ],
+      "not_content_patterns": [
+        "nums.each { |n| n * 2 }"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/doubler_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/doubler\"\n\nclass DoublerHiddenTest < Minitest::Test\n  def test_doubles_each_element\n    assert_equal [2, 4, 6], App::Doubler.new.doubled([1, 2, 3])\n  end\n\n  def test_preserves_order\n    assert_equal [20, 4], App::Doubler.new.doubled([10, 2])\n  end\n\n  def test_empty\n    assert_equal [], App::Doubler.new.doubled([])\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/doubler_test.rb",
+  "reference_solution": {
+    "lib/doubler.rb": "module App\n  class Doubler\n    # Return a NEW array with every element doubled, in the same order.\n    def doubled(nums)\n      nums.map { |n| n * 2 }\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "reversed-order",
+      "files": {
+        "lib/doubler.rb": "module App\n  class Doubler\n    def doubled(nums)\n      nums.map { |n| n * 2 }.reverse\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

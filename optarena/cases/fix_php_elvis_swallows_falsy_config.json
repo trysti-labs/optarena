@@ -1,0 +1,49 @@
+{
+  "name": "fix_php_elvis_swallows_falsy_config",
+  "language": "php",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "description": "Fixes a PHP config getter that uses `?:` (elvis) and wrongly returns the default for stored falsy values",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "php",
+    "null-safety",
+    "type-juggling"
+  ],
+  "prompts": [
+    "Config::get in src/Config.php is documented to return the stored value for a key, and to return the caller's $default only when the key is ABSENT. It currently uses the elvis operator `?:`, which returns $default for any falsy stored value - so get(\"retries\", 3) wrongly returns 3 instead of the stored integer 0, and get(\"prefix\", \"x\") wrongly returns \"x\" instead of the stored empty string. Fix it (use the null-coalescing operator `??`, or array_key_exists) so a present key returns its stored value even when that value is falsy, while an absent key still returns $default. Keep the class and method signatures."
+  ],
+  "setup_files": {
+    "src/Config.php": "<?php\nnamespace App;\n\nclass Config\n{\n    /** @var array<string,mixed> */\n    private array $values = [\n        \"retries\" => 0,\n        \"prefix\" => \"\",\n        \"name\" => \"app\",\n    ];\n\n    // Return the stored value for $key. Only when $key is ABSENT should the\n    // caller-supplied $default be returned; a stored falsy value such as the\n    // integer 0 or the empty string \"\" must be returned as-is.\n    // BUG: the elvis operator `?:` returns $default for ANY falsy stored\n    // value, so get(\"retries\", 3) wrongly yields 3 instead of the stored 0.\n    public function get(string $key, $default = null)\n    {\n        return $this->values[$key] ?: $default;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Config.php",
+      "content_patterns": [
+        "function get"
+      ],
+      "not_content_patterns": [
+        "?: $default"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/ConfigHiddenTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Config.php';\n\nfinal class ConfigHiddenTest extends TestCase\n{\n    public function testPresentFalsyIntIsReturned(): void\n    {\n        $c = new \\App\\Config();\n        $this->assertSame(0, $c->get(\"retries\", 3));\n    }\n\n    public function testPresentEmptyStringIsReturned(): void\n    {\n        $c = new \\App\\Config();\n        $this->assertSame(\"\", $c->get(\"prefix\", \"x\"));\n    }\n\n    public function testPresentNormalValue(): void\n    {\n        $c = new \\App\\Config();\n        $this->assertSame(\"app\", $c->get(\"name\", \"?\"));\n    }\n\n    public function testAbsentKeyReturnsDefault(): void\n    {\n        $c = new \\App\\Config();\n        $this->assertSame(\"d\", $c->get(\"missing\", \"d\"));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/ConfigHiddenTest.php",
+  "reference_solution": {
+    "src/Config.php": "<?php\nnamespace App;\n\nclass Config\n{\n    /** @var array<string,mixed> */\n    private array $values = [\n        \"retries\" => 0,\n        \"prefix\" => \"\",\n        \"name\" => \"app\",\n    ];\n\n    // Return the stored value for $key. Only when $key is ABSENT should the\n    // caller-supplied $default be returned; a stored falsy value such as the\n    // integer 0 or the empty string \"\" must be returned as-is.\n    public function get(string $key, $default = null)\n    {\n        return $this->values[$key] ?? $default;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "returns-null-not-default",
+      "files": {
+        "src/Config.php": "<?php\nnamespace App;\n\nclass Config\n{\n    /** @var array<string,mixed> */\n    private array $values = [\n        \"retries\" => 0,\n        \"prefix\" => \"\",\n        \"name\" => \"app\",\n    ];\n\n    // Return the stored value for $key. Only when $key is ABSENT should the\n    // caller-supplied $default be returned; a stored falsy value such as the\n    // integer 0 or the empty string \"\" must be returned as-is.\n    public function get(string $key, $default = null)\n    {\n        return $this->values[$key] ?? null;\n    }\n}\n"
+      }
+    }
+  ]
+}

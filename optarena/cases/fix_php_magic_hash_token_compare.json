@@ -1,0 +1,52 @@
+{
+  "name": "fix_php_magic_hash_token_compare",
+  "language": "php",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes a PHP auth check that compares tokens with loose `==`, allowing a 'magic hash' scientific-notation bypass",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "php",
+    "security",
+    "auth",
+    "timing-safe",
+    "multi-file"
+  ],
+  "prompts": [
+    "TokenVerifier::verify in src/TokenVerifier.php is supposed to accept ONLY the exact stored token string, but it compares with the loose `==` operator. Because the stored token has the form \"0e\" followed by only digits, PHP reads it (and any other all-numeric \"0e...\" string) as 0 in scientific notation, so a crafted token compares equal and bypasses authentication (this is the classic PHP \"magic hash\" vulnerability). src/AuthGate.php calls this verifier. Fix verify() so only the exact stored token is accepted - use hash_equals() for a strictly-typed, constant-time comparison. Do not weaken any other behavior and keep the class and method signatures. You should not need to modify AuthGate.php."
+  ],
+  "setup_files": {
+    "src/TokenVerifier.php": "<?php\nnamespace App;\n\nclass TokenVerifier\n{\n    private string $token = \"0e462097431906509019562988736854\";\n\n    // Accept ONLY the exact stored token string.\n    // BUG: `==` does loose comparison. Both this token and other all-numeric\n    // \"0e...\" strings are read as 0 in scientific notation, so a crafted\n    // \"magic hash\" token compares equal and bypasses the check.\n    public function verify(string $provided): bool\n    {\n        return $provided == $this->token;\n    }\n}\n",
+    "src/AuthGate.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/TokenVerifier.php';\n\nclass AuthGate\n{\n    private TokenVerifier $verifier;\n\n    public function __construct(?TokenVerifier $verifier = null)\n    {\n        $this->verifier = $verifier ?? new TokenVerifier();\n    }\n\n    // Extract a bearer token from an Authorization header and authorize it.\n    public function authorize(string $authHeader): bool\n    {\n        if (strncmp($authHeader, \"Bearer \", 7) !== 0) {\n            return false;\n        }\n        $token = substr($authHeader, 7);\n        return $this->verifier->verify($token);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/TokenVerifier.php",
+      "content_patterns": [
+        "function verify"
+      ],
+      "not_content_patterns": [
+        "$provided == $this->token"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/AuthGateHiddenTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/AuthGate.php';\n\nfinal class AuthGateHiddenTest extends TestCase\n{\n    public function testCorrectTokenAuthorized(): void\n    {\n        $gate = new \\App\\AuthGate();\n        $this->assertTrue($gate->authorize(\"Bearer 0e462097431906509019562988736854\"));\n    }\n\n    public function testMagicHashTokenRejected(): void\n    {\n        // A different all-numeric \"0e...\" string must NOT be accepted.\n        $gate = new \\App\\AuthGate();\n        $this->assertFalse($gate->authorize(\"Bearer 0e000000000000000000000000000000000\"));\n    }\n\n    public function testWrongTokenRejected(): void\n    {\n        $gate = new \\App\\AuthGate();\n        $this->assertFalse($gate->authorize(\"Bearer totally-wrong\"));\n    }\n\n    public function testMissingBearerPrefixRejected(): void\n    {\n        $gate = new \\App\\AuthGate();\n        $this->assertFalse($gate->authorize(\"0e462097431906509019562988736854\"));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/AuthGateHiddenTest.php",
+  "reference_solution": {
+    "src/TokenVerifier.php": "<?php\nnamespace App;\n\nclass TokenVerifier\n{\n    private string $token = \"0e462097431906509019562988736854\";\n\n    // Accept ONLY the exact stored token string. hash_equals does a\n    // constant-time, strictly-typed comparison (no scientific-notation\n    // coercion, no \"magic hash\" bypass, no timing side channel).\n    public function verify(string $provided): bool\n    {\n        return hash_equals($this->token, $provided);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-loose-after-trim",
+      "files": {
+        "src/TokenVerifier.php": "<?php\nnamespace App;\n\nclass TokenVerifier\n{\n    private string $token = \"0e462097431906509019562988736854\";\n\n    public function verify(string $provided): bool\n    {\n        // still loose `==` after trimming -> magic-hash bypass survives\n        return trim($provided) == trim($this->token);\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "name": "refactor_ruby_extract_validation_module",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Extracts duplicated name-validation from two Ruby form classes into a shared mixin module, preserving behavior",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "ruby",
+    "refactoring",
+    "mixin",
+    "multi-file"
+  ],
+  "prompts": [
+    "lib/signup_form.rb and lib/profile_form.rb contain the same inline name validation (strip the value, then require it be non-empty AND at least 2 characters). Refactor to remove the duplication: create lib/validations.rb defining a module App::Validations with an instance method valid_name?(value) implementing exactly that rule, and have both form classes `include` it and call valid_name? instead of their inline copy. Do not change observable behavior - a 2-character name like \"Al\" must still be accepted and the returned strings (\"signed_up:...\", \"saved:...\", \"invalid\") must be unchanged. Neither form should still contain the inline `name.length < 2` check."
+  ],
+  "setup_files": {
+    "lib/signup_form.rb": "module App\n  class SignupForm\n    def initialize(name)\n      @name = name\n    end\n\n    def submit\n      # inline validation (duplicated in ProfileForm)\n      name = @name.to_s.strip\n      return \"invalid\" if name.empty? || name.length < 2\n      \"signed_up:#{name.downcase}\"\n    end\n  end\nend\n",
+    "lib/profile_form.rb": "module App\n  class ProfileForm\n    def initialize(name)\n      @name = name\n    end\n\n    def save\n      # inline validation (duplicated in SignupForm)\n      name = @name.to_s.strip\n      return \"invalid\" if name.empty? || name.length < 2\n      \"saved:#{name.downcase}\"\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/validations.rb",
+      "content_patterns": [
+        "valid_name?"
+      ]
+    },
+    {
+      "path_pattern": "**/signup_form.rb",
+      "content_patterns": [
+        "valid_name?"
+      ],
+      "not_content_patterns": [
+        "name.length < 2"
+      ]
+    },
+    {
+      "path_pattern": "**/profile_form.rb",
+      "content_patterns": [
+        "valid_name?"
+      ],
+      "not_content_patterns": [
+        "name.length < 2"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/refactor_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/signup_form\"\nrequire_relative \"../lib/profile_form\"\n\nclass RefactorHiddenTest < Minitest::Test\n  def test_signup_accepts_two_char_name\n    assert_equal \"signed_up:jo\", App::SignupForm.new(\" Jo \").submit\n  end\n\n  def test_signup_rejects_single_char\n    assert_equal \"invalid\", App::SignupForm.new(\"x\").submit\n  end\n\n  def test_profile_accepts_two_char_name\n    assert_equal \"saved:al\", App::ProfileForm.new(\"Al\").save\n  end\n\n  def test_profile_rejects_blank\n    assert_equal \"invalid\", App::ProfileForm.new(\"   \").save\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/refactor_test.rb",
+  "reference_solution": {
+    "lib/validations.rb": "module App\n  module Validations\n    # Extracted shared rule: a name is valid when, after stripping, it is\n    # non-empty and at least 2 characters long.\n    def valid_name?(value)\n      name = value.to_s.strip\n      !name.empty? && name.length >= 2\n    end\n  end\nend\n",
+    "lib/signup_form.rb": "require_relative \"validations\"\n\nmodule App\n  class SignupForm\n    include Validations\n\n    def initialize(name)\n      @name = name\n    end\n\n    def submit\n      return \"invalid\" unless valid_name?(@name)\n      \"signed_up:#{@name.to_s.strip.downcase}\"\n    end\n  end\nend\n",
+    "lib/profile_form.rb": "require_relative \"validations\"\n\nmodule App\n  class ProfileForm\n    include Validations\n\n    def initialize(name)\n      @name = name\n    end\n\n    def save\n      return \"invalid\" unless valid_name?(@name)\n      \"saved:#{@name.to_s.strip.downcase}\"\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "rule-drifted-min-length-3",
+      "files": {
+        "lib/validations.rb": "module App\n  module Validations\n    def valid_name?(value)\n      name = value.to_s.strip\n      !name.empty? && name.length >= 3\n    end\n  end\nend\n",
+        "lib/signup_form.rb": "require_relative \"validations\"\n\nmodule App\n  class SignupForm\n    include Validations\n\n    def initialize(name)\n      @name = name\n    end\n\n    def submit\n      return \"invalid\" unless valid_name?(@name)\n      \"signed_up:#{@name.to_s.strip.downcase}\"\n    end\n  end\nend\n",
+        "lib/profile_form.rb": "require_relative \"validations\"\n\nmodule App\n  class ProfileForm\n    include Validations\n\n    def initialize(name)\n      @name = name\n    end\n\n    def save\n      return \"invalid\" unless valid_name?(@name)\n      \"saved:#{@name.to_s.strip.downcase}\"\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

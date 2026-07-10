@@ -91,6 +91,8 @@ DOCKER_IMAGES: dict[str, str] = {
     "go": "optarena-tester-go:latest",
     "rust": "optarena-tester-rust:latest",
     "dotnet": "optarena-tester-dotnet:latest",
+    "php": "optarena-tester-php:latest",
+    "ruby": "optarena-tester-ruby:latest",
 }
 
 

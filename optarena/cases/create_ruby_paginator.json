@@ -1,0 +1,54 @@
+{
+  "name": "create_ruby_paginator",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Creates a Ruby Paginator (ceil page count, page clamping) consumed by an existing Api class (cross-file)",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "pagination",
+    "multi-file"
+  ],
+  "prompts": [
+    "lib/api.rb already exists and calls App::Paginator.new(items, per_page).page(n). Create lib/paginator.rb defining class App::Paginator so the Api works. Requirements: initialize(items, per_page); total_pages returns the number of pages using ceiling division (e.g. 5 items at 2 per page => 3 pages) and is at least 1 even for an empty list; page(n) returns a hash with keys :items (the slice of items for that page), :page (the effective page number), :total_pages, and :total (the item count). The requested page number must be CLAMPED into the range 1..total_pages - asking for page 99 returns the last page, asking for page 0 returns the first. Do not modify lib/api.rb."
+  ],
+  "setup_files": {
+    "lib/api.rb": "require_relative \"paginator\"\n\nmodule App\n  class Api\n    def initialize(items)\n      @items = items\n    end\n\n    # Page size is fixed at 2 for this endpoint.\n    def list(page)\n      Paginator.new(@items, 2).page(page)\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/paginator.rb",
+      "content_patterns": [
+        "class paginator",
+        "def page",
+        "total_pages"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/paginator_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/api\"\n\nclass PaginatorHiddenTest < Minitest::Test\n  def setup\n    @api = App::Api.new(%w[a b c d e])\n  end\n\n  def test_first_page\n    assert_equal({ items: %w[a b], page: 1, total_pages: 3, total: 5 }, @api.list(1))\n  end\n\n  def test_middle_page\n    assert_equal({ items: %w[c d], page: 2, total_pages: 3, total: 5 }, @api.list(2))\n  end\n\n  def test_last_partial_page\n    assert_equal({ items: %w[e], page: 3, total_pages: 3, total: 5 }, @api.list(3))\n  end\n\n  def test_over_last_page_is_clamped\n    assert_equal({ items: %w[e], page: 3, total_pages: 3, total: 5 }, @api.list(99))\n  end\n\n  def test_below_first_page_is_clamped\n    assert_equal({ items: %w[a b], page: 1, total_pages: 3, total: 5 }, @api.list(0))\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/paginator_test.rb",
+  "reference_solution": {
+    "lib/paginator.rb": "module App\n  class Paginator\n    def initialize(items, per_page)\n      @items = items\n      @per_page = per_page\n    end\n\n    def total_pages\n      return 1 if @items.empty?\n      (@items.size.to_f / @per_page).ceil\n    end\n\n    def page(n)\n      tp = total_pages\n      p = n < 1 ? 1 : (n > tp ? tp : n)\n      start = (p - 1) * @per_page\n      {\n        items: @items.slice(start, @per_page) || [],\n        page: p,\n        total_pages: tp,\n        total: @items.size,\n      }\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-page-clamping",
+      "files": {
+        "lib/paginator.rb": "module App\n  class Paginator\n    def initialize(items, per_page)\n      @items = items\n      @per_page = per_page\n    end\n\n    def total_pages\n      return 1 if @items.empty?\n      (@items.size.to_f / @per_page).ceil\n    end\n\n    def page(n)\n      start = (n - 1) * @per_page\n      {\n        items: @items.slice(start, @per_page) || [],\n        page: n,\n        total_pages: total_pages,\n        total: @items.size,\n      }\n    end\n  end\nend\n"
+      }
+    },
+    {
+      "name": "floor-total-pages",
+      "files": {
+        "lib/paginator.rb": "module App\n  class Paginator\n    def initialize(items, per_page)\n      @items = items\n      @per_page = per_page\n    end\n\n    def total_pages\n      return 1 if @items.empty?\n      @items.size / @per_page\n    end\n\n    def page(n)\n      tp = total_pages\n      p = n < 1 ? 1 : (n > tp ? tp : n)\n      start = (p - 1) * @per_page\n      {\n        items: @items.slice(start, @per_page) || [],\n        page: p,\n        total_pages: tp,\n        total: @items.size,\n      }\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

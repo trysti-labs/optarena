@@ -1,0 +1,51 @@
+{
+  "name": "fix_ruby_yaml_unsafe_load",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes a Ruby config loader using YAML.unsafe_load (arbitrary object instantiation) to use safe_load",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "ruby",
+    "security",
+    "deserialization",
+    "multi-file"
+  ],
+  "prompts": [
+    "ConfigLoader.load in lib/config_loader.rb parses a YAML config string, but it uses YAML.unsafe_load, which instantiates arbitrary Ruby objects named by !ruby/object tags in the input - so an untrusted config can drive object construction (a remote-code-execution foothold). lib/app_config.rb calls this loader. Fix load() so it only accepts plain data (hashes, arrays, strings, numbers, booleans) and refuses !ruby/object payloads - use YAML.safe_load. Plain configs like \"name: app\" must still parse normally. Keep the method name and signature; you should not need to modify app_config.rb."
+  ],
+  "setup_files": {
+    "lib/config_loader.rb": "require \"yaml\"\n\nmodule App\n  class ConfigLoader\n    # Parse a YAML config string into plain data.\n    # BUG: unsafe_load will instantiate arbitrary Ruby objects named by\n    # !ruby/object tags in the input - an untrusted config can trigger\n    # object construction (a remote-code-execution foothold). Only plain\n    # data (hashes, arrays, strings, numbers, booleans) should be allowed.\n    def self.load(text)\n      YAML.unsafe_load(text)\n    end\n  end\nend\n",
+    "lib/app_config.rb": "require_relative \"config_loader\"\n\nmodule App\n  class AppConfig\n    def self.from_yaml(text)\n      data = ConfigLoader.load(text)\n      { name: data[\"name\"], port: data[\"port\"] }\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/config_loader.rb",
+      "content_patterns": [
+        "def self.load"
+      ],
+      "not_content_patterns": [
+        "unsafe_load"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/config_loader_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/app_config\"\n\n# A stand-in for any class an attacker might name in a !ruby/object payload.\nclass Gadget\n  attr_accessor :pwned\nend\n\nclass ConfigLoaderSecurityTest < Minitest::Test\n  def test_plain_config_loads\n    cfg = App::AppConfig.from_yaml(\"name: app\\nport: 8080\\n\")\n    assert_equal({ name: \"app\", port: 8080 }, cfg)\n  end\n\n  def test_rejects_ruby_object_payload\n    payload = \"--- !ruby/object:Gadget\\npwned: true\\n\"\n    assert_raises(StandardError) { App::ConfigLoader.load(payload) }\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/config_loader_test.rb",
+  "reference_solution": {
+    "lib/config_loader.rb": "require \"yaml\"\n\nmodule App\n  class ConfigLoader\n    # Parse a YAML config string into plain data only. safe_load refuses\n    # !ruby/object tags, so an untrusted config cannot instantiate arbitrary\n    # Ruby objects.\n    def self.load(text)\n      YAML.safe_load(text)\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "permits-arbitrary-classes",
+      "files": {
+        "lib/config_loader.rb": "require \"yaml\"\n\nmodule App\n  class ConfigLoader\n    def self.load(text)\n      YAML.safe_load(text, permitted_classes: [Gadget, Symbol], aliases: true)\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}
