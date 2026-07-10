@@ -1,0 +1,48 @@
+{
+  "name": "fix_kotlin_toint_crashes_on_bad_input",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Fixes a parser that uses String.toInt() (throws on non-numeric) instead of skipping invalid tokens",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "kotlin",
+    "bug_fix",
+    "parsing",
+    "idiom"
+  ],
+  "prompts": [
+    "Parser.parseInts in src/main/kotlin/com/optarena/app/Parser.kt should return the integers parsed from the given tokens, in order, SKIPPING any token that is not a valid integer. It's broken: `tokens.map { it.trim().toInt() }` throws NumberFormatException on the first non-numeric token (like \"x\" or an empty string) instead of skipping it, so one bad token aborts the whole parse. Fix parseInts to skip invalid tokens and keep the valid ones in order. Keep the object name and the parseInts(tokens: List<String>): List<Int> signature. The file declares package com.optarena.app."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Parser.kt": "package com.optarena.app\n\nobject Parser {\n    // Parse the integers out of the tokens, in order, skipping invalid ones.\n    // BUG: toInt() throws on the first non-numeric token instead of skipping.\n    fun parseInts(tokens: List<String>): List<Int> {\n        return tokens.map { it.trim().toInt() }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Parser.kt",
+      "content_patterns": [
+        "fun parseints"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/ParserTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass ParserTest {\n\n    @Test\n    fun parsesValidIntegers() {\n        assertEquals(listOf(1, 2, 3), Parser.parseInts(listOf(\"1\", \" 2 \", \"3\")))\n    }\n\n    @Test\n    fun skipsInvalidTokens() {\n        assertEquals(listOf(1, 3), Parser.parseInts(listOf(\"1\", \"x\", \"3\", \"\")))\n    }\n\n    @Test\n    fun allInvalidIsEmpty() {\n        assertEquals(emptyList<Int>(), Parser.parseInts(listOf(\"a\", \"b\", \"--\")))\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=ParserTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Parser.kt": "package com.optarena.app\n\nobject Parser {\n    fun parseInts(tokens: List<String>): List<Int> {\n        return tokens.mapNotNull { it.trim().toIntOrNull() }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "invalid-becomes-zero",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Parser.kt": "package com.optarena.app\n\nobject Parser {\n    // Stops throwing but substitutes 0 for invalid tokens instead of skipping.\n    fun parseInts(tokens: List<String>): List<Int> {\n        return tokens.map { it.trim().toIntOrNull() ?: 0 }\n    }\n}\n"
+      }
+    }
+  ]
+}

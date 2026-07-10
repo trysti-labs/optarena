@@ -1,0 +1,48 @@
+{
+  "name": "fix_kotlin_integer_division_average",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Fixes an average that does Int/Int integer division and truncates before converting to Double",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "kotlin",
+    "bug_fix",
+    "integer-division",
+    "idiom"
+  ],
+  "prompts": [
+    "Stats.average in src/main/kotlin/com/optarena/app/Stats.kt should return the arithmetic mean of the given integers as a Double. It's broken: it computes `sum / xs.size` where both operands are Int, so Kotlin does integer division and truncates the fractional part BEFORE the result is widened to Double - average([1,2,3,4]) returns 2.0 instead of 2.5. Fix average to compute the true fractional mean (convert to Double before dividing), and return 0.0 for an empty list (do not divide by zero). Keep the object name and the average(xs: List<Int>): Double signature. The file declares package com.optarena.app."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Stats.kt": "package com.optarena.app\n\nobject Stats {\n    // Arithmetic mean as a Double.\n    // BUG: sum and size are Int, so `sum / xs.size` truncates via integer\n    // division before the .toDouble() widening.\n    fun average(xs: List<Int>): Double {\n        val sum = xs.sum()\n        return (sum / xs.size).toDouble()\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Stats.kt",
+      "content_patterns": [
+        "fun average"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/StatsTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass StatsTest {\n\n    @Test\n    fun fractionalAverage() {\n        assertEquals(2.5, Stats.average(listOf(1, 2, 3, 4)), 1e-9)\n    }\n\n    @Test\n    fun repeatingAverage() {\n        assertEquals(10.0 / 3.0, Stats.average(listOf(3, 3, 4)), 1e-9)\n    }\n\n    @Test\n    fun wholeNumberAverage() {\n        assertEquals(3.0, Stats.average(listOf(2, 4)), 1e-9)\n    }\n\n    @Test\n    fun emptyIsZero() {\n        assertEquals(0.0, Stats.average(emptyList()), 1e-9)\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=StatsTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Stats.kt": "package com.optarena.app\n\nobject Stats {\n    fun average(xs: List<Int>): Double {\n        if (xs.isEmpty()) return 0.0\n        return xs.sum().toDouble() / xs.size\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-empty-guard-nan",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Stats.kt": "package com.optarena.app\n\nobject Stats {\n    // Fixes the truncation but drops the empty-list guard: 0.0 / 0 -> NaN.\n    fun average(xs: List<Int>): Double {\n        return xs.sum().toDouble() / xs.size\n    }\n}\n"
+      }
+    }
+  ]
+}

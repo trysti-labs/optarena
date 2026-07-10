@@ -1,0 +1,48 @@
+{
+  "name": "fix_kotlin_xxe_xml_parser",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Fixes an XXE vulnerability: DocumentBuilderFactory resolves external SYSTEM entities in untrusted XML",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "kotlin",
+    "security",
+    "xxe",
+    "xml"
+  ],
+  "prompts": [
+    "XmlConfigParser.rootText in src/main/kotlin/com/optarena/app/XmlConfigParser.kt parses an untrusted XML string and returns the text content of its root element. It builds a DocumentBuilderFactory with default settings, which resolves external entities - so a DOCTYPE declaring a SYSTEM entity (an XXE attack) can read local files or reach internal URLs. Fix rootText so external entities are never resolved: disable DOCTYPE declarations entirely (set the feature \"http://apache.org/xml/features/disallow-doctype-decl\" to true on the factory). A normal document like <value>hello</value> must still parse and return \"hello\". Keep the object name and the rootText(xml: String): String signature. The file declares package com.optarena.app."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/XmlConfigParser.kt": "package com.optarena.app\n\nimport java.io.ByteArrayInputStream\nimport javax.xml.parsers.DocumentBuilderFactory\n\nobject XmlConfigParser {\n    // Return the text content of the root element of an XML config string.\n    // BUG: the default DocumentBuilderFactory resolves external entities, so\n    // a DOCTYPE with a SYSTEM entity (XXE) can read local files / SSRF.\n    fun rootText(xml: String): String {\n        val factory = DocumentBuilderFactory.newInstance()\n        val builder = factory.newDocumentBuilder()\n        val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))\n        return doc.documentElement.textContent\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/XmlConfigParser.kt",
+      "content_patterns": [
+        "fun roottext"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/XmlConfigParserTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertFalse\nimport org.junit.jupiter.api.Test\nimport java.io.File\n\nclass XmlConfigParserTest {\n\n    @Test\n    fun parsesPlainXml() {\n        assertEquals(\"hello\", XmlConfigParser.rootText(\"<value>hello</value>\"))\n    }\n\n    @Test\n    fun doesNotResolveExternalEntities() {\n        File(\"secret.txt\").writeText(\"TOPSECRET-XYZ\")\n        val payload =\n            \"<?xml version=\\\"1.0\\\"?><!DOCTYPE v [<!ENTITY x SYSTEM \\\"file:secret.txt\\\">]><value>&x;</value>\"\n        val leaked = try {\n            XmlConfigParser.rootText(payload)\n        } catch (e: Exception) {\n            // A safe parser rejects the DOCTYPE outright; that is acceptable.\n            \"\"\n        }\n        assertFalse(\n            leaked.contains(\"TOPSECRET\"),\n            \"XXE: the external SYSTEM entity was resolved and leaked file contents\"\n        )\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=XmlConfigParserTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/XmlConfigParser.kt": "package com.optarena.app\n\nimport java.io.ByteArrayInputStream\nimport javax.xml.parsers.DocumentBuilderFactory\n\nobject XmlConfigParser {\n    fun rootText(xml: String): String {\n        val factory = DocumentBuilderFactory.newInstance()\n        // Refuse DOCTYPE declarations entirely: no DTD, so no external entities.\n        factory.setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true)\n        val builder = factory.newDocumentBuilder()\n        val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))\n        return doc.documentElement.textContent\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "cosmetic-hardening-only",
+      "files": {
+        "src/main/kotlin/com/optarena/app/XmlConfigParser.kt": "package com.optarena.app\n\nimport java.io.ByteArrayInputStream\nimport javax.xml.parsers.DocumentBuilderFactory\n\nobject XmlConfigParser {\n    // INCOMPLETE FIX: toggles unrelated hardening knobs but never disables\n    // external entities, so the SYSTEM entity (XXE) still resolves.\n    fun rootText(xml: String): String {\n        val factory = DocumentBuilderFactory.newInstance()\n        factory.isNamespaceAware = true\n        factory.isValidating = false\n        factory.isXIncludeAware = false\n        val builder = factory.newDocumentBuilder()\n        val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))\n        return doc.documentElement.textContent\n    }\n}\n"
+      }
+    }
+  ]
+}
