@@ -1,0 +1,47 @@
+{
+  "name": "fix_python_mass_assignment",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes a mass-assignment privilege escalation: update_user copies every key from an untrusted body onto the user",
+  "difficulty": 1,
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "mass-assignment",
+    "authorization"
+  ],
+  "prompts": [
+    "update_user(user, data) in users.py applies an untrusted request body (data) to a User by doing setattr for EVERY key in data. That is a mass-assignment vulnerability: a request can set role='admin' to escalate privileges, or set any arbitrary attribute. Fix update_user to only apply an allowlist of user-editable fields - name and email - and ignore every other key (including role and any unknown attribute). Keep the User class and the update_user(user, data) signature."
+  ],
+  "setup_files": {
+    "users.py": "class User:\n    def __init__(self, name, email):\n        self.name = name\n        self.email = email\n        self.role = \"user\"\n\n\ndef update_user(user, data):\n    \"\"\"Apply request-body updates to user.\n\n    BUG: mass assignment - copies EVERY key from the untrusted body, so a\n    request can set role='admin' or any other attribute.\n    \"\"\"\n    for key, value in data.items():\n        setattr(user, key, value)\n    return user\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "users.py",
+      "content_patterns": [
+        "def update_user"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_users.py": "from users import User, update_user\n\n\ndef test_updates_allowed_fields():\n    user = update_user(User(\"Ada\", \"a@b.com\"), {\"name\": \"Ada Lovelace\", \"email\": \"ada@x.io\"})\n    assert user.name == \"Ada Lovelace\"\n    assert user.email == \"ada@x.io\"\n\n\ndef test_ignores_role_escalation():\n    user = update_user(User(\"Ada\", \"a@b.com\"), {\"name\": \"X\", \"role\": \"admin\"})\n    assert user.role == \"user\"\n    assert user.name == \"X\"\n\n\ndef test_ignores_arbitrary_attributes():\n    user = update_user(User(\"Ada\", \"a@b.com\"), {\"is_staff\": True, \"password_hash\": \"x\"})\n    assert not hasattr(user, \"is_staff\")\n    assert not hasattr(user, \"password_hash\")\n"
+  },
+  "check_command": "python3 -m pytest -q test_users.py",
+  "reference_solution": {
+    "users.py": "class User:\n    def __init__(self, name, email):\n        self.name = name\n        self.email = email\n        self.role = \"user\"\n\n\n_EDITABLE_FIELDS = (\"name\", \"email\")\n\n\ndef update_user(user, data):\n    \"\"\"Apply only allowlisted, user-editable fields from the request body.\"\"\"\n    for key in _EDITABLE_FIELDS:\n        if key in data:\n            setattr(user, key, data[key])\n    return user\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "blocklists-role-only",
+      "files": {
+        "users.py": "class User:\n    def __init__(self, name, email):\n        self.name = name\n        self.email = email\n        self.role = \"user\"\n\n\ndef update_user(user, data):\n    # INCOMPLETE FIX: denies 'role' but still copies every other key, so an\n    # attacker can set arbitrary attributes (is_staff, password_hash, ...).\n    for key, value in data.items():\n        if key == \"role\":\n            continue\n        setattr(user, key, value)\n    return user\n"
+      }
+    }
+  ]
+}

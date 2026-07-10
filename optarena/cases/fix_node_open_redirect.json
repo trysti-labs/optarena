@@ -1,0 +1,48 @@
+{
+  "name": "fix_node_open_redirect",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes an open redirect: a 'next' target is trusted if it merely starts with '/', allowing //evil.com",
+  "difficulty": 1,
+  "task_type": "security",
+  "tags": [
+    "javascript",
+    "node",
+    "security",
+    "open-redirect",
+    "validation"
+  ],
+  "prompts": [
+    "safeRedirectTarget(target) in redirect.js sanitizes a user-supplied post-login 'next' path, returning '/' when the target is unsafe. It only checks `target.startsWith('/')`, which is an open redirect: protocol-relative URLs like '//evil.com' and backslash tricks like '/\\\\evil.com' start with '/' but browsers treat them as absolute off-site URLs. Fix safeRedirectTarget so it returns target ONLY when it is a safe same-site relative path: it must be a non-empty string that starts with a single '/', and must NOT start with '//' or '/\\\\'. Otherwise return '/'. Keep the module export and the safeRedirectTarget(target) signature."
+  ],
+  "setup_files": {
+    "redirect.js": "function safeRedirectTarget(target) {\n  // BUG: only checks for a leading '/', so '//evil.com' and '/\\\\evil.com'\n  // (which browsers treat as absolute) are trusted -> open redirect.\n  if (target && target.startsWith('/')) {\n    return target;\n  }\n  return '/';\n}\n\nmodule.exports = { safeRedirectTarget };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "redirect.js",
+      "content_patterns": [
+        "function saferedirecttarget"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('node:assert');\nconst { safeRedirectTarget } = require('./redirect.js');\n\n// safe same-site paths pass through\nassert.strictEqual(safeRedirectTarget('/dashboard'), '/dashboard');\nassert.strictEqual(safeRedirectTarget('/a/b?x=1'), '/a/b?x=1');\n\n// off-site tricks are rejected\nassert.strictEqual(safeRedirectTarget('//evil.com'), '/', 'protocol-relative //host not blocked');\nassert.strictEqual(safeRedirectTarget('/\\\\evil.com'), '/', 'backslash /\\\\host not blocked');\nassert.strictEqual(safeRedirectTarget('https://evil.com'), '/');\n\n// junk / empty defaults to '/'\nassert.strictEqual(safeRedirectTarget(''), '/');\nassert.strictEqual(safeRedirectTarget(undefined), '/');\nassert.strictEqual(safeRedirectTarget('relative'), '/');\n\nconsole.log('ok');\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "redirect.js": "function safeRedirectTarget(target) {\n  if (typeof target !== 'string' || target.length === 0) {\n    return '/';\n  }\n  if (!target.startsWith('/')) {\n    return '/';\n  }\n  if (target.startsWith('//') || target.startsWith('/\\\\')) {\n    return '/';\n  }\n  return target;\n}\n\nmodule.exports = { safeRedirectTarget };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "blocks-double-slash-not-backslash",
+      "files": {
+        "redirect.js": "function safeRedirectTarget(target) {\n  // INCOMPLETE FIX: blocks '//host' but misses the '/\\\\host' backslash variant.\n  if (typeof target !== 'string' || !target.startsWith('/')) {\n    return '/';\n  }\n  if (target.startsWith('//')) {\n    return '/';\n  }\n  return target;\n}\n\nmodule.exports = { safeRedirectTarget };\n"
+      }
+    }
+  ]
+}

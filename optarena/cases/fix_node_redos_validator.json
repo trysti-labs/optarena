@@ -1,0 +1,51 @@
+{
+  "name": "fix_node_redos_validator",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Fixes a ReDoS: a slug validator regex with nested quantifiers backtracks exponentially on crafted input",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "javascript",
+    "node",
+    "security",
+    "redos",
+    "regex"
+  ],
+  "prompts": [
+    "isValidSlug(s) in validate.js should accept a slug of one or more lowercase ASCII letters (the whole string, a-z only). It uses the regex /^([a-z]+)+$/, whose nested quantifiers cause catastrophic backtracking: a crafted input like many letters followed by a non-letter takes exponential time (a ReDoS denial of service). Fix the regex so validation runs in linear time while accepting EXACTLY the same strings (one or more lowercase a-z letters, anchored to the whole string). Do not keep the nested-quantifier group. Keep the module export and the isValidSlug(s) signature."
+  ],
+  "setup_files": {
+    "validate.js": "function isValidSlug(s) {\n  // BUG: nested quantifiers /^([a-z]+)+$/ backtrack exponentially on a long\n  // non-matching input (ReDoS).\n  return /^([a-z]+)+$/.test(s);\n}\n\nmodule.exports = { isValidSlug };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "validate.js",
+      "content_patterns": [
+        "function isvalidslug"
+      ],
+      "not_content_patterns": [
+        "([a-z]+)+"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('node:assert');\nconst { isValidSlug } = require('./validate.js');\n\n// correctness: exactly one-or-more lowercase letters, whole string\nassert.strictEqual(isValidSlug('hello'), true);\nassert.strictEqual(isValidSlug('a'), true);\nassert.strictEqual(isValidSlug(''), false);\nassert.strictEqual(isValidSlug('ab1'), false);\nassert.strictEqual(isValidSlug('AB'), false);\nassert.strictEqual(isValidSlug('a-b'), false);\n\n// ReDoS: a crafted non-matching input must be rejected quickly, not hang\nconst evil = 'a'.repeat(28) + '!';\nconst t0 = Date.now();\nconst result = isValidSlug(evil);\nconst elapsedMs = Date.now() - t0;\nassert.strictEqual(result, false);\nassert.ok(\n  elapsedMs < 1500,\n  `isValidSlug took ${elapsedMs}ms on a crafted input - catastrophic backtracking (ReDoS)`\n);\n\nconsole.log('ok');\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "validate.js": "function isValidSlug(s) {\n  return /^[a-z]+$/.test(s);\n}\n\nmodule.exports = { isValidSlug };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unanchored-accepts-invalid",
+      "files": {
+        "validate.js": "function isValidSlug(s) {\n  // INCOMPLETE FIX: linear (no ReDoS) but unanchored, so it matches a\n  // lowercase run anywhere and wrongly accepts 'ab1'.\n  return /[a-z]+/.test(s);\n}\n\nmodule.exports = { isValidSlug };\n"
+      }
+    }
+  ]
+}
