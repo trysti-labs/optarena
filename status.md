@@ -1,6 +1,6 @@
 # OptArena Status
 
-_As of 2026-07-10, HEAD `c120933` on `main` (pushed to github.com/trysti-labs/optarena)._
+_As of 2026-07-10, HEAD `a8d20cd` on `main` (pushed to github.com/trysti-labs/optarena)._
 
 ## Where things stand
 
@@ -8,16 +8,16 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-328 cases**, all new cases shipped with a `reference_solution` and
+334 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
 `verify-corpus` against the real Docker sandboxes before commit.
 
-## Corpus census (328 cases)
+## Corpus census (334 cases)
 
 | | |
 |---|---|
-| Total cases | **328** (target 500, 66%) |
-| With `reference_solution` | 224 (68%; 100% of the 208 added this expansion) |
+| Total cases | **334** (target 500, 67%) |
+| With `reference_solution` | 230 (69%; 100% of the 214 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) — all in the GHCR publish matrix |
 
@@ -27,7 +27,7 @@ shell 10, c 7, hcl 5, cpp 3, **dockerfile 1**, **makefile 1** — plus 7
 language-neutral devops cases.
 
 **By task type:** bug_fix 95, feature 72, refactoring 41, security 38,
-testing 31, performance 23, devops 16, data_engineering 12.
+testing 37, performance 23, devops 16, data_engineering 12.
 
 ## Waves shipped (chronology)
 
@@ -43,6 +43,7 @@ Since then:
 | **Rebalance** — devops breadth | 1 | 310 → 316 | Batch 11: Dockerfile hardening, Kubernetes Deployment (probes/limits/non-root), GitHub Actions least-privilege permissions, GitHub Actions caching+concurrency, Compose `service_healthy`, Makefile `.PHONY` — all structural / real-`make` on the base image; devops 10 → 16 |
 | **Rebalance** — refactoring breadth | 1 | 316 → 322 | Batch 12: six varied refactor shapes across six langs, each with a behavior-*drift* broken: Python if/elif→dict-dispatch and class→`@dataclass`, JS `.then`-chain→async/await, Go switch→table-driven, SQL correlated-subquery→LEFT JOIN, C# loop→LINQ; refactoring 35 → 41 |
 | **Rebalance** — security families | 1 | 322 → 328 | Batch 13: six new vuln families, each with a realistic *incomplete-fix* broken — JWT signature-not-verified/alg:none, SSRF host allowlist (ipaddress), Python mass-assignment, secrets-in-logs (nested redaction), open redirect (`//` and `/\`), ReDoS validator (nested-quantifier backtracking); security 32 → 38 |
+| **Rebalance** — testing breadth | 1 | 328 → 334 | Batch 14: six mutation-checked cases on distinct functions (Luhn, Roman numerals, password policy, time-ago, semver compare, median) across go/python/php/ruby/node; testing 31 → 37. verify-corpus caught a stale-`__pycache__` mutation-survival bug and the php-image-has-no-python3 issue pre-commit |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -66,13 +67,15 @@ explicit `unmodified` broken so doing nothing fails.
 ## Quality gates in practice
 
 `verify-corpus` (the plan's [non-negotiable gate](CORPUS_EXPANSION_PLAN.md#quality-gates-non-negotiable-or-500-cases-make-the-corpus-worse))
-has now caught **~26 authoring defects pre-commit** across the expansion —
+has now caught **~29 authoring defects pre-commit** across the expansion —
 broken variants that weren't actually broken, perf budgets the slow code
 beat, a csproj glob compiling tests into the app, a `filter_var` "drift"
-that didn't drift, the fnmatch `**/x.go` root-level-file miss (Go batch), and
-a Python sessionization "no-sort" broken that passed because the test's
-unsorted input was accidentally already per-user ascending (fixed by
-interleaving one user's events out of order).
+that didn't drift, the fnmatch `**/x.go` root-level-file miss (Go batch), a
+Python sessionization "no-sort" broken that passed because the test's unsorted
+input was accidentally already per-user ascending, a mutation harness reusing
+a stale `__pycache__` so mutants "survived" (fixed with
+`PYTHONDONTWRITEBYTECODE=1`), and a PHP testing case whose python3 harness
+didn't run because the php sandbox has no python3 (rewritten PHP-native).
 None shipped. The batch-4-8 perf cases were each pre-calibrated in-container
 (measuring the naive-vs-fast gap) so the chosen budget busts the slow path
 with margin even on faster native hardware — for the compiled Rust/C# cases
@@ -83,7 +86,7 @@ which rejects the Apache feature-flag knobs outright — hence the cosmetic-
 hardening incomplete-fix. New-image batches additionally smoke-test the
 offline toolchain in-container *before* any case is authored.
 
-## Remaining to 500 (172 cases)
+## Remaining to 500 (166 cases)
 
 Per the plan's [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies):
 
@@ -97,10 +100,10 @@ Per the plan's [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-or
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
 Rebalance note: **bug_fix is at target (95/95) — stop adding it.** After the
-devops (batch 11 → 16/45), refactoring (batch 12 → 41/70) and security
-(batch 13 → 38/55) pushes, the categories still furthest behind are
-**testing (31/65), performance (23/45), devops (16/45), feature (72/95), and
-refactoring (41/70)**; data_engineering (12/15) and security (38/55) are
-closing in. Next levers: more mutation-checked testing, further devops/CI
-breadth, calibrated performance cases, and the cross-file feature shift of
-Wave B/E.
+devops (16/45), refactoring (41/70), security (38/55) and testing (batch 14 →
+37/65) pushes, the categories still furthest behind are **performance
+(23/45), devops (16/45), feature (72/95), testing (37/65), and refactoring
+(41/70)**; data_engineering (12/15) and security (38/55) are closing in. Next
+levers: calibrated performance cases, further devops/CI breadth, the cross-
+file feature shift of Wave B/E, and starting the L3 repo-scale work (blocked
+on the `setup_repo`/`git_init` schema fields).
