@@ -1,0 +1,50 @@
+{
+  "name": "fix_python_unsafe_pickle_load",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes unsafe deserialization: pickle.loads on an untrusted session blob executes arbitrary code",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "deserialization",
+    "pickle"
+  ],
+  "prompts": [
+    "SessionStore.decode in session_store.py restores a session blob (bytes) back into a dict. It calls pickle.loads on the untrusted blob, and unpickling executes code embedded in the payload (via __reduce__) - a remote code execution foothold. The session format is now JSON: blobs are produced with json.dumps(...).encode('utf-8'). Rewrite decode to parse the blob as JSON (json.loads) and return the resulting dict, so an untrusted blob can never execute code. Do NOT keep a pickle fallback. A legitimate JSON blob must still decode to the same dict. Keep the class name and the decode(self, blob) signature; the module already imports json."
+  ],
+  "setup_files": {
+    "session_store.py": "import json\nimport pickle\n\n\nclass SessionStore:\n    def decode(self, blob):\n        \"\"\"Restore a session blob (bytes) into a dict.\"\"\"\n        # BUG: pickle.loads on untrusted bytes executes code embedded in the\n        # payload (via __reduce__) - a remote code execution foothold.\n        return pickle.loads(blob)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "session_store.py",
+      "content_patterns": [
+        "def decode"
+      ],
+      "not_content_patterns": [
+        "pickle.loads"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_session_store.py": "import json\nimport pickle\n\nfrom session_store import SessionStore\n\nTRIPPED = {\"v\": False}\n\n\ndef _trip():\n    TRIPPED[\"v\"] = True\n    return 0\n\n\nclass Gadget:\n    # Simulates an attacker gadget: pickle calls __reduce__ on load.\n    def __reduce__(self):\n        return (_trip, ())\n\n\ndef test_decodes_json_dict():\n    blob = json.dumps({\"user\": \"ada\", \"role\": \"admin\"}).encode(\"utf-8\")\n    assert SessionStore().decode(blob) == {\"user\": \"ada\", \"role\": \"admin\"}\n\n\ndef test_does_not_execute_pickle_payload():\n    TRIPPED[\"v\"] = False\n    payload = pickle.dumps(Gadget())\n    try:\n        SessionStore().decode(payload)\n    except Exception:\n        # A safe decoder rejects the non-JSON blob; that is acceptable.\n        pass\n    assert TRIPPED[\"v\"] is False, \"unsafe deserialization: the pickle payload executed\"\n"
+  },
+  "check_command": "python3 -m pytest -q test_session_store.py",
+  "reference_solution": {
+    "session_store.py": "import json\nimport pickle  # noqa: F401 (kept for import stability; no longer used)\n\n\nclass SessionStore:\n    def decode(self, blob):\n        \"\"\"Restore a session blob (JSON bytes) into a dict - never executes code.\"\"\"\n        return json.loads(blob)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "pickle-fallback",
+      "files": {
+        "session_store.py": "import json\nimport pickle\n\n\nclass SessionStore:\n    def decode(self, blob):\n        # INCOMPLETE FIX: tries JSON first but falls back to pickle for\n        # \"legacy\" blobs, so an attacker just sends a pickle blob and still\n        # gets code execution.\n        try:\n            return json.loads(blob)\n        except Exception:\n            return pickle.loads(blob)\n"
+      }
+    }
+  ]
+}

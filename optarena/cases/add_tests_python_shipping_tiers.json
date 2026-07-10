@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_python_shipping_tiers",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Asks the model to write pytest tests for a shipping-cost function; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "python",
+    "testing",
+    "pytest"
+  ],
+  "prompts": [
+    "cost(weight_g, express=False) in shipping.py (already correct, do not modify it) returns a shipping cost in integer cents: it starts at a base of 500; for each FULL 1000g above the first 1000g it adds 100 (so 2500g adds 100, 3000g adds 200); and when express is True the whole total is doubled. Write pytest tests at exactly test_shipping.py (functions named test_*) with at least 4 separate test functions that pin the EXACT integer cost for: a package at or below 1000g (base only); a package incurring one extra-kilo surcharge; a package incurring two extra-kilo surcharges; and an express package. Use plain assert with the exact expected cents, importing the function with `from shipping import cost`."
+  ],
+  "setup_files": {
+    "shipping.py": "def cost(weight_g, express=False):\n    \"\"\"Shipping cost in cents: base 500; +100 per full 1000g over the first\n    1000g; doubled when express.\"\"\"\n    total = 500\n    if weight_g > 1000:\n        total += ((weight_g - 1000) // 1000) * 100\n    if express:\n        total *= 2\n    return total\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_shipping.py",
+      "content_patterns": [
+        "from shipping import cost",
+        "assert",
+        "cost("
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('shipping.py')\nTEST_CMD = 'python3 -m pytest -q test_shipping.py'\nMUTANTS = [\n    ['    total = 500', '    total = 400'],\n    ['        total += ((weight_g - 1000) // 1000) * 100', '        total += ((weight_g - 1000) // 1000) * 150'],\n    ['        total *= 2', '        total *= 3'],\n]\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (tests pass on correct impl and kill all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_shipping.py": "from shipping import cost\n\n\ndef test_base_under_one_kilo():\n    assert cost(500) == 500\n\n\ndef test_one_extra_kilo_surcharge():\n    # 2500g -> 1 full kg over 1000g -> 500 + 100 = 600\n    assert cost(2500) == 600\n\n\ndef test_two_extra_kilo_surcharges():\n    # 3000g -> 2 full kg over 1000g -> 500 + 200 = 700\n    assert cost(3000) == 700\n\n\ndef test_express_doubles_total():\n    assert cost(500, express=True) == 1000\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_shipping.py": "from shipping import cost\n\n\ndef test_returns_int():\n    assert isinstance(cost(500), int)\n\n\ndef test_positive():\n    assert cost(2500) > 0\n\n\ndef test_express_not_cheaper():\n    assert cost(500, express=True) >= cost(500)\n\n\ndef test_heavier_not_cheaper():\n    assert cost(3000) >= cost(500)\n"
+      }
+    }
+  ]
+}

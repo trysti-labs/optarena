@@ -1,0 +1,47 @@
+{
+  "name": "fix_python_late_binding_closure",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes late-binding closures in a loop so each generated function uses its own index",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "python",
+    "bug_fix",
+    "closure",
+    "idiom"
+  ],
+  "prompts": [
+    "make_multipliers(n) in builders.py should return a list of n functions where the i-th function multiplies its argument by i (so make_multipliers(4) yields functions that multiply by 0, 1, 2, 3). It's broken by Python's late-binding closures: each lambda captures the loop variable i by reference, so after the loop they ALL use the final value of i. Fix make_multipliers so each function multiplies by its own index (e.g. bind i via a default argument, or a factory function). Keep the function name and signature."
+  ],
+  "setup_files": {
+    "builders.py": "def make_multipliers(n):\n    \"\"\"Return n functions; the i-th multiplies its argument by i.\"\"\"\n    # BUG: each lambda closes over the loop variable i by reference, so they\n    # all end up using the final value of i.\n    funcs = []\n    for i in range(n):\n        funcs.append(lambda x: x * i)\n    return funcs\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "builders.py",
+      "content_patterns": [
+        "def make_multipliers"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_builders.py": "from builders import make_multipliers\n\n\ndef test_each_multiplies_by_its_index():\n    fns = make_multipliers(4)\n    assert [f(10) for f in fns] == [0, 10, 20, 30]\n\n\ndef test_empty():\n    assert make_multipliers(0) == []\n\n\ndef test_single():\n    fns = make_multipliers(1)\n    assert fns[0](5) == 0\n"
+  },
+  "check_command": "python3 -m pytest -q test_builders.py",
+  "reference_solution": {
+    "builders.py": "def make_multipliers(n):\n    \"\"\"Return n functions; the i-th multiplies its argument by i.\"\"\"\n    funcs = []\n    for i in range(n):\n        funcs.append(lambda x, i=i: x * i)\n    return funcs\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "off-by-one-index",
+      "files": {
+        "builders.py": "def make_multipliers(n):\n    # Fixes late binding but multiplies by i+1 instead of i.\n    funcs = []\n    for i in range(n):\n        funcs.append(lambda x, i=i + 1: x * i)\n    return funcs\n"
+      }
+    }
+  ]
+}

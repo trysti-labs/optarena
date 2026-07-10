@@ -1,0 +1,53 @@
+{
+  "name": "create_python_sessionize_events",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Builds an event sessionizer (30-min inactivity gap) consumed by an existing summary renderer",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "python",
+    "data_engineering",
+    "sessionization",
+    "multi-file"
+  ],
+  "prompts": [
+    "An existing summary.py imports count_sessions from a sessions module and renders it, but sessions.py does not exist yet. Create sessions.py defining count_sessions(events) where events is a list of (user, timestamp) pairs (timestamp is an int of epoch seconds). For each user, split that user's events into sessions: sort the user's timestamps ascending, start a new session on the first event and whenever the gap from the previous event is STRICTLY GREATER THAN 1800 seconds (a gap of exactly 1800 stays in the same session). Return a dict {user: number_of_sessions}. Skip any event whose user is not a non-empty string or whose timestamp is not an int (note: booleans are not valid timestamps). Do not modify summary.py."
+  ],
+  "setup_files": {
+    "summary.py": "from sessions import count_sessions\n\n\ndef render(events):\n    \"\"\"One line per user, 'user: session_count', sorted by user.\"\"\"\n    counts = count_sessions(events)\n    return \"\\n\".join(f\"{user}: {n}\" for user, n in sorted(counts.items()))\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "sessions.py",
+      "content_patterns": [
+        "def count_sessions"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_sessions.py": "from sessions import count_sessions\nfrom summary import render\n\n\ndef test_single_session_within_gaps():\n    events = [(\"u1\", 0), (\"u1\", 600), (\"u1\", 1200)]\n    assert count_sessions(events) == {\"u1\": 1}\n\n\ndef test_gap_over_threshold_starts_new_session():\n    events = [(\"u1\", 0), (\"u1\", 2000), (\"u1\", 2500)]\n    assert count_sessions(events) == {\"u1\": 2}\n\n\ndef test_exactly_1800_stays_same_session():\n    events = [(\"u1\", 0), (\"u1\", 1800)]\n    assert count_sessions(events) == {\"u1\": 1}\n\n\ndef test_multiple_users_and_unsorted_input():\n    # u1's events arrive out of order (5000 before 0); a correct impl sorts\n    # each user's timestamps before measuring gaps.\n    events = [(\"u1\", 5000), (\"u2\", 100), (\"u1\", 0), (\"u2\", 200)]\n    assert count_sessions(events) == {\"u1\": 2, \"u2\": 1}\n\n\ndef test_skips_invalid_events():\n    events = [(\"u1\", 0), (\"\", 100), (\"u1\", \"bad\"), (\"u1\", True), (\"u1\", 100)]\n    assert count_sessions(events) == {\"u1\": 1}\n\n\ndef test_render_integration():\n    events = [(\"u1\", 0), (\"u1\", 5000), (\"u2\", 0)]\n    assert render(events) == \"u1: 2\\nu2: 1\"\n"
+  },
+  "check_command": "python3 -m pytest -q test_sessions.py",
+  "reference_solution": {
+    "sessions.py": "def count_sessions(events):\n    \"\"\"Number of sessions per user; a >1800s gap starts a new session.\"\"\"\n    by_user = {}\n    for ev in events:\n        if not isinstance(ev, (list, tuple)) or len(ev) < 2:\n            continue\n        user, ts = ev[0], ev[1]\n        if not isinstance(user, str) or user.strip() == \"\":\n            continue\n        if not isinstance(ts, int) or isinstance(ts, bool):\n            continue\n        by_user.setdefault(user, []).append(ts)\n\n    counts = {}\n    for user, times in by_user.items():\n        times.sort()\n        sessions = 0\n        prev = None\n        for t in times:\n            if prev is None or t - prev > 1800:\n                sessions += 1\n            prev = t\n        counts[user] = sessions\n    return counts\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "gap-uses-ge-not-gt",
+      "files": {
+        "sessions.py": "def count_sessions(events):\n    # BUG: uses >= 1800, so a gap of exactly 1800 wrongly starts a new session.\n    by_user = {}\n    for ev in events:\n        if not isinstance(ev, (list, tuple)) or len(ev) < 2:\n            continue\n        user, ts = ev[0], ev[1]\n        if not isinstance(user, str) or user.strip() == \"\":\n            continue\n        if not isinstance(ts, int) or isinstance(ts, bool):\n            continue\n        by_user.setdefault(user, []).append(ts)\n\n    counts = {}\n    for user, times in by_user.items():\n        times.sort()\n        sessions = 0\n        prev = None\n        for t in times:\n            if prev is None or t - prev >= 1800:\n                sessions += 1\n            prev = t\n        counts[user] = sessions\n    return counts\n"
+      }
+    },
+    {
+      "name": "does-not-sort",
+      "files": {
+        "sessions.py": "def count_sessions(events):\n    # BUG: never sorts each user's timestamps, so out-of-order input miscounts.\n    by_user = {}\n    for ev in events:\n        if not isinstance(ev, (list, tuple)) or len(ev) < 2:\n            continue\n        user, ts = ev[0], ev[1]\n        if not isinstance(user, str) or user.strip() == \"\":\n            continue\n        if not isinstance(ts, int) or isinstance(ts, bool):\n            continue\n        by_user.setdefault(user, []).append(ts)\n\n    counts = {}\n    for user, times in by_user.items():\n        sessions = 0\n        prev = None\n        for t in times:\n            if prev is None or t - prev > 1800:\n                sessions += 1\n            prev = t\n        counts[user] = sessions\n    return counts\n"
+      }
+    }
+  ]
+}
