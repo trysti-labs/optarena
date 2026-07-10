@@ -44,6 +44,9 @@ jobs:
           - lang: dotnet
             image: optarena-tester-dotnet
             context: docker/dotnet
+          - lang: php
+            image: optarena-tester-php
+            context: docker/php
     steps:
       - uses: actions/checkout@v4
       - name: Log in to GHCR

@@ -1,0 +1,46 @@
+{
+  "name": "fix_php_switch_missing_break_permissions",
+  "language": "php",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "description": "Fixes a PHP switch whose `admin` case is missing a break and falls through to the default empty list",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "php",
+    "control-flow"
+  ],
+  "prompts": [
+    "Permissions::forRole in src/Permissions.php maps viewer -> [read], editor -> [read, write], admin -> [read, write, delete], and any other role -> []. There is a bug: the `admin` case is missing its `break`, so it falls through into the `default` branch and forRole(\"admin\") wrongly returns an empty array. Fix the control flow so each role returns exactly its documented permission list. Keep the class and method signatures."
+  ],
+  "setup_files": {
+    "src/Permissions.php": "<?php\nnamespace App;\n\nclass Permissions\n{\n    // Map a role name to its permission list:\n    //   viewer -> [read]; editor -> [read, write];\n    //   admin  -> [read, write, delete]; anything else -> [].\n    // BUG: the `admin` case is missing its `break`, so execution falls\n    // through into `default` and admin wrongly comes back as an empty list.\n    public function forRole(string $role): array\n    {\n        switch ($role) {\n            case \"viewer\":\n                $perms = [\"read\"];\n                break;\n            case \"editor\":\n                $perms = [\"read\", \"write\"];\n                break;\n            case \"admin\":\n                $perms = [\"read\", \"write\", \"delete\"];\n            default:\n                $perms = [];\n        }\n        return $perms;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Permissions.php",
+      "content_patterns": [
+        "forrole",
+        "admin"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/PermissionsHiddenTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Permissions.php';\n\nfinal class PermissionsHiddenTest extends TestCase\n{\n    public function testViewer(): void\n    {\n        $this->assertSame([\"read\"], (new \\App\\Permissions())->forRole(\"viewer\"));\n    }\n\n    public function testEditor(): void\n    {\n        $this->assertSame([\"read\", \"write\"], (new \\App\\Permissions())->forRole(\"editor\"));\n    }\n\n    public function testAdmin(): void\n    {\n        $this->assertSame([\"read\", \"write\", \"delete\"], (new \\App\\Permissions())->forRole(\"admin\"));\n    }\n\n    public function testUnknownRole(): void\n    {\n        $this->assertSame([], (new \\App\\Permissions())->forRole(\"guest\"));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/PermissionsHiddenTest.php",
+  "reference_solution": {
+    "src/Permissions.php": "<?php\nnamespace App;\n\nclass Permissions\n{\n    // Map a role name to its permission list:\n    //   viewer -> [read]; editor -> [read, write];\n    //   admin  -> [read, write, delete]; anything else -> [].\n    public function forRole(string $role): array\n    {\n        switch ($role) {\n            case \"viewer\":\n                $perms = [\"read\"];\n                break;\n            case \"editor\":\n                $perms = [\"read\", \"write\"];\n                break;\n            case \"admin\":\n                $perms = [\"read\", \"write\", \"delete\"];\n                break;\n            default:\n                $perms = [];\n        }\n        return $perms;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "editor-falls-through",
+      "files": {
+        "src/Permissions.php": "<?php\nnamespace App;\n\nclass Permissions\n{\n    // Map a role name to its permission list:\n    //   viewer -> [read]; editor -> [read, write];\n    //   admin  -> [read, write, delete]; anything else -> [].\n    public function forRole(string $role): array\n    {\n        switch ($role) {\n            case \"viewer\":\n                $perms = [\"read\"];\n                break;\n            case \"editor\":\n                $perms = [\"read\", \"write\"];\n            case \"admin\":\n                $perms = [\"read\", \"write\", \"delete\"];\n                break;\n            default:\n                $perms = [];\n        }\n        return $perms;\n    }\n}\n"
+      }
+    }
+  ]
+}
