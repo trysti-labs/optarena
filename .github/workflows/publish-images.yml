@@ -47,6 +47,9 @@ jobs:
           - lang: php
             image: optarena-tester-php
             context: docker/php
+          - lang: ruby
+            image: optarena-tester-ruby
+            context: docker/ruby
     steps:
       - uses: actions/checkout@v4
       - name: Log in to GHCR
