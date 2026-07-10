@@ -1,0 +1,48 @@
+{
+  "name": "fix_ts_prototype_pollution_deep_merge",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes a TS recursive deep-merge that lets __proto__ keys pollute Object.prototype at any depth",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "typescript",
+    "security",
+    "prototype-pollution"
+  ],
+  "prompts": [
+    "deepMerge in merge.ts recursively merges untrusted JSON into a target object, but it copies keys named __proto__ / constructor / prototype like any other key - so a payload such as JSON.parse('{\"__proto__\": {\"isAdmin\": true}}') walks into Object.prototype and pollutes every object in the process (prototype pollution). Fix deepMerge so those three key names are skipped at EVERY recursion depth - a nested payload like {\"profile\": {\"__proto__\": {...}}} must be blocked too, not just top-level keys. Legitimate deep merging of plain objects must keep working exactly as documented. Keep the exported function name and signature."
+  ],
+  "setup_files": {
+    "merge.ts": "type Dict = Record<string, unknown>;\n\nfunction isPlainObject(value: unknown): value is Dict {\n  return typeof value === \"object\" && value !== null && !Array.isArray(value);\n}\n\n// Recursively merge `source` into `target` (mutating target) and return it.\n// Plain-object values merge deep; anything else overwrites.\n// BUG: keys named __proto__ / constructor / prototype are merged like any\n// other key, so untrusted input such as JSON.parse('{\"__proto__\":\n// {\"isAdmin\": true}}') walks into Object.prototype and pollutes every\n// object in the process (prototype-pollution vulnerability).\nexport function deepMerge(target: Dict, source: Dict): Dict {\n  for (const key of Object.keys(source)) {\n    const value = source[key];\n    if (isPlainObject(value) && isPlainObject(target[key])) {\n      deepMerge(target[key] as Dict, value);\n    } else {\n      target[key] = value;\n    }\n  }\n  return target;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "merge.ts",
+      "content_patterns": [
+        "deepmerge",
+        "__proto__"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit merge.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build merge.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { deepMerge } = require(\"./build/merge.js\");\n\n// legitimate deep merge still works\nconst target = { a: 1, nested: { x: 1 } };\ndeepMerge(target, JSON.parse('{\"b\": 2, \"nested\": {\"y\": 2}}'));\nassert.deepStrictEqual(target, { a: 1, b: 2, nested: { x: 1, y: 2 } });\n\n// top-level pollution attempt\ndeepMerge({}, JSON.parse('{\"__proto__\": {\"pollutedA\": true}}'));\nconst probeA = {};\nassert.strictEqual(\n  probeA.pollutedA,\n  undefined,\n  \"top-level __proto__ payload polluted Object.prototype\"\n);\n\n// nested pollution attempt - must be blocked at every depth\ndeepMerge({ profile: {} }, JSON.parse('{\"profile\": {\"__proto__\": {\"pollutedB\": true}}}'));\nconst probeB = {};\nassert.strictEqual(\n  probeB.pollutedB,\n  undefined,\n  \"nested __proto__ payload polluted Object.prototype\"\n);\n\nconsole.log(\"behavior OK\");\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "merge.ts": "type Dict = Record<string, unknown>;\n\nconst FORBIDDEN_KEYS = new Set([\"__proto__\", \"constructor\", \"prototype\"]);\n\nfunction isPlainObject(value: unknown): value is Dict {\n  return typeof value === \"object\" && value !== null && !Array.isArray(value);\n}\n\n// Recursively merge `source` into `target` (mutating target) and return it.\n// Plain-object values merge deep; anything else overwrites. Keys that could\n// walk into the prototype chain (__proto__ / constructor / prototype) are\n// skipped at EVERY level so untrusted input cannot pollute Object.prototype.\nexport function deepMerge(target: Dict, source: Dict): Dict {\n  for (const key of Object.keys(source)) {\n    if (FORBIDDEN_KEYS.has(key)) {\n      continue;\n    }\n    const value = source[key];\n    if (isPlainObject(value) && isPlainObject(target[key])) {\n      deepMerge(target[key] as Dict, value);\n    } else {\n      target[key] = value;\n    }\n  }\n  return target;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "top-level-guard-only",
+      "files": {
+        "merge.ts": "type Dict = Record<string, unknown>;\n\nfunction isPlainObject(value: unknown): value is Dict {\n  return typeof value === \"object\" && value !== null && !Array.isArray(value);\n}\n\nfunction mergeInner(target: Dict, source: Dict): Dict {\n  for (const key of Object.keys(source)) {\n    const value = source[key];\n    if (isPlainObject(value) && isPlainObject(target[key])) {\n      mergeInner(target[key] as Dict, value);\n    } else {\n      target[key] = value;\n    }\n  }\n  return target;\n}\n\n// only guards the FIRST level - {\"profile\": {\"__proto__\": ...}} slips through\nexport function deepMerge(target: Dict, source: Dict): Dict {\n  const cleaned: Dict = {};\n  for (const key of Object.keys(source)) {\n    if (key !== \"__proto__\" && key !== \"constructor\" && key !== \"prototype\") {\n      cleaned[key] = source[key];\n    }\n  }\n  return mergeInner(target, cleaned);\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "optimize_php_flatten_array_merge",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Optimizes an O(n^2) flatten that calls array_merge inside a loop to a single linear pass",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "php",
+    "performance",
+    "array",
+    "algorithms"
+  ],
+  "prompts": [
+    "BatchFlattener::flatten in src/BatchFlattener.php concatenates a list of batches (each an array) into one flat list, preserving order. It builds the result with `$out = array_merge($out, $batch)` inside the loop, which re-copies the whole growing accumulator on every iteration - O(n^2) total, and far too slow for tens of thousands of batches. Rewrite flatten so it runs in linear time (append each batch's elements to the result, or merge all batches in one call) while producing exactly the same flattened list in the same order. Keep the class name and the flatten(array $batches): array signature."
+  ],
+  "setup_files": {
+    "src/BatchFlattener.php": "<?php\nnamespace App;\n\nclass BatchFlattener\n{\n    // Concatenate a list of batches into one flat list, order preserved.\n    // BUG: array_merge inside the loop copies the growing accumulator every\n    // iteration -> O(n^2), unusable for tens of thousands of batches.\n    public function flatten(array $batches): array\n    {\n        $out = [];\n        foreach ($batches as $batch) {\n            $out = array_merge($out, $batch);\n        }\n        return $out;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/BatchFlattener.php",
+      "content_patterns": [
+        "function flatten"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/BatchFlattenerTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/BatchFlattener.php';\n\nfinal class BatchFlattenerTest extends TestCase\n{\n    public function testFlattensInOrder(): void\n    {\n        $f = new \\App\\BatchFlattener();\n        $this->assertSame([1, 2, 3, 4, 5], $f->flatten([[1, 2], [3], [], [4, 5]]));\n    }\n\n    public function testEmpty(): void\n    {\n        $this->assertSame([], (new \\App\\BatchFlattener())->flatten([]));\n    }\n\n    public function testPreservesDuplicates(): void\n    {\n        $f = new \\App\\BatchFlattener();\n        $this->assertSame([1, 1, 2, 1], $f->flatten([[1, 1], [2], [1]]));\n    }\n\n    public function testPerformanceLargeInput(): void\n    {\n        $n = 50000;\n        $batches = [];\n        for ($i = 0; $i < $n; $i++) {\n            $batches[] = [$i, $i + 1];\n        }\n        $expected = [];\n        foreach ($batches as $b) {\n            foreach ($b as $x) {\n                $expected[] = $x;\n            }\n        }\n\n        $f = new \\App\\BatchFlattener();\n        $t0 = microtime(true);\n        $got = $f->flatten($batches);\n        $dt = microtime(true) - $t0;\n\n        $this->assertSame($expected, $got);\n        $this->assertLessThan(\n            0.5,\n            $dt,\n            sprintf('flatten took %.3fs for 50000 batches; expected a linear-time concatenation, not array_merge in a loop', $dt)\n        );\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/BatchFlattenerTest.php",
+  "reference_solution": {
+    "src/BatchFlattener.php": "<?php\nnamespace App;\n\nclass BatchFlattener\n{\n    // Linear-time concatenation: append each batch's elements once.\n    public function flatten(array $batches): array\n    {\n        $out = [];\n        foreach ($batches as $batch) {\n            foreach ($batch as $item) {\n                $out[] = $item;\n            }\n        }\n        return $out;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-quadratic-merge",
+      "files": {
+        "src/BatchFlattener.php": "<?php\nnamespace App;\n\nclass BatchFlattener\n{\n    // Correct output but still O(n^2): array_merge re-copies the accumulator\n    // each iteration, so the large-input time budget is busted.\n    public function flatten(array $batches): array\n    {\n        $out = [];\n        foreach ($batches as $batch) {\n            $out = array_merge($out, $batch);\n        }\n        return $out;\n    }\n}\n"
+      }
+    }
+  ]
+}

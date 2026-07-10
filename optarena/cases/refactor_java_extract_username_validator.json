@@ -1,0 +1,71 @@
+{
+  "name": "refactor_java_extract_username_validator",
+  "language": "java",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Extracts duplicated username validation from two Java services into a shared validator, preserving behavior",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "java",
+    "refactoring",
+    "dry",
+    "multi-file"
+  ],
+  "prompts": [
+    "SignupService and ProfileService (in src/main/java/com/optarena/) both contain the same inline username validation: trim (treating null as empty), then require the length to be between 3 and 20 inclusive. Refactor to remove the duplication: create src/main/java/com/optarena/UsernameValidator.java with a method isValid(String) implementing exactly that rule, and have both services use it instead of their inline check. Do not change observable behavior - a 3-character name like \"Bob\" stays valid (\"registered:bob\"), \"ab\" and a 21-char name stay \"invalid\", null stays \"invalid\", and the \"registered:\"/\"updated:\" prefixes plus lower-casing are unchanged. Neither service should still contain the inline `u.length() < 3` check."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>plain-java-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+    "src/main/java/com/optarena/SignupService.java": "package com.optarena;\n\npublic class SignupService {\n    public String register(String username) {\n        String u = username == null ? \"\" : username.trim();\n        if (u.length() < 3 || u.length() > 20) {\n            return \"invalid\";\n        }\n        return \"registered:\" + u.toLowerCase();\n    }\n}\n",
+    "src/main/java/com/optarena/ProfileService.java": "package com.optarena;\n\npublic class ProfileService {\n    public String update(String username) {\n        String u = username == null ? \"\" : username.trim();\n        if (u.length() < 3 || u.length() > 20) {\n            return \"invalid\";\n        }\n        return \"updated:\" + u.toLowerCase();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/UsernameValidator.java",
+      "content_patterns": [
+        "isvalid"
+      ]
+    },
+    {
+      "path_pattern": "**/SignupService.java",
+      "content_patterns": [
+        "validator"
+      ],
+      "not_content_patterns": [
+        "u.length() < 3"
+      ]
+    },
+    {
+      "path_pattern": "**/ProfileService.java",
+      "content_patterns": [
+        "validator"
+      ],
+      "not_content_patterns": [
+        "u.length() < 3"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/UsernameRefactorHiddenTest.java": "package com.optarena;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Test;\n\nclass UsernameRefactorHiddenTest {\n\n    @Test\n    void signupAcceptsThreeCharName() {\n        assertEquals(\"registered:bob\", new SignupService().register(\" Bob \"));\n    }\n\n    @Test\n    void signupRejectsTooShortAndTooLong() {\n        assertEquals(\"invalid\", new SignupService().register(\"ab\"));\n        assertEquals(\"invalid\", new SignupService().register(\"a\".repeat(21)));\n    }\n\n    @Test\n    void profileAcceptsAndRejects() {\n        assertEquals(\"updated:alice\", new ProfileService().update(\"Alice\"));\n        assertEquals(\"invalid\", new ProfileService().update(null));\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=UsernameRefactorHiddenTest",
+  "reference_solution": {
+    "src/main/java/com/optarena/UsernameValidator.java": "package com.optarena;\n\npublic class UsernameValidator {\n    // Extracted shared rule: after trimming, a username is valid when its\n    // length is between 3 and 20 characters inclusive.\n    public boolean isValid(String username) {\n        String u = username == null ? \"\" : username.trim();\n        return u.length() >= 3 && u.length() <= 20;\n    }\n}\n",
+    "src/main/java/com/optarena/SignupService.java": "package com.optarena;\n\npublic class SignupService {\n    private final UsernameValidator validator = new UsernameValidator();\n\n    public String register(String username) {\n        if (!validator.isValid(username)) {\n            return \"invalid\";\n        }\n        return \"registered:\" + username.trim().toLowerCase();\n    }\n}\n",
+    "src/main/java/com/optarena/ProfileService.java": "package com.optarena;\n\npublic class ProfileService {\n    private final UsernameValidator validator = new UsernameValidator();\n\n    public String update(String username) {\n        if (!validator.isValid(username)) {\n            return \"invalid\";\n        }\n        return \"updated:\" + username.trim().toLowerCase();\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "lower-bound-drifted",
+      "files": {
+        "src/main/java/com/optarena/UsernameValidator.java": "package com.optarena;\n\npublic class UsernameValidator {\n    public boolean isValid(String username) {\n        String u = username == null ? \"\" : username.trim();\n        return u.length() >= 4 && u.length() <= 20;\n    }\n}\n",
+        "src/main/java/com/optarena/SignupService.java": "package com.optarena;\n\npublic class SignupService {\n    private final UsernameValidator validator = new UsernameValidator();\n\n    public String register(String username) {\n        if (!validator.isValid(username)) {\n            return \"invalid\";\n        }\n        return \"registered:\" + username.trim().toLowerCase();\n    }\n}\n",
+        "src/main/java/com/optarena/ProfileService.java": "package com.optarena;\n\npublic class ProfileService {\n    private final UsernameValidator validator = new UsernameValidator();\n\n    public String update(String username) {\n        if (!validator.isValid(username)) {\n            return \"invalid\";\n        }\n        return \"updated:\" + username.trim().toLowerCase();\n    }\n}\n"
+      }
+    }
+  ]
+}

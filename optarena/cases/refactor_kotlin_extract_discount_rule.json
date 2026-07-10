@@ -1,0 +1,71 @@
+{
+  "name": "refactor_kotlin_extract_discount_rule",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Consolidates duplicated quantity-discount tier logic into one shared function without changing behavior",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "kotlin",
+    "refactoring",
+    "dry",
+    "multi-file"
+  ],
+  "prompts": [
+    "CheckoutService.kt and QuoteService.kt (package com.optarena.app, both under src/main/kotlin/com/optarena/app/) contain the SAME inline quantity-discount tier logic: qty >= 100 -> 20, qty >= 50 -> 10, qty >= 10 -> 5, else 0. Remove the duplication: create src/main/kotlin/com/optarena/app/DiscountRules.kt defining object DiscountRules with fun percentFor(qty: Int): Int that implements exactly that tier rule, and rewrite BOTH services to call DiscountRules.percentFor instead of their inline `when` block. Do not change observable behavior: QuoteService.discountPercent(qty) must return the same percents, and CheckoutService.finalPrice(unitCents, qty) must still return gross minus gross*percent/100. Neither service should keep its own copy of the tier thresholds."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/CheckoutService.kt": "package com.optarena.app\n\nclass CheckoutService {\n    fun finalPrice(unitCents: Int, qty: Int): Int {\n        val percent = when {\n            qty >= 100 -> 20\n            qty >= 50 -> 10\n            qty >= 10 -> 5\n            else -> 0\n        }\n        val gross = unitCents * qty\n        return gross - gross * percent / 100\n    }\n}\n",
+    "src/main/kotlin/com/optarena/app/QuoteService.kt": "package com.optarena.app\n\nclass QuoteService {\n    fun discountPercent(qty: Int): Int {\n        return when {\n            qty >= 100 -> 20\n            qty >= 50 -> 10\n            qty >= 10 -> 5\n            else -> 0\n        }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/DiscountRules.kt",
+      "content_patterns": [
+        "fun percentfor"
+      ]
+    },
+    {
+      "path_pattern": "**/CheckoutService.kt",
+      "content_patterns": [
+        "discountrules.percentfor"
+      ],
+      "not_content_patterns": [
+        "qty >= 50"
+      ]
+    },
+    {
+      "path_pattern": "**/QuoteService.kt",
+      "content_patterns": [
+        "discountrules.percentfor"
+      ],
+      "not_content_patterns": [
+        "qty >= 50"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/DiscountRefactorTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass DiscountRefactorTest {\n\n    @Test\n    fun quoteDiscountTiers() {\n        val q = QuoteService()\n        assertEquals(0, q.discountPercent(9))\n        assertEquals(5, q.discountPercent(10))\n        assertEquals(5, q.discountPercent(49))\n        assertEquals(10, q.discountPercent(50))\n        assertEquals(10, q.discountPercent(99))\n        assertEquals(20, q.discountPercent(100))\n    }\n\n    @Test\n    fun checkoutAppliesDiscount() {\n        val c = CheckoutService()\n        assertEquals(900, c.finalPrice(100, 9))     // 0% off 900\n        assertEquals(4500, c.finalPrice(100, 50))   // 10% off 5000\n        assertEquals(8000, c.finalPrice(100, 100))  // 20% off 10000\n    }\n\n    @Test\n    fun servicesAgreeAtBoundaries() {\n        val q = QuoteService()\n        assertEquals(10, q.discountPercent(50))\n        assertEquals(20, q.discountPercent(100))\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=DiscountRefactorTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/DiscountRules.kt": "package com.optarena.app\n\nobject DiscountRules {\n    fun percentFor(qty: Int): Int = when {\n        qty >= 100 -> 20\n        qty >= 50 -> 10\n        qty >= 10 -> 5\n        else -> 0\n    }\n}\n",
+    "src/main/kotlin/com/optarena/app/CheckoutService.kt": "package com.optarena.app\n\nclass CheckoutService {\n    fun finalPrice(unitCents: Int, qty: Int): Int {\n        val percent = DiscountRules.percentFor(qty)\n        val gross = unitCents * qty\n        return gross - gross * percent / 100\n    }\n}\n",
+    "src/main/kotlin/com/optarena/app/QuoteService.kt": "package com.optarena.app\n\nclass QuoteService {\n    fun discountPercent(qty: Int): Int = DiscountRules.percentFor(qty)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "boundary-drift",
+      "files": {
+        "src/main/kotlin/com/optarena/app/DiscountRules.kt": "package com.optarena.app\n\nobject DiscountRules {\n    // BEHAVIOR DRIFT: the 50-unit tier boundary moved to 60.\n    fun percentFor(qty: Int): Int = when {\n        qty >= 100 -> 20\n        qty >= 60 -> 10\n        qty >= 10 -> 5\n        else -> 0\n    }\n}\n",
+        "src/main/kotlin/com/optarena/app/CheckoutService.kt": "package com.optarena.app\n\nclass CheckoutService {\n    fun finalPrice(unitCents: Int, qty: Int): Int {\n        val percent = DiscountRules.percentFor(qty)\n        val gross = unitCents * qty\n        return gross - gross * percent / 100\n    }\n}\n",
+        "src/main/kotlin/com/optarena/app/QuoteService.kt": "package com.optarena.app\n\nclass QuoteService {\n    fun discountPercent(qty: Int): Int = DiscountRules.percentFor(qty)\n}\n"
+      }
+    }
+  ]
+}

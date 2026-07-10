@@ -1,0 +1,54 @@
+{
+  "name": "add_tests_go_grade_brackets",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Asks the model to write table-driven Go tests for a grade-bracket function; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "go",
+    "testing",
+    "table-driven"
+  ],
+  "prompts": [
+    "Grade in grade.go (already correct, do not modify it) maps an integer score to a letter grade: below 60 -> \"F\"; 60..69 -> \"D\"; 70..79 -> \"C\"; 80..89 -> \"B\"; 90 and above -> \"A\". Write a Go test at exactly grade_test.go (package app) with a function TestGrade that uses table-driven cases and pins the EXACT letter for scores that exercise every boundary - include values just below and just at each threshold (e.g. 59 and 60, 79 and 80, 89 and 90) as well as a clear F and a clear A. Fail with t.Fatalf/t.Errorf on any mismatch."
+  ],
+  "setup_files": {
+    "go.mod": "module app\n\ngo 1.22\n",
+    "grade.go": "package app\n\n// Grade maps a 0..100 score to a letter: <60 F, <70 D, <80 C, <90 B, else A.\nfunc Grade(score int) string {\n\tswitch {\n\tcase score < 60:\n\t\treturn \"F\"\n\tcase score < 70:\n\t\treturn \"D\"\n\tcase score < 80:\n\t\treturn \"C\"\n\tcase score < 90:\n\t\treturn \"B\"\n\tdefault:\n\t\treturn \"A\"\n\t}\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "grade_test.go",
+      "content_patterns": [
+        "func testgrade",
+        "grade("
+      ],
+      "regex_patterns": [
+        "\\{59",
+        "\\{79",
+        "\\{89"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"grade.go\")\nTEST_CMD = \"go test ./... -count=1\"\nMUTANTS = [\n    [[\"\\tcase score < 60:\", \"\\tcase score < 50:\"]],\n    [[\"\\tcase score < 80:\", \"\\tcase score < 70:\"]],\n    [[\"\\tcase score < 90:\", \"\\tcase score < 100:\"]],\n]\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f\"protected implementation file {IMPL} was modified - the task said not to change it \"\n            f\"(anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately broken \"\n            f\"implementation, so they do not actually verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(\"PASS (tests pass on correct impl and kill all {n} mutants)\".format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "grade_test.go": "package app\n\nimport \"testing\"\n\nfunc TestGrade(t *testing.T) {\n\tcases := []struct {\n\t\tscore int\n\t\twant  string\n\t}{\n\t\t{55, \"F\"},\n\t\t{59, \"F\"},\n\t\t{60, \"D\"},\n\t\t{75, \"C\"},\n\t\t{79, \"C\"},\n\t\t{85, \"B\"},\n\t\t{89, \"B\"},\n\t\t{90, \"A\"},\n\t\t{95, \"A\"},\n\t\t{100, \"A\"},\n\t}\n\tfor _, c := range cases {\n\t\tif got := Grade(c.score); got != c.want {\n\t\t\tt.Fatalf(\"Grade(%d)=%q want %q\", c.score, got, c.want)\n\t\t}\n\t}\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-membership-only",
+      "files": {
+        "grade_test.go": "package app\n\nimport (\n\t\"strings\"\n\t\"testing\"\n)\n\nfunc TestGrade(t *testing.T) {\n\tfor score := 0; score <= 100; score += 10 {\n\t\tgot := Grade(score)\n\t\tif !strings.Contains(\"FDCBA\", got) {\n\t\t\tt.Fatalf(\"Grade(%d)=%q not a letter\", score, got)\n\t\t}\n\t}\n}\n"
+      }
+    }
+  ]
+}

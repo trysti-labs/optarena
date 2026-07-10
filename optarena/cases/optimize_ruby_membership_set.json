@@ -1,0 +1,53 @@
+{
+  "name": "optimize_ruby_membership_set",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Optimizes an O(n*m) Array#include? membership filter to O(n) using a Set",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "ruby",
+    "performance",
+    "set",
+    "algorithms"
+  ],
+  "prompts": [
+    "OrderFilter#allowed in lib/order_filter.rb takes a list of order ids and returns only those NOT in the blocked list, preserving input order and duplicates. It checks membership with @blocked.include?(o) where @blocked is a plain Array, so every lookup scans the whole blocked list - the whole call is O(n*m) and is far too slow when both lists have tens of thousands of entries. Make membership testing O(1) (build a Set from the blocked ids, e.g. in initialize) so allowed runs in O(n) overall. Keep the class name, the initialize(blocked) signature (it still receives an Array), and the exact behavior of allowed: same elements, same order, duplicates preserved."
+  ],
+  "setup_files": {
+    "lib/order_filter.rb": "module App\n  # Filters out blocked order ids, preserving input order and duplicates.\n  class OrderFilter\n    def initialize(blocked)\n      @blocked = blocked\n    end\n\n    # BUG: @blocked is an Array, so include? is a linear scan and the whole\n    # call is O(n*m) - unusably slow for large lists. Membership should be\n    # O(1) via a Set.\n    def allowed(orders)\n      orders.reject { |o| @blocked.include?(o) }\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/order_filter.rb",
+      "content_patterns": [
+        "def allowed"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/order_filter_test.rb": "require \"minitest/autorun\"\nrequire \"set\"\nrequire_relative \"../lib/order_filter\"\n\nclass OrderFilterTest < Minitest::Test\n  def test_filters_blocked\n    f = App::OrderFilter.new([\"b\", \"d\"])\n    assert_equal [\"a\", \"c\"], f.allowed([\"a\", \"b\", \"c\", \"d\"])\n  end\n\n  def test_preserves_order_and_duplicates\n    f = App::OrderFilter.new([\"x\"])\n    assert_equal [\"a\", \"a\", \"y\"], f.allowed([\"a\", \"x\", \"a\", \"y\"])\n  end\n\n  def test_empty_blocked\n    f = App::OrderFilter.new([])\n    assert_equal [\"a\", \"b\"], f.allowed([\"a\", \"b\"])\n  end\n\n  def test_performance_large_input\n    blocked = (0...20_000).map { |i| \"ord-#{i * 7}\" }\n    orders  = (0...20_000).map { |i| \"ord-#{i * 3}\" }\n    bset = blocked.to_set\n    expected = orders.reject { |o| bset.include?(o) }\n\n    f = App::OrderFilter.new(blocked)\n    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)\n    got = f.allowed(orders)\n    dt = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0\n\n    assert_equal expected, got\n    assert dt < 0.4,\n           \"allowed took #{dt.round(3)}s for 20000 orders vs 20000 blocked; \" \\\n           \"expected an O(n) Set-based membership check (well under 0.4s)\"\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/order_filter_test.rb",
+  "reference_solution": {
+    "lib/order_filter.rb": "require \"set\"\n\nmodule App\n  # Filters out blocked order ids, preserving input order and duplicates.\n  class OrderFilter\n    def initialize(blocked)\n      @blocked = blocked.to_set\n    end\n\n    def allowed(orders)\n      orders.reject { |o| @blocked.include?(o) }\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "keeps-blocked-instead",
+      "files": {
+        "lib/order_filter.rb": "require \"set\"\n\nmodule App\n  class OrderFilter\n    def initialize(blocked)\n      @blocked = blocked.to_set\n    end\n\n    # Wrong: returns the blocked ones instead of the allowed ones.\n    def allowed(orders)\n      orders.select { |o| @blocked.include?(o) }\n    end\n  end\nend\n"
+      }
+    },
+    {
+      "name": "still-linear-array-scan",
+      "files": {
+        "lib/order_filter.rb": "module App\n  class OrderFilter\n    def initialize(blocked)\n      @blocked = blocked\n    end\n\n    # Correct output but still O(n*m): @blocked stays an Array, so include?\n    # is a linear scan. Busts the time budget on the large input.\n    def allowed(orders)\n      orders.reject { |o| @blocked.include?(o) }\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

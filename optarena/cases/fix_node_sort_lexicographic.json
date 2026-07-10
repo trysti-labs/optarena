@@ -1,0 +1,48 @@
+{
+  "name": "fix_node_sort_lexicographic",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes numeric sorting that used Array.sort() with no comparator (sorts by string order)",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "javascript",
+    "node",
+    "bug_fix",
+    "sort",
+    "idiom"
+  ],
+  "prompts": [
+    "sortNumbers(nums) in sorter.js should return a NEW array with the numbers in ascending numeric order, without mutating the input. It's broken: it calls .sort() with no comparator, and Array.prototype.sort converts elements to strings and sorts lexicographically, so [3, 1, 10, 2, 21] becomes [1, 10, 2, 21, 3]. Fix sortNumbers to sort by numeric value (pass a comparator) while still returning a new array and leaving the input unchanged. Keep the module export and the sortNumbers(nums) signature."
+  ],
+  "setup_files": {
+    "sorter.js": "function sortNumbers(nums) {\n  // BUG: .sort() with no comparator sorts by STRING order, so 10 sorts\n  // before 2. Returns a new array (spread) but in the wrong order.\n  return [...nums].sort();\n}\n\nmodule.exports = { sortNumbers };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "sorter.js",
+      "content_patterns": [
+        "function sortnumbers"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_sorter.js": "const assert = require('node:assert');\nconst { sortNumbers } = require('./sorter.js');\n\nassert.deepStrictEqual(sortNumbers([3, 1, 10, 2, 21]), [1, 2, 3, 10, 21]);\nassert.deepStrictEqual(sortNumbers([100, 9, 80]), [9, 80, 100]);\nassert.deepStrictEqual(sortNumbers([]), []);\nassert.deepStrictEqual(sortNumbers([5]), [5]);\n\n// must not mutate the input\nconst input = [3, 1, 2];\nsortNumbers(input);\nassert.deepStrictEqual(input, [3, 1, 2], 'input array was mutated');\n\nconsole.log('ok');\n"
+  },
+  "check_command": "node test_sorter.js",
+  "reference_solution": {
+    "sorter.js": "function sortNumbers(nums) {\n  return [...nums].sort((a, b) => a - b);\n}\n\nmodule.exports = { sortNumbers };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "sorts-descending",
+      "files": {
+        "sorter.js": "function sortNumbers(nums) {\n  // Numeric now, but sorts DESCENDING.\n  return [...nums].sort((a, b) => b - a);\n}\n\nmodule.exports = { sortNumbers };\n"
+      }
+    }
+  ]
+}

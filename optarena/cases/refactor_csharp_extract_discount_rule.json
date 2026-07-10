@@ -1,0 +1,72 @@
+{
+  "name": "refactor_csharp_extract_discount_rule",
+  "language": "csharp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Consolidates duplicated quantity-discount tier logic from two services into one shared class",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "csharp",
+    "refactoring",
+    "dry",
+    "multi-file"
+  ],
+  "prompts": [
+    "CheckoutService.cs and QuoteService.cs contain the SAME inline quantity-discount tier logic: qty >= 100 -> 20, qty >= 50 -> 10, qty >= 10 -> 5, else 0. Remove the duplication: create DiscountRules.cs defining `public static class DiscountRules` with `public static int PercentFor(int qty)` implementing exactly that tier rule, and rewrite BOTH CheckoutService.FinalPrice and QuoteService.DiscountPercent to call DiscountRules.PercentFor instead of their inline expression. Do not change observable behavior: QuoteService.DiscountPercent(qty) returns the same percents, and CheckoutService.FinalPrice(unitCents, qty) still returns gross minus gross*percent/100. Neither service should keep its own copy of the tier thresholds."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <!-- tests/ has its own project; without this the SDK's default glob\n         compiles tests/*.cs into the app itself, where xunit isn't referenced -->\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "CheckoutService.cs": "public static class CheckoutService\n{\n    public static int FinalPrice(int unitCents, int qty)\n    {\n        int percent = qty >= 100 ? 20 : qty >= 50 ? 10 : qty >= 10 ? 5 : 0;\n        int gross = unitCents * qty;\n        return gross - gross * percent / 100;\n    }\n}\n",
+    "QuoteService.cs": "public static class QuoteService\n{\n    public static int DiscountPercent(int qty)\n    {\n        return qty >= 100 ? 20 : qty >= 50 ? 10 : qty >= 10 ? 5 : 0;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "DiscountRules.cs",
+      "content_patterns": [
+        "percentfor"
+      ]
+    },
+    {
+      "path_pattern": "CheckoutService.cs",
+      "content_patterns": [
+        "percentfor"
+      ],
+      "not_content_patterns": [
+        ">= 50"
+      ]
+    },
+    {
+      "path_pattern": "QuoteService.cs",
+      "content_patterns": [
+        "percentfor"
+      ],
+      "not_content_patterns": [
+        ">= 50"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"Microsoft.AspNetCore.Mvc.Testing\" Version=\"8.0.10\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/DiscountTests.cs": "using Xunit;\n\npublic class DiscountTests\n{\n    [Fact]\n    public void QuoteDiscountTiers()\n    {\n        Assert.Equal(0, QuoteService.DiscountPercent(9));\n        Assert.Equal(5, QuoteService.DiscountPercent(10));\n        Assert.Equal(5, QuoteService.DiscountPercent(49));\n        Assert.Equal(10, QuoteService.DiscountPercent(50));\n        Assert.Equal(10, QuoteService.DiscountPercent(99));\n        Assert.Equal(20, QuoteService.DiscountPercent(100));\n    }\n\n    [Fact]\n    public void CheckoutAppliesDiscount()\n    {\n        Assert.Equal(900, CheckoutService.FinalPrice(100, 9));\n        Assert.Equal(4500, CheckoutService.FinalPrice(100, 50));\n        Assert.Equal(8000, CheckoutService.FinalPrice(100, 100));\n    }\n\n    [Fact]\n    public void ServicesAgreeAtBoundaries()\n    {\n        Assert.Equal(10, QuoteService.DiscountPercent(50));\n        Assert.Equal(20, QuoteService.DiscountPercent(100));\n    }\n}\n"
+  },
+  "check_command": "dotnet test tests/tests.csproj",
+  "reference_solution": {
+    "DiscountRules.cs": "public static class DiscountRules\n{\n    public static int PercentFor(int qty)\n    {\n        return qty >= 100 ? 20 : qty >= 50 ? 10 : qty >= 10 ? 5 : 0;\n    }\n}\n",
+    "CheckoutService.cs": "public static class CheckoutService\n{\n    public static int FinalPrice(int unitCents, int qty)\n    {\n        int percent = DiscountRules.PercentFor(qty);\n        int gross = unitCents * qty;\n        return gross - gross * percent / 100;\n    }\n}\n",
+    "QuoteService.cs": "public static class QuoteService\n{\n    public static int DiscountPercent(int qty)\n    {\n        return DiscountRules.PercentFor(qty);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "boundary-drift",
+      "files": {
+        "DiscountRules.cs": "public static class DiscountRules\n{\n    // BEHAVIOR DRIFT: the 50-unit tier boundary moved to 60.\n    public static int PercentFor(int qty)\n    {\n        return qty >= 100 ? 20 : qty >= 60 ? 10 : qty >= 10 ? 5 : 0;\n    }\n}\n",
+        "CheckoutService.cs": "public static class CheckoutService\n{\n    public static int FinalPrice(int unitCents, int qty)\n    {\n        int percent = DiscountRules.PercentFor(qty);\n        int gross = unitCents * qty;\n        return gross - gross * percent / 100;\n    }\n}\n",
+        "QuoteService.cs": "public static class QuoteService\n{\n    public static int DiscountPercent(int qty)\n    {\n        return DiscountRules.PercentFor(qty);\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "name": "fix_csharp_modify_during_foreach",
+  "language": "csharp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes a List mutated during foreach (throws InvalidOperationException) to remove in place correctly",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "csharp",
+    "bug_fix",
+    "collection-mutation",
+    "idiom"
+  ],
+  "prompts": [
+    "Pruner.RemoveEvens(List<int> items) in Pruner.cs should remove every even number from the list and return it. It's broken: it calls items.Remove(x) INSIDE a `foreach (var x in items)`, and mutating a List while enumerating it throws InvalidOperationException ('Collection was modified'). Fix RemoveEvens to remove all even numbers correctly (e.g. List<T>.RemoveAll, or iterate a snapshot), returning the same list instance behavior: only the odd numbers remain, in their original order. Keep the class name and the RemoveEvens(List<int>) signature."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <!-- tests/ has its own project; without this the SDK's default glob\n         compiles tests/*.cs into the app itself, where xunit isn't referenced -->\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "Pruner.cs": "using System.Collections.Generic;\n\npublic static class Pruner\n{\n    // Remove all even numbers, keep the odds in order.\n    // BUG: mutating the list during foreach throws InvalidOperationException.\n    public static List<int> RemoveEvens(List<int> items)\n    {\n        foreach (var x in items)\n        {\n            if (x % 2 == 0)\n            {\n                items.Remove(x);\n            }\n        }\n        return items;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Pruner.cs",
+      "content_patterns": [
+        "removeevens"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"Microsoft.AspNetCore.Mvc.Testing\" Version=\"8.0.10\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/PrunerTests.cs": "using System.Collections.Generic;\nusing Xunit;\n\npublic class PrunerTests\n{\n    [Fact]\n    public void RemovesEvensKeepsOddOrder()\n    {\n        Assert.Equal(new List<int> { 1, 3, 5 }, Pruner.RemoveEvens(new List<int> { 1, 2, 3, 4, 5 }));\n    }\n\n    [Fact]\n    public void HandlesConsecutiveEvens()\n    {\n        Assert.Equal(new List<int> { 1, 5 }, Pruner.RemoveEvens(new List<int> { 2, 2, 1, 4, 6, 5 }));\n    }\n\n    [Fact]\n    public void AllEvenBecomesEmpty()\n    {\n        Assert.Equal(new List<int>(), Pruner.RemoveEvens(new List<int> { 2, 4, 6 }));\n    }\n\n    [Fact]\n    public void NoneEvenUnchanged()\n    {\n        Assert.Equal(new List<int> { 1, 3 }, Pruner.RemoveEvens(new List<int> { 1, 3 }));\n    }\n}\n"
+  },
+  "check_command": "dotnet test tests/tests.csproj",
+  "reference_solution": {
+    "Pruner.cs": "using System.Collections.Generic;\n\npublic static class Pruner\n{\n    public static List<int> RemoveEvens(List<int> items)\n    {\n        items.RemoveAll(x => x % 2 == 0);\n        return items;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "inverted-predicate",
+      "files": {
+        "Pruner.cs": "using System.Collections.Generic;\n\npublic static class Pruner\n{\n    // Stops throwing but removes the ODD numbers instead of the even ones.\n    public static List<int> RemoveEvens(List<int> items)\n    {\n        items.RemoveAll(x => x % 2 != 0);\n        return items;\n    }\n}\n"
+      }
+    }
+  ]
+}

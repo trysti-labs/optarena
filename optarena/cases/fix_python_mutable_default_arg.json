@@ -1,0 +1,47 @@
+{
+  "name": "fix_python_mutable_default_arg",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes the classic mutable-default-argument bug where a list default is shared across calls",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "python",
+    "bug_fix",
+    "mutable-default",
+    "idiom"
+  ],
+  "prompts": [
+    "append_item(item, bucket=[]) in accumulator.py should append item to bucket and return it; when called WITHOUT a bucket it should start from a fresh empty list. It's broken by the classic mutable-default-argument trap: the default [] is created once when the function is defined and shared by every call that omits bucket, so items leak across calls - append_item('a') then append_item('b') returns ['a', 'b']. Fix it so each call that omits bucket starts empty, while a bucket that IS passed in is still appended to and returned. Keep the function name and signature (bucket must remain an optional second parameter)."
+  ],
+  "setup_files": {
+    "accumulator.py": "def append_item(item, bucket=[]):\n    \"\"\"Append item to bucket and return it; omit bucket to start fresh.\"\"\"\n    # BUG: the default [] is created ONCE at def time and shared across every\n    # call that omits bucket, so items leak between calls.\n    bucket.append(item)\n    return bucket\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "accumulator.py",
+      "content_patterns": [
+        "def append_item"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_accumulator.py": "from accumulator import append_item\n\n\ndef test_appends_to_passed_bucket():\n    assert append_item(1, [10]) == [10, 1]\n\n\ndef test_fresh_list_each_call():\n    assert append_item(\"a\") == [\"a\"]\n    assert append_item(\"b\") == [\"b\"]\n\n\ndef test_returned_lists_are_independent():\n    first = append_item(1)\n    second = append_item(2)\n    assert first == [1]\n    assert second == [2]\n"
+  },
+  "check_command": "python3 -m pytest -q test_accumulator.py",
+  "reference_solution": {
+    "accumulator.py": "def append_item(item, bucket=None):\n    \"\"\"Append item to bucket and return it; omit bucket to start fresh.\"\"\"\n    if bucket is None:\n        bucket = []\n    bucket.append(item)\n    return bucket\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "ignores-passed-bucket",
+      "files": {
+        "accumulator.py": "def append_item(item, bucket=None):\n    # Fixes the sharing but always discards a passed-in bucket, starting empty.\n    bucket = []\n    bucket.append(item)\n    return bucket\n"
+      }
+    }
+  ]
+}

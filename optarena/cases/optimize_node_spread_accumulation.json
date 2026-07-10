@@ -1,0 +1,47 @@
+{
+  "name": "optimize_node_spread_accumulation",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Optimizes O(n^2) array building (acc = [...acc, x] in a loop) to a single-pass push",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "javascript",
+    "node",
+    "performance",
+    "algorithms"
+  ],
+  "prompts": [
+    "doubleEach(nums) in scale.js returns a new array with every element multiplied by two, in order. It accumulates with `acc = [...acc, n * 2]` inside the loop; because the spread copies the entire growing array every iteration, the whole thing is O(n^2) and far too slow for arrays of tens of thousands of elements. Rewrite doubleEach to run in linear time (push onto a result array, or use map) producing exactly the same array in the same order. Keep the module export and the doubleEach(nums) signature."
+  ],
+  "setup_files": {
+    "scale.js": "function doubleEach(nums) {\n  // BUG: [...acc, x] copies the whole growing array each iteration -> O(n^2).\n  let acc = [];\n  for (const n of nums) {\n    acc = [...acc, n * 2];\n  }\n  return acc;\n}\n\nmodule.exports = { doubleEach };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "scale.js",
+      "content_patterns": [
+        "function doubleeach"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_perf.js": "const assert = require('node:assert');\nconst { doubleEach } = require('./scale.js');\n\nassert.deepStrictEqual(doubleEach([1, 2, 3]), [2, 4, 6], 'basic correctness failed');\nassert.deepStrictEqual(doubleEach([]), [], 'empty array failed');\n\nconst N = 60000;\nconst big = [];\nfor (let i = 0; i < N; i++) big.push(i);\nconst expected = big.map((x) => x * 2);\n\nconst t0 = Date.now();\nconst result = doubleEach(big);\nconst elapsedMs = Date.now() - t0;\n\nassert.deepStrictEqual(result, expected, 'large-input result incorrect');\nassert(\n  elapsedMs < 1500,\n  `doubleEach took ${elapsedMs}ms for ${N} elements; expected an O(n) push/map, not spreading the accumulator each iteration`\n);\n\nconsole.log('ok');\n"
+  },
+  "check_command": "node test_perf.js",
+  "reference_solution": {
+    "scale.js": "function doubleEach(nums) {\n  const acc = [];\n  for (const n of nums) {\n    acc.push(n * 2);\n  }\n  return acc;\n}\n\nmodule.exports = { doubleEach };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-quadratic-spread",
+      "files": {
+        "scale.js": "function doubleEach(nums) {\n  // Correct output but still O(n^2): keeps spreading the accumulator.\n  let acc = [];\n  for (const n of nums) {\n    acc = acc.concat([n * 2]);\n  }\n  return acc;\n}\n\nmodule.exports = { doubleEach };\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "fix_node_map_parseint",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes the map(parseInt) trap where the array index is passed to parseInt as the radix",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "javascript",
+    "node",
+    "bug_fix",
+    "parseint",
+    "idiom"
+  ],
+  "prompts": [
+    "parseAll(strings) in parse.js should convert each numeric string to a base-10 Number and return the array of numbers. It's broken: it passes parseInt directly to map, so map calls parseInt(value, index) - the array INDEX becomes the radix argument. parseInt('2', 1) and parseInt('3', 2) are NaN, so ['1','2','3','10'] wrongly yields [1, NaN, NaN, 3]. Fix parseAll so every element is parsed in base 10 (wrap parseInt with an explicit radix, or use Number). Keep the module export and the parseAll(strings) signature."
+  ],
+  "setup_files": {
+    "parse.js": "function parseAll(strings) {\n  // BUG: map calls parseInt(value, index), so the index is used as the radix.\n  return strings.map(parseInt);\n}\n\nmodule.exports = { parseAll };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "parse.js",
+      "content_patterns": [
+        "function parseall"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_parse.js": "const assert = require('node:assert');\nconst { parseAll } = require('./parse.js');\n\nassert.deepStrictEqual(parseAll(['1', '2', '3', '10']), [1, 2, 3, 10]);\nassert.deepStrictEqual(parseAll(['42']), [42]);\nassert.deepStrictEqual(parseAll([]), []);\nassert.deepStrictEqual(parseAll(['100', '200', '300']), [100, 200, 300]);\n\nconsole.log('ok');\n"
+  },
+  "check_command": "node test_parse.js",
+  "reference_solution": {
+    "parse.js": "function parseAll(strings) {\n  return strings.map((s) => parseInt(s, 10));\n}\n\nmodule.exports = { parseAll };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-passes-parseint-to-map",
+      "files": {
+        "parse.js": "function parseAll(strings) {\n  // Swapped in Number.parseInt but STILL passes it to map, so map hands it\n  // the index as the radix - same bug.\n  return strings.map(Number.parseInt);\n}\n\nmodule.exports = { parseAll };\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "optimize_kotlin_immutable_list_accumulation",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Optimizes an O(n^2) accumulation that rebuilds an immutable List with + on each iteration",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "kotlin",
+    "performance",
+    "collections",
+    "algorithms"
+  ],
+  "prompts": [
+    "Scaler.doubleEach in src/main/kotlin/com/optarena/app/Scaler.kt returns a new list containing every input element multiplied by two, in order. It accumulates with `acc = acc + (x * 2)` on an immutable List inside the loop, so each iteration copies the entire growing list - O(n^2) total, unusably slow for lists of a hundred thousand elements. Rewrite doubleEach to run in linear time (use a MutableList, buildList, or a single map) producing exactly the same list in the same order. Keep the object name and the doubleEach(xs: List<Int>): List<Int> signature. The file declares package com.optarena.app."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Scaler.kt": "package com.optarena.app\n\nobject Scaler {\n    // Return each element doubled, in order.\n    // BUG: `acc = acc + (x * 2)` rebuilds the whole immutable list every\n    // iteration -> O(n^2), far too slow for large inputs.\n    fun doubleEach(xs: List<Int>): List<Int> {\n        var acc = emptyList<Int>()\n        for (x in xs) {\n            acc = acc + (x * 2)\n        }\n        return acc\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Scaler.kt",
+      "content_patterns": [
+        "fun doubleeach"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/ScalerTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\n\nclass ScalerTest {\n\n    @Test\n    fun doublesInOrder() {\n        assertEquals(listOf(2, 4, 6), Scaler.doubleEach(listOf(1, 2, 3)))\n    }\n\n    @Test\n    fun emptyStaysEmpty() {\n        assertEquals(emptyList<Int>(), Scaler.doubleEach(emptyList()))\n    }\n\n    @Test\n    fun performanceLargeInput() {\n        val xs = (0 until 100_000).toList()\n        val expected = xs.map { it * 2 }\n\n        val start = System.nanoTime()\n        val got = Scaler.doubleEach(xs)\n        val elapsed = (System.nanoTime() - start) / 1e9\n\n        assertEquals(expected, got)\n        assertTrue(\n            elapsed < 1.0,\n            \"doubleEach took ${elapsed}s for 100000 elements; expected an O(n) \" +\n                \"accumulation, not rebuilding an immutable list with + each iteration\"\n        )\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=ScalerTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Scaler.kt": "package com.optarena.app\n\nobject Scaler {\n    fun doubleEach(xs: List<Int>): List<Int> {\n        val acc = ArrayList<Int>(xs.size)\n        for (x in xs) {\n            acc.add(x * 2)\n        }\n        return acc\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-quadratic-plus",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Scaler.kt": "package com.optarena.app\n\nobject Scaler {\n    // Correct output but still O(n^2): keeps rebuilding the immutable list.\n    fun doubleEach(xs: List<Int>): List<Int> {\n        var acc = emptyList<Int>()\n        for (x in xs) {\n            acc = acc + (x * 2)\n        }\n        return acc\n    }\n}\n"
+      }
+    }
+  ]
+}

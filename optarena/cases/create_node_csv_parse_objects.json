@@ -1,0 +1,48 @@
+{
+  "name": "create_node_csv_parse_objects",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Builds a quoted-CSV parser (handles commas and escaped quotes inside fields) consumed by an existing module",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "javascript",
+    "node",
+    "data_engineering",
+    "csv",
+    "multi-file"
+  ],
+  "prompts": [
+    "An existing report.js requires parseCsv from a csv module and uses it, but csv.js does not exist yet. Create csv.js exporting parseCsv(text): given CSV text whose first non-empty line is the header row, return an array of objects mapping each header to that row's value. It must correctly handle double-quoted fields: a quoted field may contain commas (which are NOT field separators) and may contain a literal double-quote written as two double-quotes (\"\"), and the surrounding quotes are stripped from the value. Ignore empty lines. You may assume no field contains a newline. Header-only or empty input returns an empty array. Do not modify report.js. Export with module.exports = { parseCsv }."
+  ],
+  "setup_files": {
+    "report.js": "const { parseCsv } = require('./csv.js');\n\n// Extract the 'name' column from every row.\nfunction names(text) {\n  return parseCsv(text).map((row) => row.name);\n}\n\nmodule.exports = { names };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "csv.js",
+      "content_patterns": [
+        "parsecsv"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_csv.js": "const assert = require('node:assert');\nconst { parseCsv } = require('./csv.js');\nconst { names } = require('./report.js');\n\n// basic rows\nassert.deepStrictEqual(\n  parseCsv('name,qty\\napple,3\\nbanana,5\\n'),\n  [{ name: 'apple', qty: '3' }, { name: 'banana', qty: '5' }]\n);\n\n// quoted field containing a comma\nassert.deepStrictEqual(\n  parseCsv('name,note\\nwidget,\"a, b\"\\n'),\n  [{ name: 'widget', note: 'a, b' }]\n);\n\n// escaped double-quote inside a quoted field\nassert.deepStrictEqual(\n  parseCsv('name,note\\nwidget,\"say \"\"hi\"\"\"\\n'),\n  [{ name: 'widget', note: 'say \"hi\"' }]\n);\n\n// header only / empty\nassert.deepStrictEqual(parseCsv('name,qty\\n'), []);\nassert.deepStrictEqual(parseCsv(''), []);\n\n// consumed by report.names, with a quoted comma in the name\nassert.deepStrictEqual(names('name,qty\\n\"a, b\",1\\nc,2\\n'), ['a, b', 'c']);\n\nconsole.log('ok');\n"
+  },
+  "check_command": "node test_csv.js",
+  "reference_solution": {
+    "csv.js": "function parseLine(line) {\n  const fields = [];\n  let cur = '';\n  let inQuotes = false;\n  for (let i = 0; i < line.length; i++) {\n    const ch = line[i];\n    if (inQuotes) {\n      if (ch === '\"') {\n        if (line[i + 1] === '\"') {\n          cur += '\"';\n          i++;\n        } else {\n          inQuotes = false;\n        }\n      } else {\n        cur += ch;\n      }\n    } else if (ch === '\"') {\n      inQuotes = true;\n    } else if (ch === ',') {\n      fields.push(cur);\n      cur = '';\n    } else {\n      cur += ch;\n    }\n  }\n  fields.push(cur);\n  return fields;\n}\n\nfunction parseCsv(text) {\n  const lines = text.split('\\n').filter((l) => l.length > 0);\n  if (lines.length <= 1) return [];\n  const headers = parseLine(lines[0]);\n  return lines.slice(1).map((line) => {\n    const values = parseLine(line);\n    const obj = {};\n    headers.forEach((h, idx) => {\n      obj[h] = values[idx] !== undefined ? values[idx] : '';\n    });\n    return obj;\n  });\n}\n\nmodule.exports = { parseCsv };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "naive-comma-split",
+      "files": {
+        "csv.js": "function parseCsv(text) {\n  // BUG: splits on every comma, so a comma inside a quoted field wrongly\n  // splits the row, and surrounding quotes are never stripped.\n  const lines = text.split('\\n').filter((l) => l.length > 0);\n  if (lines.length <= 1) return [];\n  const headers = lines[0].split(',');\n  return lines.slice(1).map((line) => {\n    const values = line.split(',');\n    const obj = {};\n    headers.forEach((h, idx) => {\n      obj[h] = values[idx] !== undefined ? values[idx] : '';\n    });\n    return obj;\n  });\n}\n\nmodule.exports = { parseCsv };\n"
+      }
+    }
+  ]
+}

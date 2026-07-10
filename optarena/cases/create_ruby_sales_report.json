@@ -1,0 +1,54 @@
+{
+  "name": "create_ruby_sales_report",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Builds a CSV sales aggregator (revenue per category, with row cleaning) consumed by an existing printer",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "ruby",
+    "data_engineering",
+    "csv",
+    "multi-file"
+  ],
+  "prompts": [
+    "An existing lib/report_printer.rb calls SalesReport.summarize(csv_text) and formats the result, but SalesReport does not exist yet. Create lib/sales_report.rb defining module App with class SalesReport and a class method summarize(csv_text) that parses CSV text with a header row `category,unit_price_cents,qty` and returns a Hash mapping each category (String) to its total revenue in integer cents, where a row's revenue is unit_price_cents * qty. Clean the data as you aggregate: skip any row whose category is empty or whitespace-only, whose qty is missing/non-integer/zero-or-negative, or whose unit_price_cents is missing/non-integer. Categories that appear on multiple rows accumulate. An input with only a header (or no valid rows) returns an empty Hash. Keep everything as integer cents (no floats). Do not modify report_printer.rb."
+  ],
+  "setup_files": {
+    "lib/report_printer.rb": "require_relative \"sales_report\"\n\nmodule App\n  # Renders the per-category revenue totals as dollar lines, one per\n  # category, sorted by category name. Delegates all aggregation to\n  # SalesReport.summarize.\n  class ReportPrinter\n    def self.render(csv_text)\n      totals = SalesReport.summarize(csv_text)\n      totals.sort.map { |cat, cents| \"#{cat}: $#{format('%.2f', cents / 100.0)}\" }.join(\"\\n\")\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/sales_report.rb",
+      "content_patterns": [
+        "def self.summarize",
+        "csv"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/sales_report_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/report_printer\"\n\nclass SalesReportTest < Minitest::Test\n  def test_aggregates_revenue_by_category\n    csv = \"category,unit_price_cents,qty\\nbooks,500,2\\nfood,250,4\\nbooks,300,1\\n\"\n    assert_equal({ \"books\" => 1300, \"food\" => 1000 }, App::SalesReport.summarize(csv))\n  end\n\n  def test_multiplies_price_by_quantity\n    csv = \"category,unit_price_cents,qty\\nwidgets,199,3\\n\"\n    assert_equal({ \"widgets\" => 597 }, App::SalesReport.summarize(csv))\n  end\n\n  def test_skips_dirty_rows\n    csv = \"category,unit_price_cents,qty\\n\" \\\n          \"books,500,2\\n\" \\\n          \",999,1\\n\" \\\n          \"   ,100,1\\n\" \\\n          \"food,250,0\\n\" \\\n          \"food,250,-2\\n\" \\\n          \"toys,notanumber,3\\n\" \\\n          \"toys,100,x\\n\"\n    assert_equal({ \"books\" => 1000 }, App::SalesReport.summarize(csv))\n  end\n\n  def test_header_only_is_empty\n    assert_equal({}, App::SalesReport.summarize(\"category,unit_price_cents,qty\\n\"))\n  end\n\n  def test_integration_with_printer\n    csv = \"category,unit_price_cents,qty\\nbooks,500,2\\nfood,250,4\\n\"\n    assert_equal(\"books: $10.00\\nfood: $10.00\", App::ReportPrinter.render(csv))\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/sales_report_test.rb",
+  "reference_solution": {
+    "lib/sales_report.rb": "require \"csv\"\n\nmodule App\n  class SalesReport\n    # Aggregate revenue (unit_price_cents * qty) per category from CSV text,\n    # skipping rows with a blank category or a non-positive/invalid qty or an\n    # invalid unit price. Returns a Hash of category => total integer cents.\n    def self.summarize(csv_text)\n      totals = Hash.new(0)\n      CSV.parse(csv_text, headers: true) do |row|\n        category = row[\"category\"].to_s.strip\n        next if category.empty?\n\n        qty = Integer(row[\"qty\"].to_s.strip, exception: false)\n        next if qty.nil? || qty <= 0\n\n        price = Integer(row[\"unit_price_cents\"].to_s.strip, exception: false)\n        next if price.nil?\n\n        totals[category] += price * qty\n      end\n      totals\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "ignores-quantity",
+      "files": {
+        "lib/sales_report.rb": "require \"csv\"\n\nmodule App\n  class SalesReport\n    # BUG: sums unit_price_cents but never multiplies by qty.\n    def self.summarize(csv_text)\n      totals = Hash.new(0)\n      CSV.parse(csv_text, headers: true) do |row|\n        category = row[\"category\"].to_s.strip\n        next if category.empty?\n        price = Integer(row[\"unit_price_cents\"].to_s.strip, exception: false)\n        next if price.nil?\n        totals[category] += price\n      end\n      totals\n    end\n  end\nend\n"
+      }
+    },
+    {
+      "name": "keeps-dirty-rows",
+      "files": {
+        "lib/sales_report.rb": "require \"csv\"\n\nmodule App\n  class SalesReport\n    # BUG: coerces with to_i and does not skip invalid/blank/non-positive\n    # rows, so blank categories and zero/negative/garbage quantities leak in.\n    def self.summarize(csv_text)\n      totals = Hash.new(0)\n      CSV.parse(csv_text, headers: true) do |row|\n        category = row[\"category\"].to_s.strip\n        qty = row[\"qty\"].to_i\n        price = row[\"unit_price_cents\"].to_i\n        totals[category] += price * qty\n      end\n      totals\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

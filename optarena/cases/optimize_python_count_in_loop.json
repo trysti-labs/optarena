@@ -1,0 +1,47 @@
+{
+  "name": "optimize_python_count_in_loop",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Optimizes a frequency count that calls list.count() per element (O(n^2)) to a single pass",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "python",
+    "performance",
+    "collections",
+    "algorithms"
+  ],
+  "prompts": [
+    "frequencies(items) in frequency.py returns a dict mapping each distinct value to the number of times it appears in items. It's implemented as {x: items.count(x) for x in items}, which calls items.count(x) - a full linear scan - once for every element, making it O(n^2) and far too slow for tens of thousands of items. Rewrite frequencies to compute the same dict in a single pass (e.g. collections.Counter or a manual dict tally), returning exactly the same mapping of value -> count. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "frequency.py": "def frequencies(items):\n    \"\"\"Return {value: number of times it appears in items}.\"\"\"\n    # BUG: items.count(x) rescans the whole list for every element -> O(n^2).\n    return {x: items.count(x) for x in items}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "frequency.py",
+      "content_patterns": [
+        "def frequencies"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_frequency.py": "import time\n\nfrom frequency import frequencies\n\n\ndef test_counts_values():\n    assert frequencies([\"a\", \"b\", \"a\", \"c\", \"a\"]) == {\"a\": 3, \"b\": 1, \"c\": 1}\n\n\ndef test_empty():\n    assert frequencies([]) == {}\n\n\ndef test_single():\n    assert frequencies([7]) == {7: 1}\n\n\ndef test_performance_large_input():\n    items = [i % 500 for i in range(30000)]\n    expected = {}\n    for x in items:\n        expected[x] = expected.get(x, 0) + 1\n\n    start = time.perf_counter()\n    got = frequencies(items)\n    elapsed = time.perf_counter() - start\n\n    assert got == expected\n    assert elapsed < 1.5, (\n        f\"frequencies took {elapsed:.3f}s for 30000 items; expected an O(n) \"\n        f\"single-pass tally, not list.count() per element\"\n    )\n"
+  },
+  "check_command": "python3 -m pytest -q test_frequency.py",
+  "reference_solution": {
+    "frequency.py": "from collections import Counter\n\n\ndef frequencies(items):\n    \"\"\"Return {value: number of times it appears in items}.\"\"\"\n    return dict(Counter(items))\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-quadratic-count",
+      "files": {
+        "frequency.py": "def frequencies(items):\n    # Correct output but still O(n^2): count() per element.\n    result = {}\n    for x in items:\n        result[x] = items.count(x)\n    return result\n"
+      }
+    }
+  ]
+}

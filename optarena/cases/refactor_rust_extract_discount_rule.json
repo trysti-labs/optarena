@@ -1,0 +1,74 @@
+{
+  "name": "refactor_rust_extract_discount_rule",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Consolidates duplicated quantity-discount tier logic from two modules into one shared function",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "rust",
+    "refactoring",
+    "dry",
+    "multi-file"
+  ],
+  "prompts": [
+    "The modules src/checkout.rs and src/quote.rs contain the SAME inline quantity-discount tier logic: qty >= 100 -> 20, qty >= 50 -> 10, qty >= 10 -> 5, else 0. Remove the duplication: create a new module src/discount.rs defining `pub fn percent_for(qty: u32) -> u32` implementing exactly that tier rule, declare it in src/lib.rs (add `pub mod discount;`), and rewrite BOTH `checkout::final_price` and `quote::discount_percent` to call `crate::discount::percent_for` instead of their inline match. Do not change observable behavior: `quote::discount_percent(qty)` returns the same percents, and `checkout::final_price(unit_cents, qty)` still returns gross minus gross*percent/100. Neither module should keep its own copy of the tier thresholds."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"disc\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub mod checkout;\npub mod quote;\n",
+    "src/checkout.rs": "/// Final price in cents after the quantity discount.\npub fn final_price(unit_cents: u32, qty: u32) -> u32 {\n    let percent = match qty {\n        q if q >= 100 => 20,\n        q if q >= 50 => 10,\n        q if q >= 10 => 5,\n        _ => 0,\n    };\n    let gross = unit_cents * qty;\n    gross - gross * percent / 100\n}\n",
+    "src/quote.rs": "/// Discount percent for a given quantity.\npub fn discount_percent(qty: u32) -> u32 {\n    match qty {\n        q if q >= 100 => 20,\n        q if q >= 50 => 10,\n        q if q >= 10 => 5,\n        _ => 0,\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/discount.rs",
+      "content_patterns": [
+        "fn percent_for"
+      ]
+    },
+    {
+      "path_pattern": "src/checkout.rs",
+      "content_patterns": [
+        "percent_for"
+      ],
+      "not_content_patterns": [
+        "q >= 50"
+      ]
+    },
+    {
+      "path_pattern": "src/quote.rs",
+      "content_patterns": [
+        "percent_for"
+      ],
+      "not_content_patterns": [
+        "q >= 50"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/discount_test.rs": "use disc::checkout::final_price;\nuse disc::quote::discount_percent;\n\n#[test]\nfn quote_discount_tiers() {\n    assert_eq!(discount_percent(9), 0);\n    assert_eq!(discount_percent(10), 5);\n    assert_eq!(discount_percent(49), 5);\n    assert_eq!(discount_percent(50), 10);\n    assert_eq!(discount_percent(99), 10);\n    assert_eq!(discount_percent(100), 20);\n}\n\n#[test]\nfn checkout_applies_discount() {\n    assert_eq!(final_price(100, 9), 900); // 0% off 900\n    assert_eq!(final_price(100, 50), 4500); // 10% off 5000\n    assert_eq!(final_price(100, 100), 8000); // 20% off 10000\n}\n\n#[test]\nfn services_agree_at_boundaries() {\n    assert_eq!(discount_percent(50), 10);\n    assert_eq!(discount_percent(100), 20);\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "pub mod checkout;\npub mod discount;\npub mod quote;\n",
+    "src/discount.rs": "/// Quantity-discount percent tiers, shared by checkout and quote.\npub fn percent_for(qty: u32) -> u32 {\n    match qty {\n        q if q >= 100 => 20,\n        q if q >= 50 => 10,\n        q if q >= 10 => 5,\n        _ => 0,\n    }\n}\n",
+    "src/checkout.rs": "/// Final price in cents after the quantity discount.\npub fn final_price(unit_cents: u32, qty: u32) -> u32 {\n    let percent = crate::discount::percent_for(qty);\n    let gross = unit_cents * qty;\n    gross - gross * percent / 100\n}\n",
+    "src/quote.rs": "/// Discount percent for a given quantity.\npub fn discount_percent(qty: u32) -> u32 {\n    crate::discount::percent_for(qty)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "boundary-drift",
+      "files": {
+        "src/lib.rs": "pub mod checkout;\npub mod discount;\npub mod quote;\n",
+        "src/discount.rs": "/// BEHAVIOR DRIFT: the 50-unit tier boundary moved to 60.\npub fn percent_for(qty: u32) -> u32 {\n    match qty {\n        q if q >= 100 => 20,\n        q if q >= 60 => 10,\n        q if q >= 10 => 5,\n        _ => 0,\n    }\n}\n",
+        "src/checkout.rs": "/// Final price in cents after the quantity discount.\npub fn final_price(unit_cents: u32, qty: u32) -> u32 {\n    let percent = crate::discount::percent_for(qty);\n    let gross = unit_cents * qty;\n    gross - gross * percent / 100\n}\n",
+        "src/quote.rs": "/// Discount percent for a given quantity.\npub fn discount_percent(qty: u32) -> u32 {\n    crate::discount::percent_for(qty)\n}\n"
+      }
+    }
+  ]
+}

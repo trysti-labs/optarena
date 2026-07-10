@@ -1,0 +1,54 @@
+{
+  "name": "create_rust_category_totals",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Builds a CSV category-totals aggregator in a new module, consumed by an existing render function",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "rust",
+    "data_engineering",
+    "csv",
+    "multi-file"
+  ],
+  "prompts": [
+    "src/lib.rs declares `pub mod aggregate;` and a `render` function that calls `aggregate::category_totals(csv)`, but the aggregate module does not exist yet. Create src/aggregate.rs defining `pub fn category_totals(csv: &str) -> Vec<(String, i64)>`. It parses CSV text whose first line is the header `category,amount` and returns, for each category, its summed amount, as (category, total) pairs sorted by category name ascending. Skip any data row whose category is empty/whitespace or whose amount is not a valid integer. A category appearing on multiple rows accumulates. Header-only or empty input returns an empty Vec. Do not modify src/lib.rs."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"category_totals\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub mod aggregate;\n\n/// Render category totals as \"category: total\" lines, sorted by category.\npub fn render(csv: &str) -> String {\n    aggregate::category_totals(csv)\n        .iter()\n        .map(|(cat, total)| format!(\"{}: {}\", cat, total))\n        .collect::<Vec<_>>()\n        .join(\"\\n\")\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/aggregate.rs",
+      "content_patterns": [
+        "fn category_totals"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/aggregate_test.rs": "use category_totals::aggregate::category_totals;\nuse category_totals::render;\n\n#[test]\nfn sums_by_category_sorted() {\n    let csv = \"category,amount\\nbooks,500\\nfood,250\\nbooks,300\\n\";\n    assert_eq!(\n        category_totals(csv),\n        vec![(\"books\".to_string(), 800), (\"food\".to_string(), 250)]\n    );\n}\n\n#[test]\nfn skips_invalid_rows() {\n    let csv = \"category,amount\\nbooks,500\\n,99\\n   ,100\\ntoys,notanumber\\nbooks,-200\\n\";\n    assert_eq!(category_totals(csv), vec![(\"books\".to_string(), 300)]);\n}\n\n#[test]\nfn header_only_is_empty() {\n    assert_eq!(category_totals(\"category,amount\\n\"), Vec::<(String, i64)>::new());\n}\n\n#[test]\nfn integrates_with_render() {\n    let csv = \"category,amount\\nbooks,500\\nfood,250\\nbooks,300\\n\";\n    assert_eq!(render(csv), \"books: 800\\nfood: 250\");\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/aggregate.rs": "use std::collections::BTreeMap;\n\n/// Sum `amount` per `category` from CSV text, sorted by category ascending.\npub fn category_totals(csv: &str) -> Vec<(String, i64)> {\n    let mut totals: BTreeMap<String, i64> = BTreeMap::new();\n    for line in csv.lines().skip(1) {\n        if line.trim().is_empty() {\n            continue;\n        }\n        let mut cols = line.splitn(2, ',');\n        let category = cols.next().unwrap_or(\"\").trim();\n        let amount = cols.next().unwrap_or(\"\").trim();\n        if category.is_empty() {\n            continue;\n        }\n        match amount.parse::<i64>() {\n            Ok(value) => *totals.entry(category.to_string()).or_insert(0) += value,\n            Err(_) => continue,\n        }\n    }\n    totals.into_iter().collect()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "overwrites-instead-of-sums",
+      "files": {
+        "src/aggregate.rs": "use std::collections::BTreeMap;\n\n/// BUG: inserts (overwrites) the amount per category instead of accumulating,\n/// so a category on multiple rows keeps only its last amount.\npub fn category_totals(csv: &str) -> Vec<(String, i64)> {\n    let mut totals: BTreeMap<String, i64> = BTreeMap::new();\n    for line in csv.lines().skip(1) {\n        if line.trim().is_empty() {\n            continue;\n        }\n        let mut cols = line.splitn(2, ',');\n        let category = cols.next().unwrap_or(\"\").trim();\n        let amount = cols.next().unwrap_or(\"\").trim();\n        if category.is_empty() {\n            continue;\n        }\n        if let Ok(value) = amount.parse::<i64>() {\n            totals.insert(category.to_string(), value);\n        }\n    }\n    totals.into_iter().collect()\n}\n"
+      }
+    },
+    {
+      "name": "does-not-skip-invalid",
+      "files": {
+        "src/aggregate.rs": "use std::collections::BTreeMap;\n\n/// BUG: treats an unparseable amount as 0 and keeps blank categories, so\n/// invalid rows leak in instead of being skipped.\npub fn category_totals(csv: &str) -> Vec<(String, i64)> {\n    let mut totals: BTreeMap<String, i64> = BTreeMap::new();\n    for line in csv.lines().skip(1) {\n        if line.trim().is_empty() {\n            continue;\n        }\n        let mut cols = line.splitn(2, ',');\n        let category = cols.next().unwrap_or(\"\").trim();\n        let amount = cols.next().unwrap_or(\"\").trim();\n        let value = amount.parse::<i64>().unwrap_or(0);\n        *totals.entry(category.to_string()).or_insert(0) += value;\n    }\n    totals.into_iter().collect()\n}\n"
+      }
+    }
+  ]
+}

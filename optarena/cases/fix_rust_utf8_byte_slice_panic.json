@@ -1,0 +1,48 @@
+{
+  "name": "fix_rust_utf8_byte_slice_panic",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes first-character extraction that byte-slices &s[0..1] and panics on multi-byte UTF-8",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "rust",
+    "bug_fix",
+    "utf8",
+    "idiom"
+  ],
+  "prompts": [
+    "The function `initial(s: &str) -> String` in src/lib.rs should return the first CHARACTER of the string (as a String), or an empty string if `s` is empty. It's broken: it uses the byte slice `&s[0..1]`, which panics with 'byte index is not a char boundary' whenever the first character is multi-byte UTF-8 (e.g. '\u00fc', an emoji), and also panics on an empty string. Fix `initial` to return the first Unicode scalar value correctly (use the chars iterator), returning \"\" for an empty string. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"initial_char\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "/// First character of `s` as a String (\"\" if empty).\n/// BUG: `&s[0..1]` is a BYTE slice - it panics when the first char is\n/// multi-byte UTF-8, and panics on an empty string.\npub fn initial(s: &str) -> String {\n    s[0..1].to_string()\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "fn initial"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/initial_test.rs": "use initial_char::initial;\n\n#[test]\nfn ascii_first() {\n    assert_eq!(initial(\"hello\"), \"h\");\n}\n\n#[test]\nfn multibyte_first() {\n    assert_eq!(initial(\"\\u{00fc}ber\"), \"\\u{00fc}\"); // '\u00fc' is 2 bytes\n}\n\n#[test]\nfn emoji_first() {\n    assert_eq!(initial(\"\\u{1F680}go\"), \"\\u{1F680}\"); // rocket is 4 bytes\n}\n\n#[test]\nfn empty_is_empty() {\n    assert_eq!(initial(\"\"), \"\");\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "/// First character of `s` as a String (\"\" if empty).\npub fn initial(s: &str) -> String {\n    s.chars().next().map(|c| c.to_string()).unwrap_or_default()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "byte-get-returns-empty",
+      "files": {
+        "src/lib.rs": "/// Stops panicking but still byte-based: `s.get(0..1)` returns None when the\n/// first char isn't 1 byte, so multi-byte first chars become \"\".\npub fn initial(s: &str) -> String {\n    s.get(0..1).unwrap_or(\"\").to_string()\n}\n"
+      }
+    }
+  ]
+}

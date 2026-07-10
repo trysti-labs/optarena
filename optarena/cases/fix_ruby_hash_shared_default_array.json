@@ -1,0 +1,47 @@
+{
+  "name": "fix_ruby_hash_shared_default_array",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes a grouping method that uses Hash.new([]) with <<, so all keys share one default array and none are stored",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "ruby",
+    "bug_fix",
+    "hash-default",
+    "idiom"
+  ],
+  "prompts": [
+    "Grouper#group in lib/grouper.rb should group the given words into a Hash keyed by each word's first letter, mapping to an array of the words that start with that letter (in input order). It's broken: it builds the hash with Hash.new([]) and appends with <<, so every << mutates the one shared default array and no keys are ever actually stored - group(['apple','ant','bee'])['a'] comes back with every word, and a missing key returns that same shared array. Fix group so each distinct first letter maps to its own array containing exactly its words, and looking up a letter that never appeared returns an empty array. Keep the class name and the group(words) signature."
+  ],
+  "setup_files": {
+    "lib/grouper.rb": "module App\n  class Grouper\n    # Group words by their first letter.\n    # BUG: Hash.new([]) hands out ONE shared default array and `<<` mutates\n    # it in place without ever assigning the key, so the result hash stays\n    # empty while the shared array collects everything.\n    def group(words)\n      result = Hash.new([])\n      words.each { |w| result[w[0]] << w }\n      result\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/grouper.rb",
+      "content_patterns": [
+        "def group"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/grouper_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/grouper\"\n\nclass GrouperTest < Minitest::Test\n  def setup\n    @grouper = App::Grouper.new\n  end\n\n  def test_groups_by_first_letter\n    result = @grouper.group([\"apple\", \"ant\", \"bee\"])\n    assert_equal [\"apple\", \"ant\"], result[\"a\"]\n    assert_equal [\"bee\"], result[\"b\"]\n  end\n\n  def test_missing_key_returns_empty_array\n    result = @grouper.group([\"apple\"])\n    assert_equal [], result[\"z\"]\n  end\n\n  def test_preserves_input_order\n    result = @grouper.group([\"bat\", \"ball\", \"bee\"])\n    assert_equal [\"bat\", \"ball\", \"bee\"], result[\"b\"]\n  end\n\n  def test_empty_input\n    assert_equal [], @grouper.group([])[\"a\"]\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/grouper_test.rb",
+  "reference_solution": {
+    "lib/grouper.rb": "module App\n  class Grouper\n    # Group words by their first letter. The default block assigns a fresh\n    # array per key on first access, so keys are stored and never shared.\n    def group(words)\n      result = Hash.new { |hash, key| hash[key] = [] }\n      words.each { |w| result[w[0]] << w }\n      result\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "block-does-not-store-key",
+      "files": {
+        "lib/grouper.rb": "module App\n  class Grouper\n    # STILL BROKEN: the default block returns a fresh array but does not\n    # assign it back into the hash, so the appended value is discarded and\n    # every lookup recomputes an empty array.\n    def group(words)\n      result = Hash.new { |_hash, _key| [] }\n      words.each { |w| result[w[0]] << w }\n      result\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

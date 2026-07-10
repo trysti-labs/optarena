@@ -1,0 +1,54 @@
+{
+  "name": "create_kotlin_csv_leaderboard",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Builds a CSV leaderboard (top-3 by score desc, tie-break by name) consumed by an existing printer",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "kotlin",
+    "data_engineering",
+    "csv",
+    "multi-file"
+  ],
+  "prompts": [
+    "An existing src/main/kotlin/com/optarena/app/LeaderboardPrinter.kt calls ScoreBoard.topThree(csv), but ScoreBoard does not exist yet. Create src/main/kotlin/com/optarena/app/ScoreBoard.kt (package com.optarena.app) defining object ScoreBoard with fun topThree(csv: String): List<Pair<String, Int>>. Parse CSV text whose first line is the header `name,score` and return the top three entries as (name, score) pairs ordered by score DESCENDING, breaking ties by name ASCENDING. Skip any data row whose name is blank/whitespace or whose score is not a valid integer. If fewer than three valid rows exist, return all of them (still sorted). Header-only or empty input returns an empty list. Do not modify LeaderboardPrinter.kt."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/LeaderboardPrinter.kt": "package com.optarena.app\n\nobject LeaderboardPrinter {\n    // One line per ranked entry: \"name: score\".\n    fun render(csv: String): String =\n        ScoreBoard.topThree(csv).joinToString(\"\\n\") { (name, score) -> \"$name: $score\" }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/ScoreBoard.kt",
+      "content_patterns": [
+        "fun topthree"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/ScoreBoardTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass ScoreBoardTest {\n\n    @Test\n    fun ranksTopThreeByScoreDescTieByName() {\n        val csv = \"name,score\\nalice,50\\nbob,90\\ncarol,70\\ndave,90\\n\"\n        // 90: bob,dave (name asc); then carol 70 -> top three\n        assertEquals(listOf(\"bob\" to 90, \"dave\" to 90, \"carol\" to 70), ScoreBoard.topThree(csv))\n    }\n\n    @Test\n    fun skipsInvalidRows() {\n        val csv = \"name,score\\nalice,50\\n,99,\\nbob,notanumber\\ncarol,70\\n\"\n        assertEquals(listOf(\"carol\" to 70, \"alice\" to 50), ScoreBoard.topThree(csv))\n    }\n\n    @Test\n    fun fewerThanThreeReturnsAll() {\n        assertEquals(listOf(\"x\" to 10), ScoreBoard.topThree(\"name,score\\nx,10\\n\"))\n    }\n\n    @Test\n    fun headerOnlyIsEmpty() {\n        assertEquals(emptyList<Pair<String, Int>>(), ScoreBoard.topThree(\"name,score\\n\"))\n    }\n\n    @Test\n    fun integratesWithPrinter() {\n        val csv = \"name,score\\nalice,50\\nbob,90\\ncarol,70\\n\"\n        assertEquals(\"bob: 90\\ncarol: 70\\nalice: 50\", LeaderboardPrinter.render(csv))\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=ScoreBoardTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/ScoreBoard.kt": "package com.optarena.app\n\nobject ScoreBoard {\n    fun topThree(csv: String): List<Pair<String, Int>> {\n        val lines = csv.trim().lines()\n        if (lines.size <= 1) return emptyList()\n        return lines.drop(1)\n            .mapNotNull { line ->\n                if (line.isBlank()) return@mapNotNull null\n                val cols = line.split(\",\")\n                val name = cols.getOrNull(0)?.trim().orEmpty()\n                val score = cols.getOrNull(1)?.trim()?.toIntOrNull()\n                if (name.isEmpty() || score == null) null else name to score\n            }\n            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })\n            .take(3)\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "sorts-ascending",
+      "files": {
+        "src/main/kotlin/com/optarena/app/ScoreBoard.kt": "package com.optarena.app\n\nobject ScoreBoard {\n    // BUG: sorts by score ASCENDING, returning the bottom three.\n    fun topThree(csv: String): List<Pair<String, Int>> {\n        val lines = csv.trim().lines()\n        if (lines.size <= 1) return emptyList()\n        return lines.drop(1)\n            .mapNotNull { line ->\n                if (line.isBlank()) return@mapNotNull null\n                val cols = line.split(\",\")\n                val name = cols.getOrNull(0)?.trim().orEmpty()\n                val score = cols.getOrNull(1)?.trim()?.toIntOrNull()\n                if (name.isEmpty() || score == null) null else name to score\n            }\n            .sortedWith(compareBy<Pair<String, Int>> { it.second }.thenBy { it.first })\n            .take(3)\n    }\n}\n"
+      }
+    },
+    {
+      "name": "keeps-blank-name-rows",
+      "files": {
+        "src/main/kotlin/com/optarena/app/ScoreBoard.kt": "package com.optarena.app\n\nobject ScoreBoard {\n    // BUG: only skips non-integer scores, not blank names, so a blank-name\n    // row with a high score wrongly ranks.\n    fun topThree(csv: String): List<Pair<String, Int>> {\n        val lines = csv.trim().lines()\n        if (lines.size <= 1) return emptyList()\n        return lines.drop(1)\n            .mapNotNull { line ->\n                if (line.isBlank()) return@mapNotNull null\n                val cols = line.split(\",\")\n                val name = cols.getOrNull(0)?.trim().orEmpty()\n                val score = cols.getOrNull(1)?.trim()?.toIntOrNull()\n                if (score == null) null else name to score\n            }\n            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })\n            .take(3)\n    }\n}\n"
+      }
+    }
+  ]
+}

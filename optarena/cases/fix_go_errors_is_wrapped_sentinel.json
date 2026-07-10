@@ -1,0 +1,49 @@
+{
+  "name": "fix_go_errors_is_wrapped_sentinel",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "description": "Fixes a Go check that uses `==` against a sentinel error that was wrapped with %w; must use errors.Is",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "go",
+    "errors"
+  ],
+  "prompts": [
+    "IsMissing in lookup.go should report whether lookup(id) returned a not-found error. lookup wraps the ErrNotFound sentinel with fmt.Errorf(\"...: %w\", ...), but IsMissing compares the returned error with `== ErrNotFound`, which is false for a wrapped error - so genuine misses report false. Fix IsMissing to correctly detect the wrapped sentinel (use errors.Is) while still returning false when there is no error. Keep the function signature and do not change lookup."
+  ],
+  "setup_files": {
+    "go.mod": "module app\n\ngo 1.22\n",
+    "lookup.go": "package app\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\n// ErrNotFound is the sentinel returned (wrapped) when an id is missing.\nvar ErrNotFound = errors.New(\"not found\")\n\nfunc lookup(id int) error {\n\tif id <= 0 {\n\t\treturn fmt.Errorf(\"lookup id=%d: %w\", id, ErrNotFound)\n\t}\n\treturn nil\n}\n\n// IsMissing reports whether looking up id produced a not-found error.\n// BUG: it compares with == against ErrNotFound, but lookup wraps the sentinel\n// with %w, so the wrapped error is not == ErrNotFound and this returns false\n// even for a genuine miss. Should use errors.Is.\nfunc IsMissing(id int) bool {\n\terr := lookup(id)\n\treturn err == ErrNotFound\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "lookup.go",
+      "content_patterns": [
+        "errors.is"
+      ],
+      "not_content_patterns": [
+        "return err == errnotfound"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "lookup_test.go": "package app\n\nimport \"testing\"\n\nfunc TestIsMissingTrueForWrappedSentinel(t *testing.T) {\n\tif !IsMissing(0) {\n\t\tt.Fatal(\"expected IsMissing(0) to be true (wrapped ErrNotFound)\")\n\t}\n\tif !IsMissing(-5) {\n\t\tt.Fatal(\"expected IsMissing(-5) to be true\")\n\t}\n}\n\nfunc TestIsMissingFalseWhenPresent(t *testing.T) {\n\tif IsMissing(7) {\n\t\tt.Fatal(\"expected IsMissing(7) to be false (no error)\")\n\t}\n}\n"
+  },
+  "check_command": "go test ./... -count=1",
+  "reference_solution": {
+    "lookup.go": "package app\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\n// ErrNotFound is the sentinel returned (wrapped) when an id is missing.\nvar ErrNotFound = errors.New(\"not found\")\n\nfunc lookup(id int) error {\n\tif id <= 0 {\n\t\treturn fmt.Errorf(\"lookup id=%d: %w\", id, ErrNotFound)\n\t}\n\treturn nil\n}\n\n// IsMissing reports whether looking up id produced a not-found error.\n// BUG: it compares with == against ErrNotFound, but lookup wraps the sentinel\n// with %w, so the wrapped error is not == ErrNotFound and this returns false\n// even for a genuine miss. Should use errors.Is.\nfunc IsMissing(id int) bool {\n\terr := lookup(id)\n\treturn errors.Is(err, ErrNotFound)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fragile-string-compare",
+      "files": {
+        "lookup.go": "package app\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\n// ErrNotFound is the sentinel returned (wrapped) when an id is missing.\nvar ErrNotFound = errors.New(\"not found\")\n\nfunc lookup(id int) error {\n\tif id <= 0 {\n\t\treturn fmt.Errorf(\"lookup id=%d: %w\", id, ErrNotFound)\n\t}\n\treturn nil\n}\n\n// IsMissing reports whether looking up id produced a not-found error.\n// BUG: it compares with == against ErrNotFound, but lookup wraps the sentinel\n// with %w, so the wrapped error is not == ErrNotFound and this returns false\n// even for a genuine miss. Should use errors.Is.\nfunc IsMissing(id int) bool {\n\terr := lookup(id)\n\treturn err != nil && err.Error() == ErrNotFound.Error()\n}\n"
+      }
+    }
+  ]
+}

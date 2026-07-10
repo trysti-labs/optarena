@@ -1,0 +1,56 @@
+{
+  "name": "create_csharp_csv_category_totals",
+  "language": "csharp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Builds a CSV category-totals aggregator (with row cleaning) consumed by an existing report printer",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "csharp",
+    "data_engineering",
+    "csv",
+    "linq",
+    "multi-file"
+  ],
+  "prompts": [
+    "An existing ReportPrinter.cs calls SalesAggregator.CategoryTotals(csv), but the SalesAggregator class does not exist yet. Create SalesAggregator.cs defining `public static class SalesAggregator` with `public static List<(string Category, long Total)> CategoryTotals(string csv)`. It parses CSV text whose first line is the header `category,amount` and returns, for each category, its summed amount, as (Category, Total) tuples ordered by Category (ordinal ascending). Skip any data row whose category is empty/whitespace or whose amount is not a valid long integer. A category on multiple rows accumulates. Header-only or empty input returns an empty list. Do not modify ReportPrinter.cs."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <!-- tests/ has its own project; without this the SDK's default glob\n         compiles tests/*.cs into the app itself, where xunit isn't referenced -->\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "ReportPrinter.cs": "using System.Linq;\n\npublic static class ReportPrinter\n{\n    // One line per category, \"category: total\", already sorted by the aggregator.\n    public static string Render(string csv)\n    {\n        var totals = SalesAggregator.CategoryTotals(csv);\n        return string.Join(\"\\n\", totals.Select(t => $\"{t.Category}: {t.Total}\"));\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "SalesAggregator.cs",
+      "content_patterns": [
+        "categorytotals"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"Microsoft.AspNetCore.Mvc.Testing\" Version=\"8.0.10\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/SalesAggregatorTests.cs": "using System.Collections.Generic;\nusing Xunit;\n\npublic class SalesAggregatorTests\n{\n    [Fact]\n    public void SumsByCategorySorted()\n    {\n        var csv = \"category,amount\\nbooks,500\\nfood,250\\nbooks,300\\n\";\n        Assert.Equal(\n            new List<(string, long)> { (\"books\", 800), (\"food\", 250) },\n            SalesAggregator.CategoryTotals(csv));\n    }\n\n    [Fact]\n    public void SkipsInvalidRows()\n    {\n        var csv = \"category,amount\\nbooks,500\\n,99\\n   ,100\\ntoys,notanumber\\nbooks,-200\\n\";\n        Assert.Equal(\n            new List<(string, long)> { (\"books\", 300) },\n            SalesAggregator.CategoryTotals(csv));\n    }\n\n    [Fact]\n    public void HeaderOnlyIsEmpty()\n    {\n        Assert.Equal(new List<(string, long)>(), SalesAggregator.CategoryTotals(\"category,amount\\n\"));\n    }\n\n    [Fact]\n    public void IntegratesWithPrinter()\n    {\n        var csv = \"category,amount\\nbooks,500\\nfood,250\\nbooks,300\\n\";\n        Assert.Equal(\"books: 800\\nfood: 250\", ReportPrinter.Render(csv));\n    }\n}\n"
+  },
+  "check_command": "dotnet test tests/tests.csproj",
+  "reference_solution": {
+    "SalesAggregator.cs": "using System;\nusing System.Collections.Generic;\nusing System.Linq;\n\npublic static class SalesAggregator\n{\n    public static List<(string Category, long Total)> CategoryTotals(string csv)\n    {\n        var totals = new Dictionary<string, long>();\n        foreach (var line in csv.Split('\\n').Skip(1))\n        {\n            if (string.IsNullOrWhiteSpace(line)) continue;\n            var cols = line.Split(',');\n            var category = cols[0].Trim();\n            if (category.Length == 0) continue;\n            if (cols.Length < 2 || !long.TryParse(cols[1].Trim(), out var amount)) continue;\n            totals[category] = totals.GetValueOrDefault(category) + amount;\n        }\n        return totals\n            .OrderBy(kv => kv.Key, StringComparer.Ordinal)\n            .Select(kv => (kv.Key, kv.Value))\n            .ToList();\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "overwrites-instead-of-sums",
+      "files": {
+        "SalesAggregator.cs": "using System;\nusing System.Collections.Generic;\nusing System.Linq;\n\npublic static class SalesAggregator\n{\n    // BUG: assigns instead of accumulating, so a category on multiple rows\n    // keeps only its last amount.\n    public static List<(string Category, long Total)> CategoryTotals(string csv)\n    {\n        var totals = new Dictionary<string, long>();\n        foreach (var line in csv.Split('\\n').Skip(1))\n        {\n            if (string.IsNullOrWhiteSpace(line)) continue;\n            var cols = line.Split(',');\n            var category = cols[0].Trim();\n            if (category.Length == 0) continue;\n            if (cols.Length < 2 || !long.TryParse(cols[1].Trim(), out var amount)) continue;\n            totals[category] = amount;\n        }\n        return totals\n            .OrderBy(kv => kv.Key, StringComparer.Ordinal)\n            .Select(kv => (kv.Key, kv.Value))\n            .ToList();\n    }\n}\n"
+      }
+    },
+    {
+      "name": "does-not-skip-invalid",
+      "files": {
+        "SalesAggregator.cs": "using System;\nusing System.Collections.Generic;\nusing System.Linq;\n\npublic static class SalesAggregator\n{\n    // BUG: treats unparseable amounts as 0 and keeps blank categories, so\n    // invalid rows leak in instead of being skipped.\n    public static List<(string Category, long Total)> CategoryTotals(string csv)\n    {\n        var totals = new Dictionary<string, long>();\n        foreach (var line in csv.Split('\\n').Skip(1))\n        {\n            if (string.IsNullOrWhiteSpace(line)) continue;\n            var cols = line.Split(',');\n            var category = cols[0].Trim();\n            long.TryParse(cols.Length > 1 ? cols[1].Trim() : \"0\", out var amount);\n            totals[category] = totals.GetValueOrDefault(category) + amount;\n        }\n        return totals\n            .OrderBy(kv => kv.Key, StringComparer.Ordinal)\n            .Select(kv => (kv.Key, kv.Value))\n            .ToList();\n    }\n}\n"
+      }
+    }
+  ]
+}

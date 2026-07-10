@@ -1,0 +1,48 @@
+{
+  "name": "fix_rust_u32_sum_overflow",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes a total() that sums into u32 (overflows) before widening; should accumulate in u64",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "rust",
+    "bug_fix",
+    "integer-overflow",
+    "idiom"
+  ],
+  "prompts": [
+    "The function `total(values: &[u32]) -> u64` in src/lib.rs should return the sum of all values. It's broken: it computes `values.iter().copied().sum::<u32>() as u64`, which accumulates in u32 and only widens AFTER summing - so a total exceeding u32::MAX (about 4.29e9) overflows (debug builds panic, release builds silently wrap). Fix `total` to accumulate in u64 (widen each element before adding) so large sums are correct. Keep the function name and signature; the empty slice must return 0."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"sum_total\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "/// Sum of all values.\n/// BUG: sums into u32 first, then widens - overflows past u32::MAX (~4.29e9);\n/// debug builds panic, release builds wrap.\npub fn total(values: &[u32]) -> u64 {\n    values.iter().copied().sum::<u32>() as u64\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "fn total"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/total_test.rs": "use sum_total::total;\n\n#[test]\nfn sums_small() {\n    assert_eq!(total(&[1, 2, 3]), 6);\n}\n\n#[test]\nfn empty_is_zero() {\n    assert_eq!(total(&[]), 0);\n}\n\n#[test]\nfn sums_large_without_overflow() {\n    // 3_000_000_000 + 2_000_000_000 = 5_000_000_000 > u32::MAX\n    assert_eq!(total(&[3_000_000_000, 2_000_000_000]), 5_000_000_000);\n}\n\n#[test]\nfn sums_many_large_values() {\n    let values = vec![4_000_000_000u32; 3]; // 1.2e10\n    assert_eq!(total(&values), 12_000_000_000);\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "/// Sum of all values, accumulated in u64 so large totals don't overflow.\npub fn total(values: &[u32]) -> u64 {\n    values.iter().map(|&x| x as u64).sum()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrapping-add-still-u32",
+      "files": {
+        "src/lib.rs": "/// Stops panicking but still accumulates in u32 via wrapping_add, so the\n/// result wraps modulo 2^32 for large inputs.\npub fn total(values: &[u32]) -> u64 {\n    values.iter().copied().fold(0u32, |acc, x| acc.wrapping_add(x)) as u64\n}\n"
+      }
+    }
+  ]
+}

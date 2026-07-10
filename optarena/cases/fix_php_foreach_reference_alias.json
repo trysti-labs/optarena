@@ -1,0 +1,47 @@
+{
+  "name": "fix_php_foreach_reference_alias",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Fixes the classic PHP dangling foreach-reference bug that corrupts the last element of an array",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "php",
+    "bug_fix",
+    "foreach-reference",
+    "idiom"
+  ],
+  "prompts": [
+    "Normalizer::process in src/Normalizer.php should trim every value in the input array and then return a new list where each trimmed value is labeled with its 1-based position, like '1:apple'. It's broken by the classic PHP foreach-by-reference trap: the first loop uses `foreach ($items as &$item)` and never unsets $item afterward, so $item stays a reference to the LAST element; the second `foreach ($items as ... $item)` then reassigns that reference on each iteration, corrupting the last element (it ends up equal to the second-to-last). Fix process so the trimmed values are correct and each is labeled with its true 1-based index. Keep the class name and the process(array $items): array signature."
+  ],
+  "setup_files": {
+    "src/Normalizer.php": "<?php\nnamespace App;\n\nclass Normalizer\n{\n    // Trim each value, then label it with its 1-based position: '1:apple'.\n    // BUG: the first loop leaves $item as a dangling reference to the last\n    // element, and the second foreach then overwrites that element each\n    // iteration, corrupting the final entry.\n    public function process(array $items): array\n    {\n        foreach ($items as &$item) {\n            $item = trim($item);\n        }\n        $labeled = [];\n        foreach ($items as $i => $item) {\n            $labeled[] = ($i + 1) . ':' . $item;\n        }\n        return $labeled;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Normalizer.php",
+      "content_patterns": [
+        "function process"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/NormalizerTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Normalizer.php';\n\nfinal class NormalizerTest extends TestCase\n{\n    public function testTrimsAndLabels(): void\n    {\n        $out = (new \\App\\Normalizer())->process(['apple ', ' bee', ' cat ']);\n        $this->assertSame(['1:apple', '2:bee', '3:cat'], $out);\n    }\n\n    public function testLastElementNotCorrupted(): void\n    {\n        $out = (new \\App\\Normalizer())->process(['x', 'y', 'z']);\n        $this->assertSame(['1:x', '2:y', '3:z'], $out);\n    }\n\n    public function testSingleElement(): void\n    {\n        $this->assertSame(['1:solo'], (new \\App\\Normalizer())->process([' solo ']));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/NormalizerTest.php",
+  "reference_solution": {
+    "src/Normalizer.php": "<?php\nnamespace App;\n\nclass Normalizer\n{\n    // Trim by key (no lingering reference), then label with the 1-based index.\n    public function process(array $items): array\n    {\n        foreach ($items as $key => $value) {\n            $items[$key] = trim($value);\n        }\n        $labeled = [];\n        foreach ($items as $i => $item) {\n            $labeled[] = ($i + 1) . ':' . $item;\n        }\n        return $labeled;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "zero-based-labels",
+      "files": {
+        "src/Normalizer.php": "<?php\nnamespace App;\n\nclass Normalizer\n{\n    // Fixes the reference bug but mislabels: 0-based instead of 1-based.\n    public function process(array $items): array\n    {\n        foreach ($items as $key => $value) {\n            $items[$key] = trim($value);\n        }\n        $labeled = [];\n        foreach ($items as $i => $item) {\n            $labeled[] = $i . ':' . $item;\n        }\n        return $labeled;\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "name": "optimize_rust_slice_intersection",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Optimizes an O(n*m) slice intersection that scans with Vec::contains to O(n) using a HashSet",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "rust",
+    "performance",
+    "hashset",
+    "algorithms"
+  ],
+  "prompts": [
+    "The function `common(a: &[i32], b: &[i32]) -> Vec<i32>` in src/lib.rs returns the elements of `a` that also appear in `b`, preserving a's order and duplicates. It tests membership with `b.contains(&x)`, a linear scan, so the whole call is O(n*m) and far too slow when both slices have tens of thousands of elements. Rewrite `common` to test membership in O(1) using a HashSet built from `b`, keeping the exact same result: each element of `a` that is present in `b`, in a's original order, with duplicates preserved. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"intersection_perf\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::collections::HashSet;\n\n/// Elements of `a` that also appear in `b`, preserving a's order/duplicates.\n/// BUG: `b.contains(&x)` is a linear scan, so this is O(n*m) - unusably slow\n/// for large slices. Membership should be O(1) via a HashSet.\n#[allow(unused_imports)]\npub fn common(a: &[i32], b: &[i32]) -> Vec<i32> {\n    let mut out = Vec::new();\n    for &x in a {\n        if b.contains(&x) {\n            out.push(x);\n        }\n    }\n    out\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "fn common",
+        "hashset"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/intersection_test.rs": "use intersection_perf::common;\nuse std::collections::HashSet;\nuse std::time::Instant;\n\n#[test]\nfn correctness_and_performance() {\n    assert_eq!(common(&[1, 2, 3, 4], &[2, 4, 6]), vec![2, 4]);\n    // order and duplicates of `a` preserved\n    assert_eq!(common(&[5, 1, 5, 9, 1], &[1, 5]), vec![5, 1, 5, 1]);\n    assert_eq!(common(&[], &[1, 2]), Vec::<i32>::new());\n    assert_eq!(common(&[1, 2, 3], &[]), Vec::<i32>::new());\n\n    // Large input: an O(n*m) scan blows past the budget; an O(n) HashSet\n    // membership check finishes almost instantly. Timed with Instant so the\n    // failure is a clear assertion, not an ambiguous process timeout.\n    let n = 30_000i32;\n    let a: Vec<i32> = (0..n).map(|i| i * 3).collect();\n    let b: Vec<i32> = (0..n).map(|i| i * 7).collect();\n\n    let set: HashSet<i32> = b.iter().copied().collect();\n    let expected: Vec<i32> = a.iter().copied().filter(|x| set.contains(x)).collect();\n\n    let start = Instant::now();\n    let got = common(&a, &b);\n    let elapsed = start.elapsed();\n\n    assert_eq!(got, expected, \"large-input intersection result is incorrect\");\n    assert!(\n        elapsed.as_secs_f64() < 1.5,\n        \"common took {:?} for n={} (looks like still O(n*m)); expected an O(n) HashSet membership check\",\n        elapsed,\n        n\n    );\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "use std::collections::HashSet;\n\n/// Elements of `a` that also appear in `b`, preserving a's order/duplicates.\npub fn common(a: &[i32], b: &[i32]) -> Vec<i32> {\n    let set: HashSet<i32> = b.iter().copied().collect();\n    a.iter().copied().filter(|x| set.contains(x)).collect()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-linear-scan",
+      "files": {
+        "src/lib.rs": "use std::collections::HashSet;\n\n/// Correct output but still O(n*m): builds a set then ignores it and scans\n/// the slice anyway, so the large-input time budget is busted.\n#[allow(unused_variables)]\npub fn common(a: &[i32], b: &[i32]) -> Vec<i32> {\n    let _set: HashSet<i32> = b.iter().copied().collect();\n    let mut out = Vec::new();\n    for &x in a {\n        if b.contains(&x) {\n            out.push(x);\n        }\n    }\n    out\n}\n"
+      }
+    }
+  ]
+}

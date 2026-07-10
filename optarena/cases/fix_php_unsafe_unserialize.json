@@ -1,0 +1,48 @@
+{
+  "name": "fix_php_unsafe_unserialize",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Fixes PHP object injection: unserialize() on an untrusted session blob instantiates arbitrary classes",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "php",
+    "security",
+    "deserialization",
+    "object-injection"
+  ],
+  "prompts": [
+    "SessionStore::decode in src/SessionStore.php restores a session payload that was stored with serialize(). It calls unserialize($blob) on the untrusted blob, which instantiates whatever classes the blob names and runs their magic methods (__wakeup/__destruct) - PHP object injection, an RCE foothold. Fix decode so the blob can only ever produce plain data (arrays and scalars) and never instantiates application objects, including objects nested inside arrays. Use unserialize's allowed_classes => false option. A legitimate blob holding an associative array must still decode to the same array. Keep the class name and the decode(string $blob): array signature; do not modify session_gateway.php."
+  ],
+  "setup_files": {
+    "src/SessionStore.php": "<?php\nnamespace App;\n\nclass SessionStore\n{\n    // Restore a session payload previously produced by serialize().\n    // BUG: unserialize() on untrusted input instantiates arbitrary classes\n    // and triggers their __wakeup/__destruct - PHP object injection.\n    public function decode(string $blob): array\n    {\n        return unserialize($blob);\n    }\n}\n",
+    "src/session_gateway.php": "<?php\nnamespace App;\n\nrequire_once __DIR__ . '/SessionStore.php';\n\n// Thin entry point used by the web layer to reload a session cookie value.\nfunction load_session(string $cookie): array\n{\n    return (new SessionStore())->decode($cookie);\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/SessionStore.php",
+      "content_patterns": [
+        "function decode"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/SessionStoreTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/SessionStore.php';\n\n// A stand-in for any class an attacker could name in a serialized payload.\n// Its __wakeup fires during unserialize() if the object is instantiated.\nclass Tripwire\n{\n    public static bool $tripped = false;\n\n    public function __wakeup(): void\n    {\n        self::$tripped = true;\n    }\n}\n\nfinal class SessionStoreTest extends TestCase\n{\n    public function testPlainArrayRoundTrips(): void\n    {\n        $blob = serialize(['user' => 'ada', 'role' => 'admin', 'seats' => 3]);\n        $this->assertSame(\n            ['user' => 'ada', 'role' => 'admin', 'seats' => 3],\n            (new \\App\\SessionStore())->decode($blob)\n        );\n    }\n\n    public function testDoesNotInstantiateNestedObjects(): void\n    {\n        Tripwire::$tripped = false;\n        // Object nested inside an array - blob starts with 'a:' not 'O:', so a\n        // naive top-level string check would miss it.\n        $blob = serialize(['payload' => new Tripwire()]);\n        try {\n            (new \\App\\SessionStore())->decode($blob);\n        } catch (\\Throwable $e) {\n            // A safe decoder may reject the blob; that is acceptable.\n        }\n        $this->assertFalse(Tripwire::$tripped, 'object injection: __wakeup ran on a nested serialized object');\n    }\n\n    public function testDoesNotInstantiateTopLevelObject(): void\n    {\n        Tripwire::$tripped = false;\n        $blob = serialize(new Tripwire());\n        try {\n            (new \\App\\SessionStore())->decode($blob);\n        } catch (\\Throwable $e) {\n        }\n        $this->assertFalse(Tripwire::$tripped, 'object injection: __wakeup ran on a top-level serialized object');\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/SessionStoreTest.php",
+  "reference_solution": {
+    "src/SessionStore.php": "<?php\nnamespace App;\n\nclass SessionStore\n{\n    // allowed_classes => false makes unserialize refuse to instantiate ANY\n    // class (nested included); objects become __PHP_Incomplete_Class and no\n    // magic methods run, so untrusted blobs can only yield plain data.\n    public function decode(string $blob): array\n    {\n        return unserialize($blob, ['allowed_classes' => false]);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "top-level-string-check-only",
+      "files": {
+        "src/SessionStore.php": "<?php\nnamespace App;\n\nclass SessionStore\n{\n    // INCOMPLETE FIX: rejects only a blob that STARTS with an object marker,\n    // but an object nested inside an array (a:...{...O:...}) still reaches\n    // unserialize() and gets instantiated.\n    public function decode(string $blob): array\n    {\n        if (str_starts_with(ltrim($blob), 'O:')) {\n            return [];\n        }\n        return unserialize($blob);\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "fix_ruby_command_injection_line_counter",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes shell command injection in a line counter that interpolates an untrusted path into a backtick `wc -l` call",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "ruby",
+    "security",
+    "command-injection",
+    "multi-file"
+  ],
+  "prompts": [
+    "LineCounter.count(path) in lib/line_counter.rb returns the number of newline-terminated lines in the file at path. It shells out with `wc -l \"#{path}\"` via backticks, interpolating the untrusted path straight into a shell command - so a path containing a $(...) command substitution or other shell metacharacters executes arbitrary commands. lib/report_scanner.rb calls this. Fix count so it computes the line count without ever invoking a shell (do not pass the path to a shell at all). Behavior must be unchanged for legitimate paths: it returns the count of newline characters in the file, exactly as `wc -l` does (a final line with no trailing newline is not counted). You should not need to modify report_scanner.rb."
+  ],
+  "setup_files": {
+    "lib/line_counter.rb": "module App\n  class LineCounter\n    # Count newline-terminated lines in the file at +path+.\n    # BUG: interpolates the untrusted path into a shell command run via\n    # backticks, so a path like 'x $(touch pwned)' executes arbitrary shell.\n    def self.count(path)\n      `wc -l \"#{path}\"`.strip.split.first.to_i\n    end\n  end\nend\n",
+    "lib/report_scanner.rb": "require_relative \"line_counter\"\n\nmodule App\n  class ReportScanner\n    def self.total_lines(paths)\n      paths.sum { |p| LineCounter.count(p) }\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/line_counter.rb",
+      "content_patterns": [
+        "def self.count"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/line_counter_test.rb": "require \"minitest/autorun\"\nrequire \"tmpdir\"\nrequire_relative \"../lib/report_scanner\"\n\nclass LineCounterTest < Minitest::Test\n  def test_counts_newline_terminated_lines\n    Dir.mktmpdir do |dir|\n      path = File.join(dir, \"data.txt\")\n      File.write(path, \"a\\nb\\nc\\n\")\n      assert_equal 3, App::LineCounter.count(path)\n    end\n  end\n\n  def test_final_line_without_newline_not_counted\n    Dir.mktmpdir do |dir|\n      path = File.join(dir, \"data.txt\")\n      File.write(path, \"a\\nb\\nc\")\n      assert_equal 2, App::LineCounter.count(path)\n    end\n  end\n\n  def test_scanner_sums_counts\n    Dir.mktmpdir do |dir|\n      p1 = File.join(dir, \"a.txt\"); File.write(p1, \"x\\ny\\n\")\n      p2 = File.join(dir, \"b.txt\"); File.write(p2, \"z\\n\")\n      assert_equal 3, App::ReportScanner.total_lines([p1, p2])\n    end\n  end\n\n  def test_no_command_injection\n    Dir.mktmpdir do |dir|\n      Dir.chdir(dir) do\n        File.write(\"data.txt\", \"a\\nb\\n\")\n        malicious = \"data.txt $(touch pwned)\"\n        begin\n          App::LineCounter.count(malicious)\n        rescue StandardError\n          # A safe implementation may raise trying to open a bogus path; that\n          # is fine. What must never happen is the shell running our payload.\n        end\n        refute File.exist?(\"pwned\"),\n               \"command injection: the $(...) payload in the path executed\"\n      end\n    end\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/line_counter_test.rb",
+  "reference_solution": {
+    "lib/line_counter.rb": "module App\n  class LineCounter\n    # Count newline-terminated lines without invoking a shell: read the file\n    # directly and count newline characters, matching `wc -l` semantics (a\n    # final line with no trailing newline is not counted).\n    def self.count(path)\n      File.read(path).count(\"\\n\")\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "incomplete-metachar-strip",
+      "files": {
+        "lib/line_counter.rb": "module App\n  class LineCounter\n    # INCOMPLETE FIX: strips a few metacharacters but still runs the path\n    # through a shell, so $(...) command substitution still executes.\n    def self.count(path)\n      safe = path.gsub(/[;&|]/, \"\")\n      `wc -l \"#{safe}\"`.strip.split.first.to_i\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

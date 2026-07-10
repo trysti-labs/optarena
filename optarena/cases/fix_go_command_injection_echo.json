@@ -1,0 +1,52 @@
+{
+  "name": "fix_go_command_injection_echo",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes a Go helper that runs user input through `sh -c` (command injection); must invoke the command without a shell",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "go",
+    "security",
+    "command-injection",
+    "multi-file"
+  ],
+  "prompts": [
+    "Echo in runner.go runs `exec.Command(\"sh\", \"-c\", \"echo \"+text)`, interpolating the caller-supplied text into a shell command line - so a value containing shell metacharacters (;, &&, $(), backticks) is executed, a command-injection vulnerability. greeter.go calls Echo. Fix Echo so the text is passed as data, not shell syntax: invoke echo directly with text as a separate argument and no shell, so metacharacters are treated literally. A legitimate call must still return the echoed text (Greet(\"world\") -> \"hello world\"); a malicious value must not be able to run an injected command. Keep the Echo signature; you should not need to modify greeter.go."
+  ],
+  "setup_files": {
+    "go.mod": "module app\n\ngo 1.22\n",
+    "runner.go": "package app\n\nimport (\n\t\"os/exec\"\n\t\"strings\"\n)\n\n// Echo returns the text as echoed back by the shell.\n// BUG: it builds a shell command by string interpolation, so a value\n// containing shell metacharacters (;, $(), &&, backticks) is executed -\n// this is a command-injection vulnerability.\nfunc Echo(text string) (string, error) {\n\tout, err := exec.Command(\"sh\", \"-c\", \"echo \"+text).Output()\n\treturn strings.TrimSpace(string(out)), err\n}\n",
+    "greeter.go": "package app\n\n// Greet echoes a greeting for name via Echo.\nfunc Greet(name string) (string, error) {\n\treturn Echo(\"hello \" + name)\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "runner.go",
+      "content_patterns": [
+        "exec.command"
+      ],
+      "not_content_patterns": [
+        "\"-c\""
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "runner_test.go": "package app\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestGreetLegitimate(t *testing.T) {\n\tout, err := Greet(\"world\")\n\tif err != nil {\n\t\tt.Fatalf(\"unexpected error: %v\", err)\n\t}\n\tif out != \"hello world\" {\n\t\tt.Fatalf(\"got %q want %q\", out, \"hello world\")\n\t}\n}\n\nfunc TestEchoDoesNotAllowCommandInjection(t *testing.T) {\n\tconst marker = \"INJECTED_MARKER\"\n\t_ = os.Remove(marker)\n\t// A malicious value tries to run `touch INJECTED_MARKER` via the shell.\n\t_, _ = Echo(\"safe; touch \" + marker)\n\tif _, err := os.Stat(marker); err == nil {\n\t\t_ = os.Remove(marker)\n\t\tt.Fatal(\"command injection: the shell executed an injected command\")\n\t}\n}\n"
+  },
+  "check_command": "go test ./... -count=1",
+  "reference_solution": {
+    "runner.go": "package app\n\nimport (\n\t\"os/exec\"\n\t\"strings\"\n)\n\n// Echo returns the text as echoed back. It passes text as a single argument\n// to echo with no shell involved, so metacharacters are treated literally and\n// cannot be executed.\nfunc Echo(text string) (string, error) {\n\tout, err := exec.Command(\"echo\", text).Output()\n\treturn strings.TrimSpace(string(out)), err\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-shell",
+      "files": {
+        "runner.go": "package app\n\nimport (\n\t\"os/exec\"\n\t\"strings\"\n)\n\nfunc Echo(text string) (string, error) {\n\tout, err := exec.Command(\"bash\", \"-c\", \"echo \"+text).Output()\n\treturn strings.TrimSpace(string(out)), err\n}\n"
+      }
+    }
+  ]
+}

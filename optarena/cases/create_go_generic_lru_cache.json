@@ -1,0 +1,58 @@
+{
+  "name": "create_go_generic_lru_cache",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Creates a generic Go LRU cache (capacity eviction by recency) used by an existing MemoService (cross-file)",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "generics",
+    "data-structures",
+    "multi-file"
+  ],
+  "prompts": [
+    "cache_service.go already exists and uses a generic cache via NewLRU[int, int](2), then .Get(key) (returning (V, bool)), .Put(key, val), and .Len(). Create lru.go defining a generic type LRU[K comparable, V any] plus NewLRU[K comparable, V any](capacity int) *LRU[K, V] that implements a least-recently-used cache: Get returns the value and true if present (and counts as a use), Put inserts/updates, Len returns the current size, and when inserting a new key would exceed capacity the LEAST-recently-used entry (least-recently Get or Put) is evicted. A Get must refresh recency so it is not the next to be evicted. Do not modify cache_service.go."
+  ],
+  "setup_files": {
+    "go.mod": "module app\n\ngo 1.22\n",
+    "cache_service.go": "package app\n\n// MemoService memoizes squares behind an LRU with capacity 2.\ntype MemoService struct {\n\tcache *LRU[int, int]\n}\n\nfunc NewMemoService() *MemoService {\n\treturn &MemoService{cache: NewLRU[int, int](2)}\n}\n\nfunc (m *MemoService) Square(n int) int {\n\tif v, ok := m.cache.Get(n); ok {\n\t\treturn v\n\t}\n\tv := n * n\n\tm.cache.Put(n, v)\n\treturn v\n}\n\nfunc (m *MemoService) CacheLen() int { return m.cache.Len() }\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "lru.go",
+      "content_patterns": [
+        "type lru",
+        "func newlru",
+        "func",
+        "get",
+        "put"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "lru_test.go": "package app\n\nimport \"testing\"\n\nfunc TestLRUEvictsLeastRecentlyUsed(t *testing.T) {\n\tc := NewLRU[string, int](2)\n\tc.Put(\"a\", 1)\n\tc.Put(\"b\", 2)\n\t// touch \"a\" so \"b\" becomes least-recently-used\n\tif v, ok := c.Get(\"a\"); !ok || v != 1 {\n\t\tt.Fatalf(\"a missing: %v %v\", v, ok)\n\t}\n\tc.Put(\"c\", 3) // should evict \"b\", not \"a\"\n\tif _, ok := c.Get(\"b\"); ok {\n\t\tt.Fatal(\"b should have been evicted\")\n\t}\n\tif v, ok := c.Get(\"a\"); !ok || v != 1 {\n\t\tt.Fatal(\"a should still be present\")\n\t}\n\tif v, ok := c.Get(\"c\"); !ok || v != 3 {\n\t\tt.Fatal(\"c should be present\")\n\t}\n\tif c.Len() != 2 {\n\t\tt.Fatalf(\"len=%d want 2\", c.Len())\n\t}\n}\n\nfunc TestMemoServiceUsesCache(t *testing.T) {\n\tm := NewMemoService()\n\tif m.Square(3) != 9 || m.Square(4) != 16 {\n\t\tt.Fatal(\"wrong squares\")\n\t}\n\tif m.CacheLen() != 2 {\n\t\tt.Fatalf(\"cache len=%d want 2\", m.CacheLen())\n\t}\n\t// a third distinct key must not grow the cache past capacity 2\n\tm.Square(5)\n\tif m.CacheLen() != 2 {\n\t\tt.Fatalf(\"cache len=%d want 2 after eviction\", m.CacheLen())\n\t}\n}\n"
+  },
+  "check_command": "go test ./... -count=1",
+  "reference_solution": {
+    "lru.go": "package app\n\nimport \"container/list\"\n\n// LRU is a fixed-capacity least-recently-used cache.\ntype LRU[K comparable, V any] struct {\n\tcap   int\n\tll    *list.List\n\titems map[K]*list.Element\n}\n\ntype entry[K comparable, V any] struct {\n\tkey K\n\tval V\n}\n\nfunc NewLRU[K comparable, V any](capacity int) *LRU[K, V] {\n\tif capacity < 1 {\n\t\tcapacity = 1\n\t}\n\treturn &LRU[K, V]{cap: capacity, ll: list.New(), items: make(map[K]*list.Element)}\n}\n\nfunc (c *LRU[K, V]) Get(key K) (V, bool) {\n\tif el, ok := c.items[key]; ok {\n\t\tc.ll.MoveToFront(el)\n\t\treturn el.Value.(*entry[K, V]).val, true\n\t}\n\tvar zero V\n\treturn zero, false\n}\n\nfunc (c *LRU[K, V]) Put(key K, val V) {\n\tif el, ok := c.items[key]; ok {\n\t\tel.Value.(*entry[K, V]).val = val\n\t\tc.ll.MoveToFront(el)\n\t\treturn\n\t}\n\tel := c.ll.PushFront(&entry[K, V]{key: key, val: val})\n\tc.items[key] = el\n\tif c.ll.Len() > c.cap {\n\t\toldest := c.ll.Back()\n\t\tif oldest != nil {\n\t\t\tc.ll.Remove(oldest)\n\t\t\tdelete(c.items, oldest.Value.(*entry[K, V]).key)\n\t\t}\n\t}\n}\n\nfunc (c *LRU[K, V]) Len() int { return c.ll.Len() }\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-eviction",
+      "files": {
+        "lru.go": "package app\n\ntype LRU[K comparable, V any] struct {\n\titems map[K]V\n}\n\nfunc NewLRU[K comparable, V any](capacity int) *LRU[K, V] {\n\treturn &LRU[K, V]{items: make(map[K]V)}\n}\n\nfunc (c *LRU[K, V]) Get(key K) (V, bool) {\n\tv, ok := c.items[key]\n\treturn v, ok\n}\n\nfunc (c *LRU[K, V]) Put(key K, val V) {\n\tc.items[key] = val\n}\n\nfunc (c *LRU[K, V]) Len() int { return len(c.items) }\n"
+      }
+    },
+    {
+      "name": "fifo-ignores-recency",
+      "files": {
+        "lru.go": "package app\n\ntype LRU[K comparable, V any] struct {\n\tcap   int\n\torder []K\n\titems map[K]V\n}\n\nfunc NewLRU[K comparable, V any](capacity int) *LRU[K, V] {\n\tif capacity < 1 {\n\t\tcapacity = 1\n\t}\n\treturn &LRU[K, V]{cap: capacity, items: make(map[K]V)}\n}\n\nfunc (c *LRU[K, V]) Get(key K) (V, bool) {\n\tv, ok := c.items[key]\n\treturn v, ok\n}\n\nfunc (c *LRU[K, V]) Put(key K, val V) {\n\tif _, ok := c.items[key]; !ok {\n\t\tif len(c.order) >= c.cap {\n\t\t\tevict := c.order[0]\n\t\t\tc.order = c.order[1:]\n\t\t\tdelete(c.items, evict)\n\t\t}\n\t\tc.order = append(c.order, key)\n\t}\n\tc.items[key] = val\n}\n\nfunc (c *LRU[K, V]) Len() int { return len(c.items) }\n"
+      }
+    }
+  ]
+}
