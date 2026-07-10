@@ -1,0 +1,64 @@
+{
+  "name": "fix_dockerfile_security_hardening",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Hardens an insecure Dockerfile: pins the base image, drops a baked-in secret, adds a non-root USER and a HEALTHCHECK",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "docker",
+    "security",
+    "dockerfile"
+  ],
+  "prompts": [
+    "The Dockerfile has several production hardening problems. Fix them without changing what the app does: (1) pin the base image to a specific version instead of `node:latest` (e.g. node:20-bookworm-slim); (2) remove the hardcoded `ENV API_KEY=...` secret entirely - secrets must be injected at runtime, never baked into the image; (3) create and switch to a non-root user with a `USER` instruction before the CMD so the container does not run as root; (4) add a `HEALTHCHECK` that requests http://localhost:3000/health. Keep the WORKDIR, the npm install, the COPY steps, `ENV NODE_ENV=production`, `EXPOSE 3000`, and the existing CMD."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM node:latest\n\nWORKDIR /app\nCOPY package.json ./\nRUN npm install\nCOPY . .\n\nENV API_KEY=sk-live-abc123secret\nENV NODE_ENV=production\n\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "healthcheck",
+        "user"
+      ],
+      "not_content_patterns": [
+        "sk-live-abc123secret",
+        "node:latest"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_dockerfile.py": "import re\n\ntext = open('Dockerfile', encoding='utf-8').read()\nlow = text.lower()\n\nfrom_m = re.search(r'(?mi)^\\s*FROM\\s+(\\S+)', text)\nassert from_m, 'no FROM instruction'\nbase = from_m.group(1)\nassert ':' in base or '@sha256' in base, f'base image is not pinned to a version: {base!r}'\nassert not base.lower().endswith(':latest'), f'base image must be pinned, not :latest ({base!r})'\n\nassert 'sk-live-abc123secret' not in text, 'the hardcoded API_KEY secret is still baked into the image'\nassert not re.search(r'(?mi)^\\s*ENV\\s+API_KEY', text), 'API_KEY must not be set via ENV in the image'\n\nusers = re.findall(r'(?mi)^\\s*USER\\s+(\\S+)', text)\nassert users, 'no USER instruction - the container still runs as root'\nassert users[-1].lower() not in ('root', '0'), f'the final USER must not be root: {users[-1]!r}'\n\nassert re.search(r'(?mi)^\\s*HEALTHCHECK', text), 'no HEALTHCHECK instruction'\nassert 'health' in low, 'the HEALTHCHECK should probe the /health endpoint'\n\n# behavior preserved\nassert re.search(r'(?mi)^\\s*ENV\\s+NODE_ENV\\s*=?\\s*production', text) or 'node_env=production' in low.replace(' ', ''), 'ENV NODE_ENV=production was dropped'\nassert re.search(r'(?mi)^\\s*EXPOSE\\s+3000', text), 'EXPOSE 3000 was dropped'\nassert 'server.js' in text, 'the CMD was changed'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_dockerfile.py",
+  "reference_solution": {
+    "Dockerfile": "FROM node:20-bookworm-slim\n\nWORKDIR /app\nCOPY package.json ./\nRUN npm install\nCOPY . .\n\nENV NODE_ENV=production\n\n# Secret is injected at runtime (e.g. -e API_KEY=...), never baked in.\n\nRUN useradd --system --create-home appuser\nUSER appuser\n\nEXPOSE 3000\nHEALTHCHECK --interval=30s --timeout=10s --retries=3 \\\n  CMD curl -f http://localhost:3000/health || exit 1\nCMD [\"node\", \"server.js\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-insecure",
+      "files": {
+        "Dockerfile": "FROM node:latest\n\nWORKDIR /app\nCOPY package.json ./\nRUN npm install\nCOPY . .\n\nENV API_KEY=sk-live-abc123secret\nENV NODE_ENV=production\n\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]\n"
+      }
+    },
+    {
+      "name": "hardened-but-keeps-secret",
+      "files": {
+        "Dockerfile": "FROM node:20-bookworm-slim\n\nWORKDIR /app\nCOPY package.json ./\nRUN npm install\nCOPY . .\n\nENV API_KEY=sk-live-abc123secret\nENV NODE_ENV=production\n\nRUN useradd --system --create-home appuser\nUSER appuser\n\nEXPOSE 3000\nHEALTHCHECK --interval=30s --timeout=10s --retries=3 \\\n  CMD curl -f http://localhost:3000/health || exit 1\nCMD [\"node\", \"server.js\"]\n"
+      }
+    },
+    {
+      "name": "pinned-healthcheck-but-root",
+      "files": {
+        "Dockerfile": "FROM node:20-bookworm-slim\n\nWORKDIR /app\nCOPY package.json ./\nRUN npm install\nCOPY . .\n\nENV NODE_ENV=production\n\nEXPOSE 3000\nHEALTHCHECK --interval=30s --timeout=10s --retries=3 \\\n  CMD curl -f http://localhost:3000/health || exit 1\nCMD [\"node\", \"server.js\"]\n"
+      }
+    }
+  ]
+}

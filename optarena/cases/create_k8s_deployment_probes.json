@@ -1,0 +1,59 @@
+{
+  "name": "create_k8s_deployment_probes",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Authors a production-ready Kubernetes Deployment with probes, resource requests/limits and a non-root securityContext",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "kubernetes",
+    "yaml"
+  ],
+  "prompts": [
+    "Create a Kubernetes manifest at k8s/deployment.yaml defining a production-ready Deployment. Requirements: apiVersion apps/v1, kind Deployment, metadata.name `web`; spec.replicas 3; a pod template whose single container is named `web`, uses image `myorg/web:1.2.3`, and exposes containerPort 8080. The container must declare resources.requests AND resources.limits (each with both cpu and memory), a livenessProbe (httpGet path /healthz on port 8080) and a readinessProbe (httpGet path /ready on port 8080), and the pod or container securityContext must set runAsNonRoot: true. Make sure the Deployment selector.matchLabels matches the pod template labels."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "**/deployment.yaml",
+      "content_patterns": [
+        "kind: deployment",
+        "livenessprobe",
+        "readinessprobe",
+        "runasnonroot"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_k8s.py": "import yaml\n\nwith open('k8s/deployment.yaml') as f:\n    d = yaml.safe_load(f)\n\nassert d.get('apiVersion') == 'apps/v1', d.get('apiVersion')\nassert d.get('kind') == 'Deployment', d.get('kind')\nassert d.get('metadata', {}).get('name') == 'web', 'metadata.name must be web'\n\nspec = d['spec']\nassert spec.get('replicas') == 3, f\"replicas must be 3, got {spec.get('replicas')}\"\n\nmatch_labels = spec['selector']['matchLabels']\ntemplate = spec['template']\ntpl_labels = template['metadata']['labels']\nfor k, v in match_labels.items():\n    assert tpl_labels.get(k) == v, f'selector.matchLabels must match template labels: {k}={v!r} vs {tpl_labels.get(k)!r}'\n\ncontainers = template['spec']['containers']\nassert len(containers) >= 1\nc = containers[0]\nassert c['image'] == 'myorg/web:1.2.3', c.get('image')\nports = [p.get('containerPort') for p in c.get('ports', [])]\nassert 8080 in ports, f'containerPort 8080 missing: {ports}'\n\nres = c.get('resources', {})\nfor kind in ('requests', 'limits'):\n    block = res.get(kind, {})\n    assert block.get('cpu') and block.get('memory'), f'resources.{kind} must set cpu and memory, got {block!r}'\n\nfor probe in ('livenessProbe', 'readinessProbe'):\n    hg = (c.get(probe) or {}).get('httpGet')\n    assert hg and hg.get('path'), f'{probe} must be an httpGet with a path'\n\npod_sc = template['spec'].get('securityContext') or {}\nc_sc = c.get('securityContext') or {}\nassert pod_sc.get('runAsNonRoot') is True or c_sc.get('runAsNonRoot') is True, 'runAsNonRoot: true must be set'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_k8s.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      securityContext:\n        runAsNonRoot: true\n      containers:\n        - name: web\n          image: myorg/web:1.2.3\n          ports:\n            - containerPort: 8080\n          resources:\n            requests:\n              cpu: 100m\n              memory: 128Mi\n            limits:\n              cpu: 500m\n              memory: 256Mi\n          livenessProbe:\n            httpGet:\n              path: /healthz\n              port: 8080\n          readinessProbe:\n            httpGet:\n              path: /ready\n              port: 8080\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-probes",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      securityContext:\n        runAsNonRoot: true\n      containers:\n        - name: web\n          image: myorg/web:1.2.3\n          ports:\n            - containerPort: 8080\n          resources:\n            requests:\n              cpu: 100m\n              memory: 128Mi\n            limits:\n              cpu: 500m\n              memory: 256Mi\n"
+      }
+    },
+    {
+      "name": "no-resource-limits",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      securityContext:\n        runAsNonRoot: true\n      containers:\n        - name: web\n          image: myorg/web:1.2.3\n          ports:\n            - containerPort: 8080\n          resources:\n            requests:\n              cpu: 100m\n              memory: 128Mi\n          livenessProbe:\n            httpGet:\n              path: /healthz\n              port: 8080\n          readinessProbe:\n            httpGet:\n              path: /ready\n              port: 8080\n"
+      }
+    },
+    {
+      "name": "runs-as-root",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      containers:\n        - name: web\n          image: myorg/web:1.2.3\n          ports:\n            - containerPort: 8080\n          resources:\n            requests:\n              cpu: 100m\n              memory: 128Mi\n            limits:\n              cpu: 500m\n              memory: 256Mi\n          livenessProbe:\n            httpGet:\n              path: /healthz\n              port: 8080\n          readinessProbe:\n            httpGet:\n              path: /ready\n              port: 8080\n"
+      }
+    }
+  ]
+}
