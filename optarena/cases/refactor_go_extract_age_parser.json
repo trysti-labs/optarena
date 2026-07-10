@@ -1,0 +1,71 @@
+{
+  "name": "refactor_go_extract_age_parser",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Extracts duplicated age parsing/validation from two Go functions into a shared helper, preserving behavior",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "go",
+    "refactoring",
+    "dry",
+    "multi-file"
+  ],
+  "prompts": [
+    "users.go and admins.go both contain the same inline age parsing: strconv.Atoi then reject when the error is non-nil or the age is outside the inclusive range 0..150. Refactor to remove the duplication: add a helper (e.g. parseAge in a new file validate.go, same package) returning the parsed age and whether it is valid, and have RegisterUser and RegisterAdmin call it instead of parsing inline. Do not change observable behavior - \"130\" stays valid (\"user:130\"), \"200\" and \"abc\" stay \"invalid\", and the \"user:\"/\"admin:\" prefixes are unchanged. Neither RegisterUser nor RegisterAdmin should still call strconv.Atoi directly."
+  ],
+  "setup_files": {
+    "go.mod": "module app\n\ngo 1.22\n",
+    "users.go": "package app\n\nimport (\n\t\"fmt\"\n\t\"strconv\"\n)\n\nfunc RegisterUser(ageStr string) string {\n\tage, err := strconv.Atoi(ageStr)\n\tif err != nil || age < 0 || age > 150 {\n\t\treturn \"invalid\"\n\t}\n\treturn fmt.Sprintf(\"user:%d\", age)\n}\n",
+    "admins.go": "package app\n\nimport (\n\t\"fmt\"\n\t\"strconv\"\n)\n\nfunc RegisterAdmin(ageStr string) string {\n\tage, err := strconv.Atoi(ageStr)\n\tif err != nil || age < 0 || age > 150 {\n\t\treturn \"invalid\"\n\t}\n\treturn fmt.Sprintf(\"admin:%d\", age)\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "validate.go",
+      "content_patterns": [
+        "parseage"
+      ]
+    },
+    {
+      "path_pattern": "users.go",
+      "content_patterns": [
+        "parseage"
+      ],
+      "not_content_patterns": [
+        "strconv.atoi"
+      ]
+    },
+    {
+      "path_pattern": "admins.go",
+      "content_patterns": [
+        "parseage"
+      ],
+      "not_content_patterns": [
+        "strconv.atoi"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "refactor_test.go": "package app\n\nimport \"testing\"\n\nfunc TestRegisterUser(t *testing.T) {\n\tcases := map[string]string{\n\t\t\"30\":  \"user:30\",\n\t\t\"130\": \"user:130\",\n\t\t\"0\":   \"user:0\",\n\t\t\"-1\":  \"invalid\",\n\t\t\"200\": \"invalid\",\n\t\t\"abc\": \"invalid\",\n\t}\n\tfor in, want := range cases {\n\t\tif got := RegisterUser(in); got != want {\n\t\t\tt.Fatalf(\"RegisterUser(%q)=%q want %q\", in, got, want)\n\t\t}\n\t}\n}\n\nfunc TestRegisterAdmin(t *testing.T) {\n\tif RegisterAdmin(\"40\") != \"admin:40\" {\n\t\tt.Fatal(\"admin 40\")\n\t}\n\tif RegisterAdmin(\"151\") != \"invalid\" {\n\t\tt.Fatal(\"admin 151\")\n\t}\n}\n"
+  },
+  "check_command": "go test ./... -count=1",
+  "reference_solution": {
+    "validate.go": "package app\n\nimport \"strconv\"\n\n// parseAge parses a human age string, returning (age, true) when it is a valid\n// integer in the inclusive range 0..150, else (0, false).\nfunc parseAge(s string) (int, bool) {\n\tage, err := strconv.Atoi(s)\n\tif err != nil || age < 0 || age > 150 {\n\t\treturn 0, false\n\t}\n\treturn age, true\n}\n",
+    "users.go": "package app\n\nimport \"fmt\"\n\nfunc RegisterUser(ageStr string) string {\n\tage, ok := parseAge(ageStr)\n\tif !ok {\n\t\treturn \"invalid\"\n\t}\n\treturn fmt.Sprintf(\"user:%d\", age)\n}\n",
+    "admins.go": "package app\n\nimport \"fmt\"\n\nfunc RegisterAdmin(ageStr string) string {\n\tage, ok := parseAge(ageStr)\n\tif !ok {\n\t\treturn \"invalid\"\n\t}\n\treturn fmt.Sprintf(\"admin:%d\", age)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "upper-bound-drifted",
+      "files": {
+        "validate.go": "package app\n\nimport \"strconv\"\n\nfunc parseAge(s string) (int, bool) {\n\tage, err := strconv.Atoi(s)\n\tif err != nil || age < 0 || age > 120 {\n\t\treturn 0, false\n\t}\n\treturn age, true\n}\n",
+        "users.go": "package app\n\nimport \"fmt\"\n\nfunc RegisterUser(ageStr string) string {\n\tage, ok := parseAge(ageStr)\n\tif !ok {\n\t\treturn \"invalid\"\n\t}\n\treturn fmt.Sprintf(\"user:%d\", age)\n}\n",
+        "admins.go": "package app\n\nimport \"fmt\"\n\nfunc RegisterAdmin(ageStr string) string {\n\tage, ok := parseAge(ageStr)\n\tif !ok {\n\t\treturn \"invalid\"\n\t}\n\treturn fmt.Sprintf(\"admin:%d\", age)\n}\n"
+      }
+    }
+  ]
+}

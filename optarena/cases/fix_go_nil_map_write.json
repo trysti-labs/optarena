@@ -1,0 +1,49 @@
+{
+  "name": "fix_go_nil_map_write",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "description": "Fixes a Go function that writes to an uninitialized (nil) map and panics; must make() it",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "go",
+    "maps"
+  ],
+  "prompts": [
+    "Tally in tally.go should return a map of each distinct string to its count, but it declares the result with `var counts map[string]int` and never initializes it, so the first `counts[it]++` panics with \"assignment to entry in nil map\". Fix it so the map is initialized (use make) and every item is counted exactly once across the whole slice. Keep the function signature."
+  ],
+  "setup_files": {
+    "go.mod": "module app\n\ngo 1.22\n",
+    "tally.go": "package app\n\n// Tally returns a map from each distinct string in items to its count.\n// BUG: the result map is declared but never initialized with make(), so the\n// first assignment panics with \"assignment to entry in nil map\".\nfunc Tally(items []string) map[string]int {\n\tvar counts map[string]int\n\tfor _, it := range items {\n\t\tcounts[it]++\n\t}\n\treturn counts\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "tally.go",
+      "content_patterns": [
+        "func tally"
+      ],
+      "not_content_patterns": [
+        "var counts map[string]int"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tally_test.go": "package app\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc TestTallyCounts(t *testing.T) {\n\tgot := Tally([]string{\"a\", \"b\", \"a\", \"c\", \"a\"})\n\twant := map[string]int{\"a\": 3, \"b\": 1, \"c\": 1}\n\tif !reflect.DeepEqual(got, want) {\n\t\tt.Fatalf(\"got %v want %v\", got, want)\n\t}\n}\n\nfunc TestTallyEmpty(t *testing.T) {\n\tgot := Tally(nil)\n\tif len(got) != 0 {\n\t\tt.Fatalf(\"got %v want empty\", got)\n\t}\n}\n"
+  },
+  "check_command": "go test ./... -count=1",
+  "reference_solution": {
+    "tally.go": "package app\n\n// Tally returns a map from each distinct string in items to its count.\nfunc Tally(items []string) map[string]int {\n\tcounts := make(map[string]int)\n\tfor _, it := range items {\n\t\tcounts[it]++\n\t}\n\treturn counts\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "reinitializes-each-iteration",
+      "files": {
+        "tally.go": "package app\n\nfunc Tally(items []string) map[string]int {\n\tcounts := make(map[string]int)\n\tfor _, it := range items {\n\t\tcounts = make(map[string]int)\n\t\tcounts[it]++\n\t}\n\treturn counts\n}\n"
+      }
+    }
+  ]
+}
