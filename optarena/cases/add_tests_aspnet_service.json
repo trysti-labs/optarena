@@ -1,0 +1,55 @@
+{
+  "name": "add_tests_aspnet_service",
+  "language": "csharp",
+  "framework": "aspnet-core",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 420,
+  "timeout": 300,
+  "check_command": "python3 mutation_check.py",
+  "description": "Asks the model to write WebApplicationFactory tests for an order API; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "aspnet-core",
+    "multi-file",
+    "testing"
+  ],
+  "prompts": [
+    "This ASP.NET Core minimal API (app.csproj at the root; Program.cs maps POST /orders using the classification rule in Services/OrderService.cs - already correct, do not modify Program.cs, the service, app.csproj, or tests/tests.csproj) responds with {items, tier, fee}: a priority order is tier \"express\" (fee 20) regardless of size; otherwise items >= 10 is \"bulk\" (fee 5); otherwise \"standard\" (fee 10). Write tests in a NEW file at exactly tests/OrderTests.cs: xUnit [Fact]s using Microsoft.AspNetCore.Mvc.Testing's WebApplicationFactory<Program> to POST /orders in-process, covering at least: a small non-priority order is standard/10; items == 10 is bulk/5 (the boundary); a priority order is express/20; and a priority order with items >= 10 is still express (priority wins over bulk)."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <!-- tests/ has its own project; without this the SDK's default glob\n         compiles tests/*.cs into the app itself, where xunit isn't referenced -->\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "Program.cs": "using Orders;\n\nvar builder = WebApplication.CreateBuilder(args);\nbuilder.Services.AddSingleton<OrderService>();\nvar app = builder.Build();\n\napp.MapPost(\"/orders\", (OrderRequest req, OrderService svc) =>\n{\n    var (tier, fee) = svc.Classify(req.items, req.priority);\n    return Results.Ok(new { req.items, tier, fee });\n});\n\napp.Run();\n\npublic record OrderRequest(int items, bool priority);\n\npublic partial class Program { }\n",
+    "Services/OrderService.cs": "namespace Orders;\n\npublic class OrderService\n{\n    public (string tier, int fee) Classify(int items, bool priority)\n    {\n        string tier;\n        if (priority)\n        {\n            tier = \"express\";\n        }\n        else if (items >= 10)\n        {\n            tier = \"bulk\";\n        }\n        else\n        {\n            tier = \"standard\";\n        }\n        int fee = tier switch\n        {\n            \"express\" => 20,\n            \"bulk\" => 5,\n            _ => 10,\n        };\n        return (tier, fee);\n    }\n}\n",
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"Microsoft.AspNetCore.Mvc.Testing\" Version=\"8.0.10\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "tests/OrderTests.cs",
+      "content_patterns": [
+        "webapplicationfactory",
+        "/orders",
+        "[fact]"
+      ],
+      "regex_patterns": [
+        "\\[fact\\][\\s\\S]*\\[fact\\]"
+      ],
+      "min_lines": 20
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"Services/OrderService.cs\")\nTEST_CMD = \"dotnet test tests/tests.csproj\"\nMUTANTS = [[[\"        else if (items >= 10)\", \"        else if (items >= 100)\"]], [['            \"bulk\" => 5,', '            \"bulk\" => 10,']]]\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f\"protected implementation file {IMPL} was modified - the task said not to change it \"\n            f\"(anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately broken \"\n            f\"implementation, so they do not actually verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(\"PASS (tests pass on correct impl and kill all {n} mutants)\".format(n=len(MUTANTS)))\n"
+  },
+  "reference_solution": {
+    "tests/OrderTests.cs": "using System.Net.Http.Json;\nusing Microsoft.AspNetCore.Mvc.Testing;\nusing Xunit;\n\npublic class OrderTests : IClassFixture<WebApplicationFactory<Program>>\n{\n    private readonly WebApplicationFactory<Program> _factory;\n    public OrderTests(WebApplicationFactory<Program> factory) => _factory = factory;\n\n    private record OrderDto(int items, string tier, int fee);\n\n    private async Task<OrderDto> Post(int items, bool priority)\n    {\n        var client = _factory.CreateClient();\n        var res = await client.PostAsJsonAsync(\"/orders\", new { items, priority });\n        res.EnsureSuccessStatusCode();\n        return (await res.Content.ReadFromJsonAsync<OrderDto>())!;\n    }\n\n    [Fact]\n    public async Task SmallOrderIsStandard()\n    {\n        var dto = await Post(3, false);\n        Assert.Equal(\"standard\", dto.tier);\n        Assert.Equal(10, dto.fee);\n    }\n\n    [Fact]\n    public async Task BulkBoundaryAtTen()\n    {\n        var dto = await Post(10, false);\n        Assert.Equal(\"bulk\", dto.tier);\n        Assert.Equal(5, dto.fee);\n    }\n\n    [Fact]\n    public async Task PriorityIsExpress()\n    {\n        var dto = await Post(2, true);\n        Assert.Equal(\"express\", dto.tier);\n        Assert.Equal(20, dto.fee);\n    }\n\n    [Fact]\n    public async Task PriorityBeatsBulk()\n    {\n        var dto = await Post(50, true);\n        Assert.Equal(\"express\", dto.tier);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "tests/OrderTests.cs": "using System.Net.Http.Json;\nusing Microsoft.AspNetCore.Mvc.Testing;\nusing Xunit;\n\npublic class OrderTests : IClassFixture<WebApplicationFactory<Program>>\n{\n    private readonly WebApplicationFactory<Program> _factory;\n    public OrderTests(WebApplicationFactory<Program> factory) => _factory = factory;\n\n    private record OrderDto(int items, string tier, int fee);\n\n    // posts to /orders for several sizes but never asserts which tier/fee\n    // comes back, so a broken classifier still passes\n    [Fact]\n    public async Task EndpointResponds()\n    {\n        var client = _factory.CreateClient();\n        foreach (int items in new[] { 1, 5, 10, 50 })\n        {\n            var res = await client.PostAsJsonAsync(\"/orders\", new { items, priority = false });\n            res.EnsureSuccessStatusCode();\n            var dto = await res.Content.ReadFromJsonAsync<OrderDto>();\n            Assert.NotNull(dto);\n            Assert.False(string.IsNullOrEmpty(dto!.tier));\n        }\n    }\n\n    [Fact]\n    public async Task PriorityEndpointResponds()\n    {\n        var client = _factory.CreateClient();\n        var res = await client.PostAsJsonAsync(\"/orders\", new { items = 2, priority = true });\n        res.EnsureSuccessStatusCode();\n    }\n}\n"
+      }
+    }
+  ]
+}
