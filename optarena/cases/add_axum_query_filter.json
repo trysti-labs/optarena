@@ -1,0 +1,58 @@
+{
+  "name": "add_axum_query_filter",
+  "language": "rust",
+  "framework": "axum",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Adds ANDed category/price filtering across repository and handler",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "axum",
+    "multi-file",
+    "query-params"
+  ],
+  "prompts": [
+    "GET /products returns all products. Add optional filtering across both layers: (1) in src/repository.rs, add a method search(&self, category: Option<&str>, max_price: Option<i64>) -> Vec<Product> to ProductRepository - category filters by exact match when Some, max_price is an INCLUSIVE upper bound when Some, both None returns everything, order preserved; (2) in src/handlers.rs, accept optional `category` and `maxPrice` query parameters on GET /products (an axum Query extractor over a struct with Option fields; note the camelCase maxPrice name needs a serde rename) and call repo.search. Combining filters ANDs them. Keep the Product JSON shape."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"webapp\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\naxum = \"0.7\"\ntokio = { version = \"1\", features = [\"full\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n\n[dev-dependencies]\ntower = { version = \"0.5\", features = [\"util\"] }\n",
+    "src/lib.rs": "use std::sync::{Arc, Mutex};\n\nuse axum::routing::get;\nuse axum::Router;\n\npub mod handlers;\npub mod repository;\n\n#[derive(Clone)]\npub struct AppState {\n    pub products: Arc<Mutex<repository::ProductRepository>>,\n}\n\npub fn build_router() -> Router {\n    let state = AppState {\n        products: Arc::new(Mutex::new(repository::ProductRepository::new())),\n    };\n    Router::new()\n        .route(\"/products\", get(handlers::list_products))\n        .with_state(state)\n}\n",
+    "src/handlers.rs": "use axum::extract::State;\nuse axum::Json;\n\nuse crate::repository::Product;\nuse crate::AppState;\n\npub async fn list_products(State(state): State<AppState>) -> Json<Vec<Product>> {\n    Json(state.products.lock().unwrap().list())\n}\n",
+    "src/repository.rs": "use serde::Serialize;\n\n#[derive(Clone, Serialize)]\npub struct Product {\n    pub id: i64,\n    pub name: String,\n    pub category: String,\n    pub price: i64,\n}\n\npub struct ProductRepository {\n    products: Vec<Product>,\n}\n\nimpl ProductRepository {\n    pub fn new() -> Self {\n        ProductRepository {\n            products: vec![\n                Product { id: 1, name: \"Steel Hammer\".into(), category: \"tools\".into(), price: 25 },\n                Product { id: 2, name: \"Rubber Mallet\".into(), category: \"tools\".into(), price: 15 },\n                Product { id: 3, name: \"Garden Hose\".into(), category: \"garden\".into(), price: 40 },\n                Product { id: 4, name: \"Steel Rake\".into(), category: \"garden\".into(), price: 30 },\n            ],\n        }\n    }\n\n    pub fn list(&self) -> Vec<Product> {\n        self.products.clone()\n    }\n}\n",
+    "src/main.rs": "#[tokio::main]\nasync fn main() {\n    let app = webapp::build_router();\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8074\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/repository.rs",
+      "content_patterns": [
+        "fn search"
+      ]
+    },
+    {
+      "path_pattern": "src/handlers.rs",
+      "content_patterns": [
+        "query"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/api_test.rs": "use axum::body::{to_bytes, Body};\nuse axum::http::{Request, StatusCode};\nuse serde_json::Value;\nuse tower::ServiceExt;\n\nasync fn send(app: axum::Router, method: &str, uri: &str, body: Option<&str>) -> (StatusCode, Value) {\n    let mut builder = Request::builder().method(method).uri(uri);\n    let request = match body {\n        Some(b) => builder\n            .header(\"content-type\", \"application/json\")\n            .body(Body::from(b.to_string()))\n            .unwrap(),\n        None => builder.body(Body::empty()).unwrap(),\n    };\n    let res = app.oneshot(request).await.unwrap();\n    let status = res.status();\n    let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();\n    let value = if bytes.is_empty() {\n        Value::Null\n    } else {\n        serde_json::from_slice(&bytes).unwrap_or(Value::Null)\n    };\n    (status, value)\n}\n\nasync fn ids(app: axum::Router, uri: &str) -> Vec<i64> {\n    let (status, body) = send(app, \"GET\", uri, None).await;\n    assert_eq!(status, StatusCode::OK, \"{uri}: {body}\");\n    let mut out: Vec<i64> = body.as_array().unwrap().iter()\n        .map(|p| p[\"id\"].as_i64().unwrap()).collect();\n    out.sort();\n    out\n}\n\n#[tokio::test]\nasync fn product_filters() {\n    let app = webapp::build_router();\n    assert_eq!(ids(app.clone(), \"/products\").await, vec![1, 2, 3, 4]);\n    assert_eq!(ids(app.clone(), \"/products?category=garden\").await, vec![3, 4]);\n    assert_eq!(ids(app.clone(), \"/products?maxPrice=25\").await, vec![1, 2],\n        \"maxPrice must be INCLUSIVE (the 25-priced hammer stays)\");\n    assert_eq!(ids(app.clone(), \"/products?category=garden&maxPrice=35\").await, vec![4]);\n    assert_eq!(ids(app, \"/products?category=tools&maxPrice=15\").await, vec![2]);\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/repository.rs": "use serde::Serialize;\n\n#[derive(Clone, Serialize)]\npub struct Product {\n    pub id: i64,\n    pub name: String,\n    pub category: String,\n    pub price: i64,\n}\n\npub struct ProductRepository {\n    products: Vec<Product>,\n}\n\nimpl ProductRepository {\n    pub fn new() -> Self {\n        ProductRepository {\n            products: vec![\n                Product { id: 1, name: \"Steel Hammer\".into(), category: \"tools\".into(), price: 25 },\n                Product { id: 2, name: \"Rubber Mallet\".into(), category: \"tools\".into(), price: 15 },\n                Product { id: 3, name: \"Garden Hose\".into(), category: \"garden\".into(), price: 40 },\n                Product { id: 4, name: \"Steel Rake\".into(), category: \"garden\".into(), price: 30 },\n            ],\n        }\n    }\n\n    pub fn list(&self) -> Vec<Product> {\n        self.products.clone()\n    }\n}\n\nimpl ProductRepository {\n    pub fn search(&self, category: Option<&str>, max_price: Option<i64>) -> Vec<Product> {\n        self.products\n            .iter()\n            .filter(|p| category.map_or(true, |c| p.category == c))\n            .filter(|p| max_price.map_or(true, |m| p.price <= m))\n            .cloned()\n            .collect()\n    }\n}\n",
+    "src/handlers.rs": "use axum::extract::{Query, State};\nuse axum::Json;\nuse serde::Deserialize;\n\nuse crate::repository::Product;\nuse crate::AppState;\n\n#[derive(Deserialize)]\npub struct ProductFilters {\n    pub category: Option<String>,\n    #[serde(rename = \"maxPrice\")]\n    pub max_price: Option<i64>,\n}\n\npub async fn list_products(\n    State(state): State<AppState>,\n    Query(filters): Query<ProductFilters>,\n) -> Json<Vec<Product>> {\n    Json(state.products.lock().unwrap().search(\n        filters.category.as_deref(),\n        filters.max_price,\n    ))\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "maxprice-exclusive",
+      "files": {
+        "src/repository.rs": "use serde::Serialize;\n\n#[derive(Clone, Serialize)]\npub struct Product {\n    pub id: i64,\n    pub name: String,\n    pub category: String,\n    pub price: i64,\n}\n\npub struct ProductRepository {\n    products: Vec<Product>,\n}\n\nimpl ProductRepository {\n    pub fn new() -> Self {\n        ProductRepository {\n            products: vec![\n                Product { id: 1, name: \"Steel Hammer\".into(), category: \"tools\".into(), price: 25 },\n                Product { id: 2, name: \"Rubber Mallet\".into(), category: \"tools\".into(), price: 15 },\n                Product { id: 3, name: \"Garden Hose\".into(), category: \"garden\".into(), price: 40 },\n                Product { id: 4, name: \"Steel Rake\".into(), category: \"garden\".into(), price: 30 },\n            ],\n        }\n    }\n\n    pub fn list(&self) -> Vec<Product> {\n        self.products.clone()\n    }\n}\n\nimpl ProductRepository {\n    pub fn search(&self, category: Option<&str>, max_price: Option<i64>) -> Vec<Product> {\n        self.products\n            .iter()\n            .filter(|p| category.map_or(true, |c| p.category == c))\n            .filter(|p| max_price.map_or(true, |m| p.price < m))\n            .cloned()\n            .collect()\n    }\n}\n",
+        "src/handlers.rs": "use axum::extract::{Query, State};\nuse axum::Json;\nuse serde::Deserialize;\n\nuse crate::repository::Product;\nuse crate::AppState;\n\n#[derive(Deserialize)]\npub struct ProductFilters {\n    pub category: Option<String>,\n    #[serde(rename = \"maxPrice\")]\n    pub max_price: Option<i64>,\n}\n\npub async fn list_products(\n    State(state): State<AppState>,\n    Query(filters): Query<ProductFilters>,\n) -> Json<Vec<Product>> {\n    Json(state.products.lock().unwrap().search(\n        filters.category.as_deref(),\n        filters.max_price,\n    ))\n}\n"
+      }
+    }
+  ]
+}

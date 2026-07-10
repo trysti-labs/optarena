@@ -1,0 +1,50 @@
+{
+  "name": "fix_axum_state_not_shared",
+  "language": "rust",
+  "framework": "axum",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Fixes handlers that build fresh repositories instead of using shared State",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "axum",
+    "multi-file",
+    "state"
+  ],
+  "prompts": [
+    "The item handlers in src/handlers.rs have a classic state bug: both create_item and list_items construct a brand-new ItemRepository inside the handler instead of using the shared Arc<Mutex<ItemRepository>> injected via State - so created items vanish when the request ends, every POST returns id 1, and GET /items is always empty. Fix src/handlers.rs so both handlers use the shared state (lock state.items): POSTs persist across requests with auto-incrementing ids, and GET lists everything created so far. Don't change src/lib.rs or src/repository.rs."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"webapp\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\naxum = \"0.7\"\ntokio = { version = \"1\", features = [\"full\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n\n[dev-dependencies]\ntower = { version = \"0.5\", features = [\"util\"] }\n",
+    "src/lib.rs": "use std::sync::{Arc, Mutex};\n\nuse axum::routing::get;\nuse axum::Router;\n\npub mod handlers;\npub mod repository;\n\n#[derive(Clone)]\npub struct AppState {\n    pub items: Arc<Mutex<repository::ItemRepository>>,\n}\n\npub fn build_router() -> Router {\n    let state = AppState {\n        items: Arc::new(Mutex::new(repository::ItemRepository::new())),\n    };\n    Router::new()\n        .route(\"/items\", get(handlers::list_items).post(handlers::create_item))\n        .with_state(state)\n}\n",
+    "src/handlers.rs": "use axum::extract::State;\nuse axum::http::StatusCode;\nuse axum::Json;\nuse serde::Deserialize;\n\nuse crate::repository::{Item, ItemRepository};\nuse crate::AppState;\n\n#[derive(Deserialize)]\npub struct CreateItem {\n    pub name: String,\n}\n\npub async fn create_item(\n    State(_state): State<AppState>,\n    Json(body): Json<CreateItem>,\n) -> (StatusCode, Json<Item>) {\n    // BUG: ignores the shared state and writes into a brand-new repository\n    // that is dropped when this request ends - nothing ever persists, and\n    // every item gets id 1.\n    let mut repo = ItemRepository::new();\n    let item = repo.add(body.name);\n    (StatusCode::CREATED, Json(item))\n}\n\npub async fn list_items(State(_state): State<AppState>) -> Json<Vec<Item>> {\n    // BUG: reads from another fresh repository - always empty.\n    let repo = ItemRepository::new();\n    Json(repo.list())\n}\n",
+    "src/repository.rs": "use serde::Serialize;\n\n#[derive(Clone, Serialize)]\npub struct Item {\n    pub id: i64,\n    pub name: String,\n}\n\npub struct ItemRepository {\n    items: Vec<Item>,\n    next_id: i64,\n}\n\nimpl ItemRepository {\n    pub fn new() -> Self {\n        ItemRepository { items: Vec::new(), next_id: 1 }\n    }\n\n    pub fn add(&mut self, name: String) -> Item {\n        let item = Item { id: self.next_id, name };\n        self.next_id += 1;\n        self.items.push(item.clone());\n        item\n    }\n\n    pub fn list(&self) -> Vec<Item> {\n        self.items.clone()\n    }\n}\n",
+    "src/main.rs": "#[tokio::main]\nasync fn main() {\n    let app = webapp::build_router();\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8073\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/handlers.rs",
+      "content_patterns": [
+        "state.items"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/api_test.rs": "use axum::body::{to_bytes, Body};\nuse axum::http::{Request, StatusCode};\nuse serde_json::Value;\nuse tower::ServiceExt;\n\nasync fn send(app: axum::Router, method: &str, uri: &str, body: Option<&str>) -> (StatusCode, Value) {\n    let mut builder = Request::builder().method(method).uri(uri);\n    let request = match body {\n        Some(b) => builder\n            .header(\"content-type\", \"application/json\")\n            .body(Body::from(b.to_string()))\n            .unwrap(),\n        None => builder.body(Body::empty()).unwrap(),\n    };\n    let res = app.oneshot(request).await.unwrap();\n    let status = res.status();\n    let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();\n    let value = if bytes.is_empty() {\n        Value::Null\n    } else {\n        serde_json::from_slice(&bytes).unwrap_or(Value::Null)\n    };\n    (status, value)\n}\n\n#[tokio::test]\nasync fn state_is_shared_across_requests() {\n    let app = webapp::build_router();\n\n    let (status, first) = send(app.clone(), \"POST\", \"/items\",\n        Some(r#\"{\"name\": \"hammer\"}\"#)).await;\n    assert_eq!(status, StatusCode::CREATED);\n    assert_eq!(first[\"id\"], 1);\n\n    let (_, second) = send(app.clone(), \"POST\", \"/items\",\n        Some(r#\"{\"name\": \"nail\"}\"#)).await;\n    assert_eq!(second[\"id\"], 2,\n        \"second POST got id {} - each request is using a fresh repository\", second[\"id\"]);\n\n    let (status, list) = send(app, \"GET\", \"/items\", None).await;\n    assert_eq!(status, StatusCode::OK);\n    let names: Vec<&str> = list.as_array().unwrap().iter()\n        .map(|i| i[\"name\"].as_str().unwrap()).collect();\n    assert_eq!(names, vec![\"hammer\", \"nail\"],\n        \"items must persist in shared state across requests\");\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/handlers.rs": "use axum::extract::State;\nuse axum::http::StatusCode;\nuse axum::Json;\nuse serde::Deserialize;\n\nuse crate::repository::Item;\nuse crate::AppState;\n\n#[derive(Deserialize)]\npub struct CreateItem {\n    pub name: String,\n}\n\npub async fn create_item(\n    State(state): State<AppState>,\n    Json(body): Json<CreateItem>,\n) -> (StatusCode, Json<Item>) {\n    let item = state.items.lock().unwrap().add(body.name);\n    (StatusCode::CREATED, Json(item))\n}\n\npub async fn list_items(State(state): State<AppState>) -> Json<Vec<Item>> {\n    Json(state.items.lock().unwrap().list())\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "create-shared-list-fresh",
+      "files": {
+        "src/handlers.rs": "use axum::extract::State;\nuse axum::http::StatusCode;\nuse axum::Json;\nuse serde::Deserialize;\n\nuse crate::repository::{Item, ItemRepository};\nuse crate::AppState;\n\n#[derive(Deserialize)]\npub struct CreateItem {\n    pub name: String,\n}\n\npub async fn create_item(\n    State(state): State<AppState>,\n    Json(body): Json<CreateItem>,\n) -> (StatusCode, Json<Item>) {\n    let item = state.items.lock().unwrap().add(body.name);\n    (StatusCode::CREATED, Json(item))\n}\n\npub async fn list_items(State(_state): State<AppState>) -> Json<Vec<Item>> {\n    // still reads from a fresh repository\n    let repo = ItemRepository::new();\n    Json(repo.list())\n}\n"
+      }
+    }
+  ]
+}
