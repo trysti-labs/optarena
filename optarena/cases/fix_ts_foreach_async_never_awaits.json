@@ -1,0 +1,50 @@
+{
+  "name": "fix_ts_foreach_async_never_awaits",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "description": "Fixes a TS async total that uses forEach(async), returning before any awaited work completes",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "typescript",
+    "async",
+    "foreach"
+  ],
+  "prompts": [
+    "totalPrice in prices.ts should return the summed price of all skus (and 0 for an empty list). It iterates with skus.forEach(async (sku) => { total += await fetchPrice(sku); }), but forEach does not await async callbacks - totalPrice returns `total` while every callback is still pending, so the result is always 0. Fix the iteration so the prices are actually awaited and summed (a for...of loop with await, or Promise.all over the mapped prices) and make sure an EMPTY sku list still returns 0 rather than throwing. Keep the function signature and do not change fetchPrice."
+  ],
+  "setup_files": {
+    "prices.ts": "const PRICES: Record<string, number> = {\n  apple: 150,\n  banana: 75,\n  cherry: 300,\n};\n\nasync function fetchPrice(sku: string): Promise<number> {\n  return PRICES[sku] ?? 0;\n}\n\n// Return the total price of all skus (0 for an empty list).\n// BUG: Array.prototype.forEach does not await async callbacks - the function\n// returns `total` before any of the awaits inside have resolved, so the\n// result is always 0.\nexport async function totalPrice(skus: string[]): Promise<number> {\n  let total = 0;\n  skus.forEach(async (sku) => {\n    total += await fetchPrice(sku);\n  });\n  return total;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "prices.ts",
+      "content_patterns": [
+        "totalprice"
+      ],
+      "not_content_patterns": [
+        "foreach"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit prices.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build prices.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { totalPrice } = require(\"./build/prices.js\");\n\nasync function main() {\n  assert.strictEqual(await totalPrice([\"apple\", \"banana\"]), 225);\n  assert.strictEqual(await totalPrice([\"apple\", \"banana\", \"cherry\"]), 525);\n  assert.strictEqual(await totalPrice([\"unknown\"]), 0);\n  assert.strictEqual(await totalPrice([]), 0, \"empty list must total 0\");\n  console.log(\"behavior OK\");\n}\n\nmain().catch((err) => {\n  console.error(err);\n  process.exit(1);\n});\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "prices.ts": "const PRICES: Record<string, number> = {\n  apple: 150,\n  banana: 75,\n  cherry: 300,\n};\n\nasync function fetchPrice(sku: string): Promise<number> {\n  return PRICES[sku] ?? 0;\n}\n\n// Return the total price of all skus (0 for an empty list).\nexport async function totalPrice(skus: string[]): Promise<number> {\n  let total = 0;\n  for (const sku of skus) {\n    total += await fetchPrice(sku);\n  }\n  return total;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "reduce-throws-on-empty",
+      "files": {
+        "prices.ts": "const PRICES: Record<string, number> = {\n  apple: 150,\n  banana: 75,\n  cherry: 300,\n};\n\nasync function fetchPrice(sku: string): Promise<number> {\n  return PRICES[sku] ?? 0;\n}\n\nexport async function totalPrice(skus: string[]): Promise<number> {\n  const prices = await Promise.all(skus.map((sku) => fetchPrice(sku)));\n  return prices.reduce((a, b) => a + b);\n}\n"
+      }
+    }
+  ]
+}

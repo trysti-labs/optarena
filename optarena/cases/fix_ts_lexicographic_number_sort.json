@@ -1,0 +1,56 @@
+{
+  "name": "fix_ts_lexicographic_number_sort",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 180,
+  "timeout": 240,
+  "description": "Fixes a TS function relying on default Array.sort, which sorts numbers lexicographically",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "typescript",
+    "arrays",
+    "sort"
+  ],
+  "prompts": [
+    "ranked in ranked.ts should return the scores in ascending NUMERIC order without mutating the input array. It calls sort() with no comparator, and JavaScript's default sort converts elements to strings and orders them lexicographically - so [10, 2, 33, 4] comes back unsorted-looking instead of [2, 4, 10, 33]. Fix it with a numeric comparator, keep the copy-before-sort behavior (the caller's array must not change), and keep the function signature."
+  ],
+  "setup_files": {
+    "ranked.ts": "// Return the scores in ascending numeric order, without mutating the input.\n// BUG: sort() with no comparator converts elements to strings and sorts\n// lexicographically, so [10, 2, 33, 4] comes back [10, 2, 33, 4] instead of\n// [2, 4, 10, 33].\nexport function ranked(scores: number[]): number[] {\n  return [...scores].sort();\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ranked.ts",
+      "content_patterns": [
+        "function ranked"
+      ],
+      "not_content_patterns": [
+        ".sort();"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit ranked.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build ranked.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { ranked } = require(\"./build/ranked.js\");\n\n// numeric, not lexicographic\nassert.deepStrictEqual(ranked([10, 2, 33, 4]), [2, 4, 10, 33]);\nassert.deepStrictEqual(ranked([100, 25, 9]), [9, 25, 100]);\nassert.deepStrictEqual(ranked([]), []);\n\n// must not mutate the input\nconst input = [3, 1, 2];\nranked(input);\nassert.deepStrictEqual(input, [3, 1, 2], \"input array was mutated\");\n\nconsole.log(\"behavior OK\");\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "ranked.ts": "// Return the scores in ascending numeric order, without mutating the input.\nexport function ranked(scores: number[]): number[] {\n  return [...scores].sort((a, b) => a - b);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "descending",
+      "files": {
+        "ranked.ts": "export function ranked(scores: number[]): number[] {\n  return [...scores].sort((a, b) => b - a);\n}\n"
+      }
+    },
+    {
+      "name": "mutates-input",
+      "files": {
+        "ranked.ts": "export function ranked(scores: number[]): number[] {\n  return scores.sort((a, b) => a - b);\n}\n"
+      }
+    }
+  ]
+}

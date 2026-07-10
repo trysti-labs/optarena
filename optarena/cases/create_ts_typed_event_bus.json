@@ -1,0 +1,57 @@
+{
+  "name": "create_ts_typed_event_bus",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Creates a generically-typed TS EventBus (on/off/once/emit) consumed by an existing notifier module (cross-file)",
+  "difficulty": 3,
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "generics",
+    "pub-sub",
+    "multi-file"
+  ],
+  "prompts": [
+    "notifier.ts already exists; it does `import { EventBus } from \"./event_bus\"`, instantiates `new EventBus<AppEvents>()` (where AppEvents maps event names to payload types), and uses bus.on(event, handler), bus.off(event, handler), bus.once(event, handler), and bus.emit(event, payload). Create event_bus.ts exporting a class EventBus<Events extends Record<string, unknown>> whose methods are typed per event: on/off/once take a K extends keyof Events and a handler receiving Events[K]; emit takes the event name and a payload of that event's type. Semantics: emit synchronously calls every handler registered for that event (and nothing for other events, and must not throw when no handler is registered); off removes a previously-registered handler so it no longer fires; once registers a handler that fires for exactly ONE emit and never again. The file must compile under tsc --strict. Do not modify notifier.ts."
+  ],
+  "setup_files": {
+    "notifier.ts": "import { EventBus } from \"./event_bus\";\n\ntype AppEvents = {\n  user_created: { name: string };\n  user_deleted: { name: string };\n};\n\n// Runs a scripted sequence against the bus and returns the resulting log.\n// Exercises on / emit / once (fires exactly once) / off (stops delivery).\nexport function runScenario(): string[] {\n  const log: string[] = [];\n  const bus = new EventBus<AppEvents>();\n\n  const onCreate = (p: { name: string }) => {\n    log.push(`created:${p.name}`);\n  };\n  bus.on(\"user_created\", onCreate);\n  bus.once(\"user_deleted\", (p) => log.push(`deleted-once:${p.name}`));\n\n  bus.emit(\"user_created\", { name: \"ada\" });\n  bus.emit(\"user_deleted\", { name: \"bob\" });\n  bus.emit(\"user_deleted\", { name: \"carol\" }); // once: must NOT fire again\n  bus.off(\"user_created\", onCreate);\n  bus.emit(\"user_created\", { name: \"dan\" }); // off: must NOT be delivered\n\n  return log;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "event_bus.ts",
+      "content_patterns": [
+        "class eventbus",
+        "emit",
+        "once",
+        "keyof events"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit event_bus.ts notifier.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build event_bus.ts notifier.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { runScenario } = require(\"./build/notifier.js\");\nconst { EventBus } = require(\"./build/event_bus.js\");\n\n// the scripted consumer sequence pins on/emit/once/off semantics together\nassert.deepStrictEqual(runScenario(), [\"created:ada\", \"deleted-once:bob\"]);\n\n// direct checks\nconst bus = new EventBus();\nlet hits = 0;\nconst h = () => {\n  hits += 1;\n};\nbus.on(\"ping\", h);\nbus.emit(\"ping\", {});\nbus.emit(\"ping\", {});\nassert.strictEqual(hits, 2, \"on-handler should fire per emit\");\nbus.off(\"ping\", h);\nbus.emit(\"ping\", {});\nassert.strictEqual(hits, 2, \"off must stop delivery\");\n\nlet onceHits = 0;\nbus.once(\"pong\", () => {\n  onceHits += 1;\n});\nbus.emit(\"pong\", {});\nbus.emit(\"pong\", {});\nassert.strictEqual(onceHits, 1, \"once must fire exactly once\");\n\n// emitting an event with no handlers must not throw\nbus.emit(\"silence\", {});\n\nconsole.log(\"behavior OK\");\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "event_bus.ts": "type Handler<T> = (payload: T) => void;\n\n// Minimal strongly-typed pub/sub bus. The Events map ties each event name to\n// its payload type, so on/emit are type-checked per event.\nexport class EventBus<Events extends Record<string, unknown>> {\n  private handlers = new Map<keyof Events, Handler<never>[]>();\n\n  on<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<never>);\n    this.handlers.set(event, list);\n  }\n\n  off<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    const list = this.handlers.get(event);\n    if (!list) {\n      return;\n    }\n    const idx = list.indexOf(handler as Handler<never>);\n    if (idx >= 0) {\n      list.splice(idx, 1);\n    }\n  }\n\n  once<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    const wrapper = (payload: Events[K]): void => {\n      this.off(event, wrapper);\n      handler(payload);\n    };\n    this.on(event, wrapper);\n  }\n\n  emit<K extends keyof Events>(event: K, payload: Events[K]): void {\n    const list = this.handlers.get(event);\n    if (!list) {\n      return;\n    }\n    for (const handler of [...list]) {\n      (handler as Handler<Events[K]>)(payload);\n    }\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "once-fires-repeatedly",
+      "files": {
+        "event_bus.ts": "type Handler<T> = (payload: T) => void;\n\n// Minimal strongly-typed pub/sub bus. The Events map ties each event name to\n// its payload type, so on/emit are type-checked per event.\nexport class EventBus<Events extends Record<string, unknown>> {\n  private handlers = new Map<keyof Events, Handler<never>[]>();\n\n  on<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<never>);\n    this.handlers.set(event, list);\n  }\n\n  off<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    const list = this.handlers.get(event);\n    if (!list) {\n      return;\n    }\n    const idx = list.indexOf(handler as Handler<never>);\n    if (idx >= 0) {\n      list.splice(idx, 1);\n    }\n  }\n\n  once<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    this.on(event, handler);\n  }\n\n  emit<K extends keyof Events>(event: K, payload: Events[K]): void {\n    const list = this.handlers.get(event);\n    if (!list) {\n      return;\n    }\n    for (const handler of [...list]) {\n      (handler as Handler<Events[K]>)(payload);\n    }\n  }\n}\n"
+      }
+    },
+    {
+      "name": "off-is-noop",
+      "files": {
+        "event_bus.ts": "type Handler<T> = (payload: T) => void;\n\n// Minimal strongly-typed pub/sub bus. The Events map ties each event name to\n// its payload type, so on/emit are type-checked per event.\nexport class EventBus<Events extends Record<string, unknown>> {\n  private handlers = new Map<keyof Events, Handler<never>[]>();\n\n  on<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<never>);\n    this.handlers.set(event, list);\n  }\n\n  off<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    const list = this.handlers.get(event);\n    if (!list) {\n      return;\n    }\n    void handler;\n  }\n\n  once<K extends keyof Events>(event: K, handler: Handler<Events[K]>): void {\n    const wrapper = (payload: Events[K]): void => {\n      this.off(event, wrapper);\n      handler(payload);\n    };\n    this.on(event, wrapper);\n  }\n\n  emit<K extends keyof Events>(event: K, payload: Events[K]): void {\n    const list = this.handlers.get(event);\n    if (!list) {\n      return;\n    }\n    for (const handler of [...list]) {\n      (handler as Handler<Events[K]>)(payload);\n    }\n  }\n}\n"
+      }
+    }
+  ]
+}

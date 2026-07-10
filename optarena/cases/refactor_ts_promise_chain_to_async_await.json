@@ -1,0 +1,52 @@
+{
+  "name": "refactor_ts_promise_chain_to_async_await",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Refactors a TS .then/.catch promise chain to async/await while preserving the error-fallback behavior",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "typescript",
+    "async",
+    "refactoring"
+  ],
+  "prompts": [
+    "displayName in user_loader.ts is written as a promise chain: fetchUser(id).then(user => user.name).then(name => name.toUpperCase()).catch(() => \"guest\"). Refactor it to async/await style: declare it async, await fetchUser, and use try/catch for the fallback. The observable behavior must be identical - a known id resolves to the upper-cased name, and an UNKNOWN id still resolves to \"guest\" (it must not reject). The refactored file must contain no .then( or .catch( calls. Do not change fetchUser or the USERS data."
+  ],
+  "setup_files": {
+    "user_loader.ts": "interface User {\n  name: string;\n}\n\nconst USERS: Record<number, User> = {\n  1: { name: \"ada\" },\n  2: { name: \"grace\" },\n};\n\nfunction fetchUser(id: number): Promise<User> {\n  return new Promise((resolve, reject) => {\n    const user = USERS[id];\n    if (user) {\n      resolve(user);\n    } else {\n      reject(new Error(`no user ${id}`));\n    }\n  });\n}\n\n// Load a user's display name; unknown ids resolve to \"guest\".\nexport function displayName(id: number): Promise<string> {\n  return fetchUser(id)\n    .then((user) => user.name)\n    .then((name) => name.toUpperCase())\n    .catch(() => \"guest\");\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "user_loader.ts",
+      "content_patterns": [
+        "async function displayname",
+        "await"
+      ],
+      "not_content_patterns": [
+        ".then(",
+        ".catch("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit user_loader.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build user_loader.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { displayName } = require(\"./build/user_loader.js\");\n\nasync function main() {\n  assert.strictEqual(await displayName(1), \"ADA\");\n  assert.strictEqual(await displayName(2), \"GRACE\");\n  assert.strictEqual(await displayName(99), \"guest\", \"unknown ids must fall back to guest\");\n  console.log(\"behavior OK\");\n}\n\nmain().catch((err) => {\n  console.error(err);\n  process.exit(1);\n});\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "user_loader.ts": "interface User {\n  name: string;\n}\n\nconst USERS: Record<number, User> = {\n  1: { name: \"ada\" },\n  2: { name: \"grace\" },\n};\n\nfunction fetchUser(id: number): Promise<User> {\n  return new Promise((resolve, reject) => {\n    const user = USERS[id];\n    if (user) {\n      resolve(user);\n    } else {\n      reject(new Error(`no user ${id}`));\n    }\n  });\n}\n\n// Load a user's display name; unknown ids resolve to \"guest\".\nexport async function displayName(id: number): Promise<string> {\n  try {\n    const user = await fetchUser(id);\n    return user.name.toUpperCase();\n  } catch {\n    return \"guest\";\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dropped-error-fallback",
+      "files": {
+        "user_loader.ts": "interface User {\n  name: string;\n}\n\nconst USERS: Record<number, User> = {\n  1: { name: \"ada\" },\n  2: { name: \"grace\" },\n};\n\nfunction fetchUser(id: number): Promise<User> {\n  return new Promise((resolve, reject) => {\n    const user = USERS[id];\n    if (user) {\n      resolve(user);\n    } else {\n      reject(new Error(`no user ${id}`));\n    }\n  });\n}\n\n// Load a user's display name; unknown ids resolve to \"guest\".\nexport async function displayName(id: number): Promise<string> {\n  const user = await fetchUser(id);\n  return user.name.toUpperCase();\n}\n"
+      }
+    }
+  ]
+}

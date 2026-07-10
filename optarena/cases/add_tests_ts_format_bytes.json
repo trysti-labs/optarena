@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_ts_format_bytes",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Asks the model to write boundary tests for a TS byte formatter; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "typescript",
+    "testing",
+    "boundaries"
+  ],
+  "prompts": [
+    "formatBytes in bytesutil.ts (already correct, do not modify it) formats a byte count: below 1024 it returns whole bytes like \"512 B\"; from 1024 up to (but not including) 1024*1024 it returns kibibytes with exactly one decimal like \"1.5 KB\"; from 1024*1024 upward it returns mebibytes with one decimal like \"2.0 MB\". Write tests at exactly test_bytesutil.ts that import { formatBytes } from \"./bytesutil\" and throw new Error on any mismatch, pinning the EXACT returned string for at least: a plain byte value; 1023 and 1024 (the KB boundary); a fractional-KB value such as 1536; 1048575 and 1048576 (the MB boundary). The file must compile under tsc --strict and print a success line when everything passes."
+  ],
+  "setup_files": {
+    "bytesutil.ts": "// Format a byte count for display:\n//   below 1024            -> whole bytes, e.g. \"512 B\"\n//   below 1024*1024       -> kibibytes with ONE decimal, e.g. \"1.5 KB\"\n//   1024*1024 and above   -> mebibytes with ONE decimal, e.g. \"2.0 MB\"\nexport function formatBytes(n: number): string {\n  if (n < 1024) {\n    return `${n} B`;\n  }\n  if (n < 1024 * 1024) {\n    return `${(n / 1024).toFixed(1)} KB`;\n  }\n  return `${(n / (1024 * 1024)).toFixed(1)} MB`;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_bytesutil.ts",
+      "content_patterns": [
+        "formatbytes",
+        "1536",
+        "1048576"
+      ],
+      "regex_patterns": [
+        "throw\\s+new\\s+error"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path('bytesutil.ts')\nTEST_CMD = (\"tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build \"\n            \"bytesutil.ts test_bytesutil.ts && node build/test_bytesutil.js\")\nMUTANTS = [\n    [[\"  if (n < 1024) {\", \"  if (n <= 1024) {\"]],\n    [[\"    return `${(n / 1024).toFixed(1)} KB`;\", \"    return `${(n / 1024).toFixed(0)} KB`;\"]],\n    [[\"  if (n < 1024 * 1024) {\", \"  if (n < 1000 * 1024) {\"]],\n]\n\ndef run_tests():\n    shutil.rmtree('build', ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_bytesutil.ts": "import { formatBytes } from \"./bytesutil\";\n\nfunction expectEqual(actual: string, expected: string, label: string): void {\n  if (actual !== expected) {\n    throw new Error(`${label}: got ${actual}, want ${expected}`);\n  }\n}\n\nexpectEqual(formatBytes(512), \"512 B\", \"plain bytes\");\nexpectEqual(formatBytes(1023), \"1023 B\", \"just below KB boundary\");\nexpectEqual(formatBytes(1024), \"1.0 KB\", \"exactly the KB boundary\");\nexpectEqual(formatBytes(1536), \"1.5 KB\", \"fractional KB\");\nexpectEqual(formatBytes(1048575), \"1024.0 KB\", \"just below MB boundary\");\nexpectEqual(formatBytes(1048576), \"1.0 MB\", \"exactly the MB boundary\");\nexpectEqual(formatBytes(2097152), \"2.0 MB\", \"whole MB\");\n\nconsole.log(\"all formatBytes tests passed\");\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_bytesutil.ts": "import { formatBytes } from \"./bytesutil\";\n\n// exercises 512, 1023, 1024, 1536, 1048575, 1048576 but never pins a value\nconst samples = [512, 1023, 1024, 1536, 1048575, 1048576];\nfor (const n of samples) {\n  const out = formatBytes(n);\n  if (typeof out !== \"string\" || out.length === 0) {\n    throw new Error(`formatBytes(${n}) returned a non-string`);\n  }\n}\n\nconsole.log(\"all formatBytes tests passed\");\n"
+      }
+    }
+  ]
+}
