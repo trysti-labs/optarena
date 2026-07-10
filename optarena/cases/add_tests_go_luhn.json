@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_go_luhn",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Asks the model to write Go tests for a Luhn checksum validator; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "go",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "Valid(number string) bool in luhn.go (package main, already correct - do not modify it) reports whether a string of digits passes the Luhn checksum (the algorithm used for credit-card numbers): walking right to left, every second digit is doubled and, if the doubled value exceeds 9, has 9 subtracted; the number is valid iff the total is a multiple of 10. It returns false for an empty string or any non-digit character. Write Go tests at exactly luhn_test.go (package main) with at least 4 test functions (or table cases) pinning: a known VALID number returns true; a number that differs by one digit returns false; the empty string returns false; and a string containing a non-digit returns false. Use a known Luhn-valid number such as \"4539148803436467\"."
+  ],
+  "setup_files": {
+    "go.mod": "module luhn\n\ngo 1.21\n",
+    "luhn.go": "package main\n\n// Valid reports whether the digit string passes the Luhn checksum.\nfunc Valid(number string) bool {\n\tif len(number) == 0 {\n\t\treturn false\n\t}\n\tsum := 0\n\tdouble := false\n\tfor i := len(number) - 1; i >= 0; i-- {\n\t\tc := number[i]\n\t\tif c < '0' || c > '9' {\n\t\t\treturn false\n\t\t}\n\t\td := int(c - '0')\n\t\tif double {\n\t\t\td *= 2\n\t\t\tif d > 9 {\n\t\t\t\td -= 9\n\t\t\t}\n\t\t}\n\t\tsum += d\n\t\tdouble = !double\n\t}\n\treturn sum%10 == 0\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "luhn_test.go",
+      "content_patterns": [
+        "func Test",
+        "Valid("
+      ],
+      "regex_patterns": [
+        "func Test"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('luhn.go')\nTEST_CMD = 'go test ./...'\nMUTANTS = [\n    ['\\t\\t\\td *= 2', '\\t\\t\\td *= 3'],\n    ['\\t\\t\\t\\td -= 9', '\\t\\t\\t\\td -= 8'],\n    ['\\treturn sum%10 == 0', '\\treturn sum%10 == 1'],\n]\n\nimport shutil\nshutil.rmtree('__pycache__', ignore_errors=True)  # avoid stale bytecode across mutants\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (killed all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "luhn_test.go": "package main\n\nimport \"testing\"\n\nfunc TestValidNumber(t *testing.T) {\n\tif !Valid(\"4539148803436467\") {\n\t\tt.Error(\"expected a Luhn-valid number to be valid\")\n\t}\n}\n\nfunc TestOneDigitOff(t *testing.T) {\n\tif Valid(\"4539148803436466\") {\n\t\tt.Error(\"a number with a bad check digit must be invalid\")\n\t}\n}\n\nfunc TestEmpty(t *testing.T) {\n\tif Valid(\"\") {\n\t\tt.Error(\"empty string must be invalid\")\n\t}\n}\n\nfunc TestNonDigit(t *testing.T) {\n\tif Valid(\"45391488034364z7\") {\n\t\tt.Error(\"a non-digit character must make it invalid\")\n\t}\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "luhn_test.go": "package main\n\nimport \"testing\"\n\nfunc TestReturnsBool(t *testing.T) {\n\t_ = Valid(\"4539148803436467\")\n}\n\nfunc TestEmptyInvalid(t *testing.T) {\n\tif Valid(\"\") {\n\t\tt.Error(\"empty invalid\")\n\t}\n}\n\nfunc TestNonDigitInvalid(t *testing.T) {\n\tif Valid(\"12a4\") {\n\t\tt.Error(\"non-digit invalid\")\n\t}\n}\n\nfunc TestAnother(t *testing.T) {\n\t_ = Valid(\"1234\")\n}\n"
+      }
+    }
+  ]
+}

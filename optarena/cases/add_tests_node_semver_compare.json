@@ -1,0 +1,54 @@
+{
+  "name": "add_tests_node_semver_compare",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Asks the model to write node:test tests for a semver comparator; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "javascript",
+    "node",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "compare(a, b) in semver.js (already correct - do not modify it) compares two \"x.y.z\" version strings numerically and returns -1 if a < b, 1 if a > b, and 0 if equal, comparing major then minor then patch. Write tests at exactly test_semver.js using the built-in node:test runner and node:assert with at least 4 test cases using assert.strictEqual that pin: two equal versions -> 0; a smaller minor -> -1; a bigger minor -> 1; and a difference only in the PATCH component (e.g. compare('1.2.4','1.2.3') -> 1). Import with `const { compare } = require('./semver.js');`."
+  ],
+  "setup_files": {
+    "semver.js": "function compare(a, b) {\n  const pa = a.split('.').map(Number);\n  const pb = b.split('.').map(Number);\n  for (let i = 0; i < 3; i++) {\n    if (pa[i] > pb[i]) return 1;\n    if (pa[i] < pb[i]) return -1;\n  }\n  return 0;\n}\n\nmodule.exports = { compare };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_semver.js",
+      "content_patterns": [
+        "node:test",
+        "node:assert",
+        "compare(",
+        "strictequal"
+      ],
+      "regex_patterns": [
+        "test\\s*\\(\\s*['\"][\\s\\S]*test\\s*\\(\\s*['\"][\\s\\S]*test\\s*\\(\\s*['\"][\\s\\S]*test\\s*\\(\\s*['\"]"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('semver.js')\nTEST_CMD = 'node --test test_semver.js'\nMUTANTS = [\n    ['    if (pa[i] > pb[i]) return 1;', '    if (pa[i] >= pb[i]) return 1;'],\n    ['    if (pa[i] < pb[i]) return -1;', '    if (pa[i] < pb[i]) return 1;'],\n    ['  for (let i = 0; i < 3; i++) {', '  for (let i = 0; i < 2; i++) {'],\n]\n\nimport shutil\nshutil.rmtree('__pycache__', ignore_errors=True)  # avoid stale bytecode across mutants\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (killed all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_semver.js": "const test = require('node:test');\nconst assert = require('node:assert');\nconst { compare } = require('./semver.js');\n\ntest('equal versions', () => {\n  assert.strictEqual(compare('1.2.3', '1.2.3'), 0);\n});\n\ntest('smaller minor', () => {\n  assert.strictEqual(compare('1.2.3', '1.3.0'), -1);\n});\n\ntest('bigger minor', () => {\n  assert.strictEqual(compare('1.3.0', '1.2.9'), 1);\n});\n\ntest('patch difference', () => {\n  assert.strictEqual(compare('1.2.4', '1.2.3'), 1);\n  assert.strictEqual(compare('1.2.3', '1.2.4'), -1);\n});\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_semver.js": "const test = require('node:test');\nconst assert = require('node:assert');\nconst { compare } = require('./semver.js');\n\ntest('returns a number', () => {\n  assert.strictEqual(typeof compare('1.2.3', '1.2.4'), 'number');\n});\n\ntest('equal is falsy', () => {\n  assert.strictEqual(compare('1.0.0', '1.0.0'), 0);\n});\n\ntest('in range', () => {\n  assert.ok(Math.abs(compare('1.0.0', '2.0.0')) <= 1);\n});\n\ntest('another', () => {\n  assert.ok(compare('2.0.0', '1.0.0') !== null);\n});\n"
+      }
+    }
+  ]
+}

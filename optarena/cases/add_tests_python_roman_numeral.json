@@ -1,0 +1,51 @@
+{
+  "name": "add_tests_python_roman_numeral",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Asks the model to write pytest tests for a Roman-numeral-to-int converter; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "python",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "to_int(s) in roman.py (already correct - do not modify it) converts an uppercase Roman numeral string to its integer value, handling the subtractive cases (IV=4, IX=9, XL=40, XC=90, CD=400, CM=900). Write pytest tests at exactly test_roman.py (functions named test_*) with at least 4 test functions pinning EXACT values that exercise: a simple additive numeral, a subtractive numeral (like IV or IX), a multi-part numeral (like LVIII = 58), and a large one with subtraction (like MCMXCIV = 1994). Use `from roman import to_int` and plain assert with exact integers."
+  ],
+  "setup_files": {
+    "roman.py": "def to_int(s):\n    \"\"\"Convert an uppercase Roman numeral to an integer.\"\"\"\n    values = {\"I\": 1, \"V\": 5, \"X\": 10, \"L\": 50, \"C\": 100, \"D\": 500, \"M\": 1000}\n    total = 0\n    prev = 0\n    for ch in reversed(s):\n        v = values[ch]\n        if v < prev:\n            total -= v\n        else:\n            total += v\n        prev = v\n    return total\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_roman.py",
+      "content_patterns": [
+        "to_int",
+        "assert"
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('roman.py')\nTEST_CMD = 'PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -p no:cacheprovider -q test_roman.py'\nMUTANTS = [\n    ['\"X\": 10', '\"X\": 11'],\n    ['            total -= v', '            total += v'],\n    ['        if v < prev:', '        if v <= prev:'],\n]\n\nimport shutil\nshutil.rmtree('__pycache__', ignore_errors=True)  # avoid stale bytecode across mutants\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (killed all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_roman.py": "from roman import to_int\n\n\ndef test_additive():\n    assert to_int(\"III\") == 3\n\n\ndef test_subtractive():\n    assert to_int(\"IV\") == 4\n    assert to_int(\"IX\") == 9\n\n\ndef test_multi_part():\n    assert to_int(\"LVIII\") == 58\n\n\ndef test_large_with_subtraction():\n    assert to_int(\"MCMXCIV\") == 1994\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_roman.py": "from roman import to_int\n\n\ndef test_returns_int():\n    assert isinstance(to_int(\"III\"), int)\n\n\ndef test_positive():\n    assert to_int(\"IV\") > 0\n\n\ndef test_not_zero():\n    assert to_int(\"X\") != 0\n\n\ndef test_bigger():\n    assert to_int(\"MM\") > to_int(\"I\")\n"
+      }
+    }
+  ]
+}

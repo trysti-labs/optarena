@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_ruby_time_ago",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Asks the model to write Minitest tests for a seconds-to-bucket humanizer; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "ruby",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "TimeAgo.humanize(seconds) in lib/time_ago.rb (already correct - do not modify it) turns a non-negative integer number of seconds into a coarse bucket string: \"just now\" if under 60 seconds; otherwise \"<n>m\" where n is the whole number of minutes if under 3600; otherwise \"<n>h\" whole hours if under 86400; otherwise \"<n>d\" whole days. Write Minitest tests at exactly test/time_ago_test.rb (class TimeAgoTest < Minitest::Test) with at least 4 test methods using assert_equal that pin the EXACT string for: a value under a minute; a value in the minutes bucket (e.g. 120 -> \"2m\"); the hours bucket (e.g. 7200 -> \"2h\"); and the days bucket (e.g. 172800 -> \"2d\"). Begin the file with `require \"minitest/autorun\"` and `require_relative \"../lib/time_ago\"`."
+  ],
+  "setup_files": {
+    "lib/time_ago.rb": "module App\n  class TimeAgo\n    def self.humanize(seconds)\n      return \"just now\" if seconds < 60\n      return \"#{seconds / 60}m\" if seconds < 3600\n      return \"#{seconds / 3600}h\" if seconds < 86400\n      \"#{seconds / 86400}d\"\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/time_ago_test.rb",
+      "content_patterns": [
+        "minitest",
+        "assert_equal",
+        "humanize("
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('lib/time_ago.rb')\nTEST_CMD = 'ruby -Itest -Ilib test/time_ago_test.rb'\nMUTANTS = [\n    ['return \"just now\" if seconds < 60', 'return \"just now\" if seconds < 30'],\n    ['return \"#{seconds / 60}m\" if seconds < 3600', 'return \"#{seconds / 30}m\" if seconds < 3600'],\n    ['return \"#{seconds / 3600}h\" if seconds < 86400', 'return \"#{seconds / 1800}h\" if seconds < 86400'],\n]\n\nimport shutil\nshutil.rmtree('__pycache__', ignore_errors=True)  # avoid stale bytecode across mutants\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (killed all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test/time_ago_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/time_ago\"\n\nclass TimeAgoTest < Minitest::Test\n  def test_just_now\n    assert_equal \"just now\", App::TimeAgo.humanize(45)\n  end\n\n  def test_minutes\n    assert_equal \"2m\", App::TimeAgo.humanize(120)\n  end\n\n  def test_hours\n    assert_equal \"2h\", App::TimeAgo.humanize(7200)\n  end\n\n  def test_days\n    assert_equal \"2d\", App::TimeAgo.humanize(172800)\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test/time_ago_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/time_ago\"\n\nclass TimeAgoTest < Minitest::Test\n  def test_returns_string\n    assert_kind_of String, App::TimeAgo.humanize(45)\n  end\n\n  def test_not_empty\n    refute_empty App::TimeAgo.humanize(120)\n  end\n\n  def test_minutes_has_m\n    assert_includes App::TimeAgo.humanize(120), \"m\"\n  end\n\n  def test_days_has_d\n    assert_includes App::TimeAgo.humanize(172800), \"d\"\n  end\nend\n"
+      }
+    }
+  ]
+}
