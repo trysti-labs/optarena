@@ -1,6 +1,6 @@
 # OptArena Status
 
-_As of 2026-07-10, HEAD `e42102f` on `main` (pushed to github.com/trysti-labs/optarena)._
+_As of 2026-07-10, HEAD `c120933` on `main` (pushed to github.com/trysti-labs/optarena)._
 
 ## Where things stand
 
@@ -8,16 +8,16 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-322 cases**, all new cases shipped with a `reference_solution` and
+328 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
 `verify-corpus` against the real Docker sandboxes before commit.
 
-## Corpus census (322 cases)
+## Corpus census (328 cases)
 
 | | |
 |---|---|
-| Total cases | **322** (target 500, 64%) |
-| With `reference_solution` | 218 (68%; 100% of the 202 added this expansion) |
+| Total cases | **328** (target 500, 66%) |
+| With `reference_solution` | 224 (68%; 100% of the 208 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) — all in the GHCR publish matrix |
 
@@ -26,7 +26,7 @@ csharp 24, sql 19, typescript 18, ruby 12, php 12, kotlin 12, **yaml 11**,
 shell 10, c 7, hcl 5, cpp 3, **dockerfile 1**, **makefile 1** — plus 7
 language-neutral devops cases.
 
-**By task type:** bug_fix 95, feature 72, refactoring 41, security 32,
+**By task type:** bug_fix 95, feature 72, refactoring 41, security 38,
 testing 31, performance 23, devops 16, data_engineering 12.
 
 ## Waves shipped (chronology)
@@ -42,6 +42,7 @@ Since then:
 | **D** — depth in core tracks | 10 | 250 → 310 | Batches 1-3: Go stdlib (nil map, `errors.Is`, generic LRU, command injection), TypeScript (forEach-async, typed EventBus, prototype pollution), plain Java/JUnit (Integer cache `==`, ConcurrentModificationException, path traversal). Batches 4-6 deepen the Wave C tracks to 12 each: Ruby, PHP, Kotlin. Batches 7-8 cover the plain-stdlib seams of the previously framework-only Rust (Vec::contains→HashSet perf, u32 overflow, UTF-8 byte-slice panic) and C# (string += →StringBuilder perf, foreach-mutation, `for`-loop closure capture) — each 18 → 24. Batch 9: **Python** stdlib (`list.count()`-in-loop perf, mutable-default-arg, late-binding closure, `pickle.loads` RCE, sessionization), 55 → 61. Batch 10: **Node/JS** stdlib (spread-accumulation perf, `map(parseInt)` radix trap, `sort()` lexicographic, quoted-CSV parser, generic groupBy), 34 → 40 |
 | **Rebalance** — devops breadth | 1 | 310 → 316 | Batch 11: Dockerfile hardening, Kubernetes Deployment (probes/limits/non-root), GitHub Actions least-privilege permissions, GitHub Actions caching+concurrency, Compose `service_healthy`, Makefile `.PHONY` — all structural / real-`make` on the base image; devops 10 → 16 |
 | **Rebalance** — refactoring breadth | 1 | 316 → 322 | Batch 12: six varied refactor shapes across six langs, each with a behavior-*drift* broken: Python if/elif→dict-dispatch and class→`@dataclass`, JS `.then`-chain→async/await, Go switch→table-driven, SQL correlated-subquery→LEFT JOIN, C# loop→LINQ; refactoring 35 → 41 |
+| **Rebalance** — security families | 1 | 322 → 328 | Batch 13: six new vuln families, each with a realistic *incomplete-fix* broken — JWT signature-not-verified/alg:none, SSRF host allowlist (ipaddress), Python mass-assignment, secrets-in-logs (nested redaction), open redirect (`//` and `/\`), ReDoS validator (nested-quantifier backtracking); security 32 → 38 |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -82,7 +83,7 @@ which rejects the Apache feature-flag knobs outright — hence the cosmetic-
 hardening incomplete-fix. New-image batches additionally smoke-test the
 offline toolchain in-container *before* any case is authored.
 
-## Remaining to 500 (178 cases)
+## Remaining to 500 (172 cases)
 
 Per the plan's [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies):
 
@@ -96,9 +97,10 @@ Per the plan's [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-or
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
 Rebalance note: **bug_fix is at target (95/95) — stop adding it.** After the
-devops (batch 11 → 16/45) and refactoring (batch 12 → 41/70) pushes, the
-categories still furthest behind are **testing (31/65), performance (23/45),
-devops (16/45), security (32/55), feature (72/95), and refactoring (41/70)**;
-data_engineering (12/15) is nearly there. Next levers: more mutation-checked
-testing, security-family cases (SSRF/JWT/secrets-in-logs), further devops/CI
-breadth, and the cross-file feature shift of Wave B/E.
+devops (batch 11 → 16/45), refactoring (batch 12 → 41/70) and security
+(batch 13 → 38/55) pushes, the categories still furthest behind are
+**testing (31/65), performance (23/45), devops (16/45), feature (72/95), and
+refactoring (41/70)**; data_engineering (12/15) and security (38/55) are
+closing in. Next levers: more mutation-checked testing, further devops/CI
+breadth, calibrated performance cases, and the cross-file feature shift of
+Wave B/E.
