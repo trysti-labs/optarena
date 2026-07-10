@@ -1,0 +1,50 @@
+{
+  "name": "fix_java_concurrent_modification_remove",
+  "language": "java",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Fixes a Java loop that removes from a list while iterating it, throwing ConcurrentModificationException",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "java",
+    "collections",
+    "iterator"
+  ],
+  "prompts": [
+    "Evens.removeEvens in src/main/java/com/optarena/Evens.java should remove every even number from the list in place, but it calls nums.remove(n) inside a for-each loop over the same list, which throws ConcurrentModificationException. Fix it so it removes exactly the even numbers (leaving the odd ones in their original order) without throwing - use Collection.removeIf or an explicit Iterator with iterator.remove(). Keep the class and method signature."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>plain-java-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+    "src/main/java/com/optarena/Evens.java": "package com.optarena;\n\nimport java.util.List;\n\npublic class Evens {\n    // Remove every even number from the list, in place.\n    // BUG: removing from the list while iterating it with a for-each loop\n    // throws ConcurrentModificationException at runtime.\n    public void removeEvens(List<Integer> nums) {\n        for (Integer n : nums) {\n            if (n % 2 == 0) {\n                nums.remove(n);\n            }\n        }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Evens.java",
+      "content_patterns": [
+        "removeevens"
+      ],
+      "not_content_patterns": [
+        "nums.remove(n)"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/EvensHiddenTest.java": "package com.optarena;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport java.util.ArrayList;\nimport java.util.Arrays;\nimport java.util.List;\n\nimport org.junit.jupiter.api.Test;\n\nclass EvensHiddenTest {\n\n    @Test\n    void removesEvensKeepsOddsInOrder() {\n        List<Integer> nums = new ArrayList<>(Arrays.asList(1, 2, 3, 4, 5, 6));\n        new Evens().removeEvens(nums);\n        assertEquals(Arrays.asList(1, 3, 5), nums);\n    }\n\n    @Test\n    void allEvensBecomesEmpty() {\n        List<Integer> nums = new ArrayList<>(Arrays.asList(2, 4, 6));\n        new Evens().removeEvens(nums);\n        assertEquals(List.of(), nums);\n    }\n\n    @Test\n    void noEvensUnchanged() {\n        List<Integer> nums = new ArrayList<>(Arrays.asList(1, 3, 5));\n        new Evens().removeEvens(nums);\n        assertEquals(Arrays.asList(1, 3, 5), nums);\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=EvensHiddenTest",
+  "reference_solution": {
+    "src/main/java/com/optarena/Evens.java": "package com.optarena;\n\nimport java.util.List;\n\npublic class Evens {\n    // Remove every even number from the list, in place.\n    public void removeEvens(List<Integer> nums) {\n        nums.removeIf(n -> n % 2 == 0);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "removes-odds",
+      "files": {
+        "src/main/java/com/optarena/Evens.java": "package com.optarena;\n\nimport java.util.List;\n\npublic class Evens {\n    public void removeEvens(List<Integer> nums) {\n        nums.removeIf(n -> n % 2 == 1);\n    }\n}\n"
+      }
+    }
+  ]
+}

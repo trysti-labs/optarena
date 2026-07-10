@@ -1,0 +1,50 @@
+{
+  "name": "fix_java_integer_boxing_equality",
+  "language": "java",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Fixes a Java method comparing boxed Integers with == (broken for values outside the -128..127 cache)",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "tags": [
+    "java",
+    "autoboxing",
+    "equality"
+  ],
+  "prompts": [
+    "Totals.sameTotal in src/main/java/com/optarena/Totals.java should return true when the two boxed Integer totals are equal in value. It uses `a == b`, which compares references - it accidentally works for small cached integers (-128..127) but returns false for larger equal values like sameTotal(1000, 1000). Fix it to compare by value (use .equals or java.util.Objects.equals for null-safety), so equal values return true and unequal values return false regardless of magnitude. Keep the class and method signature."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>plain-java-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+    "src/main/java/com/optarena/Totals.java": "package com.optarena;\n\npublic class Totals {\n    // Return true when the two boxed order totals are equal in value.\n    // BUG: `==` compares object references, not values. It happens to work for\n    // small ints (the JVM caches -128..127) but returns false for larger equal\n    // values such as sameTotal(1000, 1000).\n    public boolean sameTotal(Integer a, Integer b) {\n        return a == b;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Totals.java",
+      "content_patterns": [
+        "sametotal"
+      ],
+      "not_content_patterns": [
+        "return a == b"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/TotalsHiddenTest.java": "package com.optarena;\n\nimport static org.junit.jupiter.api.Assertions.assertFalse;\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport org.junit.jupiter.api.Test;\n\nclass TotalsHiddenTest {\n\n    @Test\n    void equalLargeValues() {\n        assertTrue(new Totals().sameTotal(1000, 1000));\n    }\n\n    @Test\n    void equalSmallCachedValues() {\n        assertTrue(new Totals().sameTotal(50, 50));\n    }\n\n    @Test\n    void unequalValues() {\n        assertFalse(new Totals().sameTotal(1000, 999));\n        assertFalse(new Totals().sameTotal(999, 1000));\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=TotalsHiddenTest",
+  "reference_solution": {
+    "src/main/java/com/optarena/Totals.java": "package com.optarena;\n\nimport java.util.Objects;\n\npublic class Totals {\n    // Return true when the two boxed order totals are equal in value.\n    public boolean sameTotal(Integer a, Integer b) {\n        return Objects.equals(a, b);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "greater-or-equal",
+      "files": {
+        "src/main/java/com/optarena/Totals.java": "package com.optarena;\n\npublic class Totals {\n    public boolean sameTotal(Integer a, Integer b) {\n        return a >= b;\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "add_tests_java_grade_brackets",
+  "language": "java",
+  "framework": "junit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 600,
+  "timeout": 420,
+  "description": "Asks the model to write JUnit boundary tests for a Java grade classifier; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "java",
+    "testing",
+    "junit"
+  ],
+  "prompts": [
+    "Grades.classify in src/main/java/com/optarena/Grades.java (already correct, do not modify it) maps a score to a letter grade: below 60 -> \"F\"; 60..69 -> \"D\"; 70..79 -> \"C\"; 80..89 -> \"B\"; 90 and above -> \"A\". Write JUnit 5 tests at exactly src/test/java/com/optarena/GradesTest.java (package com.optarena, class GradesTest) with at least 3 @Test methods that pin the EXACT letter for values exercising every boundary - include just-below and at each threshold (e.g. 59 and 60, 79 and 80, 89 and 90) plus a clear F and a clear A. Use assertEquals from org.junit.jupiter.api.Assertions."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>plain-java-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+    "src/main/java/com/optarena/Grades.java": "package com.optarena;\n\npublic class Grades {\n    // Map a score to a letter: <60 F, <70 D, <80 C, <90 B, else A.\n    public String classify(int score) {\n        if (score < 60) {\n            return \"F\";\n        }\n        if (score < 70) {\n            return \"D\";\n        }\n        if (score < 80) {\n            return \"C\";\n        }\n        if (score < 90) {\n            return \"B\";\n        }\n        return \"A\";\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/GradesTest.java",
+      "content_patterns": [
+        "@test",
+        "classify",
+        "assertequals"
+      ],
+      "regex_patterns": [
+        "@Test[\\s\\S]*@Test[\\s\\S]*@Test"
+      ],
+      "min_lines": 15
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"src/main/java/com/optarena/Grades.java\")\nTEST_CMD = \"mvn -o -q test -Dtest=GradesTest\"\nMUTANTS = [\n    [[\"if (score < 60) {\", \"if (score < 50) {\"]],\n    [[\"if (score < 80) {\", \"if (score < 70) {\"]],\n    [[\"if (score < 90) {\", \"if (score < 100) {\"]],\n]\n\n\ndef run_tests():\n    shutil.rmtree(\"target/classes\", ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f\"protected implementation file {IMPL} was modified - the task said not to change it \"\n            f\"(anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately broken \"\n            f\"implementation, so they do not actually verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(\"PASS (tests pass on correct impl and kill all {n} mutants)\".format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "src/test/java/com/optarena/GradesTest.java": "package com.optarena;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nimport org.junit.jupiter.api.Test;\n\nclass GradesTest {\n\n    private final Grades grades = new Grades();\n\n    @Test\n    void lowScoresAreF() {\n        assertEquals(\"F\", grades.classify(0));\n        assertEquals(\"F\", grades.classify(59));\n    }\n\n    @Test\n    void boundaries() {\n        assertEquals(\"D\", grades.classify(60));\n        assertEquals(\"C\", grades.classify(75));\n        assertEquals(\"C\", grades.classify(79));\n        assertEquals(\"B\", grades.classify(89));\n    }\n\n    @Test\n    void highScoresAreA() {\n        assertEquals(\"A\", grades.classify(90));\n        assertEquals(\"A\", grades.classify(100));\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-membership-only",
+      "files": {
+        "src/test/java/com/optarena/GradesTest.java": "package com.optarena;\n\nimport static org.junit.jupiter.api.Assertions.assertTrue;\n\nimport java.util.Set;\n\nimport org.junit.jupiter.api.Test;\n\nclass GradesTest {\n\n    @Test\n    void alwaysReturnsALetter() {\n        Grades grades = new Grades();\n        Set<String> letters = Set.of(\"A\", \"B\", \"C\", \"D\", \"F\");\n        for (int score = 0; score <= 100; score += 5) {\n            assertTrue(letters.contains(grades.classify(score)));\n        }\n    }\n}\n"
+      }
+    }
+  ]
+}

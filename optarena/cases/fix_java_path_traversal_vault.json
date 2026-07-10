@@ -1,0 +1,49 @@
+{
+  "name": "fix_java_path_traversal_vault",
+  "language": "java",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Fixes a Java file-vault reader that resolves caller input without containment, allowing path traversal",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "java",
+    "security",
+    "path-traversal",
+    "multi-file"
+  ],
+  "prompts": [
+    "FileVault.read in src/main/java/com/optarena/FileVault.java resolves a caller-supplied name against baseDir and reads it with no containment check, so \"../secret.txt\" or an absolute path escapes the vault and reads arbitrary files (path traversal). NoteService calls read via the vault. Fix read so it only reads files that actually live inside baseDir: normalize the resolved path and verify it stays within the (normalized, absolute) base directory, throwing instead of reading when it would escape - this must block BOTH \"../\" traversal and absolute-path inputs. A legitimate name like \"allowed.txt\" must still read normally. Keep the method name and signature (NoteService calls vault.read(name)); you should not need to modify NoteService.java."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>plain-java-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+    "src/main/java/com/optarena/FileVault.java": "package com.optarena;\n\nimport java.io.IOException;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic class FileVault {\n    private final Path baseDir;\n\n    public FileVault(Path baseDir) {\n        this.baseDir = baseDir;\n    }\n\n    // Read a file by name from inside the vault directory.\n    // BUG: it resolves the caller-supplied name against baseDir with no\n    // containment check, so \"../secret.txt\" (or an absolute path) escapes the\n    // vault and reads arbitrary files - a path-traversal vulnerability.\n    public String read(String name) throws IOException {\n        Path target = baseDir.resolve(name);\n        return Files.readString(target);\n    }\n}\n",
+    "src/main/java/com/optarena/NoteService.java": "package com.optarena;\n\nimport java.io.IOException;\nimport java.nio.file.Path;\n\n// Thin consumer of FileVault: reads a note by name from a vault directory.\npublic class NoteService {\n    private final FileVault vault;\n\n    public NoteService(Path baseDir) {\n        this.vault = new FileVault(baseDir);\n    }\n\n    public String readNote(String name) throws IOException {\n        return vault.read(name);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/FileVault.java",
+      "content_patterns": [
+        "class filevault"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/FileVaultHiddenTest.java": "package com.optarena;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertThrows;\n\nimport java.nio.file.Files;\nimport java.nio.file.Path;\n\nimport org.junit.jupiter.api.Test;\nimport org.junit.jupiter.api.io.TempDir;\n\nclass FileVaultHiddenTest {\n\n    @Test\n    void readsFileInsideVault(@TempDir Path tmp) throws Exception {\n        Path vaultDir = Files.createDirectory(tmp.resolve(\"vault\"));\n        Files.writeString(vaultDir.resolve(\"allowed.txt\"), \"hello\");\n        NoteService service = new NoteService(vaultDir);\n        assertEquals(\"hello\", service.readNote(\"allowed.txt\"));\n    }\n\n    @Test\n    void blocksRelativeTraversal(@TempDir Path tmp) throws Exception {\n        Path vaultDir = Files.createDirectory(tmp.resolve(\"vault\"));\n        Files.writeString(tmp.resolve(\"secret.txt\"), \"TOPSECRET\");\n        NoteService service = new NoteService(vaultDir);\n        assertThrows(Exception.class, () -> service.readNote(\"../secret.txt\"));\n    }\n\n    @Test\n    void blocksAbsolutePathEscape(@TempDir Path tmp) throws Exception {\n        Path vaultDir = Files.createDirectory(tmp.resolve(\"vault\"));\n        Path secret = tmp.resolve(\"secret.txt\");\n        Files.writeString(secret, \"TOPSECRET\");\n        NoteService service = new NoteService(vaultDir);\n        assertThrows(Exception.class, () -> service.readNote(secret.toAbsolutePath().toString()));\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=FileVaultHiddenTest",
+  "reference_solution": {
+    "src/main/java/com/optarena/FileVault.java": "package com.optarena;\n\nimport java.io.IOException;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic class FileVault {\n    private final Path baseDir;\n\n    public FileVault(Path baseDir) {\n        this.baseDir = baseDir;\n    }\n\n    // Read a file by name from inside the vault directory, refusing any name\n    // that would resolve outside baseDir (../ escapes and absolute paths).\n    public String read(String name) throws IOException {\n        Path base = baseDir.toAbsolutePath().normalize();\n        Path target = base.resolve(name).normalize();\n        if (!target.startsWith(base)) {\n            throw new SecurityException(\"path escapes vault: \" + name);\n        }\n        return Files.readString(target);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "naive-dotdot-check",
+      "files": {
+        "src/main/java/com/optarena/FileVault.java": "package com.optarena;\n\nimport java.io.IOException;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic class FileVault {\n    private final Path baseDir;\n\n    public FileVault(Path baseDir) {\n        this.baseDir = baseDir;\n    }\n\n    public String read(String name) throws IOException {\n        if (name.contains(\"..\")) {\n            throw new SecurityException(\"path escapes vault: \" + name);\n        }\n        Path target = baseDir.resolve(name);\n        return Files.readString(target);\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "name": "create_java_generic_lru_cache",
+  "language": "java",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Creates a generic Java LRU cache (capacity eviction by recency) used by an existing MemoService (cross-file)",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "generics",
+    "collections",
+    "multi-file"
+  ],
+  "prompts": [
+    "src/main/java/com/optarena/MemoService.java already exists and uses a generic cache via new LruCache<>(2), then cache.get(key) (returning the value or null if absent), cache.put(key, value), and cache.size(). Create src/main/java/com/optarena/LruCache.java defining a public generic class LruCache<K, V> with a constructor LruCache(int capacity), V get(K key), void put(K key, V value), and int size(), implementing a least-recently-used cache: get returns the stored value (or null) and counts as a use; put inserts/updates; and when adding a new key would exceed capacity the LEAST-recently-used entry (least-recently accessed via get or put) is evicted so size never exceeds capacity. A get must refresh recency. (java.util.LinkedHashMap in access-order with removeEldestEntry is a clean approach.) Do not modify MemoService.java."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>plain-java-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+    "src/main/java/com/optarena/MemoService.java": "package com.optarena;\n\n// Memoizes squares behind an LRU cache with capacity 2.\npublic class MemoService {\n    private final LruCache<Integer, Integer> cache = new LruCache<>(2);\n\n    public int square(int n) {\n        Integer cached = cache.get(n);\n        if (cached != null) {\n            return cached;\n        }\n        int value = n * n;\n        cache.put(n, value);\n        return value;\n    }\n\n    public int cacheSize() {\n        return cache.size();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/LruCache.java",
+      "content_patterns": [
+        "class lrucache",
+        "get",
+        "put",
+        "size"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/LruCacheHiddenTest.java": "package com.optarena;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertNull;\n\nimport org.junit.jupiter.api.Test;\n\nclass LruCacheHiddenTest {\n\n    @Test\n    void evictsLeastRecentlyUsed() {\n        LruCache<String, Integer> cache = new LruCache<>(2);\n        cache.put(\"a\", 1);\n        cache.put(\"b\", 2);\n        // touch \"a\" so \"b\" becomes least-recently-used\n        assertEquals(1, cache.get(\"a\"));\n        cache.put(\"c\", 3); // should evict \"b\", not \"a\"\n        assertNull(cache.get(\"b\"), \"b should have been evicted\");\n        assertEquals(1, cache.get(\"a\"), \"a should still be present\");\n        assertEquals(3, cache.get(\"c\"), \"c should be present\");\n        assertEquals(2, cache.size());\n    }\n\n    @Test\n    void memoServiceRespectsCapacity() {\n        MemoService memo = new MemoService();\n        assertEquals(9, memo.square(3));\n        assertEquals(16, memo.square(4));\n        assertEquals(2, memo.cacheSize());\n        memo.square(5); // third distinct key must evict, not grow\n        assertEquals(2, memo.cacheSize());\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=LruCacheHiddenTest",
+  "reference_solution": {
+    "src/main/java/com/optarena/LruCache.java": "package com.optarena;\n\nimport java.util.LinkedHashMap;\nimport java.util.Map;\n\n// Fixed-capacity least-recently-used cache. Backed by a LinkedHashMap in\n// access order, evicting the least-recently-used entry once size exceeds\n// capacity.\npublic class LruCache<K, V> {\n    private final int capacity;\n    private final LinkedHashMap<K, V> map;\n\n    public LruCache(int capacity) {\n        this.capacity = Math.max(1, capacity);\n        this.map = new LinkedHashMap<>(16, 0.75f, true) {\n            @Override\n            protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {\n                return size() > LruCache.this.capacity;\n            }\n        };\n    }\n\n    public V get(K key) {\n        return map.get(key);\n    }\n\n    public void put(K key, V value) {\n        map.put(key, value);\n    }\n\n    public int size() {\n        return map.size();\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-eviction",
+      "files": {
+        "src/main/java/com/optarena/LruCache.java": "package com.optarena;\n\nimport java.util.HashMap;\nimport java.util.Map;\n\npublic class LruCache<K, V> {\n    private final Map<K, V> map = new HashMap<>();\n\n    public LruCache(int capacity) {\n    }\n\n    public V get(K key) {\n        return map.get(key);\n    }\n\n    public void put(K key, V value) {\n        map.put(key, value);\n    }\n\n    public int size() {\n        return map.size();\n    }\n}\n"
+      }
+    },
+    {
+      "name": "insertion-order-ignores-recency",
+      "files": {
+        "src/main/java/com/optarena/LruCache.java": "package com.optarena;\n\nimport java.util.LinkedHashMap;\nimport java.util.Map;\n\npublic class LruCache<K, V> {\n    private final int capacity;\n    private final LinkedHashMap<K, V> map;\n\n    public LruCache(int capacity) {\n        this.capacity = Math.max(1, capacity);\n        this.map = new LinkedHashMap<>(16, 0.75f, false) {\n            @Override\n            protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {\n                return size() > LruCache.this.capacity;\n            }\n        };\n    }\n\n    public V get(K key) {\n        return map.get(key);\n    }\n\n    public void put(K key, V value) {\n        map.put(key, value);\n    }\n\n    public int size() {\n        return map.size();\n    }\n}\n"
+      }
+    }
+  ]
+}
