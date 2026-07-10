@@ -1,0 +1,51 @@
+{
+  "name": "refactor_go_table_driven_tiers",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Refactors a repetitive threshold switch into a table-driven lookup without changing behavior",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "go",
+    "refactoring",
+    "table-driven",
+    "idiom"
+  ],
+  "prompts": [
+    "TierName(points int) string in tiers.go returns a loyalty tier using a switch: points >= 1000 -> \"platinum\", >= 500 -> \"gold\", >= 100 -> \"silver\", otherwise \"bronze\". Refactor it to be table-driven: define a slice of {minimum points, tier name} entries ordered from highest to lowest and loop over it, returning the first tier whose minimum the points meet. Do not change observable behavior: every points value maps to the same tier as before (the boundaries are inclusive: exactly 500 is gold). Keep the TierName(points int) string signature. The file is package main."
+  ],
+  "setup_files": {
+    "go.mod": "module tiers\n\ngo 1.21\n",
+    "tiers.go": "package main\n\n// TierName returns the loyalty tier for a points total.\nfunc TierName(points int) string {\n\tswitch {\n\tcase points >= 1000:\n\t\treturn \"platinum\"\n\tcase points >= 500:\n\t\treturn \"gold\"\n\tcase points >= 100:\n\t\treturn \"silver\"\n\tdefault:\n\t\treturn \"bronze\"\n\t}\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "tiers.go",
+      "content_patterns": [
+        "func TierName"
+      ],
+      "not_content_patterns": [
+        "case points >="
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tiers_test.go": "package main\n\nimport \"testing\"\n\nfunc TestTierName(t *testing.T) {\n\tcases := map[int]string{\n\t\t0: \"bronze\", 99: \"bronze\",\n\t\t100: \"silver\", 499: \"silver\",\n\t\t500: \"gold\", 999: \"gold\",\n\t\t1000: \"platinum\", 5000: \"platinum\",\n\t}\n\tfor points, want := range cases {\n\t\tif got := TierName(points); got != want {\n\t\t\tt.Errorf(\"TierName(%d) = %q, want %q\", points, got, want)\n\t\t}\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "tiers.go": "package main\n\nvar tierTable = []struct {\n\tmin  int\n\tname string\n}{\n\t{1000, \"platinum\"},\n\t{500, \"gold\"},\n\t{100, \"silver\"},\n\t{0, \"bronze\"},\n}\n\n// TierName returns the loyalty tier for a points total.\nfunc TierName(points int) string {\n\tfor _, tier := range tierTable {\n\t\tif points >= tier.min {\n\t\t\treturn tier.name\n\t\t}\n\t}\n\treturn \"bronze\"\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "boundary-drift",
+      "files": {
+        "tiers.go": "package main\n\nvar tierTable = []struct {\n\tmin  int\n\tname string\n}{\n\t{1000, \"platinum\"},\n\t{600, \"gold\"},\n\t{100, \"silver\"},\n\t{0, \"bronze\"},\n}\n\n// DRIFT: the gold threshold moved from 500 to 600.\nfunc TierName(points int) string {\n\tfor _, tier := range tierTable {\n\t\tif points >= tier.min {\n\t\t\treturn tier.name\n\t\t}\n\t}\n\treturn \"bronze\"\n}\n"
+      }
+    }
+  ]
+}

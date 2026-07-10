@@ -1,0 +1,51 @@
+{
+  "name": "refactor_python_class_to_dataclass",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Refactors a boilerplate class (init/eq/repr) into a dataclass preserving fields, equality and repr",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "python",
+    "refactoring",
+    "dataclass",
+    "idiom"
+  ],
+  "prompts": [
+    "The Point class in point.py hand-writes __init__, __eq__ and __repr__. Refactor it to use the @dataclass decorator (from dataclasses) instead of the boilerplate methods. Preserve behavior exactly: the fields are x, y, and label (label defaults to \"origin\"); two Points are equal iff all three fields are equal; and repr(Point(1, 2, \"x\")) must remain \"Point(x=1, y=2, label='x')\". Keep the class name Point."
+  ],
+  "setup_files": {
+    "point.py": "class Point:\n    def __init__(self, x, y, label=\"origin\"):\n        self.x = x\n        self.y = y\n        self.label = label\n\n    def __eq__(self, other):\n        return (\n            isinstance(other, Point)\n            and self.x == other.x\n            and self.y == other.y\n            and self.label == other.label\n        )\n\n    def __repr__(self):\n        return f\"Point(x={self.x}, y={self.y}, label={self.label!r})\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "point.py",
+      "content_patterns": [
+        "dataclass"
+      ],
+      "not_content_patterns": [
+        "def __init__",
+        "def __eq__"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_point.py": "from point import Point\n\n\ndef test_fields_and_default():\n    p = Point(1, 2)\n    assert (p.x, p.y, p.label) == (1, 2, \"origin\")\n\n\ndef test_equality_uses_all_fields():\n    assert Point(1, 2, \"a\") == Point(1, 2, \"a\")\n    assert Point(1, 2, \"a\") != Point(1, 2, \"b\")\n    assert Point(1, 2) != Point(1, 3)\n\n\ndef test_repr_format():\n    assert repr(Point(1, 2, \"x\")) == \"Point(x=1, y=2, label='x')\"\n"
+  },
+  "check_command": "python3 -m pytest -q test_point.py",
+  "reference_solution": {
+    "point.py": "from dataclasses import dataclass\n\n\n@dataclass\nclass Point:\n    x: int\n    y: int\n    label: str = \"origin\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "label-excluded-from-equality",
+      "files": {
+        "point.py": "from dataclasses import dataclass, field\n\n\n@dataclass\nclass Point:\n    x: int\n    y: int\n    # DRIFT: label no longer participates in equality.\n    label: str = field(default=\"origin\", compare=False)\n"
+      }
+    }
+  ]
+}

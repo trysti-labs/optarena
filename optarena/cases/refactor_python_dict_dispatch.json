@@ -1,0 +1,50 @@
+{
+  "name": "refactor_python_dict_dispatch",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Refactors a long if/elif command chain into a dict dispatch table without changing behavior",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "python",
+    "refactoring",
+    "dispatch",
+    "idiom"
+  ],
+  "prompts": [
+    "handle(command, value) in router.py applies a named command to value via a long if/elif chain: 'inc' adds 1, 'dec' subtracts 1, 'double' multiplies by 2, 'square' raises to the power 2, and any unknown command returns value unchanged. Refactor it to use a dictionary dispatch table (map each command name to a function/lambda) instead of the if/elif chain, so adding commands is data-driven. Do not change observable behavior: the four commands compute the same results and an unknown command still returns value unchanged. Keep the handle(command, value) signature."
+  ],
+  "setup_files": {
+    "router.py": "def handle(command, value):\n    \"\"\"Apply a named command to value; unknown commands return it unchanged.\"\"\"\n    if command == \"inc\":\n        return value + 1\n    elif command == \"dec\":\n        return value - 1\n    elif command == \"double\":\n        return value * 2\n    elif command == \"square\":\n        return value ** 2\n    else:\n        return value\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "router.py",
+      "content_patterns": [
+        "def handle"
+      ],
+      "not_content_patterns": [
+        "elif command =="
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_router.py": "from router import handle\n\n\ndef test_known_commands():\n    assert handle(\"inc\", 5) == 6\n    assert handle(\"dec\", 5) == 4\n    assert handle(\"double\", 5) == 10\n    assert handle(\"square\", 5) == 25\n\n\ndef test_unknown_returns_unchanged():\n    assert handle(\"nope\", 5) == 5\n    assert handle(\"\", 0) == 0\n"
+  },
+  "check_command": "python3 -m pytest -q test_router.py",
+  "reference_solution": {
+    "router.py": "_COMMANDS = {\n    \"inc\": lambda v: v + 1,\n    \"dec\": lambda v: v - 1,\n    \"double\": lambda v: v * 2,\n    \"square\": lambda v: v ** 2,\n}\n\n\ndef handle(command, value):\n    \"\"\"Apply a named command to value; unknown commands return it unchanged.\"\"\"\n    op = _COMMANDS.get(command)\n    return op(value) if op is not None else value\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unknown-returns-none",
+      "files": {
+        "router.py": "_COMMANDS = {\n    \"inc\": lambda v: v + 1,\n    \"dec\": lambda v: v - 1,\n    \"double\": lambda v: v * 2,\n    \"square\": lambda v: v ** 2,\n}\n\n\ndef handle(command, value):\n    # DRIFT: an unknown command now returns None instead of value unchanged.\n    op = _COMMANDS.get(command, lambda v: None)\n    return op(value)\n"
+      }
+    }
+  ]
+}
