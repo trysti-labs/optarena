@@ -1,0 +1,47 @@
+{
+  "name": "fix_ruby_shallow_dup_shared_nested",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Fixes a per-request settings copy that uses a shallow dup, so mutating a nested array leaks into the shared defaults",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "ruby",
+    "bug_fix",
+    "shallow-copy",
+    "aliasing"
+  ],
+  "prompts": [
+    "Settings#for_request in lib/settings.rb is meant to hand each caller an independent copy of the default settings hash so a caller can mutate its copy (for example, appending to the nested :tags array) without affecting the shared defaults or any other caller's copy. It uses @defaults.dup, which is a shallow copy: the returned hash is new but its nested :tags array is the SAME object as the defaults', so `for_request[:tags] << 'x'` mutates the shared defaults and leaks into later calls. Fix for_request to return a deep-enough copy that mutating nested collections in the returned hash never affects @defaults or subsequent calls. Keep the class name and the initialize(defaults) / for_request signatures, and don't mutate @defaults."
+  ],
+  "setup_files": {
+    "lib/settings.rb": "module App\n  class Settings\n    def initialize(defaults)\n      @defaults = defaults\n    end\n\n    # Return a per-request copy callers can mutate freely.\n    # BUG: dup is shallow - nested collections (e.g. :tags) are shared with\n    # @defaults, so mutating them in the returned hash corrupts the defaults.\n    def for_request\n      @defaults.dup\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/settings.rb",
+      "content_patterns": [
+        "def for_request"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/settings_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/settings\"\n\nclass SettingsTest < Minitest::Test\n  def test_nested_mutation_does_not_leak_to_defaults\n    settings = App::Settings.new(tags: [\"base\"], level: 1)\n    a = settings.for_request\n    a[:tags] << \"extra\"\n\n    b = settings.for_request\n    assert_equal [\"base\"], b[:tags],\n                 \"a later copy saw a mutation from an earlier copy\"\n    assert_equal [\"base\", \"extra\"], a[:tags],\n                 \"the caller's own mutation should still be visible on its copy\"\n  end\n\n  def test_returns_equal_values\n    settings = App::Settings.new(tags: [\"base\"], level: 1)\n    assert_equal({ tags: [\"base\"], level: 1 }, settings.for_request)\n  end\n\n  def test_copies_are_independent\n    settings = App::Settings.new(tags: [], items: [\"a\"])\n    x = settings.for_request\n    x[:items] << \"b\"\n    y = settings.for_request\n    assert_equal [\"a\"], y[:items]\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/settings_test.rb",
+  "reference_solution": {
+    "lib/settings.rb": "module App\n  class Settings\n    def initialize(defaults)\n      @defaults = defaults\n    end\n\n    # Deep copy via Marshal so nested collections in the returned hash are\n    # distinct objects and mutating them never touches @defaults.\n    def for_request\n      Marshal.load(Marshal.dump(@defaults))\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-shallow-clone",
+      "files": {
+        "lib/settings.rb": "module App\n  class Settings\n    def initialize(defaults)\n      @defaults = defaults\n    end\n\n    # STILL BROKEN: clone, like dup, is a shallow copy - nested arrays remain\n    # shared with @defaults.\n    def for_request\n      @defaults.clone\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}
