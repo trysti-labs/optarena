@@ -18,4 +18,14 @@ COPY App.java src/main/java/com/optarena/App.java
 COPY AppTest.java src/test/java/com/optarena/AppTest.java
 RUN mvn -B package && rm -rf /warmup
 
+# Kotlin warmup: caches kotlin-maven-plugin, kotlin-stdlib/reflect,
+# jackson-module-kotlin and the allopen compiler plugin (versions managed by
+# the same spring-boot parent) so Kotlin-track cases build/test fully offline.
+WORKDIR /warmup-kotlin
+COPY kotlin-pom.xml pom.xml
+RUN mkdir -p src/main/kotlin/com/optarena src/test/kotlin/com/optarena
+COPY KotlinApp.kt src/main/kotlin/com/optarena/KotlinApp.kt
+COPY KotlinAppTest.kt src/test/kotlin/com/optarena/KotlinAppTest.kt
+RUN mvn -B package && rm -rf /warmup-kotlin
+
 WORKDIR /workspace

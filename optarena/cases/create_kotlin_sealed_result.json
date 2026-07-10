@@ -1,0 +1,47 @@
+{
+  "name": "create_kotlin_sealed_result",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Models a parse result as a sealed interface with exhaustive handling",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "kotlin",
+    "sealed-interface",
+    "exhaustiveness"
+  ],
+  "prompts": [
+    "Create src/main/kotlin/com/optarena/app/Duration.kt (package com.optarena.app) that parses human duration strings like \"90s\", \"15m\", \"2h\" into seconds, modeling the outcome as a sealed hierarchy: a sealed interface ParseResult with data class Ok(val seconds: Long) and data class Invalid(val reason: String) implementing it. Provide object DurationParser with fun parse(input: String): ParseResult - trims the input; accepts a positive integer followed by exactly one unit character s/m/h (seconds/minutes/hours); anything else (empty, missing unit, unknown unit, non-numeric, zero or negative number) returns Invalid with a non-empty reason. Also provide fun describe(result: ParseResult): String using an exhaustive when - Ok(n) becomes \"<n> seconds\" and Invalid(reason) becomes \"invalid: <reason>\"."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Duration.kt",
+      "content_patterns": [
+        "sealed interface",
+        "parseresult"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/DurationHiddenTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\n\nclass DurationHiddenTest {\n\n    private fun okSeconds(input: String): Long {\n        val result = DurationParser.parse(input)\n        assertTrue(result is ParseResult.Ok, \"expected Ok for '$input', got $result\")\n        return (result as ParseResult.Ok).seconds\n    }\n\n    @Test\n    fun parsesUnits() {\n        assertEquals(90, okSeconds(\"90s\"))\n        assertEquals(15 * 60, okSeconds(\"15m\"))\n        assertEquals(2 * 3600, okSeconds(\"2h\"))\n        assertEquals(60, okSeconds(\"  1m  \"))\n    }\n\n    @Test\n    fun rejectsBadInput() {\n        for (bad in listOf(\"\", \"12\", \"5x\", \"m\", \"-3m\", \"0s\", \"1.5h\", \"h1\")) {\n            val result = DurationParser.parse(bad)\n            assertTrue(result is ParseResult.Invalid, \"expected Invalid for '$bad', got $result\")\n            assertTrue((result as ParseResult.Invalid).reason.isNotBlank())\n        }\n    }\n\n    @Test\n    fun describeIsExhaustive() {\n        assertEquals(\"90 seconds\", DurationParser.describe(ParseResult.Ok(90)))\n        val desc = DurationParser.describe(ParseResult.Invalid(\"no unit\"))\n        assertTrue(desc.startsWith(\"invalid:\"), desc)\n        assertTrue(desc.contains(\"no unit\"), desc)\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=DurationHiddenTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Duration.kt": "package com.optarena.app\n\nsealed interface ParseResult {\n    data class Ok(val seconds: Long) : ParseResult\n    data class Invalid(val reason: String) : ParseResult\n}\n\nobject DurationParser {\n\n    fun parse(input: String): ParseResult {\n        val trimmed = input.trim()\n        if (trimmed.length < 2) {\n            return ParseResult.Invalid(\"too short: '$trimmed'\")\n        }\n        val unit = trimmed.last()\n        val number = trimmed.dropLast(1).toLongOrNull()\n            ?: return ParseResult.Invalid(\"not a number: '${trimmed.dropLast(1)}'\")\n        if (number <= 0) {\n            return ParseResult.Invalid(\"must be positive: $number\")\n        }\n        val multiplier = when (unit) {\n            's' -> 1L\n            'm' -> 60L\n            'h' -> 3600L\n            else -> return ParseResult.Invalid(\"unknown unit: '$unit'\")\n        }\n        return ParseResult.Ok(number * multiplier)\n    }\n\n    fun describe(result: ParseResult): String = when (result) {\n        is ParseResult.Ok -> \"${result.seconds} seconds\"\n        is ParseResult.Invalid -> \"invalid: ${result.reason}\"\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "accepts-zero-and-negative",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Duration.kt": "package com.optarena.app\n\nsealed interface ParseResult {\n    data class Ok(val seconds: Long) : ParseResult\n    data class Invalid(val reason: String) : ParseResult\n}\n\nobject DurationParser {\n\n    fun parse(input: String): ParseResult {\n        val trimmed = input.trim()\n        if (trimmed.length < 2) {\n            return ParseResult.Invalid(\"too short: '$trimmed'\")\n        }\n        val unit = trimmed.last()\n        val number = trimmed.dropLast(1).toLongOrNull()\n            ?: return ParseResult.Invalid(\"not a number: '${trimmed.dropLast(1)}'\")\n        val multiplier = when (unit) {\n            's' -> 1L\n            'm' -> 60L\n            'h' -> 3600L\n            else -> return ParseResult.Invalid(\"unknown unit: '$unit'\")\n        }\n        return ParseResult.Ok(number * multiplier)\n    }\n\n    fun describe(result: ParseResult): String = when (result) {\n        is ParseResult.Ok -> \"${result.seconds} seconds\"\n        is ParseResult.Invalid -> \"invalid: ${result.reason}\"\n    }\n}\n"
+      }
+    }
+  ]
+}

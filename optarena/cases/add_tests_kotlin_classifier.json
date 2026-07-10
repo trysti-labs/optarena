@@ -1,0 +1,53 @@
+{
+  "name": "add_tests_kotlin_classifier",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 600,
+  "timeout": 360,
+  "description": "Asks the model to write JUnit tests for a Kotlin classifier; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "kotlin",
+    "testing",
+    "junit"
+  ],
+  "check_command": "python3 mutation_check.py",
+  "prompts": [
+    "PasswordStrength.classify in src/main/kotlin/com/optarena/app/PasswordStrength.kt (already correct, do not modify it) implements: shorter than 8 characters -> \"weak\"; at least 8 but either shorter than 12 or containing no digit -> \"medium\"; otherwise (12+ characters AND at least one digit) -> \"strong\". Write JUnit 5 tests for it at exactly src/test/kotlin/com/optarena/app/PasswordStrengthTest.kt (package com.optarena.app, class PasswordStrengthTest), with at least 3 separate @Test functions covering: a short password classified weak; a medium-length password classified medium; a 12+-character password WITHOUT a digit classified medium; and a 12+-character password with a digit classified strong. Use assertEquals from org.junit.jupiter.api.Assertions."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/PasswordStrength.kt": "package com.optarena.app\n\nobject PasswordStrength {\n\n    // Rules: shorter than 8 characters -> \"weak\"; at least 8 but either\n    // shorter than 12 OR containing no digit -> \"medium\"; otherwise\n    // (12+ chars AND at least one digit) -> \"strong\".\n    fun classify(password: String): String {\n        val len = password.length\n        val hasDigit = password.any { it.isDigit() }\n        return when {\n            len < 8 -> \"weak\"\n            len < 12 || !hasDigit -> \"medium\"\n            else -> \"strong\"\n        }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/PasswordStrengthTest.kt",
+      "content_patterns": [
+        "@test",
+        "passwordstrength",
+        "assertequals"
+      ],
+      "regex_patterns": [
+        "@Test[\\s\\S]*@Test[\\s\\S]*@Test"
+      ],
+      "min_lines": 15
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"src/main/kotlin/com/optarena/app/PasswordStrength.kt\")\nTEST_CMD = \"mvn -o -q test -Dtest=PasswordStrengthTest\"\nMUTANTS = [[[\"            len < 8 -> \\\"weak\\\"\", \"            len < 8 -> \\\"medium\\\"\"]], [[\"            len < 12 || !hasDigit -> \\\"medium\\\"\", \"            len < 12 || !hasDigit -> \\\"strong\\\"\"]]]\n\ndef run_tests():\n    shutil.rmtree(\"target/classes\", ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f\"protected implementation file {IMPL} was modified - the task said not to change it \"\n            f\"(anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately broken \"\n            f\"implementation, so they do not actually verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(\"PASS (tests pass on correct impl and kill all {n} mutants)\".format(n=len(MUTANTS)))\n"
+  },
+  "reference_solution": {
+    "src/test/kotlin/com/optarena/app/PasswordStrengthTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass PasswordStrengthTest {\n\n    @Test\n    fun shortIsWeak() {\n        assertEquals(\"weak\", PasswordStrength.classify(\"abc\"))\n        assertEquals(\"weak\", PasswordStrength.classify(\"1234567\"))\n    }\n\n    @Test\n    fun mediumLengthIsMedium() {\n        assertEquals(\"medium\", PasswordStrength.classify(\"abcdefgh\"))\n    }\n\n    @Test\n    fun longWithoutDigitIsMedium() {\n        assertEquals(\"medium\", PasswordStrength.classify(\"abcdefghijkl\"))\n    }\n\n    @Test\n    fun longWithDigitIsStrong() {\n        assertEquals(\"strong\", PasswordStrength.classify(\"abcdefghijk1\"))\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "src/test/kotlin/com/optarena/app/PasswordStrengthTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\n\nclass PasswordStrengthTest {\n\n    // runs the classifier on several inputs but never pins down WHICH tier\n    // each one belongs to, so a broken classifier still passes\n\n    @Test\n    fun returnsATier() {\n        for (pw in listOf(\"abc\", \"abcdefgh\", \"abcdefghijk1\")) {\n            assertTrue(PasswordStrength.classify(pw) in listOf(\"weak\", \"medium\", \"strong\"))\n        }\n    }\n\n    @Test\n    fun deterministic() {\n        assertEquals(PasswordStrength.classify(\"abc\"), PasswordStrength.classify(\"abc\"))\n    }\n\n    @Test\n    fun nonEmpty() {\n        assertTrue(PasswordStrength.classify(\"whatever\").isNotBlank())\n    }\n}\n"
+      }
+    }
+  ]
+}
