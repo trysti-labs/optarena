@@ -1,0 +1,60 @@
+{
+  "name": "create_express_reviews_resource",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Adds a reviews resource across a new repository, router, and app mount",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "express",
+    "multi-file",
+    "rest"
+  ],
+  "prompts": [
+    "This Express app (src/app.js mounts src/routes/books.js, backed by src/repository/bookRepository.js) serves a books resource. Add a NEW reviews resource spanning every layer: (1) create src/repository/reviewRepository.js exporting a ReviewRepository class with add(bookId, rating, text)->review and listForBook(bookId)->array, using its own auto-incrementing integer ids from 1; each review is {id, bookId, rating, text}; (2) create src/routes/reviews.js: an express.Router with POST / (body {bookId, rating, text}, responds 201 with the created review) and GET /?bookId=N (responds 200 with the reviews for that book, in insertion order); (3) mount it in src/app.js at the path /reviews. Do not break the books routes."
+  ],
+  "setup_files": {
+    "src/app.js": "const express = require('express');\nconst booksRouter = require('./routes/books');\n\nconst app = express();\napp.use(express.json());\napp.use('/books', booksRouter);\n\nmodule.exports = app;\n",
+    "src/routes/books.js": "const express = require('express');\nconst BookRepository = require('../repository/bookRepository');\n\nconst router = express.Router();\nconst repo = new BookRepository();\n\nrouter.post('/', (req, res) => {\n  const { title, author } = req.body;\n  const book = repo.add(title, author);\n  res.status(201).json(book);\n});\n\nrouter.get('/:id', (req, res) => {\n  const book = repo.get(Number(req.params.id));\n  if (!book) return res.status(404).json({ error: 'not found' });\n  res.json(book);\n});\n\nmodule.exports = router;\n",
+    "src/repository/bookRepository.js": "class BookRepository {\n  constructor() {\n    this._books = new Map();\n    this._nextId = 1;\n  }\n\n  add(title, author) {\n    const id = this._nextId++;\n    const book = { id, title, author };\n    this._books.set(id, book);\n    return book;\n  }\n\n  get(id) {\n    return this._books.get(id) || null;\n  }\n\n  list() {\n    return [...this._books.values()];\n  }\n}\n\nmodule.exports = BookRepository;\n",
+    "server.js": "const app = require('./src/app');\napp.listen(3000);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/routes/reviews.js",
+      "content_patterns": [
+        "router",
+        "reviewrepository"
+      ]
+    },
+    {
+      "path_pattern": "src/app.js",
+      "content_patterns": [
+        "/reviews"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_reviews.js": "const http = require('http');\nfunction request(app, method, path, body) {\n  return new Promise((resolve, reject) => {\n    const server = app.listen(0, () => {\n      const port = server.address().port;\n      const data = body === undefined ? null : JSON.stringify(body);\n      const headers = data\n        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }\n        : {};\n      const req = http.request(\n        { host: '127.0.0.1', port, path, method, headers, timeout: 4000 },\n        (res) => {\n          let buf = '';\n          res.on('data', (c) => (buf += c));\n          res.on('end', () => {\n            server.close();\n            let json = null;\n            try { json = JSON.parse(buf); } catch (e) { /* non-JSON */ }\n            resolve({ status: res.statusCode, body: json, raw: buf });\n          });\n        }\n      );\n      req.on('timeout', () => { req.destroy(new Error('request timed out (handler never responded)')); });\n      req.on('error', (e) => { server.close(); reject(e); });\n      if (data) req.write(data);\n      req.end();\n    });\n  });\n}\n\nconst assert = require('assert');\nconst app = require('./src/app');\n\n(async () => {\n  let r = await request(app, 'POST', '/reviews', { bookId: 7, rating: 5, text: 'great' });\n  assert(r.status === 201, `POST /reviews: ${r.status} ${r.raw}`);\n  assert.deepStrictEqual(r.body, { id: 1, bookId: 7, rating: 5, text: 'great' });\n\n  r = await request(app, 'POST', '/reviews', { bookId: 7, rating: 3, text: 'ok' });\n  assert.strictEqual(r.body.id, 2, 'review ids must auto-increment');\n\n  r = await request(app, 'POST', '/reviews', { bookId: 99, rating: 1, text: 'other book' });\n  assert.strictEqual(r.body.id, 3);\n\n  r = await request(app, 'GET', '/reviews?bookId=7');\n  assert.strictEqual(r.status, 200);\n  assert.deepStrictEqual(r.body.map((x) => x.text), ['great', 'ok'], 'reviews for book 7, in order');\n\n  r = await request(app, 'GET', '/reviews?bookId=99');\n  assert.strictEqual(r.body.length, 1);\n\n  // books resource still works\n  r = await request(app, 'POST', '/books', { title: 'T', author: 'A' });\n  assert(r.status === 201, `books route broke: ${r.status}`);\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "check_command": "node test_reviews.js",
+  "reference_solution": {
+    "src/repository/reviewRepository.js": "class ReviewRepository {\n  constructor() {\n    this._reviews = [];\n    this._nextId = 1;\n  }\n\n  add(bookId, rating, text) {\n    const review = { id: this._nextId++, bookId, rating, text };\n    this._reviews.push(review);\n    return review;\n  }\n\n  listForBook(bookId) {\n    return this._reviews.filter((r) => r.bookId === bookId);\n  }\n}\n\nmodule.exports = ReviewRepository;\n",
+    "src/routes/reviews.js": "const express = require('express');\nconst ReviewRepository = require('../repository/reviewRepository');\n\nconst router = express.Router();\nconst repo = new ReviewRepository();\n\nrouter.post('/', (req, res) => {\n  const { bookId, rating, text } = req.body;\n  const review = repo.add(bookId, rating, text);\n  res.status(201).json(review);\n});\n\nrouter.get('/', (req, res) => {\n  const bookId = Number(req.query.bookId);\n  res.json(repo.listForBook(bookId));\n});\n\nmodule.exports = router;\n",
+    "src/app.js": "const express = require('express');\nconst booksRouter = require('./routes/books');\nconst reviewsRouter = require('./routes/reviews');\n\nconst app = express();\napp.use(express.json());\napp.use('/books', booksRouter);\napp.use('/reviews', reviewsRouter);\n\nmodule.exports = app;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "router-not-mounted",
+      "files": {
+        "src/repository/reviewRepository.js": "class ReviewRepository {\n  constructor() {\n    this._reviews = [];\n    this._nextId = 1;\n  }\n\n  add(bookId, rating, text) {\n    const review = { id: this._nextId++, bookId, rating, text };\n    this._reviews.push(review);\n    return review;\n  }\n\n  listForBook(bookId) {\n    return this._reviews.filter((r) => r.bookId === bookId);\n  }\n}\n\nmodule.exports = ReviewRepository;\n",
+        "src/routes/reviews.js": "const express = require('express');\nconst ReviewRepository = require('../repository/reviewRepository');\n\nconst router = express.Router();\nconst repo = new ReviewRepository();\n\nrouter.post('/', (req, res) => {\n  const { bookId, rating, text } = req.body;\n  res.status(201).json(repo.add(bookId, rating, text));\n});\n\nrouter.get('/', (req, res) => {\n  res.json(repo.listForBook(Number(req.query.bookId)));\n});\n\nmodule.exports = router;\n",
+        "src/app.js": "const express = require('express');\nconst booksRouter = require('./routes/books');\n\nconst app = express();\napp.use(express.json());\napp.use('/books', booksRouter);\n\nmodule.exports = app;\n"
+      }
+    }
+  ]
+}

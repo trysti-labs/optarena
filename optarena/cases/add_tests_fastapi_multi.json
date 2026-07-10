@@ -1,0 +1,57 @@
+{
+  "name": "add_tests_fastapi_multi",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 150,
+  "timeout": 240,
+  "description": "Asks the model to write TestClient tests for an order-classification API; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "fastapi",
+    "multi-file",
+    "testing"
+  ],
+  "prompts": [
+    "This FastAPI app (package `app`) exposes POST /orders. The classification rules live in app/services.py (already correct, do not modify anything under app/): a priority order is tier 'express' (fee 20) regardless of size; otherwise items>=10 is 'bulk' (fee 5); otherwise 'standard' (fee 10). The response is {items, tier, fee}. Write tests in a file named exactly test_orders.py using pytest and fastapi.testclient.TestClient against app.main.app. Cover at least: a small non-priority order is standard/10; an order with items==10 is bulk/5 (the boundary); a priority order is express/20; and a priority order with items>=10 is still express (priority wins over bulk). Use plain `assert`s so pytest collects them."
+  ],
+  "setup_files": {
+    "app/__init__.py": "",
+    "app/routers/__init__.py": "",
+    "app/schemas.py": "from pydantic import BaseModel\n\n\nclass OrderIn(BaseModel):\n    items: int\n    priority: bool = False\n\n\nclass OrderOut(BaseModel):\n    items: int\n    tier: str\n    fee: int\n",
+    "app/services.py": "def classify(items, priority):\n    if priority:\n        tier = \"express\"\n    elif items >= 10:\n        tier = \"bulk\"\n    else:\n        tier = \"standard\"\n    fee = {\"express\": 20, \"bulk\": 5, \"standard\": 10}[tier]\n    return tier, fee\n",
+    "app/routers/orders.py": "from fastapi import APIRouter\n\nfrom app import schemas\nfrom app.services import classify\n\nrouter = APIRouter()\n\n\n@router.post(\"/orders\", response_model=schemas.OrderOut)\ndef create_order(payload: schemas.OrderIn):\n    tier, fee = classify(payload.items, payload.priority)\n    return {\"items\": payload.items, \"tier\": tier, \"fee\": fee}\n",
+    "app/main.py": "from fastapi import FastAPI\n\nfrom app.routers import orders\n\napp = FastAPI()\napp.include_router(orders.router)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_orders.py",
+      "content_patterns": [
+        "testclient",
+        "/orders",
+        "assert"
+      ],
+      "regex_patterns": [
+        "def\\s+test_\\w+"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"app/services.py\")\nTEST_CMD = \"python3 -m pytest test_orders.py -q\"\nMUTANTS = [[[\"    elif items >= 10:\", \"    elif items >= 100:\"]], [['    fee = {\"express\": 20, \"bulk\": 5, \"standard\": 10}[tier]', '    fee = {\"express\": 20, \"bulk\": 10, \"standard\": 10}[tier]']]]\n\ndef run_tests():\n    shutil.rmtree(\"app/__pycache__\", ignore_errors=True)\n    shutil.rmtree(\"__pycache__\", ignore_errors=True)\n    shutil.rmtree(\".pytest_cache\", ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f\"protected implementation file {IMPL} was modified - the task said not to change it \"\n            f\"(anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately broken \"\n            f\"implementation, so they do not actually verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(\"PASS (tests pass on correct impl and kill all {n} mutants)\".format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_orders.py": "from fastapi.testclient import TestClient\n\nfrom app.main import app\n\nclient = TestClient(app)\n\n\ndef post(items, priority=False):\n    return client.post(\"/orders\", json={\"items\": items, \"priority\": priority})\n\n\ndef test_standard():\n    r = post(3)\n    assert r.status_code == 200\n    assert r.json() == {\"items\": 3, \"tier\": \"standard\", \"fee\": 10}\n\n\ndef test_bulk_threshold():\n    r = post(10)\n    assert r.json()[\"tier\"] == \"bulk\"\n    assert r.json()[\"fee\"] == 5\n\n\ndef test_priority_is_express():\n    r = post(2, priority=True)\n    assert r.json()[\"tier\"] == \"express\"\n    assert r.json()[\"fee\"] == 20\n\n\ndef test_priority_beats_bulk():\n    r = post(50, priority=True)\n    assert r.json()[\"tier\"] == \"express\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_orders.py": "from fastapi.testclient import TestClient\n\nfrom app.main import app\n\nclient = TestClient(app)\n\n\ndef test_orders_endpoint_exists():\n    # touches /orders and asserts something, but never checks tier/fee logic\n    r = client.post(\"/orders\", json={\"items\": 3, \"priority\": False})\n    assert r.status_code == 200\n    assert \"tier\" in r.json()\n"
+      }
+    }
+  ]
+}

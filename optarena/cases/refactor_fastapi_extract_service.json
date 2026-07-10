@@ -1,0 +1,58 @@
+{
+  "name": "refactor_fastapi_extract_service",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Extracts pricing rules duplicated across two routes into a service module",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "fastapi",
+    "multi-file",
+    "service-layer"
+  ],
+  "prompts": [
+    "app/routers/quotes.py has the same discount-pricing logic copy-pasted in two endpoints (/quote and /quote/bulk): subtotal = unit_price*quantity, then 20% off for quantity>=100, 10% off for quantity>=10, else none, total rounded to 2 decimals. Refactor by extracting that pricing rule into a NEW module app/services.py (e.g. a function compute_quote(unit_price, quantity) -> dict) and rewire BOTH endpoints in app/routers/quotes.py to call it, so the pricing logic exists in exactly one place. The HTTP behavior of both endpoints must stay identical."
+  ],
+  "setup_files": {
+    "app/__init__.py": "",
+    "app/routers/__init__.py": "",
+    "app/schemas.py": "from pydantic import BaseModel\n\n\nclass QuoteIn(BaseModel):\n    unit_price: float\n    quantity: int\n\n\nclass QuoteOut(BaseModel):\n    subtotal: float\n    discount: float\n    total: float\n",
+    "app/routers/quotes.py": "from fastapi import APIRouter\n\nfrom app import schemas\n\nrouter = APIRouter()\n\n\n@router.post(\"/quote\", response_model=schemas.QuoteOut)\ndef quote(payload: schemas.QuoteIn):\n    # inlined pricing rules - should live in a service layer\n    subtotal = payload.unit_price * payload.quantity\n    if payload.quantity >= 100:\n        discount = 0.20\n    elif payload.quantity >= 10:\n        discount = 0.10\n    else:\n        discount = 0.0\n    total = round(subtotal * (1 - discount), 2)\n    return {\"subtotal\": round(subtotal, 2), \"discount\": discount, \"total\": total}\n\n\n@router.post(\"/quote/bulk\", response_model=list[schemas.QuoteOut])\ndef quote_bulk(payloads: list[schemas.QuoteIn]):\n    out = []\n    for payload in payloads:\n        subtotal = payload.unit_price * payload.quantity\n        if payload.quantity >= 100:\n            discount = 0.20\n        elif payload.quantity >= 10:\n            discount = 0.10\n        else:\n            discount = 0.0\n        total = round(subtotal * (1 - discount), 2)\n        out.append({\"subtotal\": round(subtotal, 2), \"discount\": discount, \"total\": total})\n    return out\n",
+    "app/main.py": "from fastapi import FastAPI\n\nfrom app.routers import quotes\n\napp = FastAPI()\napp.include_router(quotes.router)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app/services.py",
+      "content_patterns": [
+        "def compute_quote"
+      ]
+    },
+    {
+      "path_pattern": "app/routers/quotes.py",
+      "content_patterns": [
+        "compute_quote"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_service.py": "from pathlib import Path\n\nfrom fastapi.testclient import TestClient\n\nfrom app.main import app\n\nclient = TestClient(app)\n\n# behavior unchanged\nr = client.post(\"/quote\", json={\"unit_price\": 10.0, \"quantity\": 5})\nassert r.json() == {\"subtotal\": 50.0, \"discount\": 0.0, \"total\": 50.0}, r.json()\nr = client.post(\"/quote\", json={\"unit_price\": 10.0, \"quantity\": 10})\nassert r.json() == {\"subtotal\": 100.0, \"discount\": 0.1, \"total\": 90.0}, r.json()\nr = client.post(\"/quote\", json={\"unit_price\": 2.0, \"quantity\": 100})\nassert r.json() == {\"subtotal\": 200.0, \"discount\": 0.2, \"total\": 160.0}, r.json()\n\nr = client.post(\"/quote/bulk\", json=[\n    {\"unit_price\": 10.0, \"quantity\": 5},\n    {\"unit_price\": 10.0, \"quantity\": 10},   # in [10, 100): exercises the 10% bulk tier\n    {\"unit_price\": 10.0, \"quantity\": 100},\n])\nassert r.json() == [\n    {\"subtotal\": 50.0, \"discount\": 0.0, \"total\": 50.0},\n    {\"subtotal\": 100.0, \"discount\": 0.1, \"total\": 90.0},\n    {\"subtotal\": 1000.0, \"discount\": 0.2, \"total\": 800.0},\n], r.json()\n\n# extraction proof: the discount thresholds must now live in services.py,\n# and the router must not still hard-code them twice.\nrouter_src = Path(\"app/routers/quotes.py\").read_text()\nassert \"app.services\" in router_src or \"from app import services\" in router_src or \"import services\" in router_src, \\\n    \"router must import the extracted service\"\nassert router_src.count(\">= 100\") == 0 and router_src.count(\">= 10\") == 0, \\\n    \"discount thresholds are still inlined in the router - not extracted\"\nassert Path(\"app/services.py\").exists(), \"app/services.py must exist\"\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_service.py",
+  "reference_solution": {
+    "app/services.py": "def compute_quote(unit_price, quantity):\n    subtotal = unit_price * quantity\n    if quantity >= 100:\n        discount = 0.20\n    elif quantity >= 10:\n        discount = 0.10\n    else:\n        discount = 0.0\n    total = round(subtotal * (1 - discount), 2)\n    return {\"subtotal\": round(subtotal, 2), \"discount\": discount, \"total\": total}\n",
+    "app/routers/quotes.py": "from fastapi import APIRouter\n\nfrom app import schemas\nfrom app.services import compute_quote\n\nrouter = APIRouter()\n\n\n@router.post(\"/quote\", response_model=schemas.QuoteOut)\ndef quote(payload: schemas.QuoteIn):\n    return compute_quote(payload.unit_price, payload.quantity)\n\n\n@router.post(\"/quote/bulk\", response_model=list[schemas.QuoteOut])\ndef quote_bulk(payloads: list[schemas.QuoteIn]):\n    return [compute_quote(p.unit_price, p.quantity) for p in payloads]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "extracted-but-bulk-threshold-changed",
+      "files": {
+        "app/services.py": "def compute_quote(unit_price, quantity):\n    subtotal = unit_price * quantity\n    if quantity >= 100:\n        discount = 0.20\n    elif quantity >= 10:\n        discount = 0.10\n    else:\n        discount = 0.0\n    total = round(subtotal * (1 - discount), 2)\n    return {\"subtotal\": round(subtotal, 2), \"discount\": discount, \"total\": total}\n",
+        "app/routers/quotes.py": "from fastapi import APIRouter\n\nfrom app import schemas\nfrom app.services import compute_quote\n\nrouter = APIRouter()\n\n\n@router.post(\"/quote\", response_model=schemas.QuoteOut)\ndef quote(payload: schemas.QuoteIn):\n    return compute_quote(payload.unit_price, payload.quantity)\n\n\n@router.post(\"/quote/bulk\", response_model=list[schemas.QuoteOut])\ndef quote_bulk(payloads: list[schemas.QuoteIn]):\n    out = []\n    for p in payloads:\n        subtotal = p.unit_price * p.quantity\n        discount = 0.20 if p.quantity >= 50 else 0.0\n        out.append({\"subtotal\": round(subtotal, 2), \"discount\": discount,\n                    \"total\": round(subtotal * (1 - discount), 2)})\n    return out\n"
+      }
+    }
+  ]
+}

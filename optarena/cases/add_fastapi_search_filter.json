@@ -1,0 +1,59 @@
+{
+  "name": "add_fastapi_search_filter",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Adds category/price/text filtering across repository and router",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "fastapi",
+    "multi-file",
+    "query-params"
+  ],
+  "prompts": [
+    "The GET /products endpoint currently returns all products. Add optional filtering, spanning both layers: (1) add a search method to ProductRepository in app/repository.py that accepts optional q (case-insensitive substring match on name), category (exact match), and max_price (inclusive upper bound) and returns the matching products; (2) wire those as optional query parameters on GET /products in app/routers/products.py. When no filters are given, all products are returned (order preserved). Combining filters applies them together (AND). Keep the ProductOut response shape."
+  ],
+  "setup_files": {
+    "app/__init__.py": "",
+    "app/routers/__init__.py": "",
+    "app/schemas.py": "from pydantic import BaseModel\n\n\nclass ProductOut(BaseModel):\n    id: int\n    name: str\n    category: str\n    price: int\n",
+    "app/repository.py": "class ProductRepository:\n    def __init__(self):\n        self._products = [\n            {\"id\": 1, \"name\": \"Steel Hammer\", \"category\": \"tools\", \"price\": 25},\n            {\"id\": 2, \"name\": \"Rubber Mallet\", \"category\": \"tools\", \"price\": 15},\n            {\"id\": 3, \"name\": \"Garden Hose\", \"category\": \"garden\", \"price\": 40},\n            {\"id\": 4, \"name\": \"Steel Rake\", \"category\": \"garden\", \"price\": 30},\n        ]\n\n    def list(self):\n        return list(self._products)\n",
+    "app/routers/products.py": "from fastapi import APIRouter\n\nfrom app import schemas\nfrom app.repository import ProductRepository\n\nrouter = APIRouter()\nrepo = ProductRepository()\n\n\n@router.get(\"/products\", response_model=list[schemas.ProductOut])\ndef list_products():\n    return repo.list()\n",
+    "app/main.py": "from fastapi import FastAPI\n\nfrom app.routers import products\n\napp = FastAPI()\napp.include_router(products.router)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app/repository.py",
+      "content_patterns": [
+        "def search"
+      ]
+    },
+    {
+      "path_pattern": "app/routers/products.py",
+      "content_patterns": [
+        "category"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_search.py": "from fastapi.testclient import TestClient\n\nfrom app.main import app\n\nclient = TestClient(app)\n\n\ndef ids(resp):\n    return sorted(p[\"id\"] for p in resp.json())\n\n\n# no filters -> everything\nassert ids(client.get(\"/products\")) == [1, 2, 3, 4]\n\n# case-insensitive substring on name\nassert ids(client.get(\"/products\", params={\"q\": \"steel\"})) == [1, 4]\n\n# exact category\nassert ids(client.get(\"/products\", params={\"category\": \"garden\"})) == [3, 4]\n\n# inclusive max price\nassert ids(client.get(\"/products\", params={\"max_price\": 25})) == [1, 2]\n\n# combined filters are ANDed\nassert ids(client.get(\"/products\", params={\"category\": \"garden\", \"max_price\": 35})) == [4]\nassert ids(client.get(\"/products\", params={\"q\": \"steel\", \"max_price\": 25})) == [1]\n\n# response shape preserved\none = client.get(\"/products\", params={\"q\": \"hammer\"}).json()[0]\nassert set(one.keys()) == {\"id\", \"name\", \"category\", \"price\"}, one\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_search.py",
+  "reference_solution": {
+    "app/repository.py": "class ProductRepository:\n    def __init__(self):\n        self._products = [\n            {\"id\": 1, \"name\": \"Steel Hammer\", \"category\": \"tools\", \"price\": 25},\n            {\"id\": 2, \"name\": \"Rubber Mallet\", \"category\": \"tools\", \"price\": 15},\n            {\"id\": 3, \"name\": \"Garden Hose\", \"category\": \"garden\", \"price\": 40},\n            {\"id\": 4, \"name\": \"Steel Rake\", \"category\": \"garden\", \"price\": 30},\n        ]\n\n    def list(self):\n        return list(self._products)\n\n    def search(self, q=None, category=None, max_price=None):\n        results = []\n        for p in self._products:\n            if q is not None and q.lower() not in p[\"name\"].lower():\n                continue\n            if category is not None and p[\"category\"] != category:\n                continue\n            if max_price is not None and p[\"price\"] > max_price:\n                continue\n            results.append(p)\n        return results\n",
+    "app/routers/products.py": "from fastapi import APIRouter\n\nfrom app import schemas\nfrom app.repository import ProductRepository\n\nrouter = APIRouter()\nrepo = ProductRepository()\n\n\n@router.get(\"/products\", response_model=list[schemas.ProductOut])\ndef list_products(q: str | None = None, category: str | None = None,\n                  max_price: int | None = None):\n    return repo.search(q=q, category=category, max_price=max_price)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "max-price-exclusive",
+      "files": {
+        "app/repository.py": "class ProductRepository:\n    def __init__(self):\n        self._products = [\n            {\"id\": 1, \"name\": \"Steel Hammer\", \"category\": \"tools\", \"price\": 25},\n            {\"id\": 2, \"name\": \"Rubber Mallet\", \"category\": \"tools\", \"price\": 15},\n            {\"id\": 3, \"name\": \"Garden Hose\", \"category\": \"garden\", \"price\": 40},\n            {\"id\": 4, \"name\": \"Steel Rake\", \"category\": \"garden\", \"price\": 30},\n        ]\n\n    def list(self):\n        return list(self._products)\n\n    def search(self, q=None, category=None, max_price=None):\n        results = []\n        for p in self._products:\n            if q is not None and q.lower() not in p[\"name\"].lower():\n                continue\n            if category is not None and p[\"category\"] != category:\n                continue\n            if max_price is not None and p[\"price\"] >= max_price:\n                continue\n            results.append(p)\n        return results\n",
+        "app/routers/products.py": "from fastapi import APIRouter\n\nfrom app import schemas\nfrom app.repository import ProductRepository\n\nrouter = APIRouter()\nrepo = ProductRepository()\n\n\n@router.get(\"/products\", response_model=list[schemas.ProductOut])\ndef list_products(q: str | None = None, category: str | None = None,\n                  max_price: int | None = None):\n    return repo.search(q=q, category=category, max_price=max_price)\n"
+      }
+    }
+  ]
+}

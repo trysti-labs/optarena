@@ -1,0 +1,57 @@
+{
+  "name": "fix_spring_missing_validation",
+  "language": "java",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Wires a manual validator into a controller that accepts every registration",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "spring-boot",
+    "multi-file",
+    "validation"
+  ],
+  "prompts": [
+    "POST /register accepts any body and always returns 201 - RegistrationValidator exists but is never used and its rules are unimplemented. Fix the validation across two files: (1) implement RegistrationValidator.validate(username, age) (src/main/java/com/optarena/app/RegistrationValidator.java) to return null when valid, otherwise a short error message, enforcing: username must be non-null and not blank; age must be non-null and between 13 and 120 inclusive. (2) in RegistrationController, call the validator and, when it returns an error, respond HTTP 400 with JSON {\"error\": <message>} instead of creating the registration. A valid registration still returns 201 with {\"username\", \"age\"}. Do not add new Maven dependencies (there is no jakarta.validation on the offline classpath) - keep the validation manual."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>multi-file-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/java/com/optarena/app/Application.java": "package com.optarena.app;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n\n@SpringBootApplication\npublic class Application {\n    public static void main(String[] args) {\n        SpringApplication.run(Application.class, args);\n    }\n}\n",
+    "src/main/java/com/optarena/app/RegistrationValidator.java": "package com.optarena.app;\n\n// Manual validation (no jakarta.validation dependency available offline).\n// Fill in the rules so the controller can reject bad registrations.\npublic class RegistrationValidator {\n\n    // Return null when the registration is valid, otherwise a short error\n    // message describing the first problem found.\n    public String validate(String username, Integer age) {\n        // TODO: implement the rules described in the task\n        return null;\n    }\n}\n",
+    "src/main/java/com/optarena/app/RegistrationController.java": "package com.optarena.app;\n\nimport java.util.Map;\n\nimport org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.PostMapping;\nimport org.springframework.web.bind.annotation.RequestBody;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class RegistrationController {\n\n    private final RegistrationValidator validator = new RegistrationValidator();\n\n    @PostMapping(\"/register\")\n    public ResponseEntity<Map<String, Object>> register(@RequestBody Map<String, Object> body) {\n        String username = (String) body.get(\"username\");\n        Integer age = body.get(\"age\") == null ? null : ((Number) body.get(\"age\")).intValue();\n        // BUG: the validator is never consulted, so every registration is accepted.\n        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(\"username\", username, \"age\", age));\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/RegistrationValidator.java",
+      "content_patterns": [
+        "validate"
+      ]
+    },
+    {
+      "path_pattern": "**/RegistrationController.java",
+      "content_patterns": [
+        "validator"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/app/RegistrationHiddenTest.java": "package com.optarena.app;\n\nimport org.junit.jupiter.api.Test;\nimport org.springframework.beans.factory.annotation.Autowired;\nimport org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;\nimport org.springframework.boot.test.context.SpringBootTest;\nimport org.springframework.test.web.servlet.MockMvc;\n\nimport static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;\n\n@SpringBootTest\n@AutoConfigureMockMvc\nclass RegistrationHiddenTest {\n\n    @Autowired\n    private MockMvc mvc;\n\n    private void expect(String body, int statusCode) throws Exception {\n        mvc.perform(post(\"/register\").contentType(\"application/json\").content(body))\n           .andExpect(status().is(statusCode));\n    }\n\n    @Test\n    void validRegistrationCreated() throws Exception {\n        mvc.perform(post(\"/register\").contentType(\"application/json\")\n                .content(\"{\\\"username\\\": \\\"ada\\\", \\\"age\\\": 30}\"))\n           .andExpect(status().isCreated())\n           .andExpect(jsonPath(\"$.username\").value(\"ada\"))\n           .andExpect(jsonPath(\"$.age\").value(30));\n    }\n\n    @Test\n    void boundaryAgesAccepted() throws Exception {\n        expect(\"{\\\"username\\\": \\\"a\\\", \\\"age\\\": 13}\", 201);\n        expect(\"{\\\"username\\\": \\\"b\\\", \\\"age\\\": 120}\", 201);\n    }\n\n    @Test\n    void tooYoungRejected() throws Exception {\n        mvc.perform(post(\"/register\").contentType(\"application/json\")\n                .content(\"{\\\"username\\\": \\\"kid\\\", \\\"age\\\": 12}\"))\n           .andExpect(status().isBadRequest())\n           .andExpect(jsonPath(\"$.error\").exists());\n    }\n\n    @Test\n    void tooOldRejected() throws Exception {\n        expect(\"{\\\"username\\\": \\\"methuselah\\\", \\\"age\\\": 121}\", 400);\n    }\n\n    @Test\n    void blankUsernameRejected() throws Exception {\n        expect(\"{\\\"username\\\": \\\"   \\\", \\\"age\\\": 30}\", 400);\n    }\n\n    @Test\n    void missingAgeRejected() throws Exception {\n        expect(\"{\\\"username\\\": \\\"ada\\\"}\", 400);\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=RegistrationHiddenTest",
+  "reference_solution": {
+    "src/main/java/com/optarena/app/RegistrationValidator.java": "package com.optarena.app;\n\npublic class RegistrationValidator {\n\n    public String validate(String username, Integer age) {\n        if (username == null || username.isBlank()) {\n            return \"username must not be blank\";\n        }\n        if (age == null) {\n            return \"age is required\";\n        }\n        if (age < 13 || age > 120) {\n            return \"age must be between 13 and 120\";\n        }\n        return null;\n    }\n}\n",
+    "src/main/java/com/optarena/app/RegistrationController.java": "package com.optarena.app;\n\nimport java.util.Map;\n\nimport org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.PostMapping;\nimport org.springframework.web.bind.annotation.RequestBody;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class RegistrationController {\n\n    private final RegistrationValidator validator = new RegistrationValidator();\n\n    @PostMapping(\"/register\")\n    public ResponseEntity<Map<String, Object>> register(@RequestBody Map<String, Object> body) {\n        String username = (String) body.get(\"username\");\n        Integer age = body.get(\"age\") == null ? null : ((Number) body.get(\"age\")).intValue();\n        String error = validator.validate(username, age);\n        if (error != null) {\n            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(\"error\", error));\n        }\n        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(\"username\", username, \"age\", age));\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "validates-but-wrong-lower-bound",
+      "files": {
+        "src/main/java/com/optarena/app/RegistrationValidator.java": "package com.optarena.app;\n\npublic class RegistrationValidator {\n\n    public String validate(String username, Integer age) {\n        if (username == null || username.isBlank()) {\n            return \"username must not be blank\";\n        }\n        if (age == null) {\n            return \"age is required\";\n        }\n        if (age < 18 || age > 120) {\n            return \"age must be between 18 and 120\";\n        }\n        return null;\n    }\n}\n",
+        "src/main/java/com/optarena/app/RegistrationController.java": "package com.optarena.app;\n\nimport java.util.Map;\n\nimport org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.PostMapping;\nimport org.springframework.web.bind.annotation.RequestBody;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class RegistrationController {\n\n    private final RegistrationValidator validator = new RegistrationValidator();\n\n    @PostMapping(\"/register\")\n    public ResponseEntity<Map<String, Object>> register(@RequestBody Map<String, Object> body) {\n        String username = (String) body.get(\"username\");\n        Integer age = body.get(\"age\") == null ? null : ((Number) body.get(\"age\")).intValue();\n        String error = validator.validate(username, age);\n        if (error != null) {\n            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(\"error\", error));\n        }\n        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(\"username\", username, \"age\", age));\n    }\n}\n"
+      }
+    }
+  ]
+}

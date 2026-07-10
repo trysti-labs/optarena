@@ -1,0 +1,55 @@
+{
+  "name": "add_tests_express_multi",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 150,
+  "timeout": 240,
+  "description": "Asks the model to write in-process tests for an order-classification Express API; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "express",
+    "multi-file",
+    "testing"
+  ],
+  "prompts": [
+    "This Express app (src/app.js mounts src/routes/orders.js, backed by the classify() rule in src/services/orders.js - already correct, do not modify anything under src/) exposes POST /orders. Rules: a priority order is tier 'express' (fee 20) regardless of size; otherwise items>=10 is 'bulk' (fee 5); otherwise 'standard' (fee 10). The JSON response is { items, tier, fee }. Write tests in a file named exactly test_orders.js: require('./src/app'), start it on an EPHEMERAL port with app.listen(0) (do not hardcode a port), and use Node's built-in http and assert modules (no supertest - it is not installed) to check at least: a small non-priority order is standard/10; items==10 is bulk/5 (the boundary); a priority order is express/20; and a priority order with items>=10 is still express (priority wins). Close the server after each request. Print PASS and exit 0 when all assertions hold; let a failure exit non-zero."
+  ],
+  "setup_files": {
+    "src/app.js": "const express = require('express');\nconst ordersRouter = require('./routes/orders');\n\nconst app = express();\napp.use(express.json());\napp.use('/orders', ordersRouter);\n\nmodule.exports = app;\n",
+    "src/routes/orders.js": "const express = require('express');\nconst { classify } = require('../services/orders');\n\nconst router = express.Router();\n\nrouter.post('/', (req, res) => {\n  const { items, priority } = req.body;\n  const { tier, fee } = classify(items, Boolean(priority));\n  res.json({ items, tier, fee });\n});\n\nmodule.exports = router;\n",
+    "src/services/orders.js": "function classify(items, priority) {\n  let tier;\n  if (priority) tier = 'express';\n  else if (items >= 10) tier = 'bulk';\n  else tier = 'standard';\n  const fee = { express: 20, bulk: 5, standard: 10 }[tier];\n  return { tier, fee };\n}\n\nmodule.exports = { classify };\n",
+    "server.js": "const app = require('./src/app');\napp.listen(3000);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_orders.js",
+      "content_patterns": [
+        "/orders",
+        "listen(0",
+        "assert"
+      ],
+      "regex_patterns": [
+        "require\\(.*http.*\\)"
+      ],
+      "min_lines": 15
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"src/services/orders.js\")\nTEST_CMD = \"node test_orders.js\"\nMUTANTS = [[[\"  else if (items >= 10) tier = 'bulk';\", \"  else if (items >= 100) tier = 'bulk';\"]], [[\"  const fee = { express: 20, bulk: 5, standard: 10 }[tier];\", \"  const fee = { express: 20, bulk: 10, standard: 10 }[tier];\"]]]\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f\"protected implementation file {IMPL} was modified - the task said not to change it \"\n            f\"(anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately broken \"\n            f\"implementation, so they do not actually verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(\"PASS (tests pass on correct impl and kill all {n} mutants)\".format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_orders.js": "const http = require('http');\nfunction request(app, method, path, body) {\n  return new Promise((resolve, reject) => {\n    const server = app.listen(0, () => {\n      const port = server.address().port;\n      const data = body === undefined ? null : JSON.stringify(body);\n      const headers = data\n        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }\n        : {};\n      const req = http.request(\n        { host: '127.0.0.1', port, path, method, headers, timeout: 4000 },\n        (res) => {\n          let buf = '';\n          res.on('data', (c) => (buf += c));\n          res.on('end', () => {\n            server.close();\n            let json = null;\n            try { json = JSON.parse(buf); } catch (e) { /* non-JSON */ }\n            resolve({ status: res.statusCode, body: json, raw: buf });\n          });\n        }\n      );\n      req.on('timeout', () => { req.destroy(new Error('request timed out (handler never responded)')); });\n      req.on('error', (e) => { server.close(); reject(e); });\n      if (data) req.write(data);\n      req.end();\n    });\n  });\n}\n\nconst assert = require('assert');\nconst app = require('./src/app');\n\nasync function post(items, priority) {\n  return request(app, 'POST', '/orders', { items, priority: Boolean(priority) });\n}\n\n(async () => {\n  let r = await post(3, false);\n  assert.strictEqual(r.status, 200);\n  assert.deepStrictEqual(r.body, { items: 3, tier: 'standard', fee: 10 });\n\n  r = await post(10, false);\n  assert.strictEqual(r.body.tier, 'bulk', 'items==10 is the bulk boundary');\n  assert.strictEqual(r.body.fee, 5);\n\n  r = await post(2, true);\n  assert.strictEqual(r.body.tier, 'express');\n  assert.strictEqual(r.body.fee, 20);\n\n  r = await post(50, true);\n  assert.strictEqual(r.body.tier, 'express', 'priority beats bulk');\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_orders.js": "const http = require('http');\nfunction request(app, method, path, body) {\n  return new Promise((resolve, reject) => {\n    const server = app.listen(0, () => {\n      const port = server.address().port;\n      const data = body === undefined ? null : JSON.stringify(body);\n      const headers = data\n        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }\n        : {};\n      const req = http.request(\n        { host: '127.0.0.1', port, path, method, headers, timeout: 4000 },\n        (res) => {\n          let buf = '';\n          res.on('data', (c) => (buf += c));\n          res.on('end', () => {\n            server.close();\n            let json = null;\n            try { json = JSON.parse(buf); } catch (e) { /* non-JSON */ }\n            resolve({ status: res.statusCode, body: json, raw: buf });\n          });\n        }\n      );\n      req.on('timeout', () => { req.destroy(new Error('request timed out (handler never responded)')); });\n      req.on('error', (e) => { server.close(); reject(e); });\n      if (data) req.write(data);\n      req.end();\n    });\n  });\n}\n\nconst assert = require('assert');\nconst app = require('./src/app');\n\n// hits /orders on an ephemeral port with http+assert, but only checks the\n// endpoint responds - never verifies the tier/fee classification logic\n(async () => {\n  const r = await request(app, 'POST', '/orders', { items: 3, priority: false });\n  assert.strictEqual(r.status, 200);\n  assert.ok(r.body.tier);\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+      }
+    }
+  ]
+}

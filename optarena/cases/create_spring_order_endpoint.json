@@ -1,0 +1,57 @@
+{
+  "name": "create_spring_order_endpoint",
+  "language": "java",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Adds an order-classification endpoint spanning a new service and the controller",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "spring-boot",
+    "multi-file",
+    "rest"
+  ],
+  "prompts": [
+    "This Spring Boot app (package com.optarena.app; Application and a minimal OrderController with only GET /health already exist) needs an order-classification endpoint spanning two layers. (1) Create a new @Service class OrderService (in src/main/java/com/optarena/app/OrderService.java) with a method classify(int items, boolean priority) that returns the tier and fee: a priority order is tier \"express\" (fee 20) regardless of size; otherwise items >= 10 is \"bulk\" (fee 5); otherwise \"standard\" (fee 10). (2) Add POST /orders to OrderController: it accepts a JSON body {\"items\": int, \"priority\": bool}, calls the injected OrderService (use constructor injection), and returns JSON {\"items\": <items>, \"tier\": <tier>, \"fee\": <fee>} with HTTP 200. Keep GET /health returning \"ok\". You choose how to represent the service's result (a small record/class, a Map, etc.)."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>multi-file-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/java/com/optarena/app/Application.java": "package com.optarena.app;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n\n@SpringBootApplication\npublic class Application {\n    public static void main(String[] args) {\n        SpringApplication.run(Application.class, args);\n    }\n}\n",
+    "src/main/java/com/optarena/app/OrderController.java": "package com.optarena.app;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class OrderController {\n\n    @GetMapping(\"/health\")\n    public String health() {\n        return \"ok\";\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/OrderService.java",
+      "content_patterns": [
+        "service",
+        "classify"
+      ]
+    },
+    {
+      "path_pattern": "**/OrderController.java",
+      "content_patterns": [
+        "/orders"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/app/OrderEndpointHiddenTest.java": "package com.optarena.app;\n\nimport org.junit.jupiter.api.Test;\nimport org.springframework.beans.factory.annotation.Autowired;\nimport org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;\nimport org.springframework.boot.test.context.SpringBootTest;\nimport org.springframework.test.web.servlet.MockMvc;\n\nimport static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;\nimport static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;\nimport static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;\n\n@SpringBootTest\n@AutoConfigureMockMvc\nclass OrderEndpointHiddenTest {\n\n    @Autowired\n    private MockMvc mvc;\n\n    private void order(String body, String tier, int fee) throws Exception {\n        mvc.perform(post(\"/orders\").contentType(\"application/json\").content(body))\n           .andExpect(status().isOk())\n           .andExpect(jsonPath(\"$.tier\").value(tier))\n           .andExpect(jsonPath(\"$.fee\").value(fee));\n    }\n\n    @Test\n    void standardOrder() throws Exception {\n        order(\"{\\\"items\\\": 3, \\\"priority\\\": false}\", \"standard\", 10);\n    }\n\n    @Test\n    void bulkBoundary() throws Exception {\n        order(\"{\\\"items\\\": 10, \\\"priority\\\": false}\", \"bulk\", 5);\n    }\n\n    @Test\n    void priorityIsExpress() throws Exception {\n        order(\"{\\\"items\\\": 2, \\\"priority\\\": true}\", \"express\", 20);\n    }\n\n    @Test\n    void priorityBeatsBulk() throws Exception {\n        order(\"{\\\"items\\\": 50, \\\"priority\\\": true}\", \"express\", 20);\n    }\n\n    @Test\n    void echoesItems() throws Exception {\n        mvc.perform(post(\"/orders\").contentType(\"application/json\").content(\"{\\\"items\\\": 7, \\\"priority\\\": false}\"))\n           .andExpect(jsonPath(\"$.items\").value(7));\n    }\n\n    @Test\n    void healthStillWorks() throws Exception {\n        mvc.perform(get(\"/health\")).andExpect(status().isOk()).andExpect(content().string(\"ok\"));\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=OrderEndpointHiddenTest",
+  "reference_solution": {
+    "src/main/java/com/optarena/app/OrderService.java": "package com.optarena.app;\n\nimport java.util.Map;\n\nimport org.springframework.stereotype.Service;\n\n@Service\npublic class OrderService {\n\n    public Map<String, Object> classify(int items, boolean priority) {\n        String tier;\n        if (priority) {\n            tier = \"express\";\n        } else if (items >= 10) {\n            tier = \"bulk\";\n        } else {\n            tier = \"standard\";\n        }\n        int fee = switch (tier) {\n            case \"express\" -> 20;\n            case \"bulk\" -> 5;\n            default -> 10;\n        };\n        return Map.of(\"tier\", tier, \"fee\", fee);\n    }\n}\n",
+    "src/main/java/com/optarena/app/OrderController.java": "package com.optarena.app;\n\nimport java.util.Map;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.PostMapping;\nimport org.springframework.web.bind.annotation.RequestBody;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class OrderController {\n\n    private final OrderService orderService;\n\n    public OrderController(OrderService orderService) {\n        this.orderService = orderService;\n    }\n\n    @GetMapping(\"/health\")\n    public String health() {\n        return \"ok\";\n    }\n\n    @PostMapping(\"/orders\")\n    public Map<String, Object> createOrder(@RequestBody Map<String, Object> body) {\n        int items = ((Number) body.get(\"items\")).intValue();\n        boolean priority = Boolean.TRUE.equals(body.get(\"priority\"));\n        Map<String, Object> result = orderService.classify(items, priority);\n        return Map.of(\"items\", items, \"tier\", result.get(\"tier\"), \"fee\", result.get(\"fee\"));\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "ignores-priority",
+      "files": {
+        "src/main/java/com/optarena/app/OrderService.java": "package com.optarena.app;\n\nimport java.util.Map;\n\nimport org.springframework.stereotype.Service;\n\n@Service\npublic class OrderService {\n\n    public Map<String, Object> classify(int items, boolean priority) {\n        // BUG: priority is ignored, so priority orders never become express\n        String tier = items >= 10 ? \"bulk\" : \"standard\";\n        int fee = tier.equals(\"bulk\") ? 5 : 10;\n        return Map.of(\"tier\", tier, \"fee\", fee);\n    }\n}\n",
+        "src/main/java/com/optarena/app/OrderController.java": "package com.optarena.app;\n\nimport java.util.Map;\n\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.PostMapping;\nimport org.springframework.web.bind.annotation.RequestBody;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class OrderController {\n\n    private final OrderService orderService;\n\n    public OrderController(OrderService orderService) {\n        this.orderService = orderService;\n    }\n\n    @GetMapping(\"/health\")\n    public String health() {\n        return \"ok\";\n    }\n\n    @PostMapping(\"/orders\")\n    public Map<String, Object> createOrder(@RequestBody Map<String, Object> body) {\n        int items = ((Number) body.get(\"items\")).intValue();\n        boolean priority = Boolean.TRUE.equals(body.get(\"priority\"));\n        Map<String, Object> result = orderService.classify(items, priority);\n        return Map.of(\"items\", items, \"tier\", result.get(\"tier\"), \"fee\", result.get(\"fee\"));\n    }\n}\n"
+      }
+    }
+  ]
+}

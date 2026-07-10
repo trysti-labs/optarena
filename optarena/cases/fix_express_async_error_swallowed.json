@@ -1,0 +1,58 @@
+{
+  "name": "fix_express_async_error_swallowed",
+  "language": "javascript",
+  "framework": "express",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Fixes an async route whose rejections hang instead of returning an error response",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "express",
+    "multi-file",
+    "async",
+    "error-handling"
+  ],
+  "prompts": [
+    "The GET /books/:id route in src/routes/books.js is async and awaits repo.findOrThrow, which REJECTS for a missing book ('not_found') or a bad id ('bad_request'). But the handler has no try/catch, so a rejection is unhandled - Express never responds and the request hangs. Fix this across two files: (1) in src/routes/books.js, catch errors from the async handler and forward them with next(err); (2) in src/app.js, add an error-handling middleware (the 4-argument (err, req, res, next) form, registered AFTER the routes) that maps err.kind 'not_found' to HTTP 404 and 'bad_request' to 400, anything else to 500, always responding with JSON { error: <message> }. A valid id returns the book (200); a missing book returns 404; a non-positive/non-integer id returns 400 - none of them hang."
+  ],
+  "setup_files": {
+    "src/app.js": "const express = require('express');\nconst booksRouter = require('./routes/books');\n\nconst app = express();\napp.use(express.json());\napp.use('/books', booksRouter);\n\nmodule.exports = app;\n",
+    "src/routes/books.js": "const express = require('express');\nconst BookRepository = require('../repository/bookRepository');\n\nconst router = express.Router();\nconst repo = new BookRepository();\n\nrouter.post('/', (req, res) => {\n  const { title, author } = req.body;\n  res.status(201).json(repo.add(title, author));\n});\n\nrouter.get('/:id', async (req, res) => {\n  // BUG: no try/catch. When findOrThrow rejects, the promise is unhandled,\n  // Express never sends a response, and the request hangs forever.\n  const book = await repo.findOrThrow(Number(req.params.id));\n  res.json(book);\n});\n\nmodule.exports = router;\n",
+    "src/repository/bookRepository.js": "class BookRepository {\n  constructor() {\n    this._books = new Map();\n    this._nextId = 1;\n  }\n\n  add(title, author) {\n    const id = this._nextId++;\n    const book = { id, title, author };\n    this._books.set(id, book);\n    return book;\n  }\n\n  // async lookup that REJECTS for bad ids / missing books\n  async findOrThrow(id) {\n    await Promise.resolve();\n    if (!Number.isInteger(id) || id <= 0) {\n      const err = new Error('invalid id');\n      err.kind = 'bad_request';\n      throw err;\n    }\n    const book = this._books.get(id);\n    if (!book) {\n      const err = new Error('not found');\n      err.kind = 'not_found';\n      throw err;\n    }\n    return book;\n  }\n}\n\nmodule.exports = BookRepository;\n",
+    "server.js": "const app = require('./src/app');\napp.listen(3000);\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/routes/books.js",
+      "content_patterns": [
+        "next("
+      ]
+    },
+    {
+      "path_pattern": "src/app.js",
+      "content_patterns": [
+        "err"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_async.js": "const http = require('http');\nfunction request(app, method, path, body) {\n  return new Promise((resolve, reject) => {\n    const server = app.listen(0, () => {\n      const port = server.address().port;\n      const data = body === undefined ? null : JSON.stringify(body);\n      const headers = data\n        ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }\n        : {};\n      const req = http.request(\n        { host: '127.0.0.1', port, path, method, headers, timeout: 4000 },\n        (res) => {\n          let buf = '';\n          res.on('data', (c) => (buf += c));\n          res.on('end', () => {\n            server.close();\n            let json = null;\n            try { json = JSON.parse(buf); } catch (e) { /* non-JSON */ }\n            resolve({ status: res.statusCode, body: json, raw: buf });\n          });\n        }\n      );\n      req.on('timeout', () => { req.destroy(new Error('request timed out (handler never responded)')); });\n      req.on('error', (e) => { server.close(); reject(e); });\n      if (data) req.write(data);\n      req.end();\n    });\n  });\n}\n\nconst assert = require('assert');\nconst app = require('./src/app');\n\n(async () => {\n  let r = await request(app, 'POST', '/books', { title: 'Dune', author: 'Herbert' });\n  assert.strictEqual(r.status, 201, r.raw);\n\n  r = await request(app, 'GET', '/books/1');\n  assert.strictEqual(r.status, 200, `valid id: ${r.status} ${r.raw}`);\n  assert.strictEqual(r.body.title, 'Dune');\n\n  // missing book -> 404 JSON, NOT a hang or a 500\n  r = await request(app, 'GET', '/books/999');\n  assert.strictEqual(r.status, 404, `missing book must be 404, got ${r.status} ${r.raw}`);\n  assert(r.body && r.body.error, `404 must be JSON with error: ${r.raw}`);\n\n  // bad id -> 400\n  r = await request(app, 'GET', '/books/-3');\n  assert.strictEqual(r.status, 400, `bad id must be 400, got ${r.status} ${r.raw}`);\n\n  r = await request(app, 'GET', '/books/abc');\n  assert.strictEqual(r.status, 400, `non-numeric id must be 400, got ${r.status} ${r.raw}`);\n  console.log('PASS');\n})().catch((e) => { console.error(e); process.exit(1); });\n"
+  },
+  "check_command": "node test_async.js",
+  "reference_solution": {
+    "src/routes/books.js": "const express = require('express');\nconst BookRepository = require('../repository/bookRepository');\n\nconst router = express.Router();\nconst repo = new BookRepository();\n\nrouter.post('/', (req, res) => {\n  const { title, author } = req.body;\n  res.status(201).json(repo.add(title, author));\n});\n\nrouter.get('/:id', async (req, res, next) => {\n  try {\n    const book = await repo.findOrThrow(Number(req.params.id));\n    res.json(book);\n  } catch (err) {\n    next(err);\n  }\n});\n\nmodule.exports = router;\n",
+    "src/app.js": "const express = require('express');\nconst booksRouter = require('./routes/books');\n\nconst app = express();\napp.use(express.json());\napp.use('/books', booksRouter);\n\n// eslint-disable-next-line no-unused-vars\napp.use((err, req, res, next) => {\n  const status = err.kind === 'not_found' ? 404 : err.kind === 'bad_request' ? 400 : 500;\n  res.status(status).json({ error: err.message });\n});\n\nmodule.exports = app;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "catches-but-always-500",
+      "files": {
+        "src/routes/books.js": "const express = require('express');\nconst BookRepository = require('../repository/bookRepository');\n\nconst router = express.Router();\nconst repo = new BookRepository();\n\nrouter.post('/', (req, res) => {\n  const { title, author } = req.body;\n  res.status(201).json(repo.add(title, author));\n});\n\nrouter.get('/:id', async (req, res, next) => {\n  try {\n    const book = await repo.findOrThrow(Number(req.params.id));\n    res.json(book);\n  } catch (err) {\n    next(err);\n  }\n});\n\nmodule.exports = router;\n",
+        "src/app.js": "const express = require('express');\nconst booksRouter = require('./routes/books');\n\nconst app = express();\napp.use(express.json());\napp.use('/books', booksRouter);\n\n// eslint-disable-next-line no-unused-vars\napp.use((err, req, res, next) => {\n  res.status(500).json({ error: err.message });\n});\n\nmodule.exports = app;\n"
+      }
+    }
+  ]
+}

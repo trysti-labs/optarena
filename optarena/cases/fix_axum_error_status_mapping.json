@@ -1,0 +1,51 @@
+{
+  "name": "fix_axum_error_status_mapping",
+  "language": "rust",
+  "framework": "axum",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Maps typed repository errors to correct HTTP statuses in the handler",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "axum",
+    "multi-file",
+    "error-mapping"
+  ],
+  "prompts": [
+    "The POST /withdraw handler in src/handlers.rs maps EVERY WithdrawError from the repository to HTTP 500, so a missing account and an overdraft both look like server errors. Fix the handler to match the typed variants (exported from src/repository.rs): WithdrawError::NotFound must map to 404 NOT_FOUND and WithdrawError::InsufficientFunds to 409 CONFLICT, keeping a JSON {\"error\": ...} body. A successful withdrawal still returns 200 with {\"balance\": <new balance>}. Do not change src/repository.rs."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"webapp\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\naxum = \"0.7\"\ntokio = { version = \"1\", features = [\"full\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n\n[dev-dependencies]\ntower = { version = \"0.5\", features = [\"util\"] }\n",
+    "src/lib.rs": "use std::sync::{Arc, Mutex};\n\nuse axum::routing::post;\nuse axum::Router;\n\npub mod handlers;\npub mod repository;\n\n#[derive(Clone)]\npub struct AppState {\n    pub accounts: Arc<Mutex<repository::AccountRepository>>,\n}\n\npub fn build_router() -> Router {\n    let state = AppState {\n        accounts: Arc::new(Mutex::new(repository::AccountRepository::new())),\n    };\n    Router::new()\n        .route(\"/withdraw\", post(handlers::withdraw))\n        .with_state(state)\n}\n",
+    "src/handlers.rs": "use axum::extract::State;\nuse axum::http::StatusCode;\nuse axum::Json;\nuse serde::Deserialize;\nuse serde_json::{json, Value};\n\nuse crate::AppState;\n\n#[derive(Deserialize)]\npub struct WithdrawBody {\n    pub account: String,\n    pub amount: i64,\n}\n\npub async fn withdraw(\n    State(state): State<AppState>,\n    Json(body): Json<WithdrawBody>,\n) -> (StatusCode, Json<Value>) {\n    match state.accounts.lock().unwrap().withdraw(&body.account, body.amount) {\n        Ok(balance) => (StatusCode::OK, Json(json!({\"balance\": balance}))),\n        // BUG: every error becomes 500 - a missing account and an overdraft\n        // both look like server errors to the client.\n        Err(err) => (\n            StatusCode::INTERNAL_SERVER_ERROR,\n            Json(json!({\"error\": format!(\"{err:?}\")})),\n        ),\n    }\n}\n",
+    "src/repository.rs": "use std::collections::HashMap;\n\n#[derive(Debug, PartialEq)]\npub enum WithdrawError {\n    NotFound,\n    InsufficientFunds,\n}\n\npub struct AccountRepository {\n    balances: HashMap<String, i64>,\n}\n\nimpl AccountRepository {\n    pub fn new() -> Self {\n        let mut balances = HashMap::new();\n        balances.insert(\"alice\".to_string(), 100);\n        AccountRepository { balances }\n    }\n\n    /// Withdraw `amount`; returns the new balance, or a typed error.\n    pub fn withdraw(&mut self, account: &str, amount: i64) -> Result<i64, WithdrawError> {\n        let balance = self.balances.get_mut(account).ok_or(WithdrawError::NotFound)?;\n        if amount > *balance {\n            return Err(WithdrawError::InsufficientFunds);\n        }\n        *balance -= amount;\n        Ok(*balance)\n    }\n}\n",
+    "src/main.rs": "#[tokio::main]\nasync fn main() {\n    let app = webapp::build_router();\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8072\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/handlers.rs",
+      "content_patterns": [
+        "not_found",
+        "conflict"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/api_test.rs": "use axum::body::{to_bytes, Body};\nuse axum::http::{Request, StatusCode};\nuse serde_json::Value;\nuse tower::ServiceExt;\n\nasync fn send(app: axum::Router, method: &str, uri: &str, body: Option<&str>) -> (StatusCode, Value) {\n    let mut builder = Request::builder().method(method).uri(uri);\n    let request = match body {\n        Some(b) => builder\n            .header(\"content-type\", \"application/json\")\n            .body(Body::from(b.to_string()))\n            .unwrap(),\n        None => builder.body(Body::empty()).unwrap(),\n    };\n    let res = app.oneshot(request).await.unwrap();\n    let status = res.status();\n    let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();\n    let value = if bytes.is_empty() {\n        Value::Null\n    } else {\n        serde_json::from_slice(&bytes).unwrap_or(Value::Null)\n    };\n    (status, value)\n}\n\n#[tokio::test]\nasync fn status_mapping() {\n    let app = webapp::build_router();\n\n    let (status, body) = send(app.clone(), \"POST\", \"/withdraw\",\n        Some(r#\"{\"account\": \"alice\", \"amount\": 40}\"#)).await;\n    assert_eq!(status, StatusCode::OK, \"{body}\");\n    assert_eq!(body[\"balance\"], 60);\n\n    let (status, _) = send(app.clone(), \"POST\", \"/withdraw\",\n        Some(r#\"{\"account\": \"ghost\", \"amount\": 10}\"#)).await;\n    assert_eq!(status, StatusCode::NOT_FOUND, \"missing account must be 404\");\n\n    let (status, _) = send(app, \"POST\", \"/withdraw\",\n        Some(r#\"{\"account\": \"alice\", \"amount\": 100000}\"#)).await;\n    assert_eq!(status, StatusCode::CONFLICT, \"overdraft must be 409\");\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/handlers.rs": "use axum::extract::State;\nuse axum::http::StatusCode;\nuse axum::Json;\nuse serde::Deserialize;\nuse serde_json::{json, Value};\n\nuse crate::AppState;\n\n#[derive(Deserialize)]\npub struct WithdrawBody {\n    pub account: String,\n    pub amount: i64,\n}\n\npub async fn withdraw(\n    State(state): State<AppState>,\n    Json(body): Json<WithdrawBody>,\n) -> (StatusCode, Json<Value>) {\n    match state.accounts.lock().unwrap().withdraw(&body.account, body.amount) {\n        Ok(balance) => (StatusCode::OK, Json(json!({\"balance\": balance}))),\n        Err(err) => {\n            let status = match err {\n                crate::repository::WithdrawError::NotFound => StatusCode::NOT_FOUND,\n                crate::repository::WithdrawError::InsufficientFunds => StatusCode::CONFLICT,\n            };\n            (status, Json(json!({\"error\": format!(\"{err:?}\")})))\n        }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "swaps-404-and-409",
+      "files": {
+        "src/handlers.rs": "use axum::extract::State;\nuse axum::http::StatusCode;\nuse axum::Json;\nuse serde::Deserialize;\nuse serde_json::{json, Value};\n\nuse crate::AppState;\n\n#[derive(Deserialize)]\npub struct WithdrawBody {\n    pub account: String,\n    pub amount: i64,\n}\n\npub async fn withdraw(\n    State(state): State<AppState>,\n    Json(body): Json<WithdrawBody>,\n) -> (StatusCode, Json<Value>) {\n    match state.accounts.lock().unwrap().withdraw(&body.account, body.amount) {\n        Ok(balance) => (StatusCode::OK, Json(json!({\"balance\": balance}))),\n        Err(err) => {\n            let status = match err {\n                crate::repository::WithdrawError::NotFound => StatusCode::CONFLICT,\n                crate::repository::WithdrawError::InsufficientFunds => StatusCode::NOT_FOUND,\n            };\n            (status, Json(json!({\"error\": format!(\"{err:?}\")})))\n        }\n    }\n}\n"
+      }
+    }
+  ]
+}
