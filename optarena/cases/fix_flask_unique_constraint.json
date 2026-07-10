@@ -1,0 +1,57 @@
+{
+  "name": "fix_flask_unique_constraint",
+  "language": "python",
+  "framework": "flask",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Enforces unique email across a repository check and a 409 in the blueprint",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "tags": [
+    "flask",
+    "multi-file",
+    "validation"
+  ],
+  "prompts": [
+    "Registration must reject duplicate emails, but both layers are broken: UserRepository.email_exists in app/repository.py always returns False, and the POST /users handler in app/routes/users.py never checks it. Fix BOTH: make email_exists correctly report whether an email is already registered, and have the handler return HTTP 409 with JSON {\"error\": ...} when the email is taken - BEFORE adding, so a rejected duplicate creates nothing (does not consume an id). A first registration returns 201; a duplicate returns 409; a different email returns 201 with the next id."
+  ],
+  "setup_files": {
+    "app/__init__.py": "from flask import Flask\n\nfrom app.routes.users import users_bp\n\n\ndef create_app():\n    app = Flask(__name__)\n    app.register_blueprint(users_bp)\n    return app\n",
+    "app/routes/__init__.py": "",
+    "app/routes/users.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import UserRepository\n\nusers_bp = Blueprint(\"users\", __name__)\n_repo = UserRepository()\n\n\n@users_bp.post(\"/users\")\ndef create_user():\n    data = request.get_json(silent=True) or {}\n    # BUG: never checks email_exists, so duplicate emails are accepted.\n    return jsonify(_repo.add(data.get(\"email\"))), 201\n",
+    "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def email_exists(self, email):\n        # BUG: always False, so duplicate emails slip through.\n        return False\n\n    def add(self, email):\n        user = {\"id\": self._next_id, \"email\": email}\n        self._users[self._next_id] = user\n        self._next_id += 1\n        return user\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app/repository.py",
+      "content_patterns": [
+        "def email_exists"
+      ]
+    },
+    {
+      "path_pattern": "app/routes/users.py",
+      "content_patterns": [
+        "409"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_unique.py": "from app import create_app\n\nclient = create_app().test_client()\n\nr = client.post(\"/users\", json={\"email\": \"a@x.io\"})\nassert r.status_code == 201 and r.get_json()[\"id\"] == 1, r.data\n\nr = client.post(\"/users\", json={\"email\": \"a@x.io\"})\nassert r.status_code == 409, f\"duplicate must be 409, got {r.status_code}\"\n\nr = client.post(\"/users\", json={\"email\": \"b@x.io\"})\nassert r.status_code == 201, r.data\nassert r.get_json()[\"id\"] == 2, f\"rejected duplicate consumed an id: {r.get_json()}\"\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_unique.py",
+  "reference_solution": {
+    "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def email_exists(self, email):\n        return any(u[\"email\"] == email for u in self._users.values())\n\n    def add(self, email):\n        user = {\"id\": self._next_id, \"email\": email}\n        self._users[self._next_id] = user\n        self._next_id += 1\n        return user\n",
+    "app/routes/users.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import UserRepository\n\nusers_bp = Blueprint(\"users\", __name__)\n_repo = UserRepository()\n\n\n@users_bp.post(\"/users\")\ndef create_user():\n    data = request.get_json(silent=True) or {}\n    email = data.get(\"email\")\n    if _repo.email_exists(email):\n        return jsonify({\"error\": \"email already registered\"}), 409\n    return jsonify(_repo.add(email)), 201\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "adds-then-checks",
+      "files": {
+        "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def email_exists(self, email):\n        return any(u[\"email\"] == email for u in self._users.values())\n\n    def add(self, email):\n        user = {\"id\": self._next_id, \"email\": email}\n        self._users[self._next_id] = user\n        self._next_id += 1\n        return user\n",
+        "app/routes/users.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import UserRepository\n\nusers_bp = Blueprint(\"users\", __name__)\n_repo = UserRepository()\n\n\n@users_bp.post(\"/users\")\ndef create_user():\n    data = request.get_json(silent=True) or {}\n    email = data.get(\"email\")\n    user = _repo.add(email)\n    if sum(1 for u in _repo._users.values() if u[\"email\"] == email) > 1:\n        return jsonify({\"error\": \"email already registered\"}), 409\n    return jsonify(user), 201\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "fix_flask_response_leak",
+  "language": "python",
+  "framework": "flask",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Stops a Flask blueprint leaking password_hash by returning a public projection",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "flask",
+    "multi-file",
+    "data-exposure"
+  ],
+  "prompts": [
+    "The users blueprint in app/routes/users.py returns the repository dict directly on both POST /users and GET /users/<id>, so every response includes password_hash. Fix the leak across two files: (1) add a helper to app/repository.py (e.g. public_view(user) -> dict) that returns only id and username; (2) use it in both handlers in app/routes/users.py so no response contains password_hash (or any password field). POST still returns 201 with id and username; GET returns 200 with id and username, or 404 for a missing user."
+  ],
+  "setup_files": {
+    "app/__init__.py": "from flask import Flask\n\nfrom app.routes.users import users_bp\n\n\ndef create_app():\n    app = Flask(__name__)\n    app.register_blueprint(users_bp)\n    return app\n",
+    "app/routes/__init__.py": "",
+    "app/routes/users.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import UserRepository\n\nusers_bp = Blueprint(\"users\", __name__)\n_repo = UserRepository()\n\n\n@users_bp.post(\"/users\")\ndef create_user():\n    data = request.get_json(silent=True) or {}\n    user = _repo.add(data.get(\"username\"), data.get(\"password\"))\n    # BUG: returns the repository dict, which includes password_hash.\n    return jsonify(user), 201\n\n\n@users_bp.get(\"/users/<int:uid>\")\ndef get_user(uid):\n    user = _repo.get(uid)\n    if user is None:\n        return jsonify({\"error\": \"not found\"}), 404\n    # BUG: same leak on the read path.\n    return jsonify(user)\n",
+    "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def add(self, username, password):\n        user = {\"id\": self._next_id, \"username\": username,\n                \"password_hash\": \"hash:\" + password}\n        self._users[self._next_id] = user\n        self._next_id += 1\n        return user\n\n    def get(self, uid):\n        return self._users.get(uid)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app/routes/users.py",
+      "content_patterns": [
+        "create_user"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_leak.py": "from app import create_app\n\nclient = create_app().test_client()\n\nr = client.post(\"/users\", json={\"username\": \"ada\", \"password\": \"s3cret\"})\nassert r.status_code == 201, r.data\nbody = r.get_json()\nassert \"password_hash\" not in body and \"password\" not in body, f\"create leaked: {body}\"\nassert body.get(\"username\") == \"ada\" and \"id\" in body, body\n\nr = client.get(\"/users/1\")\nassert r.status_code == 200, r.data\nassert \"password_hash\" not in r.get_json(), f\"get leaked: {r.get_json()}\"\n\nassert client.get(\"/users/999\").status_code == 404\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_leak.py",
+  "reference_solution": {
+    "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def add(self, username, password):\n        user = {\"id\": self._next_id, \"username\": username,\n                \"password_hash\": \"hash:\" + password}\n        self._users[self._next_id] = user\n        self._next_id += 1\n        return user\n\n    def get(self, uid):\n        return self._users.get(uid)\n\n\ndef public_view(user):\n    return {\"id\": user[\"id\"], \"username\": user[\"username\"]}\n",
+    "app/routes/users.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import UserRepository, public_view\n\nusers_bp = Blueprint(\"users\", __name__)\n_repo = UserRepository()\n\n\n@users_bp.post(\"/users\")\ndef create_user():\n    data = request.get_json(silent=True) or {}\n    user = _repo.add(data.get(\"username\"), data.get(\"password\"))\n    return jsonify(public_view(user)), 201\n\n\n@users_bp.get(\"/users/<int:uid>\")\ndef get_user(uid):\n    user = _repo.get(uid)\n    if user is None:\n        return jsonify({\"error\": \"not found\"}), 404\n    return jsonify(public_view(user))\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "view-keeps-hash",
+      "files": {
+        "app/repository.py": "class UserRepository:\n    def __init__(self):\n        self._users = {}\n        self._next_id = 1\n\n    def add(self, username, password):\n        user = {\"id\": self._next_id, \"username\": username,\n                \"password_hash\": \"hash:\" + password}\n        self._users[self._next_id] = user\n        self._next_id += 1\n        return user\n\n    def get(self, uid):\n        return self._users.get(uid)\n\n\ndef public_view(user):\n    # still includes the hash\n    return {\"id\": user[\"id\"], \"username\": user[\"username\"],\n            \"password_hash\": user[\"password_hash\"]}\n",
+        "app/routes/users.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import UserRepository, public_view\n\nusers_bp = Blueprint(\"users\", __name__)\n_repo = UserRepository()\n\n\n@users_bp.post(\"/users\")\ndef create_user():\n    data = request.get_json(silent=True) or {}\n    user = _repo.add(data.get(\"username\"), data.get(\"password\"))\n    return jsonify(public_view(user)), 201\n\n\n@users_bp.get(\"/users/<int:uid>\")\ndef get_user(uid):\n    user = _repo.get(uid)\n    if user is None:\n        return jsonify({\"error\": \"not found\"}), 404\n    return jsonify(public_view(user))\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "create_flask_reviews_blueprint",
+  "language": "python",
+  "framework": "flask",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 90,
+  "timeout": 240,
+  "description": "Adds a reviews blueprint wired through a new repository and app registration",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "flask",
+    "multi-file",
+    "blueprints"
+  ],
+  "prompts": [
+    "This Flask app (package `app`, with create_app() in app/__init__.py, a books blueprint in app/routes/books.py, and BookRepository in app/repository.py) needs a NEW reviews resource across the layers: (1) add a ReviewRepository class to app/repository.py with add(book_id, text) -> dict and list_for_book(book_id) -> list; each review is {\"id\", \"bookId\", \"text\"}, ids auto-increment from 1, list_for_book preserves insertion order and returns [] when none; (2) create app/routes/reviews.py with a Blueprint named reviews_bp exposing POST /reviews (JSON body {bookId, text} -> 201 with the created review) and GET /reviews?bookId=N (200 with the reviews for that book); (3) register reviews_bp in create_app(). Keep POST /books working."
+  ],
+  "setup_files": {
+    "app/__init__.py": "from flask import Flask\n\nfrom app.routes.books import books_bp\n\n\ndef create_app():\n    app = Flask(__name__)\n    app.register_blueprint(books_bp)\n    return app\n",
+    "app/routes/__init__.py": "",
+    "app/routes/books.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import BookRepository\n\nbooks_bp = Blueprint(\"books\", __name__)\n_repo = BookRepository()\n\n\n@books_bp.post(\"/books\")\ndef create_book():\n    data = request.get_json(silent=True) or {}\n    book = _repo.add(data.get(\"title\"), data.get(\"author\"))\n    return jsonify(book), 201\n",
+    "app/repository.py": "class BookRepository:\n    def __init__(self):\n        self._books = {}\n        self._next_id = 1\n\n    def add(self, title, author):\n        book = {\"id\": self._next_id, \"title\": title, \"author\": author}\n        self._books[self._next_id] = book\n        self._next_id += 1\n        return book\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "app/routes/reviews.py",
+      "content_patterns": [
+        "blueprint",
+        "reviews_bp"
+      ]
+    },
+    {
+      "path_pattern": "app/__init__.py",
+      "content_patterns": [
+        "reviews_bp"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_reviews.py": "from app import create_app\n\nclient = create_app().test_client()\n\nr = client.post(\"/reviews\", json={\"bookId\": 7, \"text\": \"great\"})\nassert r.status_code == 201, f\"POST /reviews: {r.status_code} {r.data}\"\nassert r.get_json() == {\"id\": 1, \"bookId\": 7, \"text\": \"great\"}, r.get_json()\n\nassert client.post(\"/reviews\", json={\"bookId\": 7, \"text\": \"ok\"}).get_json()[\"id\"] == 2\nclient.post(\"/reviews\", json={\"bookId\": 99, \"text\": \"other\"})\n\nr = client.get(\"/reviews?bookId=7\")\nassert r.status_code == 200\nassert [x[\"text\"] for x in r.get_json()] == [\"great\", \"ok\"], r.get_json()\nassert client.get(\"/reviews?bookId=99\").get_json()[0][\"text\"] == \"other\"\n\n# books still work\nassert client.post(\"/books\", json={\"title\": \"T\", \"author\": \"A\"}).status_code == 201\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_reviews.py",
+  "reference_solution": {
+    "app/repository.py": "class BookRepository:\n    def __init__(self):\n        self._books = {}\n        self._next_id = 1\n\n    def add(self, title, author):\n        book = {\"id\": self._next_id, \"title\": title, \"author\": author}\n        self._books[self._next_id] = book\n        self._next_id += 1\n        return book\n\n\nclass ReviewRepository:\n    def __init__(self):\n        self._reviews = []\n        self._next_id = 1\n\n    def add(self, book_id, text):\n        review = {\"id\": self._next_id, \"bookId\": book_id, \"text\": text}\n        self._reviews.append(review)\n        self._next_id += 1\n        return review\n\n    def list_for_book(self, book_id):\n        return [r for r in self._reviews if r[\"bookId\"] == book_id]\n",
+    "app/routes/reviews.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import ReviewRepository\n\nreviews_bp = Blueprint(\"reviews\", __name__)\n_repo = ReviewRepository()\n\n\n@reviews_bp.post(\"/reviews\")\ndef create_review():\n    data = request.get_json(silent=True) or {}\n    review = _repo.add(data.get(\"bookId\"), data.get(\"text\"))\n    return jsonify(review), 201\n\n\n@reviews_bp.get(\"/reviews\")\ndef list_reviews():\n    book_id = request.args.get(\"bookId\", type=int)\n    return jsonify(_repo.list_for_book(book_id))\n",
+    "app/__init__.py": "from flask import Flask\n\nfrom app.routes.books import books_bp\nfrom app.routes.reviews import reviews_bp\n\n\ndef create_app():\n    app = Flask(__name__)\n    app.register_blueprint(books_bp)\n    app.register_blueprint(reviews_bp)\n    return app\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "blueprint-not-registered",
+      "files": {
+        "app/repository.py": "class BookRepository:\n    def __init__(self):\n        self._books = {}\n        self._next_id = 1\n\n    def add(self, title, author):\n        book = {\"id\": self._next_id, \"title\": title, \"author\": author}\n        self._books[self._next_id] = book\n        self._next_id += 1\n        return book\n\n\nclass ReviewRepository:\n    def __init__(self):\n        self._reviews = []\n        self._next_id = 1\n\n    def add(self, book_id, text):\n        review = {\"id\": self._next_id, \"bookId\": book_id, \"text\": text}\n        self._reviews.append(review)\n        self._next_id += 1\n        return review\n\n    def list_for_book(self, book_id):\n        return [r for r in self._reviews if r[\"bookId\"] == book_id]\n",
+        "app/routes/reviews.py": "from flask import Blueprint, jsonify, request\n\nfrom app.repository import ReviewRepository\n\nreviews_bp = Blueprint(\"reviews\", __name__)\n_repo = ReviewRepository()\n\n\n@reviews_bp.post(\"/reviews\")\ndef create_review():\n    data = request.get_json(silent=True) or {}\n    return jsonify(_repo.add(data.get(\"bookId\"), data.get(\"text\"))), 201\n\n\n@reviews_bp.get(\"/reviews\")\ndef list_reviews():\n    return jsonify(_repo.list_for_book(request.args.get(\"bookId\", type=int)))\n",
+        "app/__init__.py": "from flask import Flask\n\nfrom app.routes.books import books_bp\n\n\ndef create_app():\n    app = Flask(__name__)\n    app.register_blueprint(books_bp)\n    return app\n"
+      }
+    }
+  ]
+}

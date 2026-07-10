@@ -1,0 +1,55 @@
+{
+  "name": "add_tests_flask_multi",
+  "language": "python",
+  "framework": "flask",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 150,
+  "timeout": 240,
+  "description": "Asks the model to write test_client tests for an order-classification blueprint; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "flask",
+    "multi-file",
+    "testing"
+  ],
+  "prompts": [
+    "This Flask app (package `app`, create_app() in app/__init__.py, orders blueprint in app/routes/orders.py, rules in app/services.py - already correct, do not modify anything under app/) exposes POST /orders. Rules: a priority order is tier \"express\" (fee 20) regardless of size; otherwise items>=10 is \"bulk\" (fee 5); otherwise \"standard\" (fee 10). The JSON response is {items, tier, fee}. Write tests in a file named exactly test_orders.py using pytest and the Flask test client (create_app().test_client()). Cover at least: a small non-priority order is standard/10; items==10 is bulk/5 (the boundary); a priority order is express/20; and a priority order with items>=10 is still express (priority wins). Use plain `assert`s so pytest collects them."
+  ],
+  "setup_files": {
+    "app/__init__.py": "from flask import Flask\n\nfrom app.routes.orders import orders_bp\n\n\ndef create_app():\n    app = Flask(__name__)\n    app.register_blueprint(orders_bp)\n    return app\n",
+    "app/routes/__init__.py": "",
+    "app/routes/orders.py": "from flask import Blueprint, jsonify, request\n\nfrom app.services import classify\n\norders_bp = Blueprint(\"orders\", __name__)\n\n\n@orders_bp.post(\"/orders\")\ndef create_order():\n    data = request.get_json(silent=True) or {}\n    items = data.get(\"items\")\n    tier, fee = classify(items, bool(data.get(\"priority\")))\n    return jsonify({\"items\": items, \"tier\": tier, \"fee\": fee})\n",
+    "app/services.py": "def classify(items, priority):\n    if priority:\n        tier = \"express\"\n    elif items >= 10:\n        tier = \"bulk\"\n    else:\n        tier = \"standard\"\n    fee = {\"express\": 20, \"bulk\": 5, \"standard\": 10}[tier]\n    return tier, fee\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_orders.py",
+      "content_patterns": [
+        "test_client",
+        "/orders",
+        "assert"
+      ],
+      "regex_patterns": [
+        "def\\s+test_\\w+"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"app/services.py\")\nTEST_CMD = \"python3 -m pytest test_orders.py -q\"\nMUTANTS = [[[\"    elif items >= 10:\", \"    elif items >= 100:\"]], [['    fee = {\"express\": 20, \"bulk\": 5, \"standard\": 10}[tier]', '    fee = {\"express\": 20, \"bulk\": 10, \"standard\": 10}[tier]']]]\n\ndef run_tests():\n    shutil.rmtree(\"app/__pycache__\", ignore_errors=True)\n    shutil.rmtree(\"__pycache__\", ignore_errors=True)\n    shutil.rmtree(\".pytest_cache\", ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f\"protected implementation file {IMPL} was modified - the task said not to change it \"\n            f\"(anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately broken \"\n            f\"implementation, so they do not actually verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(\"PASS (tests pass on correct impl and kill all {n} mutants)\".format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_orders.py": "from app import create_app\n\nclient = create_app().test_client()\n\n\ndef post(items, priority=False):\n    return client.post(\"/orders\", json={\"items\": items, \"priority\": priority})\n\n\ndef test_standard():\n    r = post(3)\n    assert r.status_code == 200\n    assert r.get_json() == {\"items\": 3, \"tier\": \"standard\", \"fee\": 10}\n\n\ndef test_bulk_boundary():\n    body = post(10).get_json()\n    assert body[\"tier\"] == \"bulk\" and body[\"fee\"] == 5\n\n\ndef test_priority_is_express():\n    body = post(2, priority=True).get_json()\n    assert body[\"tier\"] == \"express\" and body[\"fee\"] == 20\n\n\ndef test_priority_beats_bulk():\n    assert post(50, priority=True).get_json()[\"tier\"] == \"express\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_orders.py": "from app import create_app\n\nclient = create_app().test_client()\n\n\ndef _post(items, priority=False):\n    return client.post(\"/orders\", json={\"items\": items, \"priority\": priority})\n\n\ndef test_orders_endpoint_responds():\n    # exercises /orders on several inputs but never asserts the tier/fee\n    # classification, so a broken classifier still passes these tests\n    for n in (1, 5, 10, 50):\n        r = _post(n)\n        assert r.status_code == 200\n        assert \"tier\" in r.get_json()\n"
+      }
+    }
+  ]
+}
