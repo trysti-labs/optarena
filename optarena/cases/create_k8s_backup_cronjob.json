@@ -1,0 +1,55 @@
+{
+  "name": "create_k8s_backup_cronjob",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Write a nightly pg_dump CronJob with scheduling hygiene (Forbid concurrency, deadline, history limits, backoffLimit, resources) and secretKeyRef credentials",
+  "difficulty": 3,
+  "task_type": "devops",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "cronjob",
+    "backup"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml runs the orders-api service in the shop namespace against a postgres database whose credentials live in the orders-db secret (keys username and password). Write k8s/backup-cronjob.yaml: a batch/v1 CronJob named orders-db-backup in the same namespace that dumps that database nightly at 03:00 (schedule '0 3 * * *') using a postgres:16 container running pg_dump, writing into the existing orders-backups PersistentVolumeClaim mounted at /backups. Operational hygiene is the point of this task: overlapping runs must be impossible (concurrencyPolicy: Forbid), a missed window must not fire arbitrarily late (startingDeadlineSeconds), finished jobs must not accumulate unbounded (both history limits), failed dumps must not retry forever (backoffLimit on the job), the pod needs an appropriate restartPolicy, and the container needs both resource requests and limits. Wire PGUSER and PGPASSWORD from the orders-db secret via secretKeyRef - never hardcode credentials - plus PGHOST orders-db.shop.svc.cluster.local and PGDATABASE orders as plain values."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders-api\n  namespace: shop\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: orders-api\n  template:\n    metadata:\n      labels:\n        app: orders-api\n    spec:\n      containers:\n        - name: orders-api\n          image: ghcr.io/example/orders-api:1.4.2\n          ports:\n            - containerPort: 8000\n          envFrom:\n            - secretRef:\n                name: orders-db\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/backup-cronjob.yaml",
+      "content_patterns": [
+        "cronjob",
+        "pg_dump",
+        "secretkeyref"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_cronjob.py": "import yaml\n\nwith open(\"k8s/backup-cronjob.yaml\") as f:\n    cj = yaml.safe_load(f)\n\nassert cj[\"apiVersion\"] == \"batch/v1\" and cj[\"kind\"] == \"CronJob\", (\n    f\"expected a batch/v1 CronJob, got {cj.get('apiVersion')}/{cj.get('kind')}\")\nassert cj[\"metadata\"].get(\"namespace\") == \"shop\", \"CronJob must live in the shop namespace\"\n\nspec = cj[\"spec\"]\nassert spec.get(\"schedule\") == \"0 3 * * *\", f\"schedule must be 03:00 daily, got {spec.get('schedule')!r}\"\nassert spec.get(\"concurrencyPolicy\") == \"Forbid\", (\n    \"concurrencyPolicy must be Forbid - overlapping pg_dump runs corrupt the backup window\")\nassert isinstance(spec.get(\"startingDeadlineSeconds\"), int), (\n    \"startingDeadlineSeconds missing - a missed window must not fire hours later\")\nfor key in (\"successfulJobsHistoryLimit\", \"failedJobsHistoryLimit\"):\n    assert isinstance(spec.get(key), int), f\"{key} missing - completed jobs pile up unbounded\"\n\njob_spec = spec[\"jobTemplate\"][\"spec\"]\nassert isinstance(job_spec.get(\"backoffLimit\"), int), \"backoffLimit missing - failed dumps retry forever\"\n\npod_spec = job_spec[\"template\"][\"spec\"]\nassert pod_spec.get(\"restartPolicy\") in (\"Never\", \"OnFailure\"), (\n    f\"restartPolicy must be Never or OnFailure, got {pod_spec.get('restartPolicy')!r}\")\n\ncontainers = pod_spec[\"containers\"]\nassert len(containers) == 1\nc = containers[0]\nassert c[\"image\"].startswith(\"postgres:\"), f\"expected a postgres image, got {c['image']!r}\"\nassert any(\"pg_dump\" in str(part) for part in (c.get(\"command\") or []) + (c.get(\"args\") or [])), (\n    \"the container never runs pg_dump\")\n\nres = c.get(\"resources\") or {}\nassert res.get(\"requests\") and res.get(\"limits\"), (\n    \"resources.requests and resources.limits are both required for scheduled batch pods\")\n\nenv = {e[\"name\"]: e for e in c.get(\"env\", [])}\nassert \"PGPASSWORD\" in env, \"PGPASSWORD env var missing\"\npw = env[\"PGPASSWORD\"]\nassert \"value\" not in pw and (pw.get(\"valueFrom\") or {}).get(\"secretKeyRef\"), (\n    \"PGPASSWORD must come from a secretKeyRef, never a hardcoded literal\")\n\nprint(\"PASS cronjob structural checks\")\n"
+  },
+  "check_command": "python check_cronjob.py",
+  "reference_solution": {
+    "k8s/backup-cronjob.yaml": "apiVersion: batch/v1\nkind: CronJob\nmetadata:\n  name: orders-db-backup\n  namespace: shop\nspec:\n  schedule: \"0 3 * * *\"\n  concurrencyPolicy: Forbid\n  startingDeadlineSeconds: 600\n  successfulJobsHistoryLimit: 3\n  failedJobsHistoryLimit: 3\n  jobTemplate:\n    spec:\n      backoffLimit: 2\n      template:\n        spec:\n          restartPolicy: Never\n          containers:\n            - name: pg-dump\n              image: postgres:16\n              command:\n                - /bin/sh\n                - -c\n                - pg_dump --format=custom --file=/backups/orders-$(date +%Y%m%d).dump \"$PGDATABASE\"\n              env:\n                - name: PGHOST\n                  value: orders-db.shop.svc.cluster.local\n                - name: PGDATABASE\n                  value: orders\n                - name: PGUSER\n                  valueFrom:\n                    secretKeyRef:\n                      name: orders-db\n                      key: username\n                - name: PGPASSWORD\n                  valueFrom:\n                    secretKeyRef:\n                      name: orders-db\n                      key: password\n              resources:\n                requests:\n                  cpu: 100m\n                  memory: 256Mi\n                limits:\n                  cpu: 500m\n                  memory: 512Mi\n              volumeMounts:\n                - name: backups\n                  mountPath: /backups\n          volumes:\n            - name: backups\n              persistentVolumeClaim:\n                claimName: orders-backups\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-scheduling-hygiene",
+      "files": {
+        "k8s/backup-cronjob.yaml": "apiVersion: batch/v1\nkind: CronJob\nmetadata:\n  name: orders-db-backup\n  namespace: shop\nspec:\n  schedule: \"0 3 * * *\"\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          restartPolicy: OnFailure\n          containers:\n            - name: pg-dump\n              image: postgres:16\n              command:\n                - /bin/sh\n                - -c\n                - pg_dump --format=custom --file=/backups/orders-$(date +%Y%m%d).dump \"$PGDATABASE\"\n              env:\n                - name: PGHOST\n                  value: orders-db.shop.svc.cluster.local\n                - name: PGDATABASE\n                  value: orders\n                - name: PGUSER\n                  valueFrom:\n                    secretKeyRef:\n                      name: orders-db\n                      key: username\n                - name: PGPASSWORD\n                  valueFrom:\n                    secretKeyRef:\n                      name: orders-db\n                      key: password\n              volumeMounts:\n                - name: backups\n                  mountPath: /backups\n          volumes:\n            - name: backups\n              persistentVolumeClaim:\n                claimName: orders-backups\n"
+      }
+    },
+    {
+      "name": "hardcoded-password",
+      "files": {
+        "k8s/backup-cronjob.yaml": "apiVersion: batch/v1\nkind: CronJob\nmetadata:\n  name: orders-db-backup\n  namespace: shop\nspec:\n  schedule: \"0 3 * * *\"\n  concurrencyPolicy: Forbid\n  startingDeadlineSeconds: 600\n  successfulJobsHistoryLimit: 3\n  failedJobsHistoryLimit: 3\n  jobTemplate:\n    spec:\n      backoffLimit: 2\n      template:\n        spec:\n          restartPolicy: Never\n          containers:\n            - name: pg-dump\n              image: postgres:16\n              command:\n                - /bin/sh\n                - -c\n                - pg_dump --format=custom --file=/backups/orders-$(date +%Y%m%d).dump \"$PGDATABASE\"\n              env:\n                - name: PGHOST\n                  value: orders-db.shop.svc.cluster.local\n                - name: PGDATABASE\n                  value: orders\n                - name: PGUSER\n                  valueFrom:\n                    secretKeyRef:\n                      name: orders-db\n                      key: username\n                - name: PGPASSWORD\n                  value: sup3rs3cret-orders-pw\n              resources:\n                requests:\n                  cpu: 100m\n                  memory: 256Mi\n                limits:\n                  cpu: 500m\n                  memory: 512Mi\n              volumeMounts:\n                - name: backups\n                  mountPath: /backups\n          volumes:\n            - name: backups\n              persistentVolumeClaim:\n                claimName: orders-backups\n"
+      }
+    }
+  ]
+}

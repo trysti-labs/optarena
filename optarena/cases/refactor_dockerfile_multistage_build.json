@@ -1,0 +1,56 @@
+{
+  "name": "refactor_dockerfile_multistage_build",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Single-stage Dockerfile shipping build-essential in the runtime image -> multi-stage build with a slim runtime stage; structural oracle",
+  "difficulty": 3,
+  "task_type": "devops",
+  "tags": [
+    "docker",
+    "devops",
+    "multi-stage",
+    "image-size",
+    "hardening"
+  ],
+  "prompts": [
+    "The Dockerfile in this workspace builds a FastAPI service, but it installs build-essential and libpq-dev (needed only to compile psycopg2 at pip-install time) into the image that ships to production - bloating it and widening its attack surface. Convert it to a multi-stage build: a builder stage on the full python:3.12 image that installs the build tools and pip- installs requirements.txt (e.g. with --prefix or a venv), and a runtime stage on python:3.12-slim that copies the installed packages from the builder with COPY --from=... and contains NO apt-get installs or build tooling of its own. The runtime behavior must be unchanged: same app code copied in, same EXPOSE 8000, and the same uvicorn app.main:app command on 0.0.0.0:8000."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM python:3.12\nWORKDIR /app\nRUN apt-get update && apt-get install -y build-essential libpq-dev\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY app ./app\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n",
+    "requirements.txt": "fastapi\nuvicorn\npsycopg2\n",
+    "app/main.py": "from fastapi import FastAPI\n\napp = FastAPI()\n\n\n@app.get(\"/health\")\ndef health():\n    return {\"status\": \"ok\"}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "copy --from"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_multistage.py": "import re\nfrom pathlib import Path\n\nraw = Path(\"Dockerfile\").read_text(encoding=\"utf-8\")\njoined = re.sub(r\"\\\\\\s*\\n\", \" \", raw)\nlines = [l.strip() for l in joined.splitlines() if l.strip() and not l.strip().startswith(\"#\")]\n\nfrom_idxs = [i for i, l in enumerate(lines) if l.upper().startswith(\"FROM \")]\nassert len(from_idxs) >= 2, (\n    f\"expected a multi-stage build (>= 2 FROM instructions), found {len(from_idxs)}\")\n\nfinal_from = lines[from_idxs[-1]]\nassert re.search(r\"python:3\\.\\d+-slim\", final_from), (\n    f\"the runtime (final) stage must use a python:3.x-slim base, got: {final_from}\")\n\nbuilder_stage = lines[from_idxs[0]:from_idxs[-1]]\nfinal_stage = lines[from_idxs[-1]:]\n\nbuilder_all = \" \".join(builder_stage)\nassert \"pip install\" in builder_all and \"requirements.txt\" in builder_all, (\n    \"dependencies must still be installed from requirements.txt in the builder stage\")\n\nfinal_all = \" \".join(final_stage)\nfor tool in (\"build-essential\", \"gcc\", \"apt-get install\"):\n    assert tool not in final_all, (\n        f\"the runtime stage still contains {tool!r} - build tooling must stay in the builder stage\")\n\nassert any(re.search(r\"COPY\\s+--from=\", l, re.IGNORECASE) for l in final_stage), (\n    \"the runtime stage never copies the built artifacts (no COPY --from=...)\")\n\ncmd_all = \" \".join(l for l in final_stage if l.upper().startswith((\"CMD \", \"ENTRYPOINT \")))\nfor needle in (\"uvicorn\", \"app.main:app\", \"0.0.0.0\", \"8000\"):\n    assert needle in cmd_all, f\"the runtime CMD changed - missing {needle!r}\"\n\nassert any(l.upper().startswith(\"EXPOSE \") and \"8000\" in l for l in final_stage), (\n    \"EXPOSE 8000 missing from the runtime stage\")\n\nassert any(re.search(r\"^COPY\\s+(--\\S+\\s+)*app\\b\", l, re.IGNORECASE) for l in final_stage) or \\\n       any(re.search(r\"^COPY\\s+(--\\S+\\s+)*\\.\\s\", l, re.IGNORECASE) for l in final_stage), (\n    \"the application code is never copied into the runtime stage\")\n\nprint(\"PASS multi-stage structural checks\")\n"
+  },
+  "check_command": "python check_multistage.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.12 AS builder\nWORKDIR /app\nRUN apt-get update && apt-get install -y build-essential libpq-dev\nCOPY requirements.txt .\nRUN pip install --no-cache-dir --prefix=/install -r requirements.txt\n\nFROM python:3.12-slim\nWORKDIR /app\nCOPY --from=builder /install /usr/local\nCOPY app ./app\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Dockerfile": "FROM python:3.12\nWORKDIR /app\nRUN apt-get update && apt-get install -y build-essential libpq-dev\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY app ./app\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n"
+      }
+    },
+    {
+      "name": "build-tools-in-final-stage",
+      "files": {
+        "Dockerfile": "FROM python:3.12 AS builder\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir --prefix=/install -r requirements.txt\n\nFROM python:3.12-slim\nWORKDIR /app\nRUN apt-get update && apt-get install -y build-essential libpq-dev\nCOPY --from=builder /install /usr/local\nCOPY app ./app\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n"
+      }
+    }
+  ]
+}
