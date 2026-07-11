@@ -1,7 +1,7 @@
 # OptArena Status
 
-_As of 2026-07-11, on `main` (github.com/trysti-labs/optarena); L3 batch 15
-in the working tree._
+_As of 2026-07-11, on `main` (github.com/trysti-labs/optarena), through
+batch 16._
 
 ## Where things stand
 
@@ -9,30 +9,31 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-339 cases**, all new cases shipped with a `reference_solution` and
+343 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
-`verify-corpus` before commit. **The L3 (repo-scale) machinery now exists**:
-the `setup_repo`/`git_init` schema fields, the first shared starter repo
-(`repos/fastapi-tasktracker`), and the first 5 L3 cases on it.
+`verify-corpus` before commit. **The L3 (repo-scale) track is live**: the
+`setup_repo`/`git_init` schema fields, the first shared starter repo
+(`repos/fastapi-tasktracker`), and 9 L3 cases on it spanning 6 task types.
 
-## Corpus census (339 cases)
+## Corpus census (343 cases)
 
 | | |
 |---|---|
-| Total cases | **339** (target 500, 68%) |
-| With `reference_solution` | 235 (69%; 100% of the 219 added this expansion) |
+| Total cases | **343** (target 500, 69%) |
+| With `reference_solution` | 239 (70%; 100% of the 223 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
-| L3 (repo-scale, `setup_repo`) cases | 5 (fastapi-tasktracker) |
+| L3 (repo-scale, `setup_repo`) cases | 9 (fastapi-tasktracker) |
+| Multi-prompt session cases | 2 |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
 
 **By language** (recomputed from the case JSONs' `language` tags - the
-previous census under-counted several tracks): python 73, javascript 45,
+previous census under-counted several tracks): python 76, javascript 45,
 go 27, csharp 25, rust 24, java 24, sql 20, typescript 18, php 13, ruby 13,
-kotlin 12, yaml 11, shell 10, c 7, hcl 5, cpp 3, dockerfile 1, makefile 1 -
+kotlin 12, yaml 11, shell 10, c 7, hcl 5, cpp 3, dockerfile 2, makefile 1 -
 plus 7 language-neutral devops cases.
 
-**By task type:** bug_fix 95, feature 74, refactoring 42, security 39,
-testing 38, performance 23, devops 16, data_engineering 12.
+**By task type:** bug_fix 95, feature 75, refactoring 43, security 39,
+testing 38, performance 23, devops 17, data_engineering 13.
 
 ## Waves shipped (chronology)
 
@@ -50,6 +51,7 @@ Since then:
 | **Rebalance** — security families | 1 | 322 → 328 | Batch 13: six new vuln families, each with a realistic *incomplete-fix* broken — JWT signature-not-verified/alg:none, SSRF host allowlist (ipaddress), Python mass-assignment, secrets-in-logs (nested redaction), open redirect (`//` and `/\`), ReDoS validator (nested-quantifier backtracking); security 32 → 38 |
 | **Rebalance** — testing breadth | 1 | 328 → 334 | Batch 14: six mutation-checked cases on distinct functions (Luhn, Roman numerals, password policy, time-ago, semver compare, median) across go/python/php/ruby/node; testing 31 → 37. verify-corpus caught a stale-`__pycache__` mutation-survival bug and the php-image-has-no-python3 issue pre-commit |
 | **L3 kickoff** - repo-scale machinery + first repo | 1 | 334 → 339 | Batch 15: the `setup_repo` + `git_init` schema fields (`prepare_workspace` in cases.py, wired through all four drivers and verify.py), the first shared starter repo `repos/fastapi-tasktracker` (35 files: FastAPI + SQLAlchemy 2.0 + alembic + pytest, layered models/schemas/crud/services/routers, portless TestClient, file-based SQLite), and 5 L3 cases on it: Comment sub-resource feature (cross-layer, 7 files), due_date end-to-end feature (model + schemas + crud + a real `alembic upgrade head` proven by the hidden test), shared-pagination refactor (3 crud modules -> 1 helper), mutation-checked tests for the repo's `progress_summary` service, and a raw-SQL injection fix with a strips-`;`-and-`--`-only incomplete-fix broken. git added to the python image for `git_init` |
+| **L3 depth** - lagging categories on the same repo | 1 | 339 → 343 | Batch 16, all on fastapi-tasktracker: project-archiving **multi-prompt session** (2 prompts: archive endpoint + default-list filter, then `include_archived` param + 409 guard on task creation - the corpus's 2nd multi-prompt case), lookup-or-404 helper-extraction refactor across 3 routers (broken: homogenized 404 details drift), a **devops** containerization case (production Dockerfile + .dockerignore with a structural oracle: slim base, `--no-cache-dir`, non-root USER *after* the install layer, uvicorn CMD, no `--reload`), and a **data_engineering** CSV export with RFC-4180 quoting (broken: naive comma-join corrupted by hostile titles). verify-corpus caught a missing `crud/__init__` re-export in the archiving reference pre-commit |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -105,17 +107,20 @@ L3 mutation/check harnesses are also written portably (`sys.executable`,
 list-args subprocess, `-B`) instead of `python3` + POSIX env-prefix, so they
 run identically in the Linux sandbox and on a bare Windows host.
 
-## Remaining to 500 (161 cases)
+## Remaining to 500 (157 cases)
 
-**L3 (repo-scale) is now unblocked and started.** The `setup_repo`/`git_init`
-schema fields exist (see `prepare_workspace` in cases.py; documented in the
-module docstring), the first starter repo `repos/fastapi-tasktracker` is live
-with 5 verified cases, and the pattern is proven end to end. Next L3 steps:
-grow fastapi-tasktracker toward ~6-8 tasks (a performance case - e.g. an N+1
-query - needs in-container calibration first, per the perf-case protocol),
-then the next starter repos from the plan's Wave D list (Express+TS, Spring
-multi-module, Gin, Axum, ASP.NET, Rails, Laravel). Remaining
-work after L3, per the plan's [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies):
+**L3 (repo-scale) is live.** The `setup_repo`/`git_init` schema fields exist
+(see `prepare_workspace` in cases.py; documented in the module docstring),
+and the first starter repo `repos/fastapi-tasktracker` carries 9 verified
+cases across 6 task types (feature x3 incl. a multi-prompt session,
+refactoring x2, testing, security, devops, data_engineering) - at the plan's
+~6-8-tasks-per-repo target. Next L3 steps: an L3 performance case (e.g. an
+N+1 query - needs in-container calibration first, per the perf-case
+protocol), then the next starter repos from the plan's Wave D list
+(Express+TS, Spring multi-module, Gin, Axum, ASP.NET, Rails, Laravel) - the
+next repo should target a non-python image to prove setup_repo across
+toolchains. Remaining work after L3, per the plan's
+[wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies):
 
 1. **More Wave D depth** — every big track now has a stdlib-seam layer
    (Python, Node/JS, Rust, C#, Go, Java, TS all covered); Kotlin/PHP/Ruby at
@@ -126,10 +131,10 @@ work after L3, per the plan's [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-wav
 3. **Wave F + moat hardening** — private held-out slice, paraphrase variants,
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
-Rebalance note: **bug_fix is at target (95/95) - stop adding it** (the L3
-batch deliberately shipped zero). After batch 15 the categories still
-furthest behind are **performance (23/45), devops (16/45), feature (74/95),
-testing (38/65), and refactoring (42/70)**; data_engineering (12/15) and
+Rebalance note: **bug_fix is at target (95/95) - stop adding it** (both L3
+batches deliberately shipped zero). After batch 16 the categories still
+furthest behind are **performance (23/45), devops (17/45), feature (75/95),
+testing (38/65), and refactoring (43/70)**; data_engineering (13/15) and
 security (39/55) are closing in. Next levers: calibrated performance cases
 (including L3 ones once probed in-container), further devops/CI breadth,
-and more L3 tasks per repo - the L3 machinery is no longer a blocker.
+and the next starter repos - the L3 machinery is no longer a blocker.
