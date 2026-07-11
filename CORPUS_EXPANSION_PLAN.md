@@ -114,6 +114,21 @@ amount of one-time schema/harness support (noted):
 8. **Migration families** - callback→promise/async, React class→hooks,
    Python 2-isms, `var`→`const`. No schema change.
 
+## Progress (updated 2026-07-11)
+
+**Wave D's L3 machinery is now built and proven** (batch 15, corpus 334 →
+339): the `setup_repo` + `git_init` schema fields (`prepare_workspace` in
+cases.py, wired through every driver and verify-corpus), the first shared
+starter repo `repos/fastapi-tasktracker` (FastAPI + SQLAlchemy 2.0 + alembic
++ pytest, 35 files), and its first 5 L3 cases - feature x2 (Comment
+sub-resource; due_date incl. a real `alembic upgrade head` oracle),
+refactoring, mutation-checked testing, and a SQL-injection security case
+with an incomplete-fix broken variant. The unmodified-must-fail gate now
+also covers setup_repo-only cases, and `snapshot()` moved to content-hash
+signatures (the old size:mtime signature was flaky for same-size rewrites on
+coarse-mtime filesystems). See status.md for the batch-by-batch log since
+Wave A.
+
 ## Progress (updated 2026-07-09)
 
 **Wave A shipped in full (+70) plus a devops rebalance batch (+9): corpus
