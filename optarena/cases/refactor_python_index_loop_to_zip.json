@@ -1,0 +1,50 @@
+{
+  "name": "refactor_python_index_loop_to_zip",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "range(len(...)) parallel-list indexing -> zip, behavior-preserving; drift broken rounds per line instead of once at the end",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "python",
+    "refactoring",
+    "idiomatic",
+    "zip"
+  ],
+  "prompts": [
+    "billing.py iterates parallel lists the C way: `for i in range(len(...))` with repeated indexing, in both order_total and receipt_lines. Refactor both functions to iterate with zip() (a comprehension is fine for receipt_lines) and no index variable - after the change the file must not contain `range(len(` at all. This is a pure refactor: outputs must be byte-identical for every input, including that order_total keeps rounding ONCE at the end (do not introduce per-line rounding) and receipt_lines keeps its exact format and order. Keep both function names and signatures."
+  ],
+  "setup_files": {
+    "billing.py": "def order_total(prices, quantities, discounts):\n    \"\"\"Total cost of an order, rounded to 2 decimal places ONCE at the end.\n\n    The three lists are parallel: line i sells quantities[i] units at\n    prices[i] each, with discounts[i] (a 0..1 fraction) off that line.\n    \"\"\"\n    total = 0.0\n    for i in range(len(prices)):\n        total += prices[i] * quantities[i] * (1 - discounts[i])\n    return round(total, 2)\n\n\ndef receipt_lines(names, prices, quantities):\n    \"\"\"One 'name x qty @ price' string per line item, in order.\"\"\"\n    lines = []\n    for i in range(len(names)):\n        lines.append(f\"{names[i]} x{quantities[i]} @ {prices[i]:.2f}\")\n    return lines\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "billing.py",
+      "content_patterns": [
+        "zip("
+      ],
+      "not_content_patterns": [
+        "range(len("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_billing_hidden.py": "from billing import order_total, receipt_lines\n\n\ndef test_total_rounds_once_at_the_end():\n    # each line is 0.333; per-line rounding would give 0.33 * 3 = 0.99\n    assert order_total([0.333, 0.333, 0.333], [1, 1, 1], [0, 0, 0]) == 1.0\n\n\ndef test_total_with_discounts():\n    assert order_total([10.0, 4.0], [2, 3], [0.25, 0.0]) == 27.0\n\n\ndef test_total_empty_order():\n    assert order_total([], [], []) == 0.0\n\n\ndef test_receipt_lines_format_and_order():\n    got = receipt_lines([\"apple\", \"pear\"], [1.5, 0.25], [3, 12])\n    assert got == [\"apple x3 @ 1.50\", \"pear x12 @ 0.25\"]\n\n\ndef test_receipt_lines_empty():\n    assert receipt_lines([], [], []) == []\n"
+  },
+  "check_command": "python -m pytest -q test_billing_hidden.py",
+  "reference_solution": {
+    "billing.py": "def order_total(prices, quantities, discounts):\n    \"\"\"Total cost of an order, rounded to 2 decimal places ONCE at the end.\n\n    The three lists are parallel: line i sells quantities[i] units at\n    prices[i] each, with discounts[i] (a 0..1 fraction) off that line.\n    \"\"\"\n    total = 0.0\n    for price, quantity, discount in zip(prices, quantities, discounts):\n        total += price * quantity * (1 - discount)\n    return round(total, 2)\n\n\ndef receipt_lines(names, prices, quantities):\n    \"\"\"One 'name x qty @ price' string per line item, in order.\"\"\"\n    return [\n        f\"{name} x{quantity} @ {price:.2f}\"\n        for name, price, quantity in zip(names, prices, quantities)\n    ]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "per-line-rounding-drift",
+      "files": {
+        "billing.py": "def order_total(prices, quantities, discounts):\n    \"\"\"Total cost of an order, rounded to 2 decimal places ONCE at the end.\n\n    The three lists are parallel: line i sells quantities[i] units at\n    prices[i] each, with discounts[i] (a 0..1 fraction) off that line.\n    \"\"\"\n    total = 0.0\n    for price, quantity, discount in zip(prices, quantities, discounts):\n        total += round(price * quantity * (1 - discount), 2)\n    return round(total, 2)\n\n\ndef receipt_lines(names, prices, quantities):\n    \"\"\"One 'name x qty @ price' string per line item, in order.\"\"\"\n    return [\n        f\"{name} x{quantity} @ {price:.2f}\"\n        for name, price, quantity in zip(names, prices, quantities)\n    ]\n"
+      }
+    }
+  ]
+}

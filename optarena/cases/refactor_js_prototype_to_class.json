@@ -1,0 +1,51 @@
+{
+  "name": "refactor_js_prototype_to_class",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Constructor-function + prototype methods -> ES class, behavior-preserving; drift broken loses the static on the factory method",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "javascript",
+    "node",
+    "refactoring",
+    "es-class",
+    "migration"
+  ],
+  "prompts": [
+    "wallet.js implements Wallet the pre-ES2015 way: a constructor function, methods assigned to Wallet.prototype, and a factory attached directly to the constructor (Wallet.fromCents). Refactor it to an ES class: constructor, instance methods deposit/withdraw/balance, and fromCents as a STATIC method - with no `prototype` assignments left in the file. This is a pure refactor: the module still exports { Wallet }, deposit/withdraw still validate and chain (return this) with the exact same RangeError messages, balance() still returns the same fixed-2 string, and Wallet.fromCents(owner, cents) must still be callable on the constructor itself and return a Wallet instance."
+  ],
+  "setup_files": {
+    "wallet.js": "function Wallet(owner, cents) {\n  this.owner = owner;\n  this.cents = cents;\n}\n\nWallet.prototype.deposit = function (amount) {\n  if (!Number.isInteger(amount) || amount <= 0) {\n    throw new RangeError(\"deposit must be a positive integer of cents\");\n  }\n  this.cents += amount;\n  return this;\n};\n\nWallet.prototype.withdraw = function (amount) {\n  if (!Number.isInteger(amount) || amount <= 0) {\n    throw new RangeError(\"withdrawal must be a positive integer of cents\");\n  }\n  if (amount > this.cents) {\n    throw new RangeError(\"insufficient funds\");\n  }\n  this.cents -= amount;\n  return this;\n};\n\nWallet.prototype.balance = function () {\n  return (this.cents / 100).toFixed(2);\n};\n\nWallet.fromCents = function (owner, cents) {\n  return new Wallet(owner, cents);\n};\n\nmodule.exports = { Wallet };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "wallet.js",
+      "regex_patterns": [
+        "class\\s+Wallet"
+      ],
+      "not_content_patterns": [
+        "prototype"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_wallet_hidden.js": "const assert = require(\"node:assert\");\nconst { Wallet } = require(\"./wallet\");\n\n// construction + chaining\nconst w = new Wallet(\"ada\", 1000);\nassert.strictEqual(w.owner, \"ada\");\nassert.strictEqual(w.deposit(250).withdraw(750).balance(), \"5.00\");\n\n// static factory stays on the constructor\nconst w2 = Wallet.fromCents(\"bob\", 42);\nassert.ok(w2 instanceof Wallet);\nassert.strictEqual(w2.balance(), \"0.42\");\n\n// error contract preserved\nassert.throws(() => w.deposit(0), RangeError);\nassert.throws(() => w.deposit(1.5), RangeError);\nassert.throws(() => w.withdraw(999999), RangeError);\nassert.throws(() => w.withdraw(-1), RangeError);\n\n// balance formatting\nassert.strictEqual(new Wallet(\"c\", 5).balance(), \"0.05\");\nassert.strictEqual(new Wallet(\"d\", 0).balance(), \"0.00\");\n\nconsole.log(\"PASS wallet behavior checks\");\n"
+  },
+  "check_command": "node test_wallet_hidden.js",
+  "reference_solution": {
+    "wallet.js": "class Wallet {\n  constructor(owner, cents) {\n    this.owner = owner;\n    this.cents = cents;\n  }\n\n  static fromCents(owner, cents) {\n    return new Wallet(owner, cents);\n  }\n\n  deposit(amount) {\n    if (!Number.isInteger(amount) || amount <= 0) {\n      throw new RangeError(\"deposit must be a positive integer of cents\");\n    }\n    this.cents += amount;\n    return this;\n  }\n\n  withdraw(amount) {\n    if (!Number.isInteger(amount) || amount <= 0) {\n      throw new RangeError(\"withdrawal must be a positive integer of cents\");\n    }\n    if (amount > this.cents) {\n      throw new RangeError(\"insufficient funds\");\n    }\n    this.cents -= amount;\n    return this;\n  }\n\n  balance() {\n    return (this.cents / 100).toFixed(2);\n  }\n}\n\nmodule.exports = { Wallet };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "static-lost-in-translation",
+      "files": {
+        "wallet.js": "class Wallet {\n  constructor(owner, cents) {\n    this.owner = owner;\n    this.cents = cents;\n  }\n\n  fromCents(owner, cents) {\n    return new Wallet(owner, cents);\n  }\n\n  deposit(amount) {\n    if (!Number.isInteger(amount) || amount <= 0) {\n      throw new RangeError(\"deposit must be a positive integer of cents\");\n    }\n    this.cents += amount;\n    return this;\n  }\n\n  withdraw(amount) {\n    if (!Number.isInteger(amount) || amount <= 0) {\n      throw new RangeError(\"withdrawal must be a positive integer of cents\");\n    }\n    if (amount > this.cents) {\n      throw new RangeError(\"insufficient funds\");\n    }\n    this.cents -= amount;\n    return this;\n  }\n\n  balance() {\n    return (this.cents / 100).toFixed(2);\n  }\n}\n\nmodule.exports = { Wallet };\n"
+      }
+    }
+  ]
+}
