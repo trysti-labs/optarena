@@ -1,0 +1,61 @@
+{
+  "name": "add_github_actions_cache_concurrency",
+  "language": "yaml",
+  "framework": "github-actions",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Adds npm dependency caching and a cancel-in-progress concurrency group to a CI workflow",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "github-actions",
+    "caching",
+    "yaml"
+  ],
+  "prompts": [
+    "The CI workflow .github/workflows/ci.yml re-downloads npm dependencies on every run and lets redundant runs pile up. Improve it two ways: (1) enable npm dependency caching - either set `cache: 'npm'` in the actions/setup-node step's `with:`, or add an actions/cache step; (2) add a top-level `concurrency:` block with a `group` (keyed on the workflow and ref, e.g. ${{ github.workflow }}-${{ github.ref }}) and `cancel-in-progress: true` so a new push cancels an in-progress run. Keep the triggers, the `test` job, and its `npm ci` / `npm test` steps."
+  ],
+  "setup_files": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/ci.yml",
+      "content_patterns": [
+        "concurrency",
+        "cancel-in-progress",
+        "cache"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_cache.py": "import yaml\n\nwith open('.github/workflows/ci.yml') as f:\n    wf = yaml.safe_load(f)\n\nconc = wf.get('concurrency')\nassert conc, 'no top-level concurrency block'\nassert isinstance(conc, dict), f'concurrency should be a mapping, got {conc!r}'\nassert conc.get('group'), 'concurrency.group is missing'\nassert conc.get('cancel-in-progress') is True, 'concurrency.cancel-in-progress must be true'\n\njob = wf['jobs']['test']\nsteps = job['steps']\ncached = False\nfor s in steps:\n    uses = s.get('uses', '')\n    if uses.startswith('actions/setup-node') and (s.get('with') or {}).get('cache') == 'npm':\n        cached = True\n    if uses.startswith('actions/cache'):\n        cached = True\nassert cached, 'no npm dependency caching (setup-node cache: npm, or an actions/cache step)'\n\n# behavior preserved\nruns = [s.get('run', '') for s in steps]\nassert any('npm ci' in r for r in runs), 'the npm ci step was removed'\nassert any('npm test' in r for r in runs), 'the npm test step was removed'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_cache.py",
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\nconcurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: true\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n          cache: 'npm'\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-no-cache-no-concurrency",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n      - run: npm ci\n      - run: npm test\n"
+      }
+    },
+    {
+      "name": "cache-but-no-concurrency",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n          cache: 'npm'\n      - run: npm ci\n      - run: npm test\n"
+      }
+    },
+    {
+      "name": "concurrency-without-cancel",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\nconcurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n          cache: 'npm'\n      - run: npm ci\n      - run: npm test\n"
+      }
+    }
+  ]
+}

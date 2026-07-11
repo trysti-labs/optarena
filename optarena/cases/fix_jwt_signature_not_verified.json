@@ -1,0 +1,48 @@
+{
+  "name": "fix_jwt_signature_not_verified",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes a JWT verifier that decodes the payload without checking the HMAC signature or rejecting alg:none",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "jwt",
+    "authentication"
+  ],
+  "prompts": [
+    "verify(token) in auth.py is supposed to authenticate an HS256 JWT and return its payload only if the token is genuine, but it just base64-decodes and returns the payload WITHOUT verifying anything - so an attacker can forge any payload, or send an alg:none token with an empty signature, and be trusted. Fix verify so it: (1) rejects the token unless the header's alg is exactly \"HS256\" (never trust alg:none); (2) recomputes the HMAC-SHA256 signature over \"<header_b64>.<payload_b64>\" using SECRET and compares it to the token's signature with a constant-time comparison (hmac.compare_digest); (3) returns the decoded payload dict only when the signature matches, otherwise returns None. Keep the SECRET, the _b64url_decode helper, and the verify(token) signature."
+  ],
+  "setup_files": {
+    "auth.py": "import base64\nimport json\n\nSECRET = b\"top-secret-signing-key\"\n\n\ndef _b64url_decode(segment):\n    pad = \"=\" * (-len(segment) % 4)\n    return base64.urlsafe_b64decode(segment + pad)\n\n\ndef verify(token):\n    \"\"\"Return the token's payload dict if valid, else None.\n\n    BUG: this decodes the payload WITHOUT verifying the HMAC signature and\n    without checking the algorithm, so anyone can forge a token (including an\n    alg:none token with no signature) and have it accepted.\n    \"\"\"\n    try:\n        header_b64, payload_b64, sig_b64 = token.split(\".\")\n    except ValueError:\n        return None\n    return json.loads(_b64url_decode(payload_b64))\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "auth.py",
+      "content_patterns": [
+        "def verify",
+        "hmac"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_auth.py": "import base64\nimport hashlib\nimport hmac\nimport json\n\nimport auth\n\n\ndef _b64(raw):\n    return base64.urlsafe_b64encode(raw).rstrip(b\"=\").decode()\n\n\ndef make_token(payload, alg=\"HS256\", secret=None):\n    secret = auth.SECRET if secret is None else secret\n    header = {\"alg\": alg, \"typ\": \"JWT\"}\n    signing = _b64(json.dumps(header, separators=(\",\", \":\")).encode()) + \".\" + _b64(\n        json.dumps(payload, separators=(\",\", \":\")).encode())\n    sig = _b64(hmac.new(secret, signing.encode(), hashlib.sha256).digest())\n    return signing + \".\" + sig\n\n\ndef test_accepts_valid_token():\n    assert auth.verify(make_token({\"user\": \"ada\"})) == {\"user\": \"ada\"}\n\n\ndef test_rejects_tampered_payload():\n    token = make_token({\"user\": \"ada\", \"admin\": False})\n    header_b64, _payload_b64, sig_b64 = token.split(\".\")\n    forged = _b64(json.dumps({\"user\": \"ada\", \"admin\": True}, separators=(\",\", \":\")).encode())\n    assert auth.verify(header_b64 + \".\" + forged + \".\" + sig_b64) is None\n\n\ndef test_rejects_alg_none():\n    header = {\"alg\": \"none\", \"typ\": \"JWT\"}\n    signing = _b64(json.dumps(header, separators=(\",\", \":\")).encode()) + \".\" + _b64(\n        json.dumps({\"user\": \"admin\"}, separators=(\",\", \":\")).encode())\n    assert auth.verify(signing + \".\") is None\n\n\ndef test_rejects_wrong_secret():\n    assert auth.verify(make_token({\"user\": \"ada\"}, secret=b\"attacker-key\")) is None\n"
+  },
+  "check_command": "python3 -m pytest -q test_auth.py",
+  "reference_solution": {
+    "auth.py": "import base64\nimport hashlib\nimport hmac\nimport json\n\nSECRET = b\"top-secret-signing-key\"\n\n\ndef _b64url_decode(segment):\n    pad = \"=\" * (-len(segment) % 4)\n    return base64.urlsafe_b64decode(segment + pad)\n\n\ndef verify(token):\n    \"\"\"Return the token's payload dict if the HS256 signature is valid, else None.\"\"\"\n    try:\n        header_b64, payload_b64, sig_b64 = token.split(\".\")\n    except ValueError:\n        return None\n    try:\n        header = json.loads(_b64url_decode(header_b64))\n    except Exception:\n        return None\n    if header.get(\"alg\") != \"HS256\":\n        return None\n    signing = (header_b64 + \".\" + payload_b64).encode()\n    expected = hmac.new(SECRET, signing, hashlib.sha256).digest()\n    try:\n        actual = _b64url_decode(sig_b64)\n    except Exception:\n        return None\n    if not hmac.compare_digest(expected, actual):\n        return None\n    try:\n        return json.loads(_b64url_decode(payload_b64))\n    except Exception:\n        return None\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "checks-alg-not-signature",
+      "files": {
+        "auth.py": "import base64\nimport hmac  # noqa: F401\nimport json\n\nSECRET = b\"top-secret-signing-key\"\n\n\ndef _b64url_decode(segment):\n    pad = \"=\" * (-len(segment) % 4)\n    return base64.urlsafe_b64decode(segment + pad)\n\n\ndef verify(token):\n    # INCOMPLETE FIX: rejects alg:none but STILL never verifies the signature,\n    # so a tampered payload with alg HS256 is accepted.\n    try:\n        header_b64, payload_b64, sig_b64 = token.split(\".\")\n    except ValueError:\n        return None\n    header = json.loads(_b64url_decode(header_b64))\n    if header.get(\"alg\") != \"HS256\":\n        return None\n    return json.loads(_b64url_decode(payload_b64))\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+# Shared L3 starter repos are byte-copied into the Linux sandbox by
+# cases.prepare_workspace (setup_repo) - a CRLF checkout on a Windows host
+# would leak \r into the sandboxed workspace, so pin them to LF everywhere.
+repos/** text eol=lf

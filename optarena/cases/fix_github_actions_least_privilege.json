@@ -1,0 +1,57 @@
+{
+  "name": "fix_github_actions_least_privilege",
+  "language": "yaml",
+  "framework": "github-actions",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Replaces an over-broad `permissions: write-all` GITHUB_TOKEN grant with a least-privilege contents:read block",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "github-actions",
+    "security",
+    "yaml"
+  ],
+  "prompts": [
+    "The workflow .github/workflows/deploy.yml grants the GITHUB_TOKEN `permissions: write-all`, far more than it needs (it only checks out the repo and runs a script). Apply least privilege: replace the top-level `permissions: write-all` with a `permissions:` mapping that grants only `contents: read` (no scope should be write). Do not change the workflow `name`, the `on:` triggers, or the `jobs`."
+  ],
+  "setup_files": {
+    ".github/workflows/deploy.yml": "name: Deploy\non:\n  push:\n    branches: [main]\npermissions: write-all\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./deploy.sh\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/deploy.yml",
+      "content_patterns": [
+        "permissions",
+        "contents"
+      ],
+      "not_content_patterns": [
+        "write-all"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_perms.py": "import yaml\n\nwith open('.github/workflows/deploy.yml') as f:\n    wf = yaml.safe_load(f)\n\nperms = wf.get('permissions')\nassert perms is not None, 'no top-level permissions block'\nassert perms != 'write-all', 'permissions is still write-all (over-broad)'\nassert isinstance(perms, dict), f'permissions should be a mapping of scopes, got {perms!r}'\nassert perms.get('contents') == 'read', f\"contents should be 'read', got {perms.get('contents')!r}\"\nwrites = [k for k, v in perms.items() if v == 'write']\nassert not writes, f'a read-only workflow should grant no write scopes: {writes}'\n\n# unchanged structure\nassert wf.get('name') == 'Deploy', 'workflow name changed'\non = wf.get('on') or wf.get(True)\nassert on, 'on: triggers removed'\nassert 'deploy' in wf.get('jobs', {}), 'deploy job removed'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_perms.py",
+  "reference_solution": {
+    ".github/workflows/deploy.yml": "name: Deploy\non:\n  push:\n    branches: [main]\npermissions:\n  contents: read\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./deploy.sh\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-write-all",
+      "files": {
+        ".github/workflows/deploy.yml": "name: Deploy\non:\n  push:\n    branches: [main]\npermissions: write-all\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./deploy.sh\n"
+      }
+    },
+    {
+      "name": "still-grants-write",
+      "files": {
+        ".github/workflows/deploy.yml": "name: Deploy\non:\n  push:\n    branches: [main]\npermissions:\n  contents: write\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./deploy.sh\n"
+      }
+    }
+  ]
+}

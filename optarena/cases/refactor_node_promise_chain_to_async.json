@@ -1,0 +1,53 @@
+{
+  "name": "refactor_node_promise_chain_to_async",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Refactors nested Promise .then() chains into async/await while preserving results and error propagation",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "javascript",
+    "node",
+    "refactoring",
+    "async-await",
+    "multi-file"
+  ],
+  "prompts": [
+    "buildSummary(userId) in pipeline.js chains Promises with nested .then() calls: it fetches a user, then that user's orders, then summarizes them (the three step functions come from ./steps.js and each returns a Promise). Refactor buildSummary to use async/await instead of .then() chaining. Preserve behavior exactly: it still returns a Promise resolving to the same summary object, and a rejection from any step (e.g. an unknown user) must still propagate to the caller (do NOT swallow errors). Keep the module export and the buildSummary(userId) signature. Do not modify steps.js."
+  ],
+  "setup_files": {
+    "steps.js": "const USERS = { 1: { id: 1, name: 'Ada' } };\nconst ORDERS = { 1: [{ amount: 10 }, { amount: 20 }] };\n\nfunction fetchUser(id) {\n  return new Promise((resolve, reject) => {\n    setImmediate(() => (USERS[id] ? resolve(USERS[id]) : reject(new Error('no such user'))));\n  });\n}\n\nfunction fetchOrders(userId) {\n  return new Promise((resolve) => setImmediate(() => resolve(ORDERS[userId] || [])));\n}\n\nfunction summarize(user, orders) {\n  return Promise.resolve({\n    name: user.name,\n    orderCount: orders.length,\n    total: orders.reduce((s, o) => s + o.amount, 0),\n  });\n}\n\nmodule.exports = { fetchUser, fetchOrders, summarize };\n",
+    "pipeline.js": "const { fetchUser, fetchOrders, summarize } = require('./steps.js');\n\nfunction buildSummary(userId) {\n  return fetchUser(userId).then((user) =>\n    fetchOrders(user.id).then((orders) => summarize(user, orders))\n  );\n}\n\nmodule.exports = { buildSummary };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pipeline.js",
+      "content_patterns": [
+        "async",
+        "buildsummary"
+      ],
+      "not_content_patterns": [
+        ".then("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "behavior_test.js": "const assert = require('node:assert');\nconst { buildSummary } = require('./pipeline.js');\n\n(async () => {\n  const summary = await buildSummary(1);\n  assert.deepStrictEqual(summary, { name: 'Ada', orderCount: 2, total: 30 });\n\n  // a rejection must propagate, not be swallowed\n  await assert.rejects(() => buildSummary(999), /no such user/);\n\n  console.log('ok');\n})().catch((err) => {\n  console.error(err);\n  process.exit(1);\n});\n"
+  },
+  "check_command": "node behavior_test.js",
+  "reference_solution": {
+    "pipeline.js": "const { fetchUser, fetchOrders, summarize } = require('./steps.js');\n\nasync function buildSummary(userId) {\n  const user = await fetchUser(userId);\n  const orders = await fetchOrders(user.id);\n  return summarize(user, orders);\n}\n\nmodule.exports = { buildSummary };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "swallows-errors",
+      "files": {
+        "pipeline.js": "const { fetchUser, fetchOrders, summarize } = require('./steps.js');\n\nasync function buildSummary(userId) {\n  // DRIFT: a try/catch swallows step errors and resolves null instead of\n  // propagating the rejection.\n  try {\n    const user = await fetchUser(userId);\n    const orders = await fetchOrders(user.id);\n    return await summarize(user, orders);\n  } catch (err) {\n    return null;\n  }\n}\n\nmodule.exports = { buildSummary };\n"
+      }
+    }
+  ]
+}

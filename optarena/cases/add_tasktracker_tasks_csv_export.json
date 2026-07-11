@@ -1,0 +1,48 @@
+{
+  "name": "add_tasktracker_tasks_csv_export",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "setup_repo": "fastapi-tasktracker",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "description": "L3 repo-scale data_engineering: CSV export endpoint for a project's tasks with RFC-4180 quoting; broken variant does a naive comma-join",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "python",
+    "fastapi",
+    "csv",
+    "l3",
+    "repo-scale",
+    "export"
+  ],
+  "prompts": [
+    "In this fastapi-tasktracker repo, add a CSV export of a project's tasks: GET /projects/{project_id}/tasks.csv on the existing projects router. It returns 404 (via HTTPException, like the neighbouring endpoints) when the project doesn't exist; otherwise a text/csv response whose first line is the header id,title,status,priority,assignee_id followed by one row per task of that project ordered by id. Fields must be properly CSV-quoted (RFC 4180 - titles can contain commas, double quotes, and newlines; use Python's csv module rather than joining strings by hand), status is the task's string value (e.g. todo), and a task without an assignee gets an empty cell (not the text None). A project with no tasks returns just the header line."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "*/routers/projects.py",
+      "content_patterns": [
+        "tasks.csv"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_csv_export_hidden.py": "import csv\nimport io\n\n\nHEADER = [\"id\", \"title\", \"status\", \"priority\", \"assignee_id\"]\n\n\ndef _mk_project(client, name):\n    user = client.post(\n        \"/users\", json={\"username\": f\"u{name}\", \"email\": f\"{name}@example.com\"}\n    ).json()\n    project = client.post(\"/projects\", json={\"name\": name, \"owner_id\": user[\"id\"]}).json()\n    return user, project\n\n\ndef test_csv_export_quotes_hostile_titles(client):\n    user, project = _mk_project(client, \"Csv\")\n    titles = [\"plain\", \"has, comma\", 'has \"quotes\"', \"multi\\nline\"]\n    ids = []\n    for i, title in enumerate(titles):\n        body = {\"title\": title, \"project_id\": project[\"id\"]}\n        if i == 0:\n            body[\"assignee_id\"] = user[\"id\"]\n        ids.append(client.post(\"/tasks\", json=body).json()[\"id\"])\n\n    resp = client.get(f\"/projects/{project['id']}/tasks.csv\")\n    assert resp.status_code == 200\n    assert resp.headers[\"content-type\"].startswith(\"text/csv\")\n\n    rows = list(csv.reader(io.StringIO(resp.text)))\n    assert rows[0] == HEADER, rows[0]\n    assert len(rows) == 5, f\"expected header + 4 rows, got {rows}\"\n    assert [r[1] for r in rows[1:]] == titles\n    assert rows[1] == [str(ids[0]), \"plain\", \"todo\", \"3\", str(user[\"id\"])]\n    assert rows[2][4] == \"\"            # unassigned -> empty cell, not \"None\"\n\n\ndef test_csv_export_unknown_project_404(client):\n    assert client.get(\"/projects/999999/tasks.csv\").status_code == 404\n\n\ndef test_csv_export_empty_project_is_header_only(client):\n    _user, project = _mk_project(client, \"Empty\")\n    resp = client.get(f\"/projects/{project['id']}/tasks.csv\")\n    assert resp.status_code == 200\n    rows = list(csv.reader(io.StringIO(resp.text)))\n    assert rows == [HEADER], rows\n"
+  },
+  "check_command": "python -m pytest tests/ -q",
+  "reference_solution": {
+    "app/routers/projects.py": "from __future__ import annotations\n\nimport csv\nimport io\n\nfrom fastapi import APIRouter, Depends, HTTPException, Response\nfrom sqlalchemy.orm import Session\n\nfrom app import crud, schemas\nfrom app.db.session import get_db\nfrom app.services.stats import progress_summary\n\nrouter = APIRouter(prefix=\"/projects\", tags=[\"projects\"])\n\n\n@router.post(\"\", response_model=schemas.ProjectOut, status_code=201)\ndef create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):\n    return crud.create_project(db, payload)\n\n\n@router.get(\"\", response_model=list[schemas.ProjectOut])\ndef list_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):\n    return crud.list_projects(db, skip=skip, limit=limit)\n\n\n@router.get(\"/{project_id}\", response_model=schemas.ProjectOut)\ndef get_project(project_id: int, db: Session = Depends(get_db)):\n    project = crud.get_project(db, project_id)\n    if project is None:\n        raise HTTPException(status_code=404, detail=\"project not found\")\n    return project\n\n\n@router.get(\"/{project_id}/tasks\", response_model=list[schemas.TaskOut])\ndef list_project_tasks(project_id: int, db: Session = Depends(get_db)):\n    project = crud.get_project(db, project_id)\n    if project is None:\n        raise HTTPException(status_code=404, detail=\"project not found\")\n    return crud.list_tasks(db, project_id=project_id)\n\n\n@router.get(\"/{project_id}/tasks.csv\")\ndef export_project_tasks_csv(project_id: int, db: Session = Depends(get_db)):\n    project = crud.get_project(db, project_id)\n    if project is None:\n        raise HTTPException(status_code=404, detail=\"project not found\")\n    tasks = crud.list_tasks(db, project_id=project_id)\n    buf = io.StringIO()\n    writer = csv.writer(buf)\n    writer.writerow([\"id\", \"title\", \"status\", \"priority\", \"assignee_id\"])\n    for t in tasks:\n        writer.writerow([\n            t.id, t.title, t.status.value, t.priority,\n            \"\" if t.assignee_id is None else t.assignee_id,\n        ])\n    return Response(content=buf.getvalue(), media_type=\"text/csv\")\n\n\n@router.get(\"/{project_id}/progress\")\ndef project_progress(project_id: int, db: Session = Depends(get_db)):\n    project = crud.get_project(db, project_id)\n    if project is None:\n        raise HTTPException(status_code=404, detail=\"project not found\")\n    tasks = crud.list_tasks(db, project_id=project_id)\n    return progress_summary([t.status for t in tasks])\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "naive-comma-join",
+      "files": {
+        "app/routers/projects.py": "from __future__ import annotations\n\nimport csv\nimport io\n\nfrom fastapi import APIRouter, Depends, HTTPException, Response\nfrom sqlalchemy.orm import Session\n\nfrom app import crud, schemas\nfrom app.db.session import get_db\nfrom app.services.stats import progress_summary\n\nrouter = APIRouter(prefix=\"/projects\", tags=[\"projects\"])\n\n\n@router.post(\"\", response_model=schemas.ProjectOut, status_code=201)\ndef create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)):\n    return crud.create_project(db, payload)\n\n\n@router.get(\"\", response_model=list[schemas.ProjectOut])\ndef list_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):\n    return crud.list_projects(db, skip=skip, limit=limit)\n\n\n@router.get(\"/{project_id}\", response_model=schemas.ProjectOut)\ndef get_project(project_id: int, db: Session = Depends(get_db)):\n    project = crud.get_project(db, project_id)\n    if project is None:\n        raise HTTPException(status_code=404, detail=\"project not found\")\n    return project\n\n\n@router.get(\"/{project_id}/tasks\", response_model=list[schemas.TaskOut])\ndef list_project_tasks(project_id: int, db: Session = Depends(get_db)):\n    project = crud.get_project(db, project_id)\n    if project is None:\n        raise HTTPException(status_code=404, detail=\"project not found\")\n    return crud.list_tasks(db, project_id=project_id)\n\n\n@router.get(\"/{project_id}/tasks.csv\")\ndef export_project_tasks_csv(project_id: int, db: Session = Depends(get_db)):\n    project = crud.get_project(db, project_id)\n    if project is None:\n        raise HTTPException(status_code=404, detail=\"project not found\")\n    tasks = crud.list_tasks(db, project_id=project_id)\n    rows = [\"id,title,status,priority,assignee_id\"]\n    for t in tasks:\n        assignee = \"\" if t.assignee_id is None else t.assignee_id\n        rows.append(f\"{t.id},{t.title},{t.status.value},{t.priority},{assignee}\")\n    return Response(content=\"\\r\\n\".join(rows) + \"\\r\\n\", media_type=\"text/csv\")\n\n\n@router.get(\"/{project_id}/progress\")\ndef project_progress(project_id: int, db: Session = Depends(get_db)):\n    project = crud.get_project(db, project_id)\n    if project is None:\n        raise HTTPException(status_code=404, detail=\"project not found\")\n    tasks = crud.list_tasks(db, project_id=project_id)\n    return progress_summary([t.status for t in tasks])\n"
+      }
+    }
+  ]
+}

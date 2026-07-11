@@ -1,0 +1,54 @@
+{
+  "name": "create_makefile_build_run_clean",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Authors a Makefile (build/run/clean) with correct .PHONY so targets run even when a like-named file exists",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "make",
+    "makefile"
+  ],
+  "prompts": [
+    "A C source file hello.c is provided. Create a Makefile with three targets: `build` compiles hello.c into an executable named `hello` (use the C compiler, e.g. cc -o hello hello.c); `run` runs ./hello; and `clean` removes the hello binary (rm -f hello). `build` should be the default target (first in the file). Declare `run` and `clean` as .PHONY so they always execute their recipe even if a file named `run` or `clean` happens to exist in the directory. Remember Makefile recipe lines must be indented with a TAB, not spaces."
+  ],
+  "setup_files": {
+    "hello.c": "#include <stdio.h>\n\nint main(void) {\n    printf(\"Hello, Make\\n\");\n    return 0;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "build",
+        "clean",
+        ".phony"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_make.py": "import os\nimport subprocess\n\n\ndef run(cmd):\n    return subprocess.run(cmd, shell=True, capture_output=True, text=True)\n\n\n# default target builds the binary\nr = run('make')\nassert r.returncode == 0, f'`make` failed: {r.stderr}'\nassert os.path.exists('hello'), '`make` (default target) did not produce ./hello'\n\n# run target executes and prints the expected line\nr = run('make run')\nassert r.returncode == 0, f'`make run` failed: {r.stderr}'\nassert 'Hello, Make' in r.stdout, f'`make run` output unexpected: {r.stdout!r}'\n\n# clean removes the binary\nr = run('make clean')\nassert r.returncode == 0, f'`make clean` failed: {r.stderr}'\nassert not os.path.exists('hello'), '`make clean` did not remove ./hello'\n\n# .PHONY: clean must still run its recipe even if a file named 'clean' exists\nrun('make')  # rebuild the binary\nassert os.path.exists('hello')\nwith open('clean', 'w') as f:\n    f.write('decoy')\nr = run('make clean')\nassert not os.path.exists('hello'), (\n    'a file named clean is shadowing the target: `make clean` did not run its '\n    'recipe (clean is not declared .PHONY)')\nif os.path.exists('clean'):\n    os.remove('clean')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_make.py",
+  "reference_solution": {
+    "Makefile": "build: hello\n\nhello: hello.c\n\tcc -o hello hello.c\n\nrun:\n\t./hello\n\nclean:\n\trm -f hello\n\n.PHONY: build run clean\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-phony-clean-shadowed",
+      "files": {
+        "Makefile": "build: hello\n\nhello: hello.c\n\tcc -o hello hello.c\n\nrun:\n\t./hello\n\nclean:\n\trm -f hello\n"
+      }
+    },
+    {
+      "name": "clean-does-not-remove",
+      "files": {
+        "Makefile": "build: hello\n\nhello: hello.c\n\tcc -o hello hello.c\n\nrun:\n\t./hello\n\nclean:\n\techo cleaning\n\n.PHONY: build run clean\n"
+      }
+    }
+  ]
+}

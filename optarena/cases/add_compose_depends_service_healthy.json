@@ -1,0 +1,54 @@
+{
+  "name": "add_compose_depends_service_healthy",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Makes an app wait for the DB to be healthy: adds a db healthcheck and a depends_on service_healthy condition",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "docker-compose",
+    "yaml"
+  ],
+  "prompts": [
+    "In docker-compose.yml, the `api` service uses the short `depends_on: [db]`, which only waits for the db container to START, not to be READY - so api can come up before Postgres accepts connections. Fix it: (1) add a `healthcheck` to the `db` service that runs `pg_isready -U postgres` with an interval, timeout, and retries; (2) change `api`'s `depends_on` to the long/map form so it waits for `db` with `condition: service_healthy`. Keep both services' images, api's ports, and db's environment."
+  ],
+  "setup_files": {
+    "docker-compose.yml": "services:\n  api:\n    image: myorg/api:1.0.0\n    depends_on:\n      - db\n    ports:\n      - \"8080:8080\"\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: secret\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "healthcheck",
+        "service_healthy",
+        "pg_isready"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_compose.py": "import yaml\n\nwith open('docker-compose.yml') as f:\n    d = yaml.safe_load(f)\n\nsvc = d['services']\ndb = svc['db']\nhc = db.get('healthcheck')\nassert isinstance(hc, dict), 'the db service needs a healthcheck'\ntest = hc.get('test')\ntstr = ' '.join(test) if isinstance(test, list) else str(test)\nassert 'pg_isready' in tstr, f'db healthcheck should use pg_isready, got {tstr!r}'\nassert hc.get('retries'), 'db healthcheck must set retries'\nassert hc.get('interval'), 'db healthcheck must set an interval'\n\ndep = svc['api'].get('depends_on')\nassert isinstance(dep, dict), f'api depends_on must be the long/map form with a condition, got {dep!r}'\nassert dep.get('db', {}).get('condition') == 'service_healthy', f'api must wait for db service_healthy: {dep!r}'\n\n# preserved\nassert svc['api']['image'] == 'myorg/api:1.0.0', 'api image changed'\nassert svc['db']['image'] == 'postgres:16', 'db image changed'\nassert '8080:8080' in [str(p) for p in svc['api'].get('ports', [])], 'api ports changed'\nassert svc['db'].get('environment', {}).get('POSTGRES_PASSWORD') == 'secret', 'db environment changed'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_compose.py",
+  "reference_solution": {
+    "docker-compose.yml": "services:\n  api:\n    image: myorg/api:1.0.0\n    depends_on:\n      db:\n        condition: service_healthy\n    ports:\n      - \"8080:8080\"\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: secret\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U postgres\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-short-depends",
+      "files": {
+        "docker-compose.yml": "services:\n  api:\n    image: myorg/api:1.0.0\n    depends_on:\n      - db\n    ports:\n      - \"8080:8080\"\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: secret\n"
+      }
+    },
+    {
+      "name": "healthcheck-but-short-depends",
+      "files": {
+        "docker-compose.yml": "services:\n  api:\n    image: myorg/api:1.0.0\n    depends_on:\n      - db\n    ports:\n      - \"8080:8080\"\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: secret\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U postgres\"]\n      interval: 10s\n      timeout: 5s\n      retries: 5\n"
+      }
+    }
+  ]
+}

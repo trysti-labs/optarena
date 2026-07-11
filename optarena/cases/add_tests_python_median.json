@@ -1,0 +1,51 @@
+{
+  "name": "add_tests_python_median",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Asks the model to write pytest tests for a median function (odd/even length); mutation-checked",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": [
+    "python",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "median(nums) in stats.py (already correct - do not modify it) returns the median of a list of numbers as a float: it sorts the input; for an odd count it returns the middle element; for an even count it returns the average of the two middle elements; and an empty list returns 0.0. Write pytest tests at exactly test_stats.py (functions named test_*) with at least 4 test functions pinning EXACT values that exercise: an odd-length list (unsorted input), an even-length list (the two-middle average), a single element, and the empty list. Use `from stats import median` and plain assert with exact float values."
+  ],
+  "setup_files": {
+    "stats.py": "def median(nums):\n    \"\"\"Median of nums as a float; 0.0 for an empty list.\"\"\"\n    s = sorted(nums)\n    n = len(s)\n    if n == 0:\n        return 0.0\n    if n % 2 == 1:\n        return float(s[n // 2])\n    return (s[n // 2 - 1] + s[n // 2]) / 2\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_stats.py",
+      "content_patterns": [
+        "median",
+        "assert"
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('stats.py')\nTEST_CMD = 'PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -p no:cacheprovider -q test_stats.py'\nMUTANTS = [\n    ['    if n % 2 == 1:', '    if n % 2 == 0:'],\n    ['        return float(s[n // 2])', '        return float(s[n // 2 - 1])'],\n    ['    return (s[n // 2 - 1] + s[n // 2]) / 2', '    return (s[n // 2 - 1] + s[n // 2]) / 4'],\n]\n\nimport shutil\nshutil.rmtree('__pycache__', ignore_errors=True)  # avoid stale bytecode across mutants\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (killed all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_stats.py": "from stats import median\n\n\ndef test_odd_length_unsorted():\n    assert median([3, 1, 2]) == 2.0\n\n\ndef test_even_length_average():\n    assert median([1, 2, 3, 4]) == 2.5\n\n\ndef test_single_element():\n    assert median([5]) == 5.0\n\n\ndef test_empty_is_zero():\n    assert median([]) == 0.0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_stats.py": "from stats import median\n\n\ndef test_returns_float():\n    assert isinstance(median([1, 2, 3]), float)\n\n\ndef test_nonnegative():\n    assert median([1, 2, 3, 4]) >= 0\n\n\ndef test_empty_zero():\n    assert median([]) == 0.0\n\n\ndef test_in_range():\n    assert 1 <= median([1, 2, 3]) <= 3\n"
+      }
+    }
+  ]
+}

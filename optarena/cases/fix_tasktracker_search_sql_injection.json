@@ -1,0 +1,52 @@
+{
+  "name": "fix_tasktracker_search_sql_injection",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "setup_repo": "fastapi-tasktracker",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "description": "L3 repo-scale: parameterize the raw-SQL task search endpoint (SQL injection via string interpolation); incomplete-fix broken variant strips ; and -- only",
+  "difficulty": 3,
+  "task_type": "security",
+  "tags": [
+    "python",
+    "fastapi",
+    "sqlalchemy",
+    "l3",
+    "repo-scale",
+    "sql-injection"
+  ],
+  "prompts": [
+    "In this fastapi-tasktracker repo, the task search endpoint at app/routers/search.py builds its SQL by f-string interpolation of the user-supplied q parameter into a LIKE clause - a classic SQL injection (q=\\\"' OR '1'='1\\\" dumps every row, and a legitimate apostrophe like q=\\\"Bob's\\\" breaks the query outright). Fix it properly: the query text must contain no user input - pass the search term as a bound parameter (e.g. sqlalchemy text() with a :pattern placeholder and .bindparams(), keeping the %...% wildcards in the bound value). Do not attempt to sanitize or escape the input string instead of parameterizing. The endpoint's contract is unchanged: GET /search/tasks?q=<term> returns tasks whose title contains the term, ordered by id, with the same response shape; an empty q returns all tasks."
+  ],
+  "setup_files": {
+    "app/routers/search.py": "from __future__ import annotations\n\nfrom fastapi import APIRouter, Depends\nfrom sqlalchemy import text\nfrom sqlalchemy.orm import Session\n\nfrom app import schemas\nfrom app.db.session import get_db\n\nrouter = APIRouter(prefix=\"/search\", tags=[\"search\"])\n\n\n@router.get(\"/tasks\", response_model=list[schemas.TaskOut])\ndef search_tasks(q: str = \"\", db: Session = Depends(get_db)):\n    sql = text(\n        f\"SELECT id, title, description, status, priority, project_id, assignee_id \"\n        f\"FROM tasks WHERE title LIKE '%{q}%' ORDER BY id\"\n    )\n    rows = db.execute(sql).mappings().all()\n    return [dict(r) for r in rows]\n",
+    "app/main.py": "from __future__ import annotations\n\nfrom fastapi import FastAPI\n\nfrom app.routers import projects, search, tasks, users\n\napp = FastAPI(title=\"Task Tracker\")\napp.include_router(users.router)\napp.include_router(projects.router)\napp.include_router(tasks.router)\napp.include_router(search.router)\n\n\n@app.get(\"/health\")\ndef health():\n    return {\"status\": \"ok\"}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/routers/search.py",
+      "content_patterns": [
+        "like"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_search_hidden.py": "def _seed(client):\n    user = client.post(\"/users\", json={\"username\": \"s\", \"email\": \"s@example.com\"}).json()\n    project = client.post(\"/projects\", json={\"name\": \"Search\", \"owner_id\": user[\"id\"]}).json()\n    for title in [\"Deploy alpha\", \"Write docs\", \"Bob's report\"]:\n        client.post(\"/tasks\", json={\"title\": title, \"project_id\": project[\"id\"]})\n\n\ndef test_search_matches_substring(client):\n    _seed(client)\n    resp = client.get(\"/search/tasks\", params={\"q\": \"alpha\"})\n    assert resp.status_code == 200\n    assert [t[\"title\"] for t in resp.json()] == [\"Deploy alpha\"]\n\n\ndef test_injection_is_treated_as_a_literal(client):\n    _seed(client)\n    resp = client.get(\"/search/tasks\", params={\"q\": \"' OR '1'='1\"})\n    assert resp.status_code == 200\n    assert resp.json() == [], \"injection payload must match nothing, not dump every row\"\n\n\ndef test_quote_in_search_term_is_safe(client):\n    _seed(client)\n    resp = client.get(\"/search/tasks\", params={\"q\": \"Bob's\"})\n    assert resp.status_code == 200\n    assert [t[\"title\"] for t in resp.json()] == [\"Bob's report\"]\n\n\ndef test_empty_query_returns_everything(client):\n    _seed(client)\n    resp = client.get(\"/search/tasks\", params={\"q\": \"\"})\n    assert resp.status_code == 200\n    assert len(resp.json()) == 3\n"
+  },
+  "check_command": "python -m pytest tests/ -q",
+  "reference_solution": {
+    "app/routers/search.py": "from __future__ import annotations\n\nfrom fastapi import APIRouter, Depends\nfrom sqlalchemy import text\nfrom sqlalchemy.orm import Session\n\nfrom app import schemas\nfrom app.db.session import get_db\n\nrouter = APIRouter(prefix=\"/search\", tags=[\"search\"])\n\n\n@router.get(\"/tasks\", response_model=list[schemas.TaskOut])\ndef search_tasks(q: str = \"\", db: Session = Depends(get_db)):\n    sql = text(\n        \"SELECT id, title, description, status, priority, project_id, assignee_id \"\n        \"FROM tasks WHERE title LIKE :pattern ORDER BY id\"\n    ).bindparams(pattern=f\"%{q}%\")\n    rows = db.execute(sql).mappings().all()\n    return [dict(r) for r in rows]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "strips-semicolons-and-comments-only",
+      "files": {
+        "app/routers/search.py": "from __future__ import annotations\n\nfrom fastapi import APIRouter, Depends\nfrom sqlalchemy import text\nfrom sqlalchemy.orm import Session\n\nfrom app import schemas\nfrom app.db.session import get_db\n\nrouter = APIRouter(prefix=\"/search\", tags=[\"search\"])\n\n\n@router.get(\"/tasks\", response_model=list[schemas.TaskOut])\ndef search_tasks(q: str = \"\", db: Session = Depends(get_db)):\n    cleaned = q.replace(\";\", \"\").replace(\"--\", \"\")\n    sql = text(\n        f\"SELECT id, title, description, status, priority, project_id, assignee_id \"\n        f\"FROM tasks WHERE title LIKE '%{cleaned}%' ORDER BY id\"\n    )\n    rows = db.execute(sql).mappings().all()\n    return [dict(r) for r in rows]\n"
+      }
+    }
+  ]
+}

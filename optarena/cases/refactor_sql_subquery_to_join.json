@@ -1,0 +1,50 @@
+{
+  "name": "refactor_sql_subquery_to_join",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Refactors a correlated subquery into a LEFT JOIN + GROUP BY producing the identical result set",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "sql",
+    "refactoring",
+    "join",
+    "sqlite"
+  ],
+  "prompts": [
+    "query.sql lists every customer with the number of orders they have placed, using a correlated subquery in the SELECT list: (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id). Refactor it to compute order_count with a LEFT JOIN from customers to orders plus GROUP BY, removing the correlated subquery. The result set must be identical: one row per customer ordered by c.id, with order_count = number of their orders, and a customer with zero orders must still appear with order_count 0. Return columns id, name, order_count in that order."
+  ],
+  "setup_files": {
+    "query.sql": "-- For every customer, the number of orders they have placed (0 if none).\nSELECT c.id, c.name,\n       (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count\nFROM customers c\nORDER BY c.id;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.sql",
+      "content_patterns": [
+        "join"
+      ],
+      "not_content_patterns": [
+        "select count(*) from orders"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_query.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript('''\n    CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT);\n    CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER);\n    INSERT INTO customers VALUES (1, 'Ada'), (2, 'Bob'), (3, 'Cy');\n    INSERT INTO orders VALUES (10, 1), (11, 1), (12, 2);\n''')\n\nsql = open('query.sql').read()\ngot = [tuple(r) for r in conn.execute(sql).fetchall()]\nexpected = [(1, 'Ada', 2), (2, 'Bob', 1), (3, 'Cy', 0)]\nassert got == expected, f'result set wrong (a customer with zero orders must still appear): {got}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_query.py",
+  "reference_solution": {
+    "query.sql": "-- For every customer, the number of orders they have placed (0 if none).\nSELECT c.id, c.name, COUNT(o.id) AS order_count\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nGROUP BY c.id, c.name\nORDER BY c.id;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "inner-join-drops-zero-order-customers",
+      "files": {
+        "query.sql": "-- DRIFT: INNER JOIN drops customers who have no orders.\nSELECT c.id, c.name, COUNT(o.id) AS order_count\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nGROUP BY c.id, c.name\nORDER BY c.id;\n"
+      }
+    }
+  ]
+}

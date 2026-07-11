@@ -15,8 +15,9 @@ from pathlib import Path
 from unittest import mock
 
 from optarena.cases import (
-    DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, check_expected, classify_failure,
-    diff_stats, dockerfile_for, evaluate_case, filter_cases, load_cases, run_check_command,
+    DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, REPOS_DIR, check_expected,
+    classify_failure, diff_stats, dockerfile_for, evaluate_case, filter_cases, load_cases,
+    prepare_workspace, run_check_command,
 )
 from optarena.compare import compare_runs, format_regression, regression_summary
 from optarena.drivers import DRIVERS, get_driver
@@ -78,6 +79,44 @@ class OracleTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)          # only the file failure
         self.assertIn("missing.py", failures[0])
         self.assertFalse(oracle["ran"])             # check_command never invoked
+
+
+class PrepareWorkspaceTests(unittest.TestCase):
+    """setup_repo/git_init: L3 repo-scale workspace preparation (cases.prepare_workspace)."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_"))
+
+    def test_plain_setup_files_only_unchanged(self):
+        prepare_workspace(self.ws, {"setup_files": {"a.py": "x = 1\n"}})
+        self.assertEqual((self.ws / "a.py").read_text(encoding="utf-8"), "x = 1\n")
+        self.assertFalse((self.ws / ".git").exists())
+
+    def test_unknown_setup_repo_raises(self):
+        with self.assertRaises(FileNotFoundError):
+            prepare_workspace(self.ws, {"setup_repo": "no-such-starter-repo"})
+
+    def test_setup_repo_copied_then_setup_files_overlay(self):
+        # Uses a real starter repo from repos/ (they ship with the corpus).
+        repo = next((p.name for p in REPOS_DIR.iterdir() if p.is_dir()), None)
+        self.assertIsNotNone(repo, f"no starter repos found under {REPOS_DIR}")
+        case = {"setup_repo": repo, "setup_files": {"README.md": "overlaid\n"}}
+        prepare_workspace(self.ws, case)
+        copied = [p for p in self.ws.rglob("*") if p.is_file()]
+        self.assertGreater(len(copied), 5, "starter repo files were not copied")
+        # setup_files must win over the copied repo's file of the same name
+        self.assertEqual((self.ws / "README.md").read_text(encoding="utf-8"), "overlaid\n")
+
+    def test_git_init_commits_prepared_state(self):
+        import shutil as _shutil
+        if not _shutil.which("git"):
+            self.skipTest("git not on PATH")
+        prepare_workspace(self.ws, {"setup_files": {"a.py": "x = 1\n"}, "git_init": True})
+        self.assertTrue((self.ws / ".git").is_dir())
+        import subprocess as _sp
+        status = _sp.run(["git", "status", "--porcelain"], cwd=self.ws,
+                         capture_output=True, text=True)
+        self.assertEqual(status.stdout, "", "git_init must leave a clean tree (all committed)")
 
 
 class TestSetupFilesTests(unittest.TestCase):
@@ -441,6 +480,13 @@ class VerifyCorpusTests(unittest.TestCase):
     def test_variants_include_reference_broken_and_unmodified(self):
         names = [n for n, _f, _p in variants_for(self.CASE)]
         self.assertEqual(names, ["reference", "still-subtracts", "unmodified"])
+
+    def test_setup_repo_only_case_still_gets_unmodified_variant(self):
+        # An L3 case whose starting state is entirely the shared starter repo
+        # (no setup_files overlay) must still run the unmodified-must-fail check.
+        case = {"name": "l3", "task_type": "security", "setup_repo": "fastapi-tasktracker"}
+        names = [n for n, _f, _p in variants_for(case)]
+        self.assertEqual(names, ["unmodified"])
 
     def test_good_case_verifies_clean(self):
         violations, checked, skipped = verify_cases([dict(self.CASE)])

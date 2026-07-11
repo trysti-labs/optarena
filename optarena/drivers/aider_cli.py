@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from ..cases import changed_files, evaluate_case, snapshot, write_setup_files
+from ..cases import changed_files, evaluate_case, prepare_workspace, snapshot
 from ..scenario import Scenario
 from .base import CaseResult, Driver
 
@@ -88,7 +88,7 @@ class AiderDriver(Driver):
         result = CaseResult(name=case["name"])
         timeout = scenario.timeout or case.get("timeout", 120)
         backend = scenario.backend
-        write_setup_files(workspace, case.get("setup_files"))
+        prepare_workspace(workspace, case)
         before = snapshot(workspace)
 
         # Existing setup files must be added to aider's context so "modify" cases work.

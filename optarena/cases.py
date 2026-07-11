@@ -11,6 +11,13 @@ decides pass/fail - the JSON schema shared with the original cline harness:
       "setup_files":    {relpath: content},  # written BEFORE the run (visible
                                              # to the model - e.g. the file a
                                              # "modify" case edits)
+      "setup_repo":     str,                 # L3 (repo-scale) cases: name of a
+                                             # shared starter repo under repos/
+                                             # copied into the workspace BEFORE
+                                             # setup_files (which then overlay it)
+      "git_init":       bool,                # commit the prepared workspace as a
+                                             # one-commit git repo so repo-scale
+                                             # edits land as a realistic diff
       "expected_files": [{
           "path_pattern":         str,       # glob vs relpath and basename
           "content_patterns":     [str],     # required substrings (case-insensitive)
@@ -63,6 +70,7 @@ correctness for anything beyond the most trivial case.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -138,7 +146,14 @@ IGNORE_DIRS = {".git", ".vscode", ".cline", ".aider", "node_modules", "__pycache
 
 
 def snapshot(root: Path) -> dict[str, str]:
-    """Map each file (relative posix path) to a `size:mtime` signature."""
+    """Map each file (relative posix path) to a content signature (sha1).
+
+    Content-based rather than size:mtime - a same-size rewrite landing within
+    one filesystem-timestamp tick (routine in verify-corpus, which writes the
+    setup file and the solution file back-to-back) was invisible to the old
+    signature, making changed-file detection flaky on coarse-mtime
+    filesystems (Windows hosts).
+    """
     out: dict[str, str] = {}
     for p in root.rglob("*"):
         if not p.is_file():
@@ -150,8 +165,11 @@ def snapshot(root: Path) -> dict[str, str]:
         # out of the diff so they don't inflate the files/lines metrics.
         if p.name.startswith(".aider"):
             continue
-        st = p.stat()
-        out[p.relative_to(root).as_posix()] = f"{st.st_size}:{st.st_mtime_ns}"
+        try:
+            digest = hashlib.sha1(p.read_bytes()).hexdigest()
+        except OSError:
+            continue        # vanished/locked mid-scan - treat as absent
+        out[p.relative_to(root).as_posix()] = digest
     return out
 
 
@@ -653,3 +671,52 @@ def write_setup_files(root: Path, setup_files: dict[str, str] | None) -> None:
         # corrupts POSIX shell scripts (a stray \r glued to `do`/`done`/etc.
         # breaks dash/sh parsing) once bind-mounted into the Linux sandbox.
         dest.write_text(content, encoding="utf-8", newline="")
+
+
+# ── L3 (repo-scale) cases: a shared starter repo copied in, not inlined ────────
+
+REPOS_DIR = Path(__file__).resolve().parent.parent / "repos"
+
+
+def copy_setup_repo(root: Path, repo_name: str) -> None:
+    """Copy every file from repos/<repo_name>/ into the workspace root. Used
+    by L3 cases (`setup_repo`) so a 20-100 file starter app lives once on
+    disk instead of being inlined into every case JSON that shares it."""
+    src = REPOS_DIR / repo_name
+    if not src.is_dir():
+        raise FileNotFoundError(f'setup_repo "{repo_name}" not found under {REPOS_DIR}')
+    for p in src.rglob("*"):
+        if not p.is_file():
+            continue
+        dest = root / p.relative_to(src)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(p.read_bytes())
+
+
+def git_init_workspace(root: Path) -> None:
+    """Commit the freshly-prepared workspace as a one-commit git repo, so an
+    L3 case's model edits land as a realistic diff against a checked-in
+    baseline instead of an untracked directory. Best-effort: a sandbox image
+    without `git` on PATH just skips it silently - no case's oracle depends
+    on the repo actually existing, only on the files being there."""
+    env = {**os.environ,
+           "GIT_AUTHOR_NAME": "optarena", "GIT_AUTHOR_EMAIL": "optarena@local",
+           "GIT_COMMITTER_NAME": "optarena", "GIT_COMMITTER_EMAIL": "optarena@local"}
+    try:
+        for cmd in (["git", "init", "-q"], ["git", "add", "-A"],
+                    ["git", "commit", "-q", "-m", "initial"]):
+            subprocess.run(cmd, cwd=root, capture_output=True, timeout=15, env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def prepare_workspace(root: Path, case: dict) -> None:
+    """Populate a case's workspace: an optional shared starter repo
+    (`setup_repo`) copied in first - unchanged L1/L2 behavior when it's
+    absent - then this case's own `setup_files` written over it, then an
+    optional `git_init` commit of that combined starting state."""
+    if case.get("setup_repo"):
+        copy_setup_repo(root, case["setup_repo"])
+    write_setup_files(root, case.get("setup_files"))
+    if case.get("git_init"):
+        git_init_workspace(root)

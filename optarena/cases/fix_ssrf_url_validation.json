@@ -1,0 +1,47 @@
+{
+  "name": "fix_ssrf_url_validation",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Fixes an SSRF-prone URL allowlist that only blocks the substring 'localhost', letting private/metadata IPs through",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "ssrf",
+    "validation"
+  ],
+  "prompts": [
+    "is_allowed(url) in fetcher.py guards an outbound HTTP fetch against SSRF, but it only checks `\"localhost\" not in url` - so http://127.0.0.1/, private ranges, and the cloud metadata address http://169.254.169.254/ all pass. Fix is_allowed to properly validate: reject any URL whose scheme is not http or https; reject the hostname \"localhost\"; and when the host is an IP literal, reject it if it is loopback, private, link-local (this covers 169.254.169.254), reserved, or unspecified (use the stdlib ipaddress module). Regular public hostnames and public IPs return True. Keep the is_allowed(url) signature."
+  ],
+  "setup_files": {
+    "fetcher.py": "def is_allowed(url):\n    \"\"\"Return True if url is safe to fetch (SSRF guard).\n\n    BUG: only blocks the literal substring 'localhost', so 127.0.0.1, private\n    ranges and the metadata IP 169.254.169.254 all pass.\n    \"\"\"\n    return \"localhost\" not in url\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "fetcher.py",
+      "content_patterns": [
+        "def is_allowed"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_fetcher.py": "from fetcher import is_allowed\n\n\ndef test_allows_public_hosts():\n    assert is_allowed(\"http://example.com/path\")\n    assert is_allowed(\"https://93.184.216.34/\")\n\n\ndef test_blocks_localhost_and_loopback():\n    assert not is_allowed(\"http://localhost/\")\n    assert not is_allowed(\"http://127.0.0.1/\")\n    assert not is_allowed(\"http://[::1]/\")\n\n\ndef test_blocks_private_and_metadata():\n    assert not is_allowed(\"http://10.0.0.5/\")\n    assert not is_allowed(\"http://192.168.1.1/\")\n    assert not is_allowed(\"http://169.254.169.254/latest/meta-data/\")\n\n\ndef test_rejects_non_http_schemes():\n    assert not is_allowed(\"file:///etc/passwd\")\n    assert not is_allowed(\"gopher://127.0.0.1/\")\n"
+  },
+  "check_command": "python3 -m pytest -q test_fetcher.py",
+  "reference_solution": {
+    "fetcher.py": "import ipaddress\nfrom urllib.parse import urlparse\n\n\ndef is_allowed(url):\n    \"\"\"SSRF guard: allow only http/https to non-internal hosts.\"\"\"\n    parsed = urlparse(url)\n    if parsed.scheme not in (\"http\", \"https\"):\n        return False\n    host = parsed.hostname\n    if not host or host.lower() == \"localhost\":\n        return False\n    try:\n        ip = ipaddress.ip_address(host)\n    except ValueError:\n        return True  # a regular hostname (DNS name)\n    return not (\n        ip.is_loopback\n        or ip.is_private\n        or ip.is_link_local\n        or ip.is_reserved\n        or ip.is_unspecified\n    )\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "blocklists-localhost-and-127-only",
+      "files": {
+        "fetcher.py": "from urllib.parse import urlparse\n\n\ndef is_allowed(url):\n    # INCOMPLETE FIX: only blocks localhost and 127.0.0.1 by name, so private\n    # ranges and the 169.254.169.254 metadata IP still pass, and non-http\n    # schemes are not rejected.\n    host = (urlparse(url).hostname or \"\").lower()\n    return host not in (\"localhost\", \"127.0.0.1\")\n"
+      }
+    }
+  ]
+}

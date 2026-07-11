@@ -1,0 +1,63 @@
+{
+  "name": "add_tasktracker_dockerfile",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester-python:latest",
+  "setup_repo": "fastapi-tasktracker",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 600,
+  "description": "L3 repo-scale devops: containerize the tasktracker app - production-shaped Dockerfile (slim base, no-cache pip, non-root user, uvicorn CMD) + .dockerignore",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "docker",
+    "devops",
+    "l3",
+    "repo-scale",
+    "hardening"
+  ],
+  "prompts": [
+    "Containerize this fastapi-tasktracker repo for production. Write a Dockerfile at the repo root: base it on a python:3.x-slim image, install dependencies from the repo's requirements.txt with pip --no-cache-dir, copy in the application code, and start it with uvicorn serving app.main:app on host 0.0.0.0 port 8000 (EXPOSE 8000; no dev-server flags like --reload). The container must NOT run as root: create a dedicated user and switch to it with USER after the dependency install. Also add a .dockerignore at the repo root that keeps at least __pycache__, .git, the tests/ directory, and *.db files out of the build context."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "from",
+        "user"
+      ]
+    },
+    {
+      "path_pattern": ".dockerignore",
+      "content_patterns": [
+        "__pycache__"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_dockerfile.py": "import re\nfrom pathlib import Path\n\ndf_path = Path(\"Dockerfile\")\nassert df_path.is_file(), \"Dockerfile missing at repo root\"\nraw = df_path.read_text(encoding=\"utf-8\")\n\n# join backslash line-continuations, drop comments and blanks\njoined = re.sub(r\"\\\\\\s*\\n\", \" \", raw)\nlines = [l.strip() for l in joined.splitlines() if l.strip() and not l.strip().startswith(\"#\")]\n\n\ndef instr(name):\n    return [(i, l) for i, l in enumerate(lines) if l.upper().startswith(name + \" \")]\n\n\nfroms = instr(\"FROM\")\nassert froms, \"no FROM instruction\"\nfinal_from = froms[-1][1]\nassert re.search(r\"python:3\\.\\d+-slim\", final_from), (\n    f\"final stage must use a python:3.x-slim base image, got: {final_from}\")\n\npip_lines = [(i, l) for i, l in instr(\"RUN\") if \"pip\" in l and \"install\" in l]\nassert pip_lines, \"no RUN pip install instruction\"\npip_all = \" \".join(l for _i, l in pip_lines)\nassert \"--no-cache-dir\" in pip_all, \"pip install must use --no-cache-dir\"\nassert \"requirements.txt\" in pip_all, \"dependencies must be installed from requirements.txt\"\n\nusers = instr(\"USER\")\nassert users, \"container must not run as root: add a USER instruction\"\nlast_user_idx, last_user_line = users[-1]\nuser_name = last_user_line.split()[1]\nassert user_name not in (\"root\", \"0\"), f\"USER must be non-root, got {user_name!r}\"\nassert last_user_idx > pip_lines[-1][0], (\n    \"the non-root USER must take effect AFTER dependency installation \"\n    \"(pip needs root in a slim image; the runtime process must not have it)\")\n\ncmds = instr(\"CMD\") + instr(\"ENTRYPOINT\")\nassert cmds, \"no CMD or ENTRYPOINT\"\ncmd_all = \" \".join(l for _i, l in cmds)\nfor needle in (\"uvicorn\", \"app.main:app\", \"0.0.0.0\"):\n    assert needle in cmd_all, (\n        f\"start command must run uvicorn app.main:app bound to 0.0.0.0 (missing {needle!r})\")\nassert \"--reload\" not in raw, \"--reload is a dev-server flag and has no place in the image\"\n\nexpose_all = \" \".join(l for _i, l in instr(\"EXPOSE\"))\nassert \"8000\" in expose_all, \"EXPOSE 8000 missing\"\n\ncopy_lines = [l for _i, l in instr(\"COPY\") + instr(\"ADD\")]\nassert any(re.search(r\"^(COPY|ADD)\\s+(--\\S+\\s+)*(\\.|\\./|app)\", l, re.IGNORECASE) for l in copy_lines), (\n    \"application code is never copied into the image (expected COPY of app/ or the build context)\")\n\ndi = Path(\".dockerignore\")\nassert di.is_file(), \".dockerignore missing\"\nentries = [l.strip() for l in di.read_text(encoding=\"utf-8\").splitlines()\n           if l.strip() and not l.strip().startswith(\"#\")]\nfor req in (\"__pycache__\", \".git\", \"tests\", \"*.db\"):\n    assert any(req in e for e in entries), f\".dockerignore must exclude {req}\"\n\nprint(\"PASS structural Dockerfile checks\")\n"
+  },
+  "check_command": "python check_dockerfile.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /srv/tasktracker\n\nCOPY requirements.txt ./\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY app ./app\nCOPY alembic ./alembic\nCOPY alembic.ini ./\n\nRUN useradd --create-home tasktracker\nUSER tasktracker\n\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n",
+    ".dockerignore": "__pycache__/\n*.pyc\n*.db\n.git\n.gitignore\n.pytest_cache/\ntests/\nREADME.md\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "runs-as-root",
+      "files": {
+        "Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /srv/tasktracker\n\nCOPY requirements.txt ./\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY app ./app\nCOPY alembic ./alembic\nCOPY alembic.ini ./\n\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n",
+        ".dockerignore": "__pycache__/\n*.pyc\n*.db\n.git\n.gitignore\n.pytest_cache/\ntests/\nREADME.md\n"
+      }
+    },
+    {
+      "name": "dev-reload-cmd",
+      "files": {
+        "Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /srv/tasktracker\n\nCOPY requirements.txt ./\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY app ./app\nCOPY alembic ./alembic\nCOPY alembic.ini ./\n\nRUN useradd --create-home tasktracker\nUSER tasktracker\n\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\", \"--reload\"]\n",
+        ".dockerignore": "__pycache__/\n*.pyc\n*.db\n.git\n.gitignore\n.pytest_cache/\ntests/\nREADME.md\n"
+      }
+    }
+  ]
+}
