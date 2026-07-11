@@ -88,7 +88,14 @@ offline toolchain in-container *before* any case is authored.
 
 ## Remaining to 500 (166 cases)
 
-Per the plan's [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies):
+**Now starting: L3 (repo-scale) cases.** This is the plan's Wave D L3 track —
+8 shared starter repos under `repos/` × ~6 tasks each, exercised against the
+real suite. It needs the two planned schema fields first: `setup_repo` (copy a
+shared starter-repo dir into the workspace before the run) and `git_init`
+(initialize a git repo so repo-scale edits/diffs are realistic). First repo
+targeted: a FastAPI + SQLAlchemy (SQLite) + pytest app on the python image
+(everything warmed, portless in-process TestClient, file-based DB). Remaining
+work after L3, per the plan's [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies):
 
 1. **More Wave D depth** — every big track now has a stdlib-seam layer
    (Python, Node/JS, Rust, C#, Go, Java, TS all covered); Kotlin/PHP/Ruby at
