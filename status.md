@@ -1,7 +1,7 @@
 # OptArena Status
 
 _As of 2026-07-11, on `main` (github.com/trysti-labs/optarena), through
-batch 17._
+batch 18._
 
 ## Where things stand
 
@@ -9,31 +9,31 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-348 cases**, all new cases shipped with a `reference_solution` and
+354 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
 `verify-corpus` before commit. **The L3 (repo-scale) track is live**: the
 `setup_repo`/`git_init` schema fields, the first shared starter repo
 (`repos/fastapi-tasktracker`), and 9 L3 cases on it spanning 6 task types.
 
-## Corpus census (348 cases)
+## Corpus census (354 cases)
 
 | | |
 |---|---|
-| Total cases | **348** (target 500, 70%) |
-| With `reference_solution` | 244 (70%; 100% of the 228 added this expansion) |
+| Total cases | **354** (target 500, 71%) |
+| With `reference_solution` | 250 (71%; 100% of the 234 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | L3 (repo-scale, `setup_repo`) cases | 9 (fastapi-tasktracker) |
 | Multi-prompt session cases | 2 |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
 
 **By language** (recomputed from the case JSONs' `language` tags - the
-previous census under-counted several tracks): python 78, javascript 45,
-go 27, csharp 25, rust 24, java 24, sql 20, typescript 18, php 13, ruby 13,
+previous census under-counted several tracks): python 81, javascript 47,
+go 27, csharp 25, java 25, rust 24, sql 20, typescript 18, php 13, ruby 13,
 yaml 13, kotlin 12, shell 10, c 7, hcl 5, cpp 3, dockerfile 3, makefile 1 -
 plus 7 language-neutral devops cases.
 
-**By task type:** bug_fix 95, feature 75, refactoring 43, security 39,
-testing 38, performance 25, devops 20, data_engineering 13.
+**By task type:** bug_fix 95, feature 75, refactoring 45, security 39,
+testing 42, performance 25, devops 20, data_engineering 13.
 
 ## Waves shipped (chronology)
 
@@ -53,6 +53,7 @@ Since then:
 | **L3 kickoff** - repo-scale machinery + first repo | 1 | 334 → 339 | Batch 15: the `setup_repo` + `git_init` schema fields (`prepare_workspace` in cases.py, wired through all four drivers and verify.py), the first shared starter repo `repos/fastapi-tasktracker` (35 files: FastAPI + SQLAlchemy 2.0 + alembic + pytest, layered models/schemas/crud/services/routers, portless TestClient, file-based SQLite), and 5 L3 cases on it: Comment sub-resource feature (cross-layer, 7 files), due_date end-to-end feature (model + schemas + crud + a real `alembic upgrade head` proven by the hidden test), shared-pagination refactor (3 crud modules -> 1 helper), mutation-checked tests for the repo's `progress_summary` service, and a raw-SQL injection fix with a strips-`;`-and-`--`-only incomplete-fix broken. git added to the python image for `git_init` |
 | **L3 depth** - lagging categories on the same repo | 1 | 339 → 343 | Batch 16, all on fastapi-tasktracker: project-archiving **multi-prompt session** (2 prompts: archive endpoint + default-list filter, then `include_archived` param + 409 guard on task creation - the corpus's 2nd multi-prompt case), lookup-or-404 helper-extraction refactor across 3 routers (broken: homogenized 404 details drift), a **devops** containerization case (production Dockerfile + .dockerignore with a structural oracle: slim base, `--no-cache-dir`, non-root USER *after* the install layer, uvicorn CMD, no `--reload`), and a **data_engineering** CSV export with RFC-4180 quoting (broken: naive comma-join corrupted by hostile titles). verify-corpus caught a missing `crud/__init__` re-export in the archiving reference pre-commit |
 | **Perf + devops rebalance** | 1 | 343 → 348 | Batch 17: two calibrated **performance** cases (list.insert(0)-prepend -> linear+reverse at n=250k, naive ~6s native vs 2s budget; nested pair-sum -> complement dict at n=20k, naive ~6.5s vs 1.5s budget - each with a wrong-output fast broken AND an explicit still-quadratic broken proven to bust the budget) and three **devops** cases: multi-stage Dockerfile refactor (build-essential out of the runtime stage), GitHub Actions pin-to-full-SHA supply-chain hardening (brokens: third-party actions left on tags, short SHAs), and a pg_dump CronJob with scheduling hygiene (Forbid concurrency, startingDeadlineSeconds, history limits, backoffLimit, resources, secretKeyRef creds; brokens: no-hygiene, hardcoded password) |
+| **Testing + refactoring breadth** | 1 | 348 → 354 | Batch 18: four mutation-checked **testing** cases on distinct functions - python parse_duration (1h30m45s parser; seconds-dropped / hours-as-minutes / empty-returns-0 mutants) and merge_intervals (touching-not-merged / unsorted / contained-shrinks-end), js slugify with the corpus's first **node-native** mutation harness (`node mutation_check.js` - no python dependency), and java ExcelColumn with a **java-native single-file harness** (`java MutationCheck.java`, plain javac/java -ea, no maven/JUnit). Two **refactoring** cases: python range(len)->zip with a per-line-rounding drift broken, and js constructor+prototype -> ES class with a static-lost-in-translation broken. Every vacuous/broken variant tuned to survive the shape checks so the mutation harness or hidden suite is what catches it |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -142,12 +143,14 @@ toolchains. Remaining work after L3, per the plan's
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
 Rebalance note: **bug_fix is at target (95/95) - stop adding it** (batches
-15-17 deliberately shipped zero). After batch 17 the categories still
-furthest behind are **testing (38/65), refactoring (43/70), devops (20/45),
+15-18 deliberately shipped zero). After batch 18 the categories still
+furthest behind are **refactoring (45/70), testing (42/65), devops (20/45),
 performance (25/45), and feature (75/95)**; data_engineering (13/15) and
 security (39/55) are closing in. Batch 17 proved host-calibrated perf
 budgets work when margins are wide (naive 3-4x over budget on fast native
 hardware, fast path 50-500x under it) with CI's in-container verify-corpus
-as the final proof. Next levers: more calibrated perf shapes (other
-languages need their toolchains or Docker locally), testing/refactoring
+as the final proof; batch 18 added node-native and java-native mutation
+harnesses so testing cases in those tracks no longer need python in the
+loop. Next levers: more testing/refactoring breadth (the new harness
+patterns make js/java cheap), more calibrated perf shapes, devops/CI
 breadth, and the next starter repos.
