@@ -35,7 +35,7 @@ from pathlib import Path
 
 from .cases import (
     DOCKER_IMAGE_DEFAULT, DockerSandbox, changed_files, evaluate_case,
-    snapshot, write_setup_files,
+    prepare_workspace, snapshot, write_setup_files,
 )
 
 # Task types where an unmodified workspace must FAIL the oracle even without
@@ -51,7 +51,10 @@ def variants_for(case: dict) -> list[tuple[str, dict | None, bool]]:
         out.append(("reference", case["reference_solution"], True))
     for i, broken in enumerate(case.get("broken_solutions") or [], 1):
         out.append((broken.get("name") or f"broken-{i}", broken["files"], False))
-    if case.get("task_type") in MUST_FAIL_UNMODIFIED and case.get("setup_files"):
+    # An L3 case's starting state can come entirely from `setup_repo` with no
+    # per-case `setup_files` overlay - "unmodified" must still mean something
+    # there (the untouched starter repo), not be skipped outright.
+    if case.get("task_type") in MUST_FAIL_UNMODIFIED and (case.get("setup_files") or case.get("setup_repo")):
         out.append(("unmodified", None, False))
     return out
 
@@ -59,7 +62,7 @@ def variants_for(case: dict) -> list[tuple[str, dict | None, bool]]:
 def _run_variant(case: dict, files: dict | None, ws: Path) -> list[str]:
     """One variant through the real oracle; returns its failure strings."""
     ws.mkdir(parents=True, exist_ok=True)
-    write_setup_files(ws, case.get("setup_files"))
+    prepare_workspace(ws, case)
     if files is None:                    # implicit "unmodified" variant
         created: list[str] = []
     else:

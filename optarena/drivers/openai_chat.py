@@ -19,7 +19,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from ..cases import changed_files, evaluate_case, snapshot, write_setup_files
+from ..cases import changed_files, evaluate_case, prepare_workspace, snapshot
 from ..pricing import estimate_cost
 from ..scenario import Scenario
 from .base import CaseResult, Driver
@@ -87,7 +87,7 @@ class OpenAIChatDriver(Driver):
     def run_case(self, case: dict, scenario: Scenario, workspace: Path) -> CaseResult:
         result = CaseResult(name=case["name"])
         timeout = scenario.timeout or case.get("timeout", 120)
-        write_setup_files(workspace, case.get("setup_files"))
+        prepare_workspace(workspace, case)
         before = snapshot(workspace)
 
         expected = case.get("expected_files", [])

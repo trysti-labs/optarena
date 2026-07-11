@@ -18,7 +18,7 @@ import re
 import time
 from pathlib import Path
 
-from ..cases import changed_files, evaluate_case, snapshot, write_setup_files
+from ..cases import changed_files, evaluate_case, prepare_workspace, snapshot
 from ..scenario import Scenario
 from .base import CaseResult, Driver
 from .openai_chat import concrete_target
@@ -40,7 +40,7 @@ class CrewAIDriver(Driver):
 
         result = CaseResult(name=case["name"])
         backend = scenario.backend
-        write_setup_files(workspace, case.get("setup_files"))
+        prepare_workspace(workspace, case)
         before = snapshot(workspace)
 
         expected = case.get("expected_files", [])
