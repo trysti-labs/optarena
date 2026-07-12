@@ -1,0 +1,53 @@
+{
+  "name": "optimize_python_pair_sum_nested_loop",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "O(n^2) nested pair-sum count -> single-pass complement dict; overcounting fast variant (self-pairing on 2x == target) is the correctness broken",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "python",
+    "performance",
+    "big-o",
+    "hashmap"
+  ],
+  "prompts": [
+    "count_pairs(nums, target) in pairs.py returns how many index pairs (i, j) with i < j satisfy nums[i] + nums[j] == target. It's a nested O(n^2) scan - far too slow for tens of thousands of numbers. Rewrite it as a single pass using a dict of value counts seen so far (for each element, add the count of its complement seen before it, then record the element). The count must stay exactly the same, including the subtle cases: duplicates each pair separately (three 3s with target 6 is 3 pairs), and an element must never pair with itself. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "pairs.py": "def count_pairs(nums, target):\n    \"\"\"Number of index pairs (i, j) with i < j and nums[i] + nums[j] == target.\"\"\"\n    count = 0\n    for i in range(len(nums)):\n        for j in range(i + 1, len(nums)):\n            if nums[i] + nums[j] == target:\n                count += 1\n    return count\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pairs.py",
+      "content_patterns": [
+        "def count_pairs"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_pairs.py": "import random\nimport time\n\nfrom pairs import count_pairs\n\n\ndef test_basic_pairs():\n    assert count_pairs([1, 2, 3, 4], 5) == 2          # (1,4), (2,3)\n    assert count_pairs([1, 2, 3], 100) == 0\n    assert count_pairs([], 5) == 0\n\n\ndef test_duplicates_and_self_complement():\n    # target 6 with two 3s: exactly one pair of DISTINCT indices (3,3)\n    assert count_pairs([3, 3], 6) == 1\n    # three 3s -> C(3,2) = 3 pairs, and 3 must never pair with itself\n    assert count_pairs([3, 3, 3], 6) == 3\n    assert count_pairs([3], 6) == 0\n    assert count_pairs([2, 2, 4, 4], 6) == 4          # each 2 with each 4\n\n\ndef test_negative_numbers():\n    assert count_pairs([-1, 1, 0, 2], 1) == 2          # (-1,2), (1,0)\n\n\ndef test_performance_large_input():\n    random.seed(7)\n    nums = [random.randrange(0, 2000) for _ in range(20000)]\n\n    start = time.perf_counter()\n    got = count_pairs(nums, 1000)\n    elapsed = time.perf_counter() - start\n\n    assert got == 50774        # pinned from the reference implementation\n    # calibrated: the nested loop is ~6.5s on fast native hardware and slower\n    # in the sandbox; the single-pass complement tally is ~0.003s\n    assert elapsed < 1.5, (\n        f\"count_pairs took {elapsed:.2f}s for 20000 items; expected a \"\n        f\"single-pass complement tally (dict of counts seen so far), not a \"\n        f\"nested O(n^2) scan\"\n    )\n"
+  },
+  "check_command": "python -m pytest -q test_pairs.py",
+  "reference_solution": {
+    "pairs.py": "def count_pairs(nums, target):\n    \"\"\"Number of index pairs (i, j) with i < j and nums[i] + nums[j] == target.\"\"\"\n    seen = {}\n    count = 0\n    for x in nums:\n        count += seen.get(target - x, 0)\n        seen[x] = seen.get(x, 0) + 1\n    return count\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-self-pairing",
+      "files": {
+        "pairs.py": "def count_pairs(nums, target):\n    \"\"\"Number of index pairs (i, j) with i < j and nums[i] + nums[j] == target.\"\"\"\n    seen = {}\n    count = 0\n    for x in nums:\n        seen[x] = seen.get(x, 0) + 1\n        count += seen.get(target - x, 0)\n    return count\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "pairs.py": "def count_pairs(nums, target):\n    \"\"\"Number of index pairs (i, j) with i < j and nums[i] + nums[j] == target.\"\"\"\n    count = 0\n    for i in range(len(nums)):\n        for j in range(i + 1, len(nums)):\n            if nums[i] + nums[j] == target:\n                count += 1\n    return count\n"
+      }
+    }
+  ]
+}

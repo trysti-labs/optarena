@@ -371,6 +371,14 @@ def cmd_init(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Captured tool output is echoed into our own prints (oracle tails, verify
+    # details) and may contain characters a non-UTF-8 console can't encode
+    # (e.g. node's U+2139 on a cp1252 Windows terminal) - never let a status
+    # line crash the run over that.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
     parser = argparse.ArgumentParser(
         prog="optarena", description="OptArena - test & compare AI coding tools")
     sub = parser.add_subparsers(dest="command", required=True)

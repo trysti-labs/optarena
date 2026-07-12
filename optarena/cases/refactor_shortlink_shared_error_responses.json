@@ -1,0 +1,68 @@
+{
+  "name": "refactor_shortlink_shared_error_responses",
+  "language": "typescript",
+  "framework": "express",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "setup_repo": "express-ts-shortlink",
+  "git_init": true,
+  "check_command_timeout": 180,
+  "timeout": 600,
+  "description": "L3 repo-scale (express-ts-shortlink): extract the six inline JSON error responses across three routers into one sendError helper; drift broken changes the body key",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "typescript",
+    "express",
+    "l3",
+    "repo-scale",
+    "duplication"
+  ],
+  "prompts": [
+    "In this express-ts-shortlink repo, the three routers (src/routes/links.ts, redirect.ts, stats.ts) hand-build every JSON error response inline - `res.status(...).json({ error: ... })` appears six times with the same shape. Extract that into one helper: create src/routes/respond.ts exporting sendError(res, status, message) that sends { error: message } with the given status, and replace ALL inline error responses in the three routers with calls to it (success responses stay as they are). Pure refactor: every status code and every error body must stay byte-identical - the response key stays `error` and the messages stay exactly 'link not found', 'url is required', 'invalid slug', and 'slug already taken'. Everything must still compile under `tsc -p .` strict."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "*/routes/respond.ts",
+      "content_patterns": [
+        "sendError"
+      ]
+    },
+    {
+      "path_pattern": "*/routes/links.ts",
+      "content_patterns": [
+        "sendError"
+      ],
+      "not_content_patterns": [
+        ".json({ error"
+      ]
+    },
+    {
+      "path_pattern": "*/routes/redirect.ts",
+      "content_patterns": [
+        "sendError"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/errors_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { startServer, api } = require(\"./helpers\");\n\ntest(\"every error keeps the exact { error: message } contract\", async () => {\n  const { base, close } = startServer();\n  try {\n    const missing404 = await api(base, \"GET\", \"/api/links/nope\");\n    assert.strictEqual(missing404.status, 404);\n    assert.deepStrictEqual(missing404.json, { error: \"link not found\" });\n\n    assert.deepStrictEqual((await api(base, \"GET\", \"/r/nope\")).json, { error: \"link not found\" });\n    assert.deepStrictEqual(\n      (await api(base, \"GET\", \"/api/links/nope/stats\")).json,\n      { error: \"link not found\" },\n    );\n    assert.deepStrictEqual(\n      (await api(base, \"DELETE\", \"/api/links/nope\")).json,\n      { error: \"link not found\" },\n    );\n\n    const noUrl = await api(base, \"POST\", \"/api/links\", {});\n    assert.strictEqual(noUrl.status, 400);\n    assert.deepStrictEqual(noUrl.json, { error: \"url is required\" });\n\n    const badSlug = await api(base, \"POST\", \"/api/links\", { url: \"https://x.dev\", slug: \"NO\" });\n    assert.strictEqual(badSlug.status, 400);\n    assert.deepStrictEqual(badSlug.json, { error: \"invalid slug\" });\n\n    await api(base, \"POST\", \"/api/links\", { url: \"https://x.dev\", slug: \"taken\" });\n    const dup = await api(base, \"POST\", \"/api/links\", { url: \"https://y.dev\", slug: \"taken\" });\n    assert.strictEqual(dup.status, 409);\n    assert.deepStrictEqual(dup.json, { error: \"slug already taken\" });\n  } finally {\n    await close();\n  }\n});\n\ntest(\"success paths unchanged\", async () => {\n  const { base, close } = startServer();\n  try {\n    const created = await api(base, \"POST\", \"/api/links\", { url: \"https://ok.dev\", slug: \"fine\" });\n    assert.strictEqual(created.status, 201);\n    assert.strictEqual((await api(base, \"GET\", \"/r/fine\")).status, 302);\n    assert.strictEqual((await api(base, \"DELETE\", \"/api/links/fine\")).status, 204);\n  } finally {\n    await close();\n  }\n});\n"
+  },
+  "check_command": "tsc -p . && node --test",
+  "reference_solution": {
+    "src/routes/respond.ts": "import express from \"express\";\n\n/** Single JSON error shape for every route: { error: <message> }. */\nexport function sendError(res: express.Response, status: number, message: string): void {\n  res.status(status).json({ error: message });\n}\n",
+    "src/routes/links.ts": "import express from \"express\";\n\nimport { MAX_URL_LENGTH } from \"../config\";\nimport { Link } from \"../models/types\";\nimport { isValidSlug, randomSlug } from \"../services/slugService\";\nimport * as store from \"../store/linkStore\";\nimport { sendError } from \"./respond\";\n\nexport const linksRouter = express.Router();\n\nlinksRouter.post(\"/\", (req, res) => {\n  const body = req.body ?? {};\n  const url = typeof body.url === \"string\" ? body.url : \"\";\n  if (url.length === 0 || url.length > MAX_URL_LENGTH) {\n    sendError(res, 400, \"url is required\");\n    return;\n  }\n\n  let slug: string;\n  if (body.slug !== undefined) {\n    if (typeof body.slug !== \"string\" || !isValidSlug(body.slug)) {\n      sendError(res, 400, \"invalid slug\");\n      return;\n    }\n    slug = body.slug;\n  } else {\n    do {\n      slug = randomSlug();\n    } while (store.getLink(slug) !== undefined);\n  }\n\n  if (store.getLink(slug) !== undefined) {\n    sendError(res, 409, \"slug already taken\");\n    return;\n  }\n\n  const link: Link = { slug, url, createdAt: new Date().toISOString() };\n  store.createLink(link);\n  res.status(201).json(link);\n});\n\nlinksRouter.get(\"/\", (_req, res) => {\n  res.status(200).json(store.listLinks());\n});\n\nlinksRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    sendError(res, 404, \"link not found\");\n    return;\n  }\n  res.status(200).json(link);\n});\n\nlinksRouter.delete(\"/:slug\", (req, res) => {\n  if (!store.deleteLink(req.params.slug)) {\n    sendError(res, 404, \"link not found\");\n    return;\n  }\n  res.status(204).send();\n});\n",
+    "src/routes/redirect.ts": "import express from \"express\";\n\nimport * as store from \"../store/linkStore\";\nimport { sendError } from \"./respond\";\n\nexport const redirectRouter = express.Router();\n\nredirectRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    sendError(res, 404, \"link not found\");\n    return;\n  }\n  store.recordClick(link.slug, new Date().toISOString());\n  res.redirect(302, link.url);\n});\n",
+    "src/routes/stats.ts": "import express from \"express\";\n\nimport { summarizeClicks } from \"../services/statsService\";\nimport * as store from \"../store/linkStore\";\nimport { sendError } from \"./respond\";\n\nexport const statsRouter = express.Router();\n\nstatsRouter.get(\"/:slug/stats\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    sendError(res, 404, \"link not found\");\n    return;\n  }\n  res.status(200).json(summarizeClicks(store.clicksFor(link.slug)));\n});\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "body-key-drift",
+      "files": {
+        "src/routes/respond.ts": "import express from \"express\";\n\n/** Single JSON error shape for every route. */\nexport function sendError(res: express.Response, status: number, message: string): void {\n  res.status(status).json({ message });\n}\n",
+        "src/routes/links.ts": "import express from \"express\";\n\nimport { MAX_URL_LENGTH } from \"../config\";\nimport { Link } from \"../models/types\";\nimport { isValidSlug, randomSlug } from \"../services/slugService\";\nimport * as store from \"../store/linkStore\";\nimport { sendError } from \"./respond\";\n\nexport const linksRouter = express.Router();\n\nlinksRouter.post(\"/\", (req, res) => {\n  const body = req.body ?? {};\n  const url = typeof body.url === \"string\" ? body.url : \"\";\n  if (url.length === 0 || url.length > MAX_URL_LENGTH) {\n    sendError(res, 400, \"url is required\");\n    return;\n  }\n\n  let slug: string;\n  if (body.slug !== undefined) {\n    if (typeof body.slug !== \"string\" || !isValidSlug(body.slug)) {\n      sendError(res, 400, \"invalid slug\");\n      return;\n    }\n    slug = body.slug;\n  } else {\n    do {\n      slug = randomSlug();\n    } while (store.getLink(slug) !== undefined);\n  }\n\n  if (store.getLink(slug) !== undefined) {\n    sendError(res, 409, \"slug already taken\");\n    return;\n  }\n\n  const link: Link = { slug, url, createdAt: new Date().toISOString() };\n  store.createLink(link);\n  res.status(201).json(link);\n});\n\nlinksRouter.get(\"/\", (_req, res) => {\n  res.status(200).json(store.listLinks());\n});\n\nlinksRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    sendError(res, 404, \"link not found\");\n    return;\n  }\n  res.status(200).json(link);\n});\n\nlinksRouter.delete(\"/:slug\", (req, res) => {\n  if (!store.deleteLink(req.params.slug)) {\n    sendError(res, 404, \"link not found\");\n    return;\n  }\n  res.status(204).send();\n});\n",
+        "src/routes/redirect.ts": "import express from \"express\";\n\nimport * as store from \"../store/linkStore\";\nimport { sendError } from \"./respond\";\n\nexport const redirectRouter = express.Router();\n\nredirectRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    sendError(res, 404, \"link not found\");\n    return;\n  }\n  store.recordClick(link.slug, new Date().toISOString());\n  res.redirect(302, link.url);\n});\n",
+        "src/routes/stats.ts": "import express from \"express\";\n\nimport { summarizeClicks } from \"../services/statsService\";\nimport * as store from \"../store/linkStore\";\nimport { sendError } from \"./respond\";\n\nexport const statsRouter = express.Router();\n\nstatsRouter.get(\"/:slug/stats\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    sendError(res, 404, \"link not found\");\n    return;\n  }\n  res.status(200).json(summarizeClicks(store.clicksFor(link.slug)));\n});\n"
+      }
+    }
+  ]
+}

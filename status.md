@@ -1,7 +1,7 @@
 # OptArena Status
 
-_As of 2026-07-11, on `main` (github.com/trysti-labs/optarena), through
-batch 16._
+_As of 2026-07-12, on `main` (github.com/trysti-labs/optarena), through
+batch 21._
 
 ## Where things stand
 
@@ -9,31 +9,32 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-343 cases**, all new cases shipped with a `reference_solution` and
+371 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
-`verify-corpus` before commit. **The L3 (repo-scale) track is live**: the
-`setup_repo`/`git_init` schema fields, the first shared starter repo
-(`repos/fastapi-tasktracker`), and 9 L3 cases on it spanning 6 task types.
+`verify-corpus` before commit. **The L3 (repo-scale) track is live with two
+starter repos**: `repos/fastapi-tasktracker` (python image, 9 cases) and
+`repos/express-ts-shortlink` (node image, 5 cases) - 14 L3 cases across two
+toolchains.
 
-## Corpus census (343 cases)
+## Corpus census (371 cases)
 
 | | |
 |---|---|
-| Total cases | **343** (target 500, 69%) |
-| With `reference_solution` | 239 (70%; 100% of the 223 added this expansion) |
+| Total cases | **371** (target 500, 74%) |
+| With `reference_solution` | 267 (72%; 100% of the 251 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
-| L3 (repo-scale, `setup_repo`) cases | 9 (fastapi-tasktracker) |
+| L3 (repo-scale, `setup_repo`) cases | 14 (fastapi-tasktracker 9, express-ts-shortlink 5) |
 | Multi-prompt session cases | 2 |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
 
 **By language** (recomputed from the case JSONs' `language` tags - the
-previous census under-counted several tracks): python 76, javascript 45,
-go 27, csharp 25, rust 24, java 24, sql 20, typescript 18, php 13, ruby 13,
-kotlin 12, yaml 11, shell 10, c 7, hcl 5, cpp 3, dockerfile 2, makefile 1 -
+previous census under-counted several tracks): python 84, javascript 49,
+java 27, go 27, csharp 25, rust 24, typescript 23, sql 21, yaml 15, php 13,
+ruby 13, kotlin 12, shell 12, c 7, hcl 5, cpp 3, dockerfile 3, makefile 1 -
 plus 7 language-neutral devops cases.
 
-**By task type:** bug_fix 95, feature 75, refactoring 43, security 39,
-testing 38, performance 23, devops 17, data_engineering 13.
+**By task type:** bug_fix 95, feature 76, refactoring 52, security 40,
+testing 44, performance 27, devops 23, data_engineering 14.
 
 ## Waves shipped (chronology)
 
@@ -52,6 +53,11 @@ Since then:
 | **Rebalance** — testing breadth | 1 | 328 → 334 | Batch 14: six mutation-checked cases on distinct functions (Luhn, Roman numerals, password policy, time-ago, semver compare, median) across go/python/php/ruby/node; testing 31 → 37. verify-corpus caught a stale-`__pycache__` mutation-survival bug and the php-image-has-no-python3 issue pre-commit |
 | **L3 kickoff** - repo-scale machinery + first repo | 1 | 334 → 339 | Batch 15: the `setup_repo` + `git_init` schema fields (`prepare_workspace` in cases.py, wired through all four drivers and verify.py), the first shared starter repo `repos/fastapi-tasktracker` (35 files: FastAPI + SQLAlchemy 2.0 + alembic + pytest, layered models/schemas/crud/services/routers, portless TestClient, file-based SQLite), and 5 L3 cases on it: Comment sub-resource feature (cross-layer, 7 files), due_date end-to-end feature (model + schemas + crud + a real `alembic upgrade head` proven by the hidden test), shared-pagination refactor (3 crud modules -> 1 helper), mutation-checked tests for the repo's `progress_summary` service, and a raw-SQL injection fix with a strips-`;`-and-`--`-only incomplete-fix broken. git added to the python image for `git_init` |
 | **L3 depth** - lagging categories on the same repo | 1 | 339 → 343 | Batch 16, all on fastapi-tasktracker: project-archiving **multi-prompt session** (2 prompts: archive endpoint + default-list filter, then `include_archived` param + 409 guard on task creation - the corpus's 2nd multi-prompt case), lookup-or-404 helper-extraction refactor across 3 routers (broken: homogenized 404 details drift), a **devops** containerization case (production Dockerfile + .dockerignore with a structural oracle: slim base, `--no-cache-dir`, non-root USER *after* the install layer, uvicorn CMD, no `--reload`), and a **data_engineering** CSV export with RFC-4180 quoting (broken: naive comma-join corrupted by hostile titles). verify-corpus caught a missing `crud/__init__` re-export in the archiving reference pre-commit |
+| **Perf + devops rebalance** | 1 | 343 → 348 | Batch 17: two calibrated **performance** cases (list.insert(0)-prepend -> linear+reverse at n=250k, naive ~6s native vs 2s budget; nested pair-sum -> complement dict at n=20k, naive ~6.5s vs 1.5s budget - each with a wrong-output fast broken AND an explicit still-quadratic broken proven to bust the budget) and three **devops** cases: multi-stage Dockerfile refactor (build-essential out of the runtime stage), GitHub Actions pin-to-full-SHA supply-chain hardening (brokens: third-party actions left on tags, short SHAs), and a pg_dump CronJob with scheduling hygiene (Forbid concurrency, startingDeadlineSeconds, history limits, backoffLimit, resources, secretKeyRef creds; brokens: no-hygiene, hardcoded password) |
+| **Testing + refactoring breadth** | 1 | 348 → 354 | Batch 18: four mutation-checked **testing** cases on distinct functions - python parse_duration (1h30m45s parser; seconds-dropped / hours-as-minutes / empty-returns-0 mutants) and merge_intervals (touching-not-merged / unsorted / contained-shrinks-end), js slugify with the corpus's first **node-native** mutation harness (`node mutation_check.js` - no python dependency), and java ExcelColumn with a **java-native single-file harness** (`java MutationCheck.java`, plain javac/java -ea, no maven/JUnit). Two **refactoring** cases: python range(len)->zip with a per-line-rounding drift broken, and js constructor+prototype -> ES class with a static-lost-in-translation broken. Every vacuous/broken variant tuned to survive the shape checks so the mutation harness or hidden suite is what catches it |
+| **L3 repo #2** - express-ts-shortlink | 1 | 354 → 359 | Batch 19: second starter repo, on the **node image** - a TypeScript + Express 4 link shortener (src/models-store-services-routes layering, strict `tsc -p .` as part of every oracle, plain-JS node:test suites against the compiled dist/, portless `listen(0)` + global fetch). Local ambient typings under types/ (function+namespace merge mirroring @types/express) since tsc does not consult NODE_PATH and the sandbox has no per-project node_modules. 5 L3 cases: link-expiry feature (410 Gone on the redirect path, expired hits not counted; brokens: redirect-unchecked, click-recorded-before-check), shared sendError refactor across 3 routers (broken: body-key drift), mutation-checked summarizeClicks tests (node-native harness recompiling TS per mutant; earliest-day tie-break mutants), URL scheme allowlist security fix (broken: case-sensitive prefix blocklist defeated by 'JavaScript:'), and a top-links aggregation endpoint whose star broken is **route shadowing** (/top registered after /:slug) |
+| **Perf + devops push #2** | 1 | 359 → 365 | Batch 20: two calibrated **performance** cases (js Array.includes-in-loop -> Set at 30k x 30k, naive ~7s native vs 2.5s budget; python max()+remove() full-ranking extraction -> one descending sort at n=50k, naive ~6.5s vs 2s budget - both with a wrong-output fast broken AND a proven still-quadratic broken). Three **devops**: bash backup-script hardening proven by REAL bash runs against paths with spaces (brokens: unmodified, strict-mode-but-still-unquoted - set -euo pipefail alone doesn't fix word-splitting), K8s HPA where the oracle demands BOTH the autoscaling/v2 HPA and the resources.requests.cpu it computes against (brokens: request-less deployment, min > max), and compose production hygiene (pin :latest, restart policies, memory limits; 3 brokens). One **testing**: java Roman-numeral parser on the java-native harness (subtractive-rule / empty-returns-0 / equal-neighbour-subtracts mutants) |
+| **Refactoring breadth** | 1 | 365 → 371 | Batch 21: six distinct refactor shapes across six languages, each with a behavior-*drift* broken - python 3x-copy-pasted retry loops -> one @retry decorator (drift: retries EVERY exception, caught by a non-transient-error-propagates-immediately test), js triple parallel switch -> lookup table (drift: fat-fingered rate; hidden test also probes 'toString'/'constructor' so plain `obj[key]` lookups fail - Object.hasOwn required), java triple if/else-if tier chains -> enum with data (drift: silver 0.05 -> 0.5; cross-platform CheckPricing driver compiles whatever .java layout the model chose), sql three correlated scalar subqueries -> grouped CTE + LEFT JOIN (drift: INNER JOIN drops zero-order customers, proven via real sqlite), python os.path -> PurePosixPath with exact splitext semantics (drift: split('.')[0] breaks 'report.tar.gz' and '.bashrc'), and bash copy-pasted env blocks -> function/loop with byte-identical appended output (drift: replica counts swapped) - the last two proven by real interpreter runs |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -107,19 +113,25 @@ L3 mutation/check harnesses are also written portably (`sys.executable`,
 list-args subprocess, `-B`) instead of `python3` + POSIX env-prefix, so they
 run identically in the Linux sandbox and on a bare Windows host.
 
+Batch 17 closed a follow-on gap the hash change itself created: a broken
+variant byte-identical to its setup file (the standard slow-but-correct perf
+variant) no longer registered as "changed", so verify failed it at the
+expected-file check without ever running the timer - the budget was not
+actually being proven. `verify._run_variant` now feeds the variant's own
+file list to the oracle instead of a snapshot diff (which is also what the
+old mtime semantics effectively did), and both batch-17 perf budgets are
+proven by an explicit `still-quadratic` broken failing on time, not on shape.
+
 ## Remaining to 500 (157 cases)
 
-**L3 (repo-scale) is live.** The `setup_repo`/`git_init` schema fields exist
-(see `prepare_workspace` in cases.py; documented in the module docstring),
-and the first starter repo `repos/fastapi-tasktracker` carries 9 verified
-cases across 6 task types (feature x3 incl. a multi-prompt session,
-refactoring x2, testing, security, devops, data_engineering) - at the plan's
-~6-8-tasks-per-repo target. Next L3 steps: an L3 performance case (e.g. an
-N+1 query - needs in-container calibration first, per the perf-case
-protocol), then the next starter repos from the plan's Wave D list
-(Express+TS, Spring multi-module, Gin, Axum, ASP.NET, Rails, Laravel) - the
-next repo should target a non-python image to prove setup_repo across
-toolchains. Remaining work after L3, per the plan's
+**L3 (repo-scale) is live on two toolchains.** The `setup_repo`/`git_init`
+schema fields exist (see `prepare_workspace` in cases.py; documented in the
+module docstring); `repos/fastapi-tasktracker` (python image) carries 9
+verified cases across 6 task types and `repos/express-ts-shortlink` (node
+image) carries 5 - setup_repo is proven beyond a single image. Next L3
+steps: L3 performance cases (need in-container calibration per the perf
+protocol), then further Wave D repos (Spring multi-module, Gin, Axum,
+ASP.NET, Rails, Laravel). Remaining work after L3, per the plan's
 [wave sequencing](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies):
 
 1. **More Wave D depth** — every big track now has a stdlib-seam layer
@@ -131,10 +143,15 @@ toolchains. Remaining work after L3, per the plan's
 3. **Wave F + moat hardening** — private held-out slice, paraphrase variants,
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
-Rebalance note: **bug_fix is at target (95/95) - stop adding it** (both L3
-batches deliberately shipped zero). After batch 16 the categories still
-furthest behind are **performance (23/45), devops (17/45), feature (75/95),
-testing (38/65), and refactoring (43/70)**; data_engineering (13/15) and
-security (39/55) are closing in. Next levers: calibrated performance cases
-(including L3 ones once probed in-container), further devops/CI breadth,
-and the next starter repos - the L3 machinery is no longer a blocker.
+Rebalance note: **bug_fix is at target (95/95) - stop adding it** (batches
+15-21 deliberately shipped zero). After batch 21 the categories still
+furthest behind are **devops (23/45), testing (44/65), refactoring (52/70),
+performance (27/45), and feature (76/95)**; data_engineering (14/15) and
+security (40/55) are closing in. Batch 17 proved host-calibrated perf
+budgets work when margins are wide (naive 3-4x over budget on fast native
+hardware, fast path 50-500x under it) with CI's in-container verify-corpus
+as the final proof; batch 18 added node-native and java-native mutation
+harnesses so testing cases in those tracks no longer need python in the
+loop. Next levers: more testing/refactoring breadth (the new harness
+patterns make js/java cheap), more calibrated perf shapes, devops/CI
+breadth, and the next starter repos.

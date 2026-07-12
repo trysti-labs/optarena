@@ -34,8 +34,8 @@ import tempfile
 from pathlib import Path
 
 from .cases import (
-    DOCKER_IMAGE_DEFAULT, DockerSandbox, changed_files, evaluate_case,
-    prepare_workspace, snapshot, write_setup_files,
+    DOCKER_IMAGE_DEFAULT, DockerSandbox, evaluate_case, prepare_workspace,
+    write_setup_files,
 )
 
 # Task types where an unmodified workspace must FAIL the oracle even without
@@ -66,9 +66,12 @@ def _run_variant(case: dict, files: dict | None, ws: Path) -> list[str]:
     if files is None:                    # implicit "unmodified" variant
         created: list[str] = []
     else:
-        before = snapshot(ws)
+        # The variant's own file list, not a snapshot diff: a broken variant
+        # may be byte-identical to a setup file (e.g. a slow-but-correct perf
+        # variant), and it must still be treated as "the model wrote this"
+        # so the real check_command judges it - not the expected-file check.
         write_setup_files(ws, files)
-        created = changed_files(before, ws)
+        created = sorted(files.keys())
     failures, _info = evaluate_case(case, created, ws)
     return failures
 

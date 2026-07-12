@@ -1,0 +1,63 @@
+{
+  "name": "fix_compose_pin_images_restart_limits",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Compose production hygiene: pin :latest images to explicit versions, add restart policies and memory limits; brokens: still-latest, no-restart",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "docker-compose",
+    "devops",
+    "pinning",
+    "restart-policy",
+    "limits"
+  ],
+  "prompts": [
+    "docker-compose.yml runs a web service and its postgres database the convenient-but-fragile way: both images float on :latest (unrepeatable deploys; a bad upstream push rolls itself out on the next pull), neither service has a restart policy (a crash or host reboot leaves the stack down), and there are no memory limits (one leak can take the whole host with it). Harden it: pin BOTH images to explicit version tags (any concrete version is fine - e.g. a 16.x tag for postgres - just not latest), give both services restart: unless-stopped (or always), and cap both with a memory limit (mem_limit, or deploy.resources.limits.memory). Everything else - ports, environment, depends_on, the named volume - must stay exactly as it is."
+  ],
+  "setup_files": {
+    "docker-compose.yml": "services:\n  web:\n    image: ghcr.io/example/shop-web:latest\n    ports:\n      - \"8080:8080\"\n    environment:\n      DATABASE_URL: postgres://shop:shop@db:5432/shop\n    depends_on:\n      - db\n  db:\n    image: postgres:latest\n    environment:\n      POSTGRES_USER: shop\n      POSTGRES_PASSWORD: shop\n      POSTGRES_DB: shop\n    volumes:\n      - dbdata:/var/lib/postgresql/data\n\nvolumes:\n  dbdata:\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "restart"
+      ],
+      "not_content_patterns": [
+        ":latest"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_compose.py": "import yaml\n\nwith open(\"docker-compose.yml\") as f:\n    doc = yaml.safe_load(f)\n\nservices = doc.get(\"services\") or {}\nassert set(services) == {\"web\", \"db\"}, f\"services changed: {sorted(services)}\"\n\nfor name, svc in services.items():\n    image = svc.get(\"image\") or \"\"\n    assert \":\" in image, f\"{name}: image {image!r} has no explicit tag\"\n    tag = image.rsplit(\":\", 1)[1]\n    assert tag and tag != \"latest\", (\n        f\"{name}: image {image!r} still floats on :latest - deploys become \"\n        f\"unrepeatable and a bad upstream push rolls itself out\")\n\n    assert svc.get(\"restart\") in (\"unless-stopped\", \"always\"), (\n        f\"{name}: no restart policy - a crash or reboot leaves the service down\")\n\n    mem_limit = svc.get(\"mem_limit\")\n    deploy_limit = (((svc.get(\"deploy\") or {}).get(\"resources\") or {})\n                    .get(\"limits\") or {}).get(\"memory\")\n    assert mem_limit or deploy_limit, (\n        f\"{name}: no memory limit (mem_limit or deploy.resources.limits.memory)\")\n\n# nothing else was lost\nweb, db = services[\"web\"], services[\"db\"]\nassert web.get(\"ports\") == [\"8080:8080\"], \"web ports changed\"\nassert web.get(\"depends_on\") == [\"db\"], \"web depends_on changed\"\nassert db.get(\"volumes\") == [\"dbdata:/var/lib/postgresql/data\"], \"db volume changed\"\nassert (db.get(\"environment\") or {}).get(\"POSTGRES_DB\") == \"shop\", \"db environment changed\"\nassert \"dbdata\" in (doc.get(\"volumes\") or {}), \"named volume declaration lost\"\n\nprint(\"PASS compose hardening checks\")\n"
+  },
+  "check_command": "python check_compose.py",
+  "reference_solution": {
+    "docker-compose.yml": "services:\n  web:\n    image: ghcr.io/example/shop-web:1.8.2\n    ports:\n      - \"8080:8080\"\n    environment:\n      DATABASE_URL: postgres://shop:shop@db:5432/shop\n    depends_on:\n      - db\n    restart: unless-stopped\n    mem_limit: 512m\n  db:\n    image: postgres:16.3\n    environment:\n      POSTGRES_USER: shop\n      POSTGRES_PASSWORD: shop\n      POSTGRES_DB: shop\n    volumes:\n      - dbdata:/var/lib/postgresql/data\n    restart: unless-stopped\n    mem_limit: 1g\n\nvolumes:\n  dbdata:\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "docker-compose.yml": "services:\n  web:\n    image: ghcr.io/example/shop-web:latest\n    ports:\n      - \"8080:8080\"\n    environment:\n      DATABASE_URL: postgres://shop:shop@db:5432/shop\n    depends_on:\n      - db\n  db:\n    image: postgres:latest\n    environment:\n      POSTGRES_USER: shop\n      POSTGRES_PASSWORD: shop\n      POSTGRES_DB: shop\n    volumes:\n      - dbdata:/var/lib/postgresql/data\n\nvolumes:\n  dbdata:\n"
+      }
+    },
+    {
+      "name": "images-still-latest",
+      "files": {
+        "docker-compose.yml": "services:\n  web:\n    image: ghcr.io/example/shop-web:latest\n    ports:\n      - \"8080:8080\"\n    environment:\n      DATABASE_URL: postgres://shop:shop@db:5432/shop\n    depends_on:\n      - db\n    restart: unless-stopped\n    mem_limit: 512m\n  db:\n    image: postgres:latest\n    environment:\n      POSTGRES_USER: shop\n      POSTGRES_PASSWORD: shop\n      POSTGRES_DB: shop\n    volumes:\n      - dbdata:/var/lib/postgresql/data\n    restart: unless-stopped\n    mem_limit: 1g\n\nvolumes:\n  dbdata:\n"
+      }
+    },
+    {
+      "name": "no-restart-policy",
+      "files": {
+        "docker-compose.yml": "services:\n  web:\n    image: ghcr.io/example/shop-web:1.8.2\n    ports:\n      - \"8080:8080\"\n    environment:\n      DATABASE_URL: postgres://shop:shop@db:5432/shop\n    depends_on:\n      - db\n    mem_limit: 512m\n  db:\n    image: postgres:16.3\n    environment:\n      POSTGRES_USER: shop\n      POSTGRES_PASSWORD: shop\n      POSTGRES_DB: shop\n    volumes:\n      - dbdata:/var/lib/postgresql/data\n    mem_limit: 1g\n\nvolumes:\n  dbdata:\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_python_parse_duration",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write pytest tests for a 1h30m45s-style duration parser; mutation-checked (seconds dropped, hours-as-minutes, empty-returns-0 mutants)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "python",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "parse_duration(text) in duration.py (already correct - do not modify it) parses compact durations like '2h', '90m', '45s', '1h30m45s' (components optional, h/m/s order, surrounding whitespace allowed) into total seconds as an int, and raises ValueError for anything else - including empty or whitespace-only input. Write pytest tests at exactly test_duration.py (functions named test_*, plain asserts with exact expected values) covering at least: a combined h+m+s value, each single component alone, whitespace tolerance, and ValueError for garbage AND for empty/blank input (use pytest.raises). Import with `from duration import parse_duration`."
+  ],
+  "setup_files": {
+    "duration.py": "import re\n\nDURATION_RE = re.compile(r\"\\s*(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+)s)?\\s*\")\n\n\ndef parse_duration(text):\n    \"\"\"'2h', '1h30m', '45s', '1h30m45s' -> total seconds as an int.\n\n    Components are optional but must appear in h, m, s order; surrounding\n    whitespace is allowed. Anything else (including an empty string) raises\n    ValueError.\n    \"\"\"\n    m = DURATION_RE.fullmatch(text or \"\")\n    if not m or not any(m.groups()):\n        raise ValueError(f\"invalid duration: {text!r}\")\n    h, mi, s = (int(g) if g else 0 for g in m.groups())\n    return h * 3600 + mi * 60 + s\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_duration.py",
+      "content_patterns": [
+        "parse_duration",
+        "assert",
+        "raises"
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "\"\"\"Mutation harness: model tests must PASS the real parse_duration and FAIL\neach mutant. Portable (sys.executable, list args, -B): identical behavior in\nthe Linux sandbox and on a bare host.\"\"\"\nimport shutil\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nIMPL = Path(\"duration.py\")\nTEST = \"test_duration.py\"\nMUTANTS = [\n    # drops the seconds component from the total\n    [\"    return h * 3600 + mi * 60 + s\", \"    return h * 3600 + mi * 60\"],\n    # hours weighted as minutes\n    [\"    return h * 3600 + mi * 60 + s\", \"    return h * 60 + mi * 60 + s\"],\n    # empty/blank input returns 0 instead of raising\n    [\"    if not m or not any(m.groups()):\", \"    if not m:\"],\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    return subprocess.run(\n        [sys.executable, \"-B\", \"-m\", \"pytest\", \"-p\", \"no:cacheprovider\", \"-q\", TEST]\n    ).returncode\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken implementation, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python mutation_check.py",
+  "reference_solution": {
+    "test_duration.py": "import pytest\n\nfrom duration import parse_duration\n\n\ndef test_full_duration():\n    assert parse_duration(\"1h30m45s\") == 5445\n\n\ndef test_single_components():\n    assert parse_duration(\"2h\") == 7200\n    assert parse_duration(\"90m\") == 5400\n    assert parse_duration(\"45s\") == 45\n\n\ndef test_whitespace_tolerated():\n    assert parse_duration(\"  1h5s \") == 3605\n\n\ndef test_invalid_raises():\n    with pytest.raises(ValueError):\n        parse_duration(\"xyz\")\n    with pytest.raises(ValueError):\n        parse_duration(\"\")\n    with pytest.raises(ValueError):\n        parse_duration(\"   \")\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_duration.py": "import pytest\n\nfrom duration import parse_duration\n\n\ndef test_returns_int():\n    assert isinstance(parse_duration(\"1h\"), int)\n\n\ndef test_positive():\n    assert parse_duration(\"10m\") > 0\n\n\ndef test_more_is_more():\n    assert parse_duration(\"2h\") > parse_duration(\"1h\")\n\n\ndef test_garbage_raises():\n    with pytest.raises(ValueError):\n        parse_duration(\"xyz\")\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "fix_shortlink_url_scheme_allowlist",
+  "language": "typescript",
+  "framework": "express",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "setup_repo": "express-ts-shortlink",
+  "git_init": true,
+  "check_command_timeout": 180,
+  "timeout": 600,
+  "description": "L3 repo-scale (express-ts-shortlink): shortener stores and redirects to ANY string - enforce an http/https allowlist via URL parsing; incomplete-fix broken is a case-sensitive prefix blocklist",
+  "difficulty": 3,
+  "task_type": "security",
+  "tags": [
+    "typescript",
+    "express",
+    "l3",
+    "repo-scale",
+    "open-redirect",
+    "allowlist"
+  ],
+  "prompts": [
+    "This express-ts-shortlink repo has a stored-redirect vulnerability: POST /api/links accepts ANY non-empty string as the target url, and GET /r/:slug then serves it as a 302 Location - so javascript:, data:, vbscript: and file: payloads become shareable short links. Fix the validation in src/routes/links.ts properly: parse the (trimmed) input with the WHATWG URL class and accept ONLY absolute http: / https: URLs, answering 400 with { error: 'invalid url' } for everything else - unparseable input included. Allowlist, not blocklist: do not try to enumerate dangerous scheme prefixes with string checks (case variants and whitespace defeat that). Valid http/https links must keep working exactly as before (201, then 302 with the stored Location), and the code must still compile under `tsc -p .` strict."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "*/routes/links.ts",
+      "content_patterns": [
+        "invalid url"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/scheme_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { startServer, api } = require(\"./helpers\");\n\nasync function expectRejected(base, url) {\n  const resp = await api(base, \"POST\", \"/api/links\", { url, slug: \"probe\" });\n  assert.strictEqual(resp.status, 400, `expected 400 for ${JSON.stringify(url)}, got ${resp.status}`);\n}\n\ntest(\"script-scheme and non-http URLs are rejected however they are spelled\", async () => {\n  const { base, close } = startServer();\n  try {\n    await expectRejected(base, \"javascript:alert(1)\");\n    await expectRejected(base, \"JavaScript:alert(1)\");\n    await expectRejected(base, \"JAVASCRIPT:alert(document.cookie)\");\n    await expectRejected(base, \"  javascript:alert(1)\");\n    await expectRejected(base, \"data:text/html,<script>alert(1)</script>\");\n    await expectRejected(base, \"vbscript:msgbox(1)\");\n    await expectRejected(base, \"file:///etc/passwd\");\n    await expectRejected(base, \"not a url at all\");\n  } finally {\n    await close();\n  }\n});\n\ntest(\"http and https links still work end to end\", async () => {\n  const { base, close } = startServer();\n  try {\n    const https = await api(base, \"POST\", \"/api/links\", {\n      url: \"https://example.com/safe\",\n      slug: \"safe\",\n    });\n    assert.strictEqual(https.status, 201);\n\n    const http = await api(base, \"POST\", \"/api/links\", {\n      url: \"http://plain.example/page\",\n      slug: \"plain\",\n    });\n    assert.strictEqual(http.status, 201);\n\n    const hit = await api(base, \"GET\", \"/r/safe\");\n    assert.strictEqual(hit.status, 302);\n    assert.strictEqual(hit.headers.get(\"location\"), \"https://example.com/safe\");\n  } finally {\n    await close();\n  }\n});\n"
+  },
+  "check_command": "tsc -p . && node --test",
+  "reference_solution": {
+    "src/routes/links.ts": "import express from \"express\";\n\nimport { MAX_URL_LENGTH } from \"../config\";\nimport { Link } from \"../models/types\";\nimport { isValidSlug, randomSlug } from \"../services/slugService\";\nimport * as store from \"../store/linkStore\";\n\nexport const linksRouter = express.Router();\n\nfunction normalizeHttpUrl(raw: string): string | null {\n  const trimmed = raw.trim();\n  if (trimmed.length === 0 || trimmed.length > MAX_URL_LENGTH) {\n    return null;\n  }\n  let parsed: URL;\n  try {\n    parsed = new URL(trimmed);\n  } catch {\n    return null;\n  }\n  if (parsed.protocol !== \"http:\" && parsed.protocol !== \"https:\") {\n    return null;\n  }\n  return trimmed;\n}\n\nlinksRouter.post(\"/\", (req, res) => {\n  const body = req.body ?? {};\n  const url = typeof body.url === \"string\" ? normalizeHttpUrl(body.url) : null;\n  if (url === null) {\n    res.status(400).json({ error: \"invalid url\" });\n    return;\n  }\n\n  let slug: string;\n  if (body.slug !== undefined) {\n    if (typeof body.slug !== \"string\" || !isValidSlug(body.slug)) {\n      res.status(400).json({ error: \"invalid slug\" });\n      return;\n    }\n    slug = body.slug;\n  } else {\n    do {\n      slug = randomSlug();\n    } while (store.getLink(slug) !== undefined);\n  }\n\n  if (store.getLink(slug) !== undefined) {\n    res.status(409).json({ error: \"slug already taken\" });\n    return;\n  }\n\n  const link: Link = { slug, url, createdAt: new Date().toISOString() };\n  store.createLink(link);\n  res.status(201).json(link);\n});\n\nlinksRouter.get(\"/\", (_req, res) => {\n  res.status(200).json(store.listLinks());\n});\n\nlinksRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(200).json(link);\n});\n\nlinksRouter.delete(\"/:slug\", (req, res) => {\n  if (!store.deleteLink(req.params.slug)) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(204).send();\n});\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "prefix-blocklist",
+      "files": {
+        "src/routes/links.ts": "import express from \"express\";\n\nimport { MAX_URL_LENGTH } from \"../config\";\nimport { Link } from \"../models/types\";\nimport { isValidSlug, randomSlug } from \"../services/slugService\";\nimport * as store from \"../store/linkStore\";\n\nexport const linksRouter = express.Router();\n\nfunction normalizeHttpUrl(raw: string): string | null {\n  if (raw.length === 0 || raw.length > MAX_URL_LENGTH) {\n    return null;\n  }\n  if (raw.startsWith(\"javascript:\") || raw.startsWith(\"data:\")) {\n    return null;\n  }\n  return raw;\n}\n\nlinksRouter.post(\"/\", (req, res) => {\n  const body = req.body ?? {};\n  const url = typeof body.url === \"string\" ? normalizeHttpUrl(body.url) : null;\n  if (url === null) {\n    res.status(400).json({ error: \"invalid url\" });\n    return;\n  }\n\n  let slug: string;\n  if (body.slug !== undefined) {\n    if (typeof body.slug !== \"string\" || !isValidSlug(body.slug)) {\n      res.status(400).json({ error: \"invalid slug\" });\n      return;\n    }\n    slug = body.slug;\n  } else {\n    do {\n      slug = randomSlug();\n    } while (store.getLink(slug) !== undefined);\n  }\n\n  if (store.getLink(slug) !== undefined) {\n    res.status(409).json({ error: \"slug already taken\" });\n    return;\n  }\n\n  const link: Link = { slug, url, createdAt: new Date().toISOString() };\n  store.createLink(link);\n  res.status(201).json(link);\n});\n\nlinksRouter.get(\"/\", (_req, res) => {\n  res.status(200).json(store.listLinks());\n});\n\nlinksRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(200).json(link);\n});\n\nlinksRouter.delete(\"/:slug\", (req, res) => {\n  if (!store.deleteLink(req.params.slug)) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(204).send();\n});\n"
+      }
+    }
+  ]
+}

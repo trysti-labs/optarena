@@ -1,0 +1,52 @@
+{
+  "name": "refactor_sql_scalar_subqueries_to_cte",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Three correlated scalar subqueries -> one grouped CTE + LEFT JOIN; drift broken uses an INNER JOIN and drops zero-order customers",
+  "difficulty": 3,
+  "task_type": "refactoring",
+  "tags": [
+    "sql",
+    "sqlite",
+    "refactoring",
+    "cte",
+    "aggregation"
+  ],
+  "prompts": [
+    "report.sql builds a per-customer order report with three correlated scalar subqueries - COUNT, SUM, and MAX each re-scan the orders table once per customer per column. Refactor it to aggregate orders ONCE: a CTE (WITH ... AS) that groups orders by customer_id computing all three aggregates, joined to customers. The result must be byte-identical for every database state: same five columns in the same order with the same names (id, name, order_count, total_spent, last_order_at), same ORDER BY c.id - and customers with no orders must still appear with order_count 0, total_spent 0, and NULL last_order_at, exactly as the scalar-subquery version returns them (mind your join type and COALESCE). SQLite dialect; no correlated subqueries left in the file."
+  ],
+  "setup_files": {
+    "report.sql": "-- Per-customer order report. Three correlated scalar subqueries re-scan the\n-- orders table once per customer per column.\nSELECT\n  c.id,\n  c.name,\n  (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count,\n  (SELECT COALESCE(SUM(o.amount), 0) FROM orders o WHERE o.customer_id = c.id) AS total_spent,\n  (SELECT MAX(o.created_at) FROM orders o WHERE o.customer_id = c.id) AS last_order_at\nFROM customers c\nORDER BY c.id;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "report.sql",
+      "content_patterns": [
+        "with",
+        "group by"
+      ],
+      "not_content_patterns": [
+        "(select count"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_report.py": "import sqlite3\nfrom pathlib import Path\n\nsql = Path(\"report.sql\").read_text(encoding=\"utf-8\")\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(\"\"\"\nCREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\nCREATE TABLE orders (\n  id INTEGER PRIMARY KEY,\n  customer_id INTEGER NOT NULL REFERENCES customers(id),\n  amount REAL NOT NULL,\n  created_at TEXT NOT NULL\n);\nINSERT INTO customers VALUES\n  (1, 'Ada'), (2, 'Grace'), (3, 'Edsger');\nINSERT INTO orders VALUES\n  (1, 1, 40.0, '2026-06-01'),\n  (2, 1, 15.5, '2026-06-20'),\n  (3, 2, 99.9, '2026-05-05'),\n  (4, 1, 10.0, '2026-04-11');\n-- customer 3 (Edsger) has no orders and must still appear\n\"\"\")\n\ncur = con.execute(sql)\ncols = [d[0] for d in cur.description]\nrows = cur.fetchall()\n\nassert cols == [\"id\", \"name\", \"order_count\", \"total_spent\", \"last_order_at\"], (\n    f\"column names/order changed: {cols}\")\n\nexpected = [\n    (1, \"Ada\", 3, 65.5, \"2026-06-20\"),\n    (2, \"Grace\", 1, 99.9, \"2026-05-05\"),\n    (3, \"Edsger\", 0, 0, None),\n]\nassert rows == expected, (\n    f\"result drifted.\\nexpected: {expected}\\ngot:      {rows}\\n\"\n    f\"(customers with zero orders must still appear, with 0/0/NULL)\")\n\nprint(\"PASS report.sql behavior checks\")\n"
+  },
+  "check_command": "python check_report.py",
+  "reference_solution": {
+    "report.sql": "-- Per-customer order report: aggregate orders once, join the result.\nWITH agg AS (\n  SELECT\n    customer_id,\n    COUNT(*) AS order_count,\n    SUM(amount) AS total_spent,\n    MAX(created_at) AS last_order_at\n  FROM orders\n  GROUP BY customer_id\n)\nSELECT\n  c.id,\n  c.name,\n  COALESCE(agg.order_count, 0) AS order_count,\n  COALESCE(agg.total_spent, 0) AS total_spent,\n  agg.last_order_at AS last_order_at\nFROM customers c\nLEFT JOIN agg ON agg.customer_id = c.id\nORDER BY c.id;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "inner-join-drops-orderless",
+      "files": {
+        "report.sql": "-- Per-customer order report: aggregate orders once, join the result.\nWITH agg AS (\n  SELECT\n    customer_id,\n    COUNT(*) AS order_count,\n    SUM(amount) AS total_spent,\n    MAX(created_at) AS last_order_at\n  FROM orders\n  GROUP BY customer_id\n)\nSELECT\n  c.id,\n  c.name,\n  COALESCE(agg.order_count, 0) AS order_count,\n  COALESCE(agg.total_spent, 0) AS total_spent,\n  agg.last_order_at AS last_order_at\nFROM customers c\nJOIN agg ON agg.customer_id = c.id\nORDER BY c.id;\n"
+      }
+    }
+  ]
+}

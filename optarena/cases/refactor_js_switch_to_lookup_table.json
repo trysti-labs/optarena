@@ -1,0 +1,51 @@
+{
+  "name": "refactor_js_switch_to_lookup_table",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Three parallel switch statements -> one config lookup table; drift broken fat-fingers a rate while transcribing",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "javascript",
+    "node",
+    "refactoring",
+    "lookup-table",
+    "duplication"
+  ],
+  "prompts": [
+    "shipping.js dispatches on the same three shipping methods with three parallel switch statements - cost, delivery estimate, and label all repeat the case list, and adding a method means touching all three. Refactor to a single lookup table: one const object mapping each method to its data (base cost, per-kg rate, estimate, label), with the three exported functions reading from it and NO switch statements left in the file. Watch the lookup: an unknown method must still throw a RangeError from all three functions - including inputs like 'toString' or 'constructor' that exist on Object.prototype (guard with an own-property check, a null-prototype object, or a Map). Pure refactor otherwise: every cost, estimate, and label byte-identical, and module.exports unchanged."
+  ],
+  "setup_files": {
+    "shipping.js": "function shippingCost(method, weightKg) {\n  switch (method) {\n    case \"standard\":\n      return 4.99 + 0.5 * weightKg;\n    case \"express\":\n      return 9.99 + 0.9 * weightKg;\n    case \"overnight\":\n      return 24.99 + 1.5 * weightKg;\n    default:\n      throw new RangeError(`unknown method: ${method}`);\n  }\n}\n\nfunction deliveryEstimate(method) {\n  switch (method) {\n    case \"standard\":\n      return \"3-5 business days\";\n    case \"express\":\n      return \"1-2 business days\";\n    case \"overnight\":\n      return \"next business day\";\n    default:\n      throw new RangeError(`unknown method: ${method}`);\n  }\n}\n\nfunction methodLabel(method) {\n  switch (method) {\n    case \"standard\":\n      return \"Standard\";\n    case \"express\":\n      return \"Express\";\n    case \"overnight\":\n      return \"Overnight\";\n    default:\n      throw new RangeError(`unknown method: ${method}`);\n  }\n}\n\nmodule.exports = { shippingCost, deliveryEstimate, methodLabel };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "shipping.js",
+      "content_patterns": [
+        "shippingCost"
+      ],
+      "not_content_patterns": [
+        "switch"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_shipping_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { shippingCost, deliveryEstimate, methodLabel } = require(\"./shipping\");\n\ntest(\"costs are exact for every method\", () => {\n  assert.strictEqual(shippingCost(\"standard\", 2), 4.99 + 0.5 * 2);\n  assert.strictEqual(shippingCost(\"express\", 10), 9.99 + 0.9 * 10);\n  assert.strictEqual(shippingCost(\"overnight\", 0), 24.99);\n});\n\ntest(\"estimates and labels unchanged\", () => {\n  assert.strictEqual(deliveryEstimate(\"standard\"), \"3-5 business days\");\n  assert.strictEqual(deliveryEstimate(\"express\"), \"1-2 business days\");\n  assert.strictEqual(deliveryEstimate(\"overnight\"), \"next business day\");\n  assert.strictEqual(methodLabel(\"standard\"), \"Standard\");\n  assert.strictEqual(methodLabel(\"express\"), \"Express\");\n  assert.strictEqual(methodLabel(\"overnight\"), \"Overnight\");\n});\n\ntest(\"unknown methods throw RangeError from every function\", () => {\n  for (const fn of [() => shippingCost(\"drone\", 1), () => deliveryEstimate(\"drone\"),\n                    () => methodLabel(\"drone\")]) {\n    assert.throws(fn, RangeError);\n  }\n});\n\ntest(\"prototype names are not treated as methods\", () => {\n  assert.throws(() => methodLabel(\"toString\"), RangeError);\n  assert.throws(() => shippingCost(\"constructor\", 1), RangeError);\n});\n"
+  },
+  "check_command": "node --test test_shipping_hidden.test.js",
+  "reference_solution": {
+    "shipping.js": "const METHODS = {\n  standard: { base: 4.99, perKg: 0.5, estimate: \"3-5 business days\", label: \"Standard\" },\n  express: { base: 9.99, perKg: 0.9, estimate: \"1-2 business days\", label: \"Express\" },\n  overnight: { base: 24.99, perKg: 1.5, estimate: \"next business day\", label: \"Overnight\" },\n};\n\nfunction lookup(method) {\n  if (!Object.hasOwn(METHODS, method)) {\n    throw new RangeError(`unknown method: ${method}`);\n  }\n  return METHODS[method];\n}\n\nfunction shippingCost(method, weightKg) {\n  const { base, perKg } = lookup(method);\n  return base + perKg * weightKg;\n}\n\nfunction deliveryEstimate(method) {\n  return lookup(method).estimate;\n}\n\nfunction methodLabel(method) {\n  return lookup(method).label;\n}\n\nmodule.exports = { shippingCost, deliveryEstimate, methodLabel };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "rate-drift-in-transcription",
+      "files": {
+        "shipping.js": "const METHODS = {\n  standard: { base: 4.99, perKg: 0.5, estimate: \"3-5 business days\", label: \"Standard\" },\n  express: { base: 9.99, perKg: 0.99, estimate: \"1-2 business days\", label: \"Express\" },\n  overnight: { base: 24.99, perKg: 1.5, estimate: \"next business day\", label: \"Overnight\" },\n};\n\nfunction lookup(method) {\n  if (!Object.hasOwn(METHODS, method)) {\n    throw new RangeError(`unknown method: ${method}`);\n  }\n  return METHODS[method];\n}\n\nfunction shippingCost(method, weightKg) {\n  const { base, perKg } = lookup(method);\n  return base + perKg * weightKg;\n}\n\nfunction deliveryEstimate(method) {\n  return lookup(method).estimate;\n}\n\nfunction methodLabel(method) {\n  return lookup(method).label;\n}\n\nmodule.exports = { shippingCost, deliveryEstimate, methodLabel };\n"
+      }
+    }
+  ]
+}
