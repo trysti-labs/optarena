@@ -1,0 +1,52 @@
+{
+  "name": "refactor_python_duplicate_retry_to_decorator",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Three copy-pasted retry loops -> one @retry decorator; drift broken retries every exception instead of only ConnectionError",
+  "difficulty": 3,
+  "task_type": "refactoring",
+  "tags": [
+    "python",
+    "refactoring",
+    "decorator",
+    "duplication"
+  ],
+  "prompts": [
+    "client.py contains three fetch functions that each hand-roll the identical retry loop: try the call, retry on ConnectionError, give up and re-raise after 3 total attempts. Extract the duplication into ONE decorator named `retry` in the same module - `@retry(attempts=3)` (or an equivalent default) applied to fetch_profile, fetch_orders, and fetch_invoices, whose bodies shrink to their single get(...) call. Pure refactor: at most 3 total attempts, the ConnectionError re-raised after the 3rd, ONLY ConnectionError retried (any other exception must propagate on the first attempt), each function still calling its own URL. Keep the three public function names and signatures."
+  ],
+  "setup_files": {
+    "client.py": "import time\n\n\ndef fetch_profile(get, user_id):\n    \"\"\"get(url) -> dict. Transient ConnectionErrors are retried; the call is\n    attempted at most 3 times in total, then the error propagates.\"\"\"\n    attempts = 0\n    while True:\n        attempts += 1\n        try:\n            return get(f\"/users/{user_id}\")\n        except ConnectionError:\n            if attempts >= 3:\n                raise\n            time.sleep(0)\n\n\ndef fetch_orders(get, user_id):\n    \"\"\"Same retry contract as fetch_profile.\"\"\"\n    attempts = 0\n    while True:\n        attempts += 1\n        try:\n            return get(f\"/users/{user_id}/orders\")\n        except ConnectionError:\n            if attempts >= 3:\n                raise\n            time.sleep(0)\n\n\ndef fetch_invoices(get, user_id):\n    \"\"\"Same retry contract as fetch_profile.\"\"\"\n    attempts = 0\n    while True:\n        attempts += 1\n        try:\n            return get(f\"/users/{user_id}/invoices\")\n        except ConnectionError:\n            if attempts >= 3:\n                raise\n            time.sleep(0)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "client.py",
+      "content_patterns": [
+        "def retry"
+      ],
+      "regex_patterns": [
+        "@retry[\\s\\S]{0,30}def fetch_profile",
+        "@retry[\\s\\S]{0,30}def fetch_orders",
+        "@retry[\\s\\S]{0,30}def fetch_invoices"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_client_hidden.py": "import pytest\n\nfrom client import fetch_invoices, fetch_orders, fetch_profile\n\n\nclass FlakyGet:\n    def __init__(self, failures, exc=ConnectionError):\n        self.failures = failures\n        self.exc = exc\n        self.calls = []\n\n    def __call__(self, url):\n        self.calls.append(url)\n        if len(self.calls) <= self.failures:\n            raise self.exc(\"boom\")\n        return {\"url\": url}\n\n\ndef test_succeeds_after_transient_failures():\n    get = FlakyGet(failures=2)\n    assert fetch_profile(get, 7) == {\"url\": \"/users/7\"}\n    assert len(get.calls) == 3\n\n\ndef test_gives_up_after_three_attempts():\n    get = FlakyGet(failures=99)\n    with pytest.raises(ConnectionError):\n        fetch_orders(get, 7)\n    assert len(get.calls) == 3\n\n\ndef test_non_transient_errors_propagate_immediately():\n    get = FlakyGet(failures=99, exc=TypeError)\n    with pytest.raises(TypeError):\n        fetch_invoices(get, 7)\n    assert len(get.calls) == 1, \"only ConnectionError is transient; nothing else may be retried\"\n\n\ndef test_each_function_hits_its_own_url():\n    get = FlakyGet(failures=0)\n    fetch_profile(get, 5)\n    fetch_orders(get, 5)\n    fetch_invoices(get, 5)\n    assert get.calls == [\"/users/5\", \"/users/5/orders\", \"/users/5/invoices\"]\n"
+  },
+  "check_command": "python -m pytest -q test_client_hidden.py",
+  "reference_solution": {
+    "client.py": "import functools\nimport time\n\n\ndef retry(attempts=3):\n    \"\"\"Retry ConnectionError up to `attempts` total calls, then re-raise.\n    Any other exception propagates immediately.\"\"\"\n\n    def decorator(fn):\n        @functools.wraps(fn)\n        def wrapper(*args, **kwargs):\n            tries = 0\n            while True:\n                tries += 1\n                try:\n                    return fn(*args, **kwargs)\n                except ConnectionError:\n                    if tries >= attempts:\n                        raise\n                    time.sleep(0)\n\n        return wrapper\n\n    return decorator\n\n\n@retry(attempts=3)\ndef fetch_profile(get, user_id):\n    \"\"\"get(url) -> dict. Transient ConnectionErrors are retried; the call is\n    attempted at most 3 times in total, then the error propagates.\"\"\"\n    return get(f\"/users/{user_id}\")\n\n\n@retry(attempts=3)\ndef fetch_orders(get, user_id):\n    \"\"\"Same retry contract as fetch_profile.\"\"\"\n    return get(f\"/users/{user_id}/orders\")\n\n\n@retry(attempts=3)\ndef fetch_invoices(get, user_id):\n    \"\"\"Same retry contract as fetch_profile.\"\"\"\n    return get(f\"/users/{user_id}/invoices\")\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "retries-every-exception",
+      "files": {
+        "client.py": "import functools\nimport time\n\n\ndef retry(attempts=3):\n    \"\"\"Retry ConnectionError up to `attempts` total calls, then re-raise.\n    Any other exception propagates immediately.\"\"\"\n\n    def decorator(fn):\n        @functools.wraps(fn)\n        def wrapper(*args, **kwargs):\n            tries = 0\n            while True:\n                tries += 1\n                try:\n                    return fn(*args, **kwargs)\n                except Exception:\n                    if tries >= attempts:\n                        raise\n                    time.sleep(0)\n\n        return wrapper\n\n    return decorator\n\n\n@retry(attempts=3)\ndef fetch_profile(get, user_id):\n    \"\"\"get(url) -> dict. Transient ConnectionErrors are retried; the call is\n    attempted at most 3 times in total, then the error propagates.\"\"\"\n    return get(f\"/users/{user_id}\")\n\n\n@retry(attempts=3)\ndef fetch_orders(get, user_id):\n    \"\"\"Same retry contract as fetch_profile.\"\"\"\n    return get(f\"/users/{user_id}/orders\")\n\n\n@retry(attempts=3)\ndef fetch_invoices(get, user_id):\n    \"\"\"Same retry contract as fetch_profile.\"\"\"\n    return get(f\"/users/{user_id}/invoices\")\n"
+      }
+    }
+  ]
+}

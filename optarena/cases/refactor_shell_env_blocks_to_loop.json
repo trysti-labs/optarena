@@ -1,0 +1,50 @@
+{
+  "name": "refactor_shell_env_blocks_to_loop",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Three copy-pasted per-environment blocks -> one function/loop, byte-identical output; drift broken swaps replica counts while deduplicating",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "shell",
+    "bash",
+    "refactoring",
+    "duplication"
+  ],
+  "prompts": [
+    "scripts/deploy_report.sh appends a three-section report (dev, staging, prod) to the file given as its argument, and the three sections are pure copy-paste - same three echo lines with the environment name, its URL (https://<env>.example.com), and its replica count hardcoded each time. Deduplicate it: one function (or loop over the env/replica data) that emits a section, called once per environment. The output must stay BYTE-identical: same sections in the same promotion order (dev, staging, prod), same lines, same replica counts (dev 1, staging 2, prod 6), still APPENDING to the report file (>>), and still correct when the report path contains spaces. Keep `set -euo pipefail`."
+  ],
+  "setup_files": {
+    "scripts/deploy_report.sh": "#!/bin/bash\nset -euo pipefail\n\n# Render the deploy report: one section per environment, in promotion order.\nREPORT=$1\n\necho \"== dev ==\" >> \"$REPORT\"\necho \"url=https://dev.example.com\" >> \"$REPORT\"\necho \"replicas=1\" >> \"$REPORT\"\n\necho \"== staging ==\" >> \"$REPORT\"\necho \"url=https://staging.example.com\" >> \"$REPORT\"\necho \"replicas=2\" >> \"$REPORT\"\n\necho \"== prod ==\" >> \"$REPORT\"\necho \"url=https://prod.example.com\" >> \"$REPORT\"\necho \"replicas=6\" >> \"$REPORT\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/deploy_report.sh",
+      "content_patterns": [
+        "set -euo pipefail"
+      ],
+      "not_content_patterns": [
+        "== staging =="
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_report_script.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nbase = Path(\"report_check_tmp\")\nshutil.rmtree(base, ignore_errors=True)\nbase.mkdir()\nreport = base / \"deploy report.txt\"   # space on purpose - quoting must hold\n\nproc = subprocess.run(\n    [\"bash\", \"scripts/deploy_report.sh\", str(report).replace(\"\\\\\", \"/\")],\n    capture_output=True, text=True, timeout=30,\n)\nassert proc.returncode == 0, f\"script failed (exit {proc.returncode}): {proc.stderr}\"\n\nexpected = \"\"\"== dev ==\nurl=https://dev.example.com\nreplicas=1\n== staging ==\nurl=https://staging.example.com\nreplicas=2\n== prod ==\nurl=https://prod.example.com\nreplicas=6\n\"\"\"\ngot = report.read_text(encoding=\"utf-8\")\nassert got == expected, f\"report drifted.\\nexpected:\\n{expected}\\ngot:\\n{got}\"\n\n# Appending is part of the contract: a second run adds a second copy.\nproc = subprocess.run(\n    [\"bash\", \"scripts/deploy_report.sh\", str(report).replace(\"\\\\\", \"/\")],\n    capture_output=True, text=True, timeout=30,\n)\nassert proc.returncode == 0\nassert report.read_text(encoding=\"utf-8\") == expected * 2, \"output must append, not truncate\"\n\nprint(\"PASS deploy report checks\")\n"
+  },
+  "check_command": "python check_report_script.py",
+  "reference_solution": {
+    "scripts/deploy_report.sh": "#!/bin/bash\nset -euo pipefail\n\n# Render the deploy report: one section per environment, in promotion order.\nREPORT=$1\n\nemit_env() {\n  local env=$1 replicas=$2\n  echo \"== $env ==\" >> \"$REPORT\"\n  echo \"url=https://$env.example.com\" >> \"$REPORT\"\n  echo \"replicas=$replicas\" >> \"$REPORT\"\n}\n\nemit_env dev 1\nemit_env staging 2\nemit_env prod 6\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "replicas-swapped-in-dedup",
+      "files": {
+        "scripts/deploy_report.sh": "#!/bin/bash\nset -euo pipefail\n\n# Render the deploy report: one section per environment, in promotion order.\nREPORT=$1\n\nemit_env() {\n  local env=$1 replicas=$2\n  echo \"== $env ==\" >> \"$REPORT\"\n  echo \"url=https://$env.example.com\" >> \"$REPORT\"\n  echo \"replicas=$replicas\" >> \"$REPORT\"\n}\n\nemit_env dev 1\nemit_env staging 6\nemit_env prod 2\n"
+      }
+    }
+  ]
+}

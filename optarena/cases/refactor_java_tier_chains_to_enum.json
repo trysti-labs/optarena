@@ -1,0 +1,51 @@
+{
+  "name": "refactor_java_tier_chains_to_enum",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Three duplicated if/else-if tier chains -> one enum holding rate and badge; drift broken mistypes silver's rate while transcribing",
+  "difficulty": 3,
+  "task_type": "refactoring",
+  "tags": [
+    "java",
+    "refactoring",
+    "enum",
+    "duplication"
+  ],
+  "prompts": [
+    "Pricing.java repeats the same if/else-if chain over the four customer tiers three times - discountRate, finalPrice, and tierBadge each re-enumerate bronze/silver/gold/platinum, so the tier data lives in three places. Refactor: introduce a Tier enum (nested in Pricing or in its own file) that carries each tier's discount rate and badge text plus a lookup from the lowercase tier string, and have the three public methods delegate to it - no if/else-if chains over tiers left anywhere. Pure refactor: identical rates (bronze 0, silver 0.05, gold 0.10, platinum 0.20), identical badges, finalPrice keeps its round-to-cents behavior, and an unknown tier still throws IllegalArgumentException with a message naming the bad tier. The three public method signatures on Pricing must not change."
+  ],
+  "setup_files": {
+    "Pricing.java": "public final class Pricing {\n    private Pricing() {}\n\n    public static double discountRate(String tier) {\n        if (tier.equals(\"bronze\")) return 0.00;\n        else if (tier.equals(\"silver\")) return 0.05;\n        else if (tier.equals(\"gold\")) return 0.10;\n        else if (tier.equals(\"platinum\")) return 0.20;\n        else throw new IllegalArgumentException(\"unknown tier: \" + tier);\n    }\n\n    public static double finalPrice(String tier, double amount) {\n        double rate;\n        if (tier.equals(\"bronze\")) rate = 0.00;\n        else if (tier.equals(\"silver\")) rate = 0.05;\n        else if (tier.equals(\"gold\")) rate = 0.10;\n        else if (tier.equals(\"platinum\")) rate = 0.20;\n        else throw new IllegalArgumentException(\"unknown tier: \" + tier);\n        return Math.round(amount * (1 - rate) * 100.0) / 100.0;\n    }\n\n    public static String tierBadge(String tier) {\n        if (tier.equals(\"bronze\")) return \"BRONZE MEMBER\";\n        else if (tier.equals(\"silver\")) return \"SILVER MEMBER\";\n        else if (tier.equals(\"gold\")) return \"GOLD MEMBER\";\n        else if (tier.equals(\"platinum\")) return \"PLATINUM MEMBER\";\n        else throw new IllegalArgumentException(\"unknown tier: \" + tier);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Pricing.java",
+      "content_patterns": [
+        "tier"
+      ],
+      "not_content_patterns": [
+        "else if"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "PricingTest.java": "public final class PricingTest {\n    public static void main(String[] args) {\n        checkRate(\"bronze\", 0.00);\n        checkRate(\"silver\", 0.05);\n        checkRate(\"gold\", 0.10);\n        checkRate(\"platinum\", 0.20);\n\n        checkPrice(\"gold\", 19.99, 17.99);      // 19.99 * 0.9 = 17.991 -> 17.99\n        checkPrice(\"silver\", 100.0, 95.0);\n        checkPrice(\"bronze\", 12.34, 12.34);\n        checkPrice(\"platinum\", 250.0, 200.0);\n\n        checkBadge(\"bronze\", \"BRONZE MEMBER\");\n        checkBadge(\"platinum\", \"PLATINUM MEMBER\");\n\n        expectThrow(() -> Pricing.discountRate(\"wood\"));\n        expectThrow(() -> Pricing.finalPrice(\"wood\", 10.0));\n        expectThrow(() -> Pricing.tierBadge(\"wood\"));\n\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkRate(String tier, double expected) {\n        double got = Pricing.discountRate(tier);\n        if (got != expected) {\n            throw new AssertionError(\"discountRate(\" + tier + \") = \" + got + \", expected \" + expected);\n        }\n    }\n\n    static void checkPrice(String tier, double amount, double expected) {\n        double got = Pricing.finalPrice(tier, amount);\n        if (got != expected) {\n            throw new AssertionError(\"finalPrice(\" + tier + \", \" + amount + \") = \" + got\n                    + \", expected \" + expected);\n        }\n    }\n\n    static void checkBadge(String tier, String expected) {\n        String got = Pricing.tierBadge(tier);\n        if (!expected.equals(got)) {\n            throw new AssertionError(\"tierBadge(\" + tier + \") = \" + got + \", expected \" + expected);\n        }\n    }\n\n    static void expectThrow(Runnable r) {\n        try {\n            r.run();\n        } catch (IllegalArgumentException e) {\n            if (!String.valueOf(e.getMessage()).contains(\"wood\")) {\n                throw new AssertionError(\"exception message must name the bad tier, got: \" + e.getMessage());\n            }\n            return;\n        }\n        throw new AssertionError(\"unknown tier must throw IllegalArgumentException\");\n    }\n}\n",
+    "CheckPricing.java": "import java.io.IOException;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\nimport java.util.ArrayList;\nimport java.util.List;\nimport java.util.stream.Stream;\n\npublic final class CheckPricing {\n    public static void main(String[] args) throws Exception {\n        List<String> cmd = new ArrayList<>(List.of(\"javac\"));\n        try (Stream<Path> files = Files.list(Path.of(\".\"))) {\n            files.map(Path::getFileName).map(Path::toString)\n                 .filter(n -> n.endsWith(\".java\") && !n.equals(\"CheckPricing.java\"))\n                 .sorted()\n                 .forEach(cmd::add);\n        }\n        if (exec(cmd.toArray(new String[0])) != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"PricingTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckPricing.java",
+  "reference_solution": {
+    "Pricing.java": "public final class Pricing {\n    private Pricing() {}\n\n    enum Tier {\n        BRONZE(0.00, \"BRONZE MEMBER\"),\n        SILVER(0.05, \"SILVER MEMBER\"),\n        GOLD(0.10, \"GOLD MEMBER\"),\n        PLATINUM(0.20, \"PLATINUM MEMBER\");\n\n        final double rate;\n        final String badge;\n\n        Tier(double rate, String badge) {\n            this.rate = rate;\n            this.badge = badge;\n        }\n\n        static Tier fromString(String tier) {\n            for (Tier t : values()) {\n                if (t.name().toLowerCase().equals(tier)) {\n                    return t;\n                }\n            }\n            throw new IllegalArgumentException(\"unknown tier: \" + tier);\n        }\n    }\n\n    public static double discountRate(String tier) {\n        return Tier.fromString(tier).rate;\n    }\n\n    public static double finalPrice(String tier, double amount) {\n        double rate = Tier.fromString(tier).rate;\n        return Math.round(amount * (1 - rate) * 100.0) / 100.0;\n    }\n\n    public static String tierBadge(String tier) {\n        return Tier.fromString(tier).badge;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "silver-rate-drift",
+      "files": {
+        "Pricing.java": "public final class Pricing {\n    private Pricing() {}\n\n    enum Tier {\n        BRONZE(0.00, \"BRONZE MEMBER\"),\n        SILVER(0.5, \"SILVER MEMBER\"),\n        GOLD(0.10, \"GOLD MEMBER\"),\n        PLATINUM(0.20, \"PLATINUM MEMBER\");\n\n        final double rate;\n        final String badge;\n\n        Tier(double rate, String badge) {\n            this.rate = rate;\n            this.badge = badge;\n        }\n\n        static Tier fromString(String tier) {\n            for (Tier t : values()) {\n                if (t.name().toLowerCase().equals(tier)) {\n                    return t;\n                }\n            }\n            throw new IllegalArgumentException(\"unknown tier: \" + tier);\n        }\n    }\n\n    public static double discountRate(String tier) {\n        return Tier.fromString(tier).rate;\n    }\n\n    public static double finalPrice(String tier, double amount) {\n        double rate = Tier.fromString(tier).rate;\n        return Math.round(amount * (1 - rate) * 100.0) / 100.0;\n    }\n\n    public static String tierBadge(String tier) {\n        return Tier.fromString(tier).badge;\n    }\n}\n"
+      }
+    }
+  ]
+}

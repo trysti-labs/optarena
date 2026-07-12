@@ -1,0 +1,50 @@
+{
+  "name": "refactor_python_ospath_to_pathlib",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "os.path string juggling -> pathlib.PurePosixPath, behavior-preserving incl. multi-dot names and dotfiles; drift broken uses split('.')[0]",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "python",
+    "refactoring",
+    "pathlib",
+    "migration"
+  ],
+  "prompts": [
+    "files.py manipulates forward-slash paths with os.path string functions (basename, splitext, concatenation). Migrate all three functions to pathlib - use PurePosixPath, since these are posix-style path STRINGS being computed on (str results stay str, and the code must behave identically on any OS). Pure refactor with the exact splitext semantics preserved: only the FINAL extension counts ('report.tar.gz' -> stem 'report.tar', suffix '.gz'), dotfiles like '.bashrc' have NO extension (stem '.bashrc', suffix ''), and extension-less names gain the new suffix in swap_extension. No os.path usage left in the file; keep the three function names and signatures."
+  ],
+  "setup_files": {
+    "files.py": "import os\n\n\ndef artifact_name(path):\n    \"\"\"Basename without its FINAL extension: 'a/b/report.tar.gz' -> 'report.tar'.\n\n    Dotfiles keep their name: '.bashrc' -> '.bashrc' (they have no extension).\n    \"\"\"\n    base = os.path.basename(path)\n    stem, _ext = os.path.splitext(base)\n    return stem\n\n\ndef swap_extension(path, new_ext):\n    \"\"\"Swap the final extension: ('logs/app.log', '.txt') -> 'logs/app.txt'.\n\n    A path without an extension gains one: ('Makefile', '.bak') -> 'Makefile.bak'.\n    Paths use forward slashes.\n    \"\"\"\n    root, _ext = os.path.splitext(path)\n    return root + new_ext\n\n\ndef group_by_extension(paths):\n    \"\"\"Map final extension (with its dot; '' when none) -> sorted basenames.\"\"\"\n    out = {}\n    for p in paths:\n        base = os.path.basename(p)\n        _stem, ext = os.path.splitext(base)\n        out.setdefault(ext, []).append(base)\n    for ext in out:\n        out[ext].sort()\n    return out\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "files.py",
+      "content_patterns": [
+        "pureposixpath"
+      ],
+      "not_content_patterns": [
+        "os.path"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_files_hidden.py": "from files import artifact_name, group_by_extension, swap_extension\n\n\ndef test_artifact_name_final_extension_only():\n    assert artifact_name(\"a/b/report.tar.gz\") == \"report.tar\"\n    assert artifact_name(\"build/output.log\") == \"output\"\n    assert artifact_name(\"Makefile\") == \"Makefile\"\n\n\ndef test_artifact_name_dotfiles_unchanged():\n    assert artifact_name(\".bashrc\") == \".bashrc\"\n    assert artifact_name(\"home/user/.gitignore\") == \".gitignore\"\n\n\ndef test_swap_extension():\n    assert swap_extension(\"logs/app.log\", \".txt\") == \"logs/app.txt\"\n    assert swap_extension(\"archive.tar.gz\", \".bz2\") == \"archive.tar.bz2\"\n    assert swap_extension(\"Makefile\", \".bak\") == \"Makefile.bak\"\n\n\ndef test_group_by_extension():\n    got = group_by_extension(\n        [\"src/a.py\", \"src/b.py\", \"notes.txt\", \"Makefile\", \"pkg/data.tar.gz\"]\n    )\n    assert got == {\n        \".py\": [\"a.py\", \"b.py\"],\n        \".txt\": [\"notes.txt\"],\n        \"\": [\"Makefile\"],\n        \".gz\": [\"data.tar.gz\"],\n    }\n"
+  },
+  "check_command": "python -m pytest -q test_files_hidden.py",
+  "reference_solution": {
+    "files.py": "from pathlib import PurePosixPath\n\n\ndef artifact_name(path):\n    \"\"\"Basename without its FINAL extension: 'a/b/report.tar.gz' -> 'report.tar'.\n\n    Dotfiles keep their name: '.bashrc' -> '.bashrc' (they have no extension).\n    \"\"\"\n    return PurePosixPath(path).stem\n\n\ndef swap_extension(path, new_ext):\n    \"\"\"Swap the final extension: ('logs/app.log', '.txt') -> 'logs/app.txt'.\n\n    A path without an extension gains one: ('Makefile', '.bak') -> 'Makefile.bak'.\n    Paths use forward slashes.\n    \"\"\"\n    return str(PurePosixPath(path).with_suffix(new_ext))\n\n\ndef group_by_extension(paths):\n    \"\"\"Map final extension (with its dot; '' when none) -> sorted basenames.\"\"\"\n    out = {}\n    for p in paths:\n        pure = PurePosixPath(p)\n        out.setdefault(pure.suffix, []).append(pure.name)\n    for ext in out:\n        out[ext].sort()\n    return out\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "split-dot-stem-drift",
+      "files": {
+        "files.py": "from pathlib import PurePosixPath\n\n\ndef artifact_name(path):\n    \"\"\"Basename without its FINAL extension: 'a/b/report.tar.gz' -> 'report.tar'.\n\n    Dotfiles keep their name: '.bashrc' -> '.bashrc' (they have no extension).\n    \"\"\"\n    return PurePosixPath(path).name.split(\".\")[0]\n\n\ndef swap_extension(path, new_ext):\n    \"\"\"Swap the final extension: ('logs/app.log', '.txt') -> 'logs/app.txt'.\n\n    A path without an extension gains one: ('Makefile', '.bak') -> 'Makefile.bak'.\n    Paths use forward slashes.\n    \"\"\"\n    return str(PurePosixPath(path).with_suffix(new_ext))\n\n\ndef group_by_extension(paths):\n    \"\"\"Map final extension (with its dot; '' when none) -> sorted basenames.\"\"\"\n    out = {}\n    for p in paths:\n        pure = PurePosixPath(p)\n        out.setdefault(pure.suffix, []).append(pure.name)\n    for ext in out:\n        out[ext].sort()\n    return out\n"
+      }
+    }
+  ]
+}
