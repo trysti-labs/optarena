@@ -1,7 +1,7 @@
 # OptArena Status
 
 _As of 2026-07-12, on `main` (github.com/trysti-labs/optarena), through
-batch 20._
+batch 21._
 
 ## Where things stand
 
@@ -9,31 +9,31 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-365 cases**, all new cases shipped with a `reference_solution` and
+371 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
 `verify-corpus` before commit. **The L3 (repo-scale) track is live with two
 starter repos**: `repos/fastapi-tasktracker` (python image, 9 cases) and
 `repos/express-ts-shortlink` (node image, 5 cases) - 14 L3 cases across two
 toolchains.
 
-## Corpus census (365 cases)
+## Corpus census (371 cases)
 
 | | |
 |---|---|
-| Total cases | **365** (target 500, 73%) |
-| With `reference_solution` | 261 (72%; 100% of the 245 added this expansion) |
+| Total cases | **371** (target 500, 74%) |
+| With `reference_solution` | 267 (72%; 100% of the 251 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | L3 (repo-scale, `setup_repo`) cases | 14 (fastapi-tasktracker 9, express-ts-shortlink 5) |
 | Multi-prompt session cases | 2 |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
 
 **By language** (recomputed from the case JSONs' `language` tags - the
-previous census under-counted several tracks): python 82, javascript 48,
-go 27, java 26, csharp 25, rust 24, typescript 23, sql 20, yaml 15, php 13,
-ruby 13, kotlin 12, shell 11, c 7, hcl 5, cpp 3, dockerfile 3, makefile 1 -
+previous census under-counted several tracks): python 84, javascript 49,
+java 27, go 27, csharp 25, rust 24, typescript 23, sql 21, yaml 15, php 13,
+ruby 13, kotlin 12, shell 12, c 7, hcl 5, cpp 3, dockerfile 3, makefile 1 -
 plus 7 language-neutral devops cases.
 
-**By task type:** bug_fix 95, feature 76, refactoring 46, security 40,
+**By task type:** bug_fix 95, feature 76, refactoring 52, security 40,
 testing 44, performance 27, devops 23, data_engineering 14.
 
 ## Waves shipped (chronology)
@@ -57,6 +57,7 @@ Since then:
 | **Testing + refactoring breadth** | 1 | 348 → 354 | Batch 18: four mutation-checked **testing** cases on distinct functions - python parse_duration (1h30m45s parser; seconds-dropped / hours-as-minutes / empty-returns-0 mutants) and merge_intervals (touching-not-merged / unsorted / contained-shrinks-end), js slugify with the corpus's first **node-native** mutation harness (`node mutation_check.js` - no python dependency), and java ExcelColumn with a **java-native single-file harness** (`java MutationCheck.java`, plain javac/java -ea, no maven/JUnit). Two **refactoring** cases: python range(len)->zip with a per-line-rounding drift broken, and js constructor+prototype -> ES class with a static-lost-in-translation broken. Every vacuous/broken variant tuned to survive the shape checks so the mutation harness or hidden suite is what catches it |
 | **L3 repo #2** - express-ts-shortlink | 1 | 354 → 359 | Batch 19: second starter repo, on the **node image** - a TypeScript + Express 4 link shortener (src/models-store-services-routes layering, strict `tsc -p .` as part of every oracle, plain-JS node:test suites against the compiled dist/, portless `listen(0)` + global fetch). Local ambient typings under types/ (function+namespace merge mirroring @types/express) since tsc does not consult NODE_PATH and the sandbox has no per-project node_modules. 5 L3 cases: link-expiry feature (410 Gone on the redirect path, expired hits not counted; brokens: redirect-unchecked, click-recorded-before-check), shared sendError refactor across 3 routers (broken: body-key drift), mutation-checked summarizeClicks tests (node-native harness recompiling TS per mutant; earliest-day tie-break mutants), URL scheme allowlist security fix (broken: case-sensitive prefix blocklist defeated by 'JavaScript:'), and a top-links aggregation endpoint whose star broken is **route shadowing** (/top registered after /:slug) |
 | **Perf + devops push #2** | 1 | 359 → 365 | Batch 20: two calibrated **performance** cases (js Array.includes-in-loop -> Set at 30k x 30k, naive ~7s native vs 2.5s budget; python max()+remove() full-ranking extraction -> one descending sort at n=50k, naive ~6.5s vs 2s budget - both with a wrong-output fast broken AND a proven still-quadratic broken). Three **devops**: bash backup-script hardening proven by REAL bash runs against paths with spaces (brokens: unmodified, strict-mode-but-still-unquoted - set -euo pipefail alone doesn't fix word-splitting), K8s HPA where the oracle demands BOTH the autoscaling/v2 HPA and the resources.requests.cpu it computes against (brokens: request-less deployment, min > max), and compose production hygiene (pin :latest, restart policies, memory limits; 3 brokens). One **testing**: java Roman-numeral parser on the java-native harness (subtractive-rule / empty-returns-0 / equal-neighbour-subtracts mutants) |
+| **Refactoring breadth** | 1 | 365 → 371 | Batch 21: six distinct refactor shapes across six languages, each with a behavior-*drift* broken - python 3x-copy-pasted retry loops -> one @retry decorator (drift: retries EVERY exception, caught by a non-transient-error-propagates-immediately test), js triple parallel switch -> lookup table (drift: fat-fingered rate; hidden test also probes 'toString'/'constructor' so plain `obj[key]` lookups fail - Object.hasOwn required), java triple if/else-if tier chains -> enum with data (drift: silver 0.05 -> 0.5; cross-platform CheckPricing driver compiles whatever .java layout the model chose), sql three correlated scalar subqueries -> grouped CTE + LEFT JOIN (drift: INNER JOIN drops zero-order customers, proven via real sqlite), python os.path -> PurePosixPath with exact splitext semantics (drift: split('.')[0] breaks 'report.tar.gz' and '.bashrc'), and bash copy-pasted env blocks -> function/loop with byte-identical appended output (drift: replica counts swapped) - the last two proven by real interpreter runs |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -143,8 +144,8 @@ ASP.NET, Rails, Laravel). Remaining work after L3, per the plan's
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
 Rebalance note: **bug_fix is at target (95/95) - stop adding it** (batches
-15-20 deliberately shipped zero). After batch 20 the categories still
-furthest behind are **refactoring (46/70), devops (23/45), testing (44/65),
+15-21 deliberately shipped zero). After batch 21 the categories still
+furthest behind are **devops (23/45), testing (44/65), refactoring (52/70),
 performance (27/45), and feature (76/95)**; data_engineering (14/15) and
 security (40/55) are closing in. Batch 17 proved host-calibrated perf
 budgets work when margins are wide (naive 3-4x over budget on fast native
