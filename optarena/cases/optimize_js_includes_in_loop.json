@@ -1,0 +1,54 @@
+{
+  "name": "optimize_js_includes_in_loop",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "O(n*m) Array.includes inside a loop -> Set membership; budget calibrated (naive ~7s native at 30k x 30k vs ~0.01s, budget 2.5s)",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "javascript",
+    "node",
+    "performance",
+    "big-o",
+    "set"
+  ],
+  "prompts": [
+    "newSubscribers(current, previous) in subscribers.js returns the emails that are in `current` but not in `previous`, preserving current-list order and duplicates. It calls previous.includes(email) - a linear scan - for every element of current, making it O(n*m) and far too slow for real subscriber lists. Rewrite it to build a Set of `previous` once and test membership against that, returning exactly the same array (same order, duplicates in `current` still preserved). Keep the function name, signature, and module.exports shape."
+  ],
+  "setup_files": {
+    "subscribers.js": "function newSubscribers(current, previous) {\n  // Emails present in the current list but absent from the previous one,\n  // in current-list order (duplicates in `current` preserved).\n  const out = [];\n  for (const email of current) {\n    if (!previous.includes(email)) {\n      out.push(email);\n    }\n  }\n  return out;\n}\n\nmodule.exports = { newSubscribers };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "subscribers.js",
+      "content_patterns": [
+        "newSubscribers"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_subscribers.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { newSubscribers } = require(\"./subscribers\");\n\ntest(\"finds additions, keeps order and duplicates\", () => {\n  assert.deepStrictEqual(\n    newSubscribers([\"a@x.io\", \"b@x.io\", \"a@x.io\", \"c@x.io\"], [\"b@x.io\"]),\n    [\"a@x.io\", \"a@x.io\", \"c@x.io\"],\n  );\n});\n\ntest(\"empty edges\", () => {\n  assert.deepStrictEqual(newSubscribers([], [\"a@x.io\"]), []);\n  assert.deepStrictEqual(newSubscribers([\"a@x.io\"], []), [\"a@x.io\"]);\n});\n\ntest(\"performance on large lists\", () => {\n  const n = 30000;\n  const previous = Array.from({ length: n }, (_, i) => `user${i}@example.com`);\n  const current = Array.from({ length: n }, (_, i) => `user${i + n / 2}@example.com`);\n\n  const start = process.hrtime.bigint();\n  const got = newSubscribers(current, previous);\n  const elapsed = Number(process.hrtime.bigint() - start) / 1e9;\n\n  assert.strictEqual(got.length, n / 2);\n  assert.strictEqual(got[0], `user${n}@example.com`);\n  // calibrated: Array.includes per element is ~7s on fast native hardware\n  // and slower in the sandbox; the Set version is ~0.01s\n  assert.ok(\n    elapsed < 2.5,\n    `newSubscribers took ${elapsed.toFixed(2)}s for ${n}x${n}; expected a Set ` +\n      `lookup, not previous.includes() inside the loop (O(n*m))`,\n  );\n});\n"
+  },
+  "check_command": "node --test test_subscribers.test.js",
+  "reference_solution": {
+    "subscribers.js": "function newSubscribers(current, previous) {\n  // Emails present in the current list but absent from the previous one,\n  // in current-list order (duplicates in `current` preserved).\n  const prev = new Set(previous);\n  return current.filter((email) => !prev.has(email));\n}\n\nmodule.exports = { newSubscribers };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-dedupes-output",
+      "files": {
+        "subscribers.js": "function newSubscribers(current, previous) {\n  // Emails present in the current list but absent from the previous one,\n  // in current-list order (duplicates in `current` preserved).\n  const prev = new Set(previous);\n  return [...new Set(current)].filter((email) => !prev.has(email));\n}\n\nmodule.exports = { newSubscribers };\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "subscribers.js": "function newSubscribers(current, previous) {\n  // Emails present in the current list but absent from the previous one,\n  // in current-list order (duplicates in `current` preserved).\n  const out = [];\n  for (const email of current) {\n    if (!previous.includes(email)) {\n      out.push(email);\n    }\n  }\n  return out;\n}\n\nmodule.exports = { newSubscribers };\n"
+      }
+    }
+  ]
+}
