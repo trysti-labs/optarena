@@ -1,0 +1,10 @@
+{
+  "name": "express-ts-shortlink",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Link shortener with click tracking (Express + TypeScript)",
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "tsc -p . && node --test"
+  }
+}
