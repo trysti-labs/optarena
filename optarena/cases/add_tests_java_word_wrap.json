@@ -1,0 +1,49 @@
+{
+  "name": "add_tests_java_word_wrap",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Write plain-java tests for a greedy word-wrap function; java-native harness (exact-width off-by-one, dropped-trailing-line, blank-input mutants)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "java",
+    "testing",
+    "mutation-checked",
+    "strings"
+  ],
+  "prompts": [
+    "WordWrap.wrap(text, width) in WordWrap.java (already correct - do not modify it) greedily packs words onto lines of at most `width` characters (single space between words on a line), never splitting a word - one that's longer than width gets its own overflowing line. Blank/null input gives an empty list. Write a plain-Java test class at exactly WordWrapTest.java (public static void main, throw AssertionError on mismatch, no JUnit) covering at least: a multi-line wrap with an exact expected List<String>, a word that exactly fills the remaining width on a line (must stay on that line, not overflow to the next), the trailing partial line being included in the result, and blank input giving an empty list. The class must exit normally when everything passes."
+  ],
+  "setup_files": {
+    "WordWrap.java": "import java.util.ArrayList;\nimport java.util.List;\n\npublic final class WordWrap {\n    private WordWrap() {}\n\n    /** Greedy word-wrap: pack words onto lines of at most `width` chars,\n     *  single spaces between words on a line. A single word longer than\n     *  width gets its own (overflowing) line - it is never split. */\n    public static List<String> wrap(String text, int width) {\n        List<String> lines = new ArrayList<>();\n        if (text == null || text.isBlank()) {\n            return lines;\n        }\n        StringBuilder line = new StringBuilder();\n        for (String word : text.trim().split(\"\\\\s+\")) {\n            if (line.length() == 0) {\n                line.append(word);\n            } else if (line.length() + 1 + word.length() <= width) {\n                line.append(' ').append(word);\n            } else {\n                lines.add(line.toString());\n                line = new StringBuilder(word);\n            }\n        }\n        if (line.length() > 0) {\n            lines.add(line.toString());\n        }\n        return lines;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "WordWrapTest.java",
+      "content_patterns": [
+        "WordWrap.wrap",
+        "AssertionError"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "MutationCheck.java": "import java.io.IOException;\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic final class MutationCheck {\n    static final Path IMPL = Path.of(\"WordWrap.java\");\n    static final String[][] MUTANTS = {\n        // off-by-one: a word that exactly fills the width is pushed to the next line\n        {\"            } else if (line.length() + 1 + word.length() <= width) {\",\n         \"            } else if (line.length() + 1 + word.length() < width) {\"},\n        // trailing partial line silently dropped\n        {\"        if (line.length() > 0) {\\n            lines.add(line.toString());\\n        }\",\n         \"        \"},\n        // words on the same line lose their separating space\n        {\"                line.append(' ').append(word);\",\n         \"                line.append(word);\"},\n    };\n\n    public static void main(String[] args) throws Exception {\n        String src = Files.readString(IMPL, StandardCharsets.UTF_8);\n        for (String[] m : MUTANTS) {\n            if (src.split(java.util.regex.Pattern.quote(m[0]), -1).length - 1 != 1) {\n                fail(\"protected implementation file was modified - anchor not found exactly once: \" + m[0].trim());\n            }\n        }\n        if (run() != 0) fail(\"model tests FAILED against the correct implementation\");\n        try {\n            for (int i = 0; i < MUTANTS.length; i++) {\n                Files.writeString(IMPL, src.replace(MUTANTS[i][0], MUTANTS[i][1]), StandardCharsets.UTF_8);\n                if (run() == 0) fail(\"mutation \" + (i + 1) + \" SURVIVED: the tests do not verify the required behavior\");\n            }\n        } finally {\n            Files.writeString(IMPL, src, StandardCharsets.UTF_8);\n        }\n        System.out.println(\"PASS (killed all \" + MUTANTS.length + \" mutants)\");\n    }\n\n    static int run() throws IOException, InterruptedException {\n        int compile = exec(\"javac\", \"WordWrap.java\", \"WordWrapTest.java\");\n        if (compile != 0) return compile;\n        return exec(\"java\", \"-ea\", \"WordWrapTest\");\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n\n    static void fail(String message) {\n        System.err.println(message);\n        System.exit(1);\n    }\n}\n"
+  },
+  "check_command": "java MutationCheck.java",
+  "reference_solution": {
+    "WordWrapTest.java": "import java.util.List;\n\npublic final class WordWrapTest {\n    public static void main(String[] args) {\n        checkBasicWrap();\n        checkExactWidthFit();\n        checkBlankInput();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkBasicWrap() {\n        List<String> got = WordWrap.wrap(\"the quick brown fox jumps\", 10);\n        List<String> expected = List.of(\"the quick\", \"brown fox\", \"jumps\");\n        if (!got.equals(expected)) {\n            throw new AssertionError(\"wrap(...) = \" + got + \", expected \" + expected);\n        }\n    }\n\n    static void checkExactWidthFit() {\n        // \"ab cd\" is exactly 5 chars - must stay on ONE line at width 5\n        List<String> got = WordWrap.wrap(\"ab cd ef\", 5);\n        List<String> expected = List.of(\"ab cd\", \"ef\");\n        if (!got.equals(expected)) {\n            throw new AssertionError(\"wrap(...) = \" + got + \", expected \" + expected\n                    + \" (a word exactly filling the width must not overflow)\");\n        }\n    }\n\n    static void checkBlankInput() {\n        if (!WordWrap.wrap(\"\", 10).isEmpty()) {\n            throw new AssertionError(\"empty input must give an empty list\");\n        }\n        if (!WordWrap.wrap(\"   \", 10).isEmpty()) {\n            throw new AssertionError(\"blank input must give an empty list\");\n        }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "WordWrapTest.java": "import java.util.List;\n\npublic final class WordWrapTest {\n    public static void main(String[] args) {\n        List<String> got = WordWrap.wrap(\"hello world\", 20);\n        if (got.size() != 1) {\n            throw new AssertionError(\"short text should fit on one line\");\n        }\n        if (!WordWrap.wrap(\"\", 10).isEmpty()) {\n            throw new AssertionError(\"empty input must give an empty list\");\n        }\n        List<String> longer = WordWrap.wrap(\"a b c d e f g h\", 3);\n        if (longer.isEmpty()) {\n            throw new AssertionError(\"long text must produce some lines\");\n        }\n        System.out.println(\"all tests passed\");\n    }\n}\n"
+      }
+    }
+  ]
+}

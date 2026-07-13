@@ -1,0 +1,46 @@
+{
+  "name": "add_feature_flag_percentage_rollout",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Add a percentage-rollout flag type to a boolean/allowlist feature-flag evaluator, keyed so independent flags don't share the same enabled-user set",
+  "difficulty": 3,
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "feature-flags",
+    "hashing"
+  ],
+  "prompts": [
+    "flags.py's is_enabled(flag, user_id, context=None) currently handles 'boolean' and 'allowlist' flag types. Add a 'percentage' type: {'type': 'percentage', 'name': ..., 'rollout': 0-100} enables the flag for roughly `rollout` percent of users. The assignment must be: deterministic (the same flag and user always get the same answer), roughly uniform across users, and - this is the part that's easy to get wrong - keyed on BOTH the flag's name and the user_id, so that two different percentage flags at the same rollout do not enable the identical set of users (hash the combination of flag name and user_id, not either alone). rollout=0 must enable nobody and rollout=100 must enable everybody. Unknown flag types still raise ValueError."
+  ],
+  "setup_files": {
+    "flags.py": "def is_enabled(flag, user_id, context=None):\n    \"\"\"Evaluate a feature flag for a user.\n\n    flag is a dict like {\"type\": \"boolean\", \"value\": True} or\n    {\"type\": \"allowlist\", \"users\": [...]}. Unknown types raise ValueError.\n    \"\"\"\n    context = context or {}\n    if flag[\"type\"] == \"boolean\":\n        return bool(flag[\"value\"])\n    if flag[\"type\"] == \"allowlist\":\n        return user_id in flag[\"users\"]\n    raise ValueError(f\"unknown flag type: {flag['type']!r}\")\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "flags.py",
+      "content_patterns": [
+        "percentage"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_flags_hidden.py": "from flags import is_enabled\n\n\ndef test_boolean_and_allowlist_unaffected():\n    assert is_enabled({\"type\": \"boolean\", \"value\": True}, \"u1\") is True\n    assert is_enabled({\"type\": \"allowlist\", \"users\": [\"u1\"]}, \"u2\") is False\n\n\ndef test_percentage_is_deterministic():\n    flag = {\"type\": \"percentage\", \"name\": \"new-nav\", \"rollout\": 50}\n    first = is_enabled(flag, \"user-42\")\n    for _ in range(20):\n        assert is_enabled(flag, \"user-42\") == first\n\n\ndef test_percentage_0_and_100_are_absolute():\n    off = {\"type\": \"percentage\", \"name\": \"beta\", \"rollout\": 0}\n    on = {\"type\": \"percentage\", \"name\": \"beta\", \"rollout\": 100}\n    users = [f\"user-{i}\" for i in range(200)]\n    assert all(is_enabled(off, u) is False for u in users)\n    assert all(is_enabled(on, u) is True for u in users)\n\n\ndef test_different_flags_give_different_rollout_sets():\n    # Two independent 50% flags must NOT enable the exact same users -\n    # a bucket keyed only on user_id (ignoring the flag name) would.\n    flag_a = {\"type\": \"percentage\", \"name\": \"flag-a\", \"rollout\": 50}\n    flag_b = {\"type\": \"percentage\", \"name\": \"flag-b\", \"rollout\": 50}\n    users = [f\"user-{i}\" for i in range(300)]\n    enabled_a = {u for u in users if is_enabled(flag_a, u)}\n    enabled_b = {u for u in users if is_enabled(flag_b, u)}\n    assert enabled_a != enabled_b, (\n        \"two different percentage flags produced the identical enabled-user \"\n        \"set - the bucket must be keyed on (flag name, user), not user alone\"\n    )\n\n\ndef test_rollout_is_roughly_the_requested_share():\n    flag = {\"type\": \"percentage\", \"name\": \"spread-check\", \"rollout\": 30}\n    users = [f\"user-{i}\" for i in range(2000)]\n    enabled = sum(1 for u in users if is_enabled(flag, u))\n    assert 500 <= enabled <= 700, f\"expected roughly 30% of 2000 (~600), got {enabled}\"\n"
+  },
+  "check_command": "python -m pytest -q test_flags_hidden.py",
+  "reference_solution": {
+    "flags.py": "import hashlib\n\n\ndef _bucket(flag_name, user_id):\n    \"\"\"Deterministic 0-99 bucket for (flag_name, user_id): same inputs\n    always give the same bucket, buckets spread ~uniformly over users.\"\"\"\n    digest = hashlib.sha256(f\"{flag_name}:{user_id}\".encode(\"utf-8\")).hexdigest()\n    return int(digest[:8], 16) % 100\n\n\ndef is_enabled(flag, user_id, context=None):\n    \"\"\"Evaluate a feature flag for a user.\n\n    flag is a dict like {\"type\": \"boolean\", \"value\": True},\n    {\"type\": \"allowlist\", \"users\": [...]}, or\n    {\"type\": \"percentage\", \"name\": \"...\", \"rollout\": 0-100}. Unknown types\n    raise ValueError.\n    \"\"\"\n    context = context or {}\n    if flag[\"type\"] == \"boolean\":\n        return bool(flag[\"value\"])\n    if flag[\"type\"] == \"allowlist\":\n        return user_id in flag[\"users\"]\n    if flag[\"type\"] == \"percentage\":\n        return _bucket(flag[\"name\"], user_id) < flag[\"rollout\"]\n    raise ValueError(f\"unknown flag type: {flag['type']!r}\")\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "bucket-ignores-flag-name",
+      "files": {
+        "flags.py": "import hashlib\n\n\ndef _bucket(flag_name, user_id):\n    \"\"\"Deterministic 0-99 bucket for (flag_name, user_id): same inputs\n    always give the same bucket, buckets spread ~uniformly over users.\"\"\"\n    digest = hashlib.sha256(f\"{user_id}\".encode(\"utf-8\")).hexdigest()\n    return int(digest[:8], 16) % 100\n\n\ndef is_enabled(flag, user_id, context=None):\n    \"\"\"Evaluate a feature flag for a user.\n\n    flag is a dict like {\"type\": \"boolean\", \"value\": True},\n    {\"type\": \"allowlist\", \"users\": [...]}, or\n    {\"type\": \"percentage\", \"name\": \"...\", \"rollout\": 0-100}. Unknown types\n    raise ValueError.\n    \"\"\"\n    context = context or {}\n    if flag[\"type\"] == \"boolean\":\n        return bool(flag[\"value\"])\n    if flag[\"type\"] == \"allowlist\":\n        return user_id in flag[\"users\"]\n    if flag[\"type\"] == \"percentage\":\n        return _bucket(flag[\"name\"], user_id) < flag[\"rollout\"]\n    raise ValueError(f\"unknown flag type: {flag['type']!r}\")\n"
+      }
+    }
+  ]
+}

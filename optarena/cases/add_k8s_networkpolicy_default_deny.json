@@ -1,0 +1,48 @@
+{
+  "name": "add_k8s_networkpolicy_default_deny",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Default-deny-all NetworkPolicy plus a scoped allow for payments-api; broken default-deny only covers Ingress, leaving egress wide open",
+  "difficulty": 3,
+  "task_type": "devops",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "networkpolicy",
+    "zero-trust"
+  ],
+  "prompts": [
+    "The payments namespace (see k8s/deployment.yaml) has no network isolation at all - any pod anywhere in the cluster can reach payments-api, and payments-api can reach anything. Create k8s/network-policy.yaml with TWO NetworkPolicy resources (separate a YAML document each, '---'-separated) in the payments namespace: (1) 'default-deny' with an empty podSelector ({}) so it applies to every pod, covering BOTH Ingress and Egress with no rules - a deny-all baseline; and (2) 'payments-api-allow' scoped to app: payments-api that punches the specific holes it needs: ingress on port 8443 from pods in a namespace labeled kubernetes.io/metadata.name: gateway, egress on port 5432 to a namespace labeled kubernetes.io/metadata.name: data, and egress on UDP port 53 to anywhere (DNS - nothing resolves without it)."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payments-api\n  namespace: payments\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: payments-api\n  template:\n    metadata:\n      labels:\n        app: payments-api\n    spec:\n      containers:\n        - name: payments-api\n          image: ghcr.io/example/payments-api:2.0.0\n          ports:\n            - containerPort: 8443\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/network-policy.yaml",
+      "content_patterns": [
+        "default-deny",
+        "payments-api-allow"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_netpol.py": "import yaml\n\ndocs = list(yaml.safe_load_all(open(\"k8s/network-policy.yaml\", encoding=\"utf-8\")))\nby_name = {d[\"metadata\"][\"name\"]: d for d in docs if d}\n\ndeny = by_name.get(\"default-deny\")\nassert deny, \"no default-deny NetworkPolicy\"\nassert deny[\"metadata\"].get(\"namespace\") == \"payments\", \"default-deny must be in the payments namespace\"\nassert deny[\"spec\"].get(\"podSelector\") == {}, (\n    \"default-deny must select ALL pods (empty podSelector), not a subset\")\ntypes = set(deny[\"spec\"].get(\"policyTypes\") or [])\nassert types == {\"Ingress\", \"Egress\"}, (\n    f\"default-deny must cover BOTH Ingress and Egress, got {sorted(types)} - \"\n    f\"an Ingress-only deny leaves every pod free to make outbound connections anywhere\")\nassert not deny[\"spec\"].get(\"ingress\") and not deny[\"spec\"].get(\"egress\"), (\n    \"default-deny must have no ingress/egress rules (that's what makes it deny-all)\")\n\nallow = by_name.get(\"payments-api-allow\")\nassert allow, \"no payments-api-allow NetworkPolicy\"\nassert allow[\"spec\"][\"podSelector\"][\"matchLabels\"] == {\"app\": \"payments-api\"}, (\n    \"allow policy must target app=payments-api\")\n\ningress_rules = allow[\"spec\"].get(\"ingress\") or []\nassert ingress_rules, \"allow policy has no ingress rules\"\nin_ports = {p[\"port\"] for rule in ingress_rules for p in rule.get(\"ports\", [])}\nassert 8443 in in_ports, \"allow policy must permit ingress on 8443\"\n\negress_rules = allow[\"spec\"].get(\"egress\") or []\negress_ports = {p[\"port\"] for rule in egress_rules for p in rule.get(\"ports\", [])}\nassert 5432 in egress_ports, \"allow policy must permit egress to the database on 5432\"\nassert 53 in egress_ports, \"allow policy must permit DNS egress on 53 (UDP) - without it nothing resolves\"\n\nprint(\"PASS NetworkPolicy checks\")\n"
+  },
+  "check_command": "python check_netpol.py",
+  "reference_solution": {
+    "k8s/network-policy.yaml": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: default-deny\n  namespace: payments\nspec:\n  podSelector: {}\n  policyTypes:\n    - Ingress\n    - Egress\n---\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: payments-api-allow\n  namespace: payments\nspec:\n  podSelector:\n    matchLabels:\n      app: payments-api\n  policyTypes:\n    - Ingress\n    - Egress\n  ingress:\n    - from:\n        - namespaceSelector:\n            matchLabels:\n              kubernetes.io/metadata.name: gateway\n      ports:\n        - protocol: TCP\n          port: 8443\n  egress:\n    - to:\n        - namespaceSelector:\n            matchLabels:\n              kubernetes.io/metadata.name: data\n      ports:\n        - protocol: TCP\n          port: 5432\n    - to: []\n      ports:\n        - protocol: UDP\n          port: 53\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "deny-covers-ingress-only",
+      "files": {
+        "k8s/network-policy.yaml": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: default-deny\n  namespace: payments\nspec:\n  podSelector: {}\n  policyTypes:\n    - Ingress\n---\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: payments-api-allow\n  namespace: payments\nspec:\n  podSelector:\n    matchLabels:\n      app: payments-api\n  policyTypes:\n    - Ingress\n    - Egress\n  ingress:\n    - from:\n        - namespaceSelector:\n            matchLabels:\n              kubernetes.io/metadata.name: gateway\n      ports:\n        - protocol: TCP\n          port: 8443\n  egress:\n    - to:\n        - namespaceSelector:\n            matchLabels:\n              kubernetes.io/metadata.name: data\n      ports:\n        - protocol: TCP\n          port: 5432\n    - to: []\n      ports:\n        - protocol: UDP\n          port: 53\n"
+      }
+    }
+  ]
+}

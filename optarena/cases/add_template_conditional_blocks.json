@@ -1,0 +1,47 @@
+{
+  "name": "add_template_conditional_blocks",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Add {{#if key}}...{{/if}} conditional blocks (with nesting) to a plain {{key}} template renderer; broken uses a single non-recursive global replace that mishandles nested blocks",
+  "difficulty": 3,
+  "task_type": "feature",
+  "tags": [
+    "javascript",
+    "node",
+    "templating",
+    "parsing"
+  ],
+  "prompts": [
+    "template.js's render(template, data) only substitutes {{key}} placeholders. Add {{#if key}}...{{/if}} conditional blocks: the content between the tags is kept only when data[key] is truthy (otherwise the whole block, tags included, is removed), plain {{key}} substitution still happens on whatever survives, and - this is the hard part - IF-BLOCKS MUST NEST correctly: {{#if outer}}A{{#if inner}}B{{/if}}C{{/if}}D must resolve the inner block first and the outer block second (a single regex.replace with the global flag resolves left-to-right and mishandles this - you likely need to resolve one innermost match at a time, or parse recursively). Keep the function name, signature, and module.exports."
+  ],
+  "setup_files": {
+    "template.js": "function render(template, data) {\n  // Replaces {{key}} with data[key] (String()-coerced; missing keys become\n  // an empty string). No other template features.\n  return template.replace(/\\{\\{(\\w+)\\}\\}/g, (_match, key) => {\n    return Object.hasOwn(data, key) ? String(data[key]) : \"\";\n  });\n}\n\nmodule.exports = { render };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "template.js",
+      "content_patterns": [
+        "if"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_template_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { render } = require(\"./template\");\n\ntest(\"plain substitution unaffected\", () => {\n  assert.strictEqual(render(\"hi {{name}}\", { name: \"Ada\" }), \"hi Ada\");\n});\n\ntest(\"truthy if-block keeps its content\", () => {\n  assert.strictEqual(\n    render(\"{{#if admin}}welcome, boss{{/if}}\", { admin: true }),\n    \"welcome, boss\",\n  );\n});\n\ntest(\"falsy if-block is removed\", () => {\n  assert.strictEqual(render(\"{{#if admin}}welcome, boss{{/if}}\", { admin: false }), \"\");\n});\n\ntest(\"nested if-blocks both apply\", () => {\n  const tpl = \"{{#if outer}}A{{#if inner}}B{{/if}}C{{/if}}D\";\n  assert.strictEqual(render(tpl, { outer: true, inner: true }), \"ABCD\");\n  assert.strictEqual(render(tpl, { outer: true, inner: false }), \"ACD\");\n  assert.strictEqual(render(tpl, { outer: false, inner: true }), \"D\");\n});\n\ntest(\"if-block content can contain plain substitutions\", () => {\n  const tpl = \"{{#if show}}hello {{name}}{{/if}}\";\n  assert.strictEqual(render(tpl, { show: true, name: \"Grace\" }), \"hello Grace\");\n});\n"
+  },
+  "check_command": "node --test test_template_hidden.test.js",
+  "reference_solution": {
+    "template.js": "function render(template, data) {\n  // Replaces {{key}} with data[key] (String()-coerced; missing keys become\n  // an empty string). Supports {{#if key}}...{{/if}} blocks: the content\n  // between the tags is kept only when data[key] is truthy, and blocks may\n  // be nested. Blocks are resolved BEFORE plain {{key}} substitution.\n  const withBlocks = resolveIfBlocks(template, data);\n  return withBlocks.replace(/\\{\\{(\\w+)\\}\\}/g, (_match, key) => {\n    return Object.hasOwn(data, key) ? String(data[key]) : \"\";\n  });\n}\n\nfunction resolveIfBlocks(template, data) {\n  let out = \"\";\n  let i = 0;\n  while (i < template.length) {\n    const openMatch = /\\{\\{#if (\\w+)\\}\\}/.exec(template.slice(i));\n    if (!openMatch) {\n      out += template.slice(i);\n      break;\n    }\n    const openStart = i + openMatch.index;\n    const openEnd = openStart + openMatch[0].length;\n    out += template.slice(i, openStart);\n\n    // Track nesting depth to find the MATCHING {{/if}} - a naive regex\n    // pairs the first {{#if}} with the first {{/if}}, which is wrong as\n    // soon as blocks nest.\n    let depth = 1;\n    const tagPattern = /\\{\\{#if \\w+\\}\\}|\\{\\{\\/if\\}\\}/g;\n    tagPattern.lastIndex = openEnd;\n    let closeStart = -1;\n    let closeEnd = -1;\n    let m;\n    while ((m = tagPattern.exec(template)) !== null) {\n      if (m[0].startsWith(\"{{#if\")) {\n        depth++;\n      } else {\n        depth--;\n        if (depth === 0) {\n          closeStart = m.index;\n          closeEnd = m.index + m[0].length;\n          break;\n        }\n      }\n    }\n    if (closeStart === -1) {\n      out += template.slice(openStart);\n      break;\n    }\n\n    const key = openMatch[1];\n    const inner = template.slice(openEnd, closeStart);\n    if (data[key]) {\n      out += resolveIfBlocks(inner, data);\n    }\n    i = closeEnd;\n  }\n  return out;\n}\n\nmodule.exports = { render };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "global-replace-mishandles-nesting",
+      "files": {
+        "template.js": "function render(template, data) {\n  const withBlocks = resolveIfBlocks(template, data);\n  return withBlocks.replace(/\\{\\{(\\w+)\\}\\}/g, (_match, key) => {\n    return Object.hasOwn(data, key) ? String(data[key]) : \"\";\n  });\n}\n\nfunction resolveIfBlocks(template, data) {\n  return template.replace(/\\{\\{#if (\\w+)\\}\\}([\\s\\S]*?)\\{\\{\\/if\\}\\}/g, (_whole, key, inner) => {\n    return data[key] ? inner : \"\";\n  });\n}\n\nmodule.exports = { render };\n"
+      }
+    }
+  ]
+}

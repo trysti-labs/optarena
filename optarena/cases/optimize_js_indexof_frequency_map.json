@@ -1,0 +1,54 @@
+{
+  "name": "optimize_js_indexof_frequency_map",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "keys.indexOf(item) per element building a frequency table -> Map; budget calibrated (naive ~3.5s native at n=80k all-distinct vs ~0.01s, budget 2s); wrong-output broken (plain object) reorders numeric-looking keys",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "javascript",
+    "node",
+    "performance",
+    "map",
+    "big-o"
+  ],
+  "prompts": [
+    "frequency(items) in frequency.js builds a first-occurrence-ordered frequency table by calling keys.indexOf(item) on a growing array for every element - a linear scan per element, O(n^2) overall and far too slow for large inputs. Rewrite it with a Map (insertion-ordered, and safe for any key shape), returning the exact same { keys, counts } shape: keys in first-occurrence order, counts parallel to keys. Do NOT use a plain object as the accumulator - it silently reorders integer-like string keys to numeric order regardless of insertion order, which breaks the first-occurrence contract. Keep the function name, signature, and module.exports."
+  ],
+  "setup_files": {
+    "frequency.js": "function frequency(items) {\n  // Returns { keys: [...], counts: [...] } - parallel arrays, keys in\n  // first-occurrence order, counts[i] the number of times keys[i] appears.\n  const keys = [];\n  const counts = [];\n  for (const item of items) {\n    const idx = keys.indexOf(item);\n    if (idx === -1) {\n      keys.push(item);\n      counts.push(1);\n    } else {\n      counts[idx]++;\n    }\n  }\n  return { keys, counts };\n}\n\nmodule.exports = { frequency };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "frequency.js",
+      "content_patterns": [
+        "frequency"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_frequency.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { frequency } = require(\"./frequency\");\n\ntest(\"counts and first-occurrence order\", () => {\n  const got = frequency([\"b\", \"a\", \"b\", \"c\", \"a\", \"b\"]);\n  assert.deepStrictEqual(got, { keys: [\"b\", \"a\", \"c\"], counts: [3, 2, 1] });\n});\n\ntest(\"numeric-looking keys keep INSERTION order, not numeric order\", () => {\n  // a plain object hoists integer-like keys to numeric order regardless of\n  // insertion - this must stay insertion-ordered\n  const got = frequency([\"20\", \"3\", \"20\", \"100\"]);\n  assert.deepStrictEqual(got, { keys: [\"20\", \"3\", \"100\"], counts: [2, 1, 1] });\n});\n\ntest(\"empty input\", () => {\n  assert.deepStrictEqual(frequency([]), { keys: [], counts: [] });\n});\n\ntest(\"performance on many distinct items\", () => {\n  const n = 80000;\n  const items = Array.from({ length: n }, (_, i) => `k${i}`);\n\n  const start = process.hrtime.bigint();\n  const got = frequency(items);\n  const elapsed = Number(process.hrtime.bigint() - start) / 1e9;\n\n  assert.strictEqual(got.keys.length, n);\n  assert.deepStrictEqual(got.counts, new Array(n).fill(1));\n  // calibrated: keys.indexOf(item) is ~3.5s on fast native hardware at\n  // n=80000 all-distinct and slower in the sandbox; a Map is ~0.01s\n  assert.ok(\n    elapsed < 2.0,\n    `frequency took ${elapsed.toFixed(2)}s for ${n} items; expected a Map, ` +\n      `not keys.indexOf(item) per element (O(n^2))`,\n  );\n});\n"
+  },
+  "check_command": "node --test test_frequency.test.js",
+  "reference_solution": {
+    "frequency.js": "function frequency(items) {\n  // Returns { keys: [...], counts: [...] } - parallel arrays, keys in\n  // first-occurrence order, counts[i] the number of times keys[i] appears.\n  const counts = new Map();\n  for (const item of items) {\n    counts.set(item, (counts.get(item) || 0) + 1);\n  }\n  return { keys: [...counts.keys()], counts: [...counts.values()] };\n}\n\nmodule.exports = { frequency };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-plain-object-reorders",
+      "files": {
+        "frequency.js": "function frequency(items) {\n  // Returns { keys: [...], counts: [...] } - parallel arrays, keys in\n  // first-occurrence order, counts[i] the number of times keys[i] appears.\n  const counts = {};\n  for (const item of items) {\n    counts[item] = (counts[item] || 0) + 1;\n  }\n  return { keys: Object.keys(counts), counts: Object.values(counts) };\n}\n\nmodule.exports = { frequency };\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "frequency.js": "function frequency(items) {\n  // Returns { keys: [...], counts: [...] } - parallel arrays, keys in\n  // first-occurrence order, counts[i] the number of times keys[i] appears.\n  const keys = [];\n  const counts = [];\n  for (const item of items) {\n    const idx = keys.indexOf(item);\n    if (idx === -1) {\n      keys.push(item);\n      counts.push(1);\n    } else {\n      counts[idx]++;\n    }\n  }\n  return { keys, counts };\n}\n\nmodule.exports = { frequency };\n"
+      }
+    }
+  ]
+}
