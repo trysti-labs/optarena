@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_python_camel_to_snake",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write pytest tests for a camelCase -> snake_case converter with acronym handling; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "python",
+    "testing",
+    "mutation-checked",
+    "strings"
+  ],
+  "prompts": [
+    "camel_to_snake(name) in casing.py (already correct - do not modify it) converts camelCase/PascalCase identifiers to snake_case, with acronym handling: a run of capitals stays together up to (but not including) the last one before a following lowercase letter - so 'HTTPServer' becomes 'http_server' (not 'h_t_t_p_server'), and 'userID' becomes 'user_id'. Write pytest tests at exactly test_casing.py (functions named test_*, plain asserts with exact strings) with at least 4 test functions covering: a simple two-word camelCase name, a leading acronym like 'HTTPServer', a trailing acronym like 'userID', and a name with no case boundaries at all (already lowercase, unchanged). Import with `from casing import camel_to_snake`."
+  ],
+  "setup_files": {
+    "casing.py": "import re\n\n_BOUNDARY = re.compile(r\"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])\")\n\n\ndef camel_to_snake(name):\n    \"\"\"'userID' -> 'user_id', 'HTTPServer' -> 'http_server',\n    'simpleWord' -> 'simple_word'. Consecutive capitals (an acronym) stay\n    together up to the last one before a following lowercase letter.\"\"\"\n    return _BOUNDARY.sub(\"_\", name).lower()\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_casing.py",
+      "content_patterns": [
+        "camel_to_snake",
+        "assert"
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "\"\"\"Mutation harness: model tests must PASS the real implementation and FAIL\neach mutant. Portable (sys.executable, list args, -B).\"\"\"\nimport shutil\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nIMPL = Path('casing.py')\nTEST = 'test_casing.py'\nMUTANTS = [\n    [\n        \"_BOUNDARY = re.compile(r\\\"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])\\\")\",\n        \"_BOUNDARY = re.compile(r\\\"(?<=[a-z0-9])(?=[A-Z])\\\")\"\n    ],\n    [\n        \"    return _BOUNDARY.sub(\\\"_\\\", name).lower()\",\n        \"    return _BOUNDARY.sub(\\\"_\\\", name)\"\n    ],\n    [\n        \"_BOUNDARY = re.compile(r\\\"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])\\\")\",\n        \"_BOUNDARY = re.compile(r\\\"(?<=[A-Z])(?=[A-Z][a-z])\\\")\"\n    ]\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    return subprocess.run(\n        [sys.executable, \"-B\", \"-m\", \"pytest\", \"-p\", \"no:cacheprovider\", \"-q\", TEST]\n    ).returncode\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken implementation, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python mutation_check.py",
+  "reference_solution": {
+    "test_casing.py": "from casing import camel_to_snake\n\n\ndef test_simple_camel_case():\n    assert camel_to_snake(\"simpleWord\") == \"simple_word\"\n\n\ndef test_leading_acronym():\n    assert camel_to_snake(\"HTTPServer\") == \"http_server\"\n\n\ndef test_trailing_acronym():\n    assert camel_to_snake(\"userID\") == \"user_id\"\n\n\ndef test_no_boundaries_unchanged():\n    assert camel_to_snake(\"lowercase\") == \"lowercase\"\n\n\ndef test_multiple_words():\n    assert camel_to_snake(\"getUserIDFromRequest\") == \"get_user_id_from_request\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_casing.py": "from casing import camel_to_snake\n\n\ndef test_lowercase_result():\n    assert camel_to_snake(\"simpleWord\").islower()\n\n\ndef test_no_spaces():\n    assert \" \" not in camel_to_snake(\"simpleWord\")\n\n\ndef test_length_reasonable():\n    assert len(camel_to_snake(\"userID\")) >= 6\n\n\ndef test_unchanged_when_already_lower():\n    assert camel_to_snake(\"plain\") == \"plain\"\n"
+      }
+    }
+  ]
+}

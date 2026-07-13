@@ -1,0 +1,49 @@
+{
+  "name": "add_notification_webhook_channel",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Add a webhook delivery channel to a small notification dispatcher, spanning channels.py (new handler) and its registry.register call",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "multi-file",
+    "notifications"
+  ],
+  "prompts": [
+    "This is a tiny notification dispatcher: registry.py holds a name -> handler map (register/handler_for), channels.py defines the handlers (send_email, send_sms) and registers them under 'email'/'sms', and dispatcher.py looks a channel up and calls it. Add a third channel: send_webhook(recipient, message) in channels.py that validates recipient starts with 'http://' or 'https://' (raise ValueError otherwise, mirroring send_sms's validation style) and returns a receipt dict shaped like the others ({'channel': 'webhook', 'to': recipient, 'status': 'sent', 'body': message}), registered under the name 'webhook' so `dispatch('webhook', url, msg)` and `dispatch_all('webhook', urls, msg)` both work exactly like the existing channels."
+  ],
+  "setup_files": {
+    "registry.py": "CHANNELS = {}\n\n\ndef register(name, handler):\n    \"\"\"A handler is a callable: handler(recipient, message) -> dict (a\n    delivery receipt). Registering the same name twice replaces it.\"\"\"\n    CHANNELS[name] = handler\n\n\ndef handler_for(name):\n    if name not in CHANNELS:\n        raise KeyError(f\"no channel registered: {name}\")\n    return CHANNELS[name]\n",
+    "channels.py": "from registry import register\n\n\ndef send_email(recipient, message):\n    return {\"channel\": \"email\", \"to\": recipient, \"status\": \"sent\", \"body\": message}\n\n\ndef send_sms(recipient, message):\n    if len(message) > 160:\n        raise ValueError(\"sms body exceeds 160 characters\")\n    return {\"channel\": \"sms\", \"to\": recipient, \"status\": \"sent\", \"body\": message}\n\n\nregister(\"email\", send_email)\nregister(\"sms\", send_sms)\n",
+    "dispatcher.py": "from registry import handler_for\n\n\ndef dispatch(channel, recipient, message):\n    \"\"\"Look up the channel and deliver; raises KeyError for an unknown\n    channel (from handler_for) and propagates any handler error.\"\"\"\n    handler = handler_for(channel)\n    return handler(recipient, message)\n\n\ndef dispatch_all(channel, recipients, message):\n    \"\"\"Deliver to every recipient; returns the list of receipts IN ORDER.\n    Stops and propagates on the first failure (no partial-success handling).\"\"\"\n    return [dispatch(channel, r, message) for r in recipients]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "channels.py",
+      "content_patterns": [
+        "send_webhook",
+        "register(\"webhook\""
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_webhook_hidden.py": "import pytest\n\nimport channels  # noqa: F401  (registers email/sms/webhook as an import side effect)\nfrom dispatcher import dispatch, dispatch_all\n\n\ndef test_webhook_dispatch_success():\n    receipt = dispatch(\"webhook\", \"https://hooks.example.com/1\", \"ping\")\n    assert receipt == {\n        \"channel\": \"webhook\", \"to\": \"https://hooks.example.com/1\",\n        \"status\": \"sent\", \"body\": \"ping\",\n    }\n\n\ndef test_webhook_rejects_non_url_recipient():\n    with pytest.raises(ValueError):\n        dispatch(\"webhook\", \"not-a-url\", \"ping\")\n\n\ndef test_webhook_works_in_dispatch_all():\n    urls = [\"https://a.example.com\", \"https://b.example.com\"]\n    receipts = dispatch_all(\"webhook\", urls, \"batch\")\n    assert [r[\"to\"] for r in receipts] == urls\n\n\ndef test_existing_channels_unaffected():\n    assert dispatch(\"email\", \"a@x.io\", \"hi\")[\"channel\"] == \"email\"\n    assert dispatch(\"sms\", \"+1\", \"hi\")[\"channel\"] == \"sms\"\n"
+  },
+  "check_command": "python -m pytest -q test_webhook_hidden.py",
+  "reference_solution": {
+    "channels.py": "from registry import register\n\n\ndef send_email(recipient, message):\n    return {\"channel\": \"email\", \"to\": recipient, \"status\": \"sent\", \"body\": message}\n\n\ndef send_sms(recipient, message):\n    if len(message) > 160:\n        raise ValueError(\"sms body exceeds 160 characters\")\n    return {\"channel\": \"sms\", \"to\": recipient, \"status\": \"sent\", \"body\": message}\n\n\nregister(\"email\", send_email)\nregister(\"sms\", send_sms)\n\n\ndef send_webhook(recipient, message):\n    if not (recipient.startswith(\"http://\") or recipient.startswith(\"https://\")):\n        raise ValueError(f\"webhook recipient must be a URL: {recipient!r}\")\n    return {\"channel\": \"webhook\", \"to\": recipient, \"status\": \"sent\", \"body\": message}\n\n\nregister(\"webhook\", send_webhook)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "registered-under-wrong-name",
+      "files": {
+        "channels.py": "from registry import register\n\n\ndef send_email(recipient, message):\n    return {\"channel\": \"email\", \"to\": recipient, \"status\": \"sent\", \"body\": message}\n\n\ndef send_sms(recipient, message):\n    if len(message) > 160:\n        raise ValueError(\"sms body exceeds 160 characters\")\n    return {\"channel\": \"sms\", \"to\": recipient, \"status\": \"sent\", \"body\": message}\n\n\nregister(\"email\", send_email)\nregister(\"sms\", send_sms)\n\n\ndef send_webhook(recipient, message):\n    if not (recipient.startswith(\"http://\") or recipient.startswith(\"https://\")):\n        raise ValueError(f\"webhook recipient must be a URL: {recipient!r}\")\n    return {\"channel\": \"webhook\", \"to\": recipient, \"status\": \"sent\", \"body\": message}\n\n\nregister(\"webhooks\", send_webhook)\n"
+      }
+    }
+  ]
+}

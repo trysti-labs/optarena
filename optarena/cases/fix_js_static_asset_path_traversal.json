@@ -1,0 +1,47 @@
+{
+  "name": "fix_js_static_asset_path_traversal",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "path.resolve(ROOT, userPath) path traversal in a static asset reader -> resolve + prefix check; incomplete-fix broken blocks the literal '..' string but path.resolve still lets an absolute requestedPath reset entirely off ROOT",
+  "difficulty": 3,
+  "task_type": "security",
+  "tags": [
+    "javascript",
+    "node",
+    "security",
+    "path-traversal"
+  ],
+  "prompts": [
+    "readAsset(requestedPath) in assets.js serves files from a public/ directory, but it builds the target with path.resolve(ROOT, requestedPath) and never checks the result stays inside ROOT - a requestedPath of '../../secret.txt' escapes via relative traversal, and (because path.resolve treats an ABSOLUTE input as resetting entirely to that path, ignoring ROOT) an absolute requestedPath escapes just as completely with no '..' in it at all. Fix it properly: after resolving, verify the result is ROOT itself or a descendant of ROOT - check for the path separator right after ROOT so a sibling like 'public-evil' isn't mistaken for being inside 'public' - and throw an Error otherwise. Do not try to string-match '..' instead of checking the resolved path: that stops relative traversal but does nothing against an absolute requestedPath. Normal assets under public/ must keep loading exactly as before."
+  ],
+  "setup_files": {
+    "assets.js": "const fs = require(\"node:fs\");\nconst path = require(\"node:path\");\n\nconst ROOT = path.resolve(__dirname, \"public\");\n\nfunction readAsset(requestedPath) {\n  // requestedPath is the URL path after the leading \"/\", e.g. \"css/app.css\".\n  const target = path.resolve(ROOT, requestedPath);\n  return fs.readFileSync(target, \"utf8\");\n}\n\nmodule.exports = { readAsset, ROOT };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "assets.js",
+      "content_patterns": [
+        "resolve"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_assets_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\nconst fs = require(\"node:fs\");\nconst path = require(\"node:path\");\n\nconst { readAsset, ROOT } = require(\"./assets\");\n\ntest.before(() => {\n  fs.mkdirSync(path.join(ROOT, \"css\"), { recursive: true });\n  fs.writeFileSync(path.join(ROOT, \"css\", \"app.css\"), \"body{}\");\n  fs.writeFileSync(path.join(path.dirname(ROOT), \"secret.txt\"), \"top secret\");\n});\n\ntest(\"normal asset still loads\", () => {\n  assert.strictEqual(readAsset(\"css/app.css\"), \"body{}\");\n});\n\ntest(\"dotdot traversal is blocked\", () => {\n  assert.throws(() => readAsset(\"../secret.txt\"));\n});\n\ntest(\"absolute path escape is blocked\", () => {\n  const secret = path.join(path.dirname(ROOT), \"secret.txt\");\n  assert.throws(() => readAsset(secret));\n});\n\ntest(\"nested dotdot traversal is blocked\", () => {\n  assert.throws(() => readAsset(\"css/../../secret.txt\"));\n});\n"
+  },
+  "check_command": "node --test test_assets_hidden.test.js",
+  "reference_solution": {
+    "assets.js": "const fs = require(\"node:fs\");\nconst path = require(\"node:path\");\n\nconst ROOT = path.resolve(__dirname, \"public\");\n\nfunction readAsset(requestedPath) {\n  // requestedPath is the URL path after the leading \"/\", e.g. \"css/app.css\".\n  const target = path.resolve(ROOT, \".\" + path.sep + requestedPath);\n  if (target !== ROOT && !target.startsWith(ROOT + path.sep)) {\n    throw new Error(\"path traversal blocked: \" + requestedPath);\n  }\n  return fs.readFileSync(target, \"utf8\");\n}\n\nmodule.exports = { readAsset, ROOT };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "string-match-dotdot-only",
+      "files": {
+        "assets.js": "const fs = require(\"node:fs\");\nconst path = require(\"node:path\");\n\nconst ROOT = path.resolve(__dirname, \"public\");\n\nfunction readAsset(requestedPath) {\n  // requestedPath is the URL path after the leading \"/\", e.g. \"css/app.css\".\n  if (requestedPath.includes(\"..\")) {\n    throw new Error(\"path traversal blocked: \" + requestedPath);\n  }\n  const target = path.resolve(ROOT, requestedPath);\n  return fs.readFileSync(target, \"utf8\");\n}\n\nmodule.exports = { readAsset, ROOT };\n"
+      }
+    }
+  ]
+}

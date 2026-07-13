@@ -1,0 +1,54 @@
+{
+  "name": "optimize_java_dedup_nested_contains",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "List.contains per element -> LinkedHashSet; budget calibrated (naive ~3.2s native at n=150k all-unique vs ~0.01s, budget 1.5s); wrong-output broken loses insertion order via a plain HashSet",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "java",
+    "performance",
+    "hashset",
+    "big-o"
+  ],
+  "prompts": [
+    "Dedupe.distinct(int[] xs) in Dedupe.java returns the distinct values from xs in first-occurrence order. It checks `!out.contains(x)` against a growing ArrayList before each add - a linear scan per element, O(n^2) overall and far too slow for large inputs. Rewrite it to run in linear time using a Set that PRESERVES insertion order (mind which Set implementation you pick - order matters here), returning exactly the same list for every input. Keep the class name, method name, and signature."
+  ],
+  "setup_files": {
+    "Dedupe.java": "import java.util.ArrayList;\nimport java.util.List;\n\npublic final class Dedupe {\n    private Dedupe() {}\n\n    /** Distinct values from xs, first-occurrence order preserved. */\n    public static List<Integer> distinct(int[] xs) {\n        List<Integer> out = new ArrayList<>();\n        for (int x : xs) {\n            if (!out.contains(x)) {\n                out.add(x);\n            }\n        }\n        return out;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dedupe.java",
+      "content_patterns": [
+        "distinct"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "DedupeTest.java": "public final class DedupeTest {\n    public static void main(String[] args) {\n        checkOrder();\n        checkPerformance();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkOrder() {\n        int[] xs = {5, 3, 5, 1, 3, 9, 1};\n        java.util.List<Integer> got = Dedupe.distinct(xs);\n        java.util.List<Integer> expected = java.util.List.of(5, 3, 1, 9);\n        if (!got.equals(expected)) {\n            throw new AssertionError(\"distinct(...) = \" + got + \", expected \" + expected\n                    + \" (first-occurrence order)\");\n        }\n    }\n\n    static void checkPerformance() {\n        int n = 150000;\n        int[] xs = new int[n];\n        for (int i = 0; i < n; i++) {\n            xs[i] = i;\n        }\n        long start = System.nanoTime();\n        java.util.List<Integer> got = Dedupe.distinct(xs);\n        double elapsed = (System.nanoTime() - start) / 1e9;\n\n        if (got.size() != n || !got.get(0).equals(0) || !got.get(n - 1).equals(n - 1)) {\n            throw new AssertionError(\"large-input result wrong\");\n        }\n        // calibrated: List.contains per element is ~3.2s on fast native\n        // hardware at n=150000 all-unique and slower in the sandbox;\n        // LinkedHashSet is ~0.01s\n        if (elapsed >= 1.5) {\n            throw new AssertionError(String.format(\n                    \"distinct took %.2fs for %d values; expected a \"\n                    + \"LinkedHashSet, not List.contains per element (O(n^2))\",\n                    elapsed, n));\n        }\n    }\n}\n",
+    "CheckDedupe.java": "import java.io.IOException;\n\npublic final class CheckDedupe {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Dedupe.java\", \"DedupeTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"DedupeTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckDedupe.java",
+  "reference_solution": {
+    "Dedupe.java": "import java.util.ArrayList;\nimport java.util.LinkedHashSet;\nimport java.util.List;\n\npublic final class Dedupe {\n    private Dedupe() {}\n\n    /** Distinct values from xs, first-occurrence order preserved. */\n    public static List<Integer> distinct(int[] xs) {\n        LinkedHashSet<Integer> seen = new LinkedHashSet<>();\n        for (int x : xs) {\n            seen.add(x);\n        }\n        return new ArrayList<>(seen);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-loses-order",
+      "files": {
+        "Dedupe.java": "import java.util.ArrayList;\nimport java.util.HashSet;\nimport java.util.List;\n\npublic final class Dedupe {\n    private Dedupe() {}\n\n    /** Distinct values from xs, first-occurrence order preserved. */\n    public static List<Integer> distinct(int[] xs) {\n        HashSet<Integer> seen = new HashSet<>();\n        for (int x : xs) {\n            seen.add(x);\n        }\n        return new ArrayList<>(seen);\n    }\n}\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "Dedupe.java": "import java.util.ArrayList;\nimport java.util.List;\n\npublic final class Dedupe {\n    private Dedupe() {}\n\n    /** Distinct values from xs, first-occurrence order preserved. */\n    public static List<Integer> distinct(int[] xs) {\n        List<Integer> out = new ArrayList<>();\n        for (int x : xs) {\n            if (!out.contains(x)) {\n                out.add(x);\n            }\n        }\n        return out;\n    }\n}\n"
+      }
+    }
+  ]
+}

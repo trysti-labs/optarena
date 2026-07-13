@@ -1,0 +1,53 @@
+{
+  "name": "add_github_actions_docs_path_filter",
+  "language": "yaml",
+  "framework": "github-actions",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Skip the full CI job on docs-only changes via paths-ignore; broken applies the filter to push but not pull_request (the common real-world half-fix)",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": [
+    "github-actions",
+    "devops",
+    "path-filter",
+    "ci-efficiency"
+  ],
+  "prompts": [
+    "ci.yml runs the full node test job on every push to main and every pull request - including PRs that only touch a README or the docs/ directory, which waste runner minutes on a build that could never fail. Add a paths-ignore filter of `**.md` and `docs/**` to BOTH the push and pull_request triggers (a filter on only one of them still burns runs on the other event). Keep push scoped to the main branch, and don't touch the job itself."
+  ],
+  "setup_files": {
+    ".github/workflows/ci.yml": "name: ci\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/ci.yml",
+      "content_patterns": [
+        "paths-ignore"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_path_filter.py": "import yaml\n\nwith open(\".github/workflows/ci.yml\") as f:\n    wf = yaml.safe_load(f)\n\ntriggers = wf.get(\"on\") or wf.get(True)\nfor event in (\"push\", \"pull_request\"):\n    cfg = triggers.get(event)\n    assert isinstance(cfg, dict), f\"{event} trigger must stay configured (branches for push)\"\n    ignore = cfg.get(\"paths-ignore\") or []\n    assert any(\"md\" in p for p in ignore), f\"{event}: no **.md entry in paths-ignore\"\n    assert any(\"docs\" in p for p in ignore), f\"{event}: no docs/** entry in paths-ignore\"\n\nassert triggers[\"push\"].get(\"branches\") == [\"main\"], \"push.branches changed\"\n\njob = wf[\"jobs\"][\"test\"]\nruns = [s.get(\"run\", \"\") for s in job[\"steps\"]]\nassert any(\"npm ci\" in r for r in runs), \"npm ci step lost\"\nassert any(\"npm test\" in r for r in runs), \"npm test step lost\"\n\nprint(\"PASS path-filter checks\")\n"
+  },
+  "check_command": "python check_path_filter.py",
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: ci\n\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - \"**.md\"\n      - \"docs/**\"\n  pull_request:\n    paths-ignore:\n      - \"**.md\"\n      - \"docs/**\"\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        ".github/workflows/ci.yml": "name: ci\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+      }
+    },
+    {
+      "name": "filter-on-push-only",
+      "files": {
+        ".github/workflows/ci.yml": "name: ci\n\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - \"**.md\"\n      - \"docs/**\"\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+      }
+    }
+  ]
+}

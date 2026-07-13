@@ -1,0 +1,53 @@
+{
+  "name": "add_tests_js_flatten_one_level",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write node:test tests for a one-level array flattener; node-native mutation harness (full-flatten, drops-non-array, stray-undefined mutants)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "javascript",
+    "node",
+    "testing",
+    "mutation-checked",
+    "arrays"
+  ],
+  "prompts": [
+    "flattenOne(arr) in flatten.js (already correct - do not modify it) flattens EXACTLY one level deep - [1, [2, 3], [[4]]] becomes [1, 2, 3, [4]] (the doubly-nested [4] stays nested), non-array elements pass through unchanged, and an empty nested array contributes nothing. Write tests at exactly test_flatten.js using node:test + node:assert (run with `node --test`) with at least 4 test() cases asserting exact deepStrictEqual arrays, covering: a mix of flat and nested elements, a doubly-nested element staying nested (proving it's ONE level, not full recursion), an empty nested array contributing nothing to the output length, and an already-flat array passing through unchanged. Import with `const { flattenOne } = require('./flatten')`."
+  ],
+  "setup_files": {
+    "flatten.js": "function flattenOne(arr) {\n  // Flattens exactly ONE level deep: [1, [2, 3], [[4]]] -> [1, 2, 3, [4]].\n  // Non-array elements pass through unchanged.\n  const out = [];\n  for (const item of arr) {\n    if (Array.isArray(item)) {\n      for (const inner of item) {\n        out.push(inner);\n      }\n    } else {\n      out.push(item);\n    }\n  }\n  return out;\n}\n\nmodule.exports = { flattenOne };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_flatten.js",
+      "content_patterns": [
+        "flattenOne",
+        "assert"
+      ],
+      "regex_patterns": [
+        "test\\([\\s\\S]*test\\([\\s\\S]*test\\([\\s\\S]*test\\("
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.js": "const { execFileSync } = require(\"node:child_process\");\nconst fs = require(\"node:fs\");\n\nconst IMPL = \"flatten.js\";\nconst MUTANTS = [\n  // flattens fully (recurses into nested arrays) instead of one level\n  ['      for (const inner of item) {\\n        out.push(inner);\\n      }',\n   '      out.push(...item.flat(Infinity));'],\n  // non-array elements dropped instead of passed through\n  ['    } else {\\n      out.push(item);\\n    }',\n   '    }'],\n  // empty nested arrays leave a stray undefined\n  ['  for (const item of arr) {',\n   '  for (const item of arr) {\\n    if (Array.isArray(item) && item.length === 0) { out.push(undefined); continue; }'],\n];\n\nfunction runTests() {\n  try {\n    execFileSync(process.execPath, [\"--test\", \"test_flatten.js\"], { stdio: \"inherit\" });\n    return 0;\n  } catch {\n    return 1;\n  }\n}\n\nconst src = fs.readFileSync(IMPL, \"utf8\");\nfor (const [old] of MUTANTS) {\n  if (src.split(old).length - 1 !== 1) {\n    console.error(`protected implementation file ${IMPL} was modified - anchor not found exactly once: ${JSON.stringify(old)}`);\n    process.exit(1);\n  }\n}\n\nif (runTests() !== 0) {\n  console.error(\"model tests FAILED against the correct implementation\");\n  process.exit(1);\n}\n\nlet failed = false;\ntry {\n  for (let i = 0; i < MUTANTS.length; i++) {\n    fs.writeFileSync(IMPL, src.replace(MUTANTS[i][0], MUTANTS[i][1]));\n    if (runTests() === 0) {\n      console.error(`mutation ${i + 1} SURVIVED: the tests do not verify the required behavior`);\n      failed = true;\n      break;\n    }\n  }\n} finally {\n  fs.writeFileSync(IMPL, src);\n}\nif (failed) process.exit(1);\nconsole.log(`PASS (killed all ${MUTANTS.length} mutants)`);\n"
+  },
+  "check_command": "node mutation_check.js",
+  "reference_solution": {
+    "test_flatten.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\nconst { flattenOne } = require(\"./flatten\");\n\ntest(\"mix of flat and nested elements\", () => {\n  assert.deepStrictEqual(flattenOne([1, [2, 3], 4]), [1, 2, 3, 4]);\n});\n\ntest(\"only one level is flattened\", () => {\n  assert.deepStrictEqual(flattenOne([1, [2, [3, 4]]]), [1, 2, [3, 4]]);\n});\n\ntest(\"empty nested array contributes nothing\", () => {\n  assert.deepStrictEqual(flattenOne([1, [], 2]), [1, 2]);\n});\n\ntest(\"already-flat array is unchanged\", () => {\n  assert.deepStrictEqual(flattenOne([1, 2, 3]), [1, 2, 3]);\n});\n\ntest(\"empty input\", () => {\n  assert.deepStrictEqual(flattenOne([]), []);\n});\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_flatten.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\nconst { flattenOne } = require(\"./flatten\");\n\ntest(\"returns an array\", () => {\n  assert.ok(Array.isArray(flattenOne([1, [2]])));\n});\n\ntest(\"result is not longer than reasonable\", () => {\n  assert.ok(flattenOne([1, [2, 3]]).length <= 3);\n});\n\ntest(\"empty input gives empty output\", () => {\n  assert.deepStrictEqual(flattenOne([]), []);\n});\n\ntest(\"contains the flat elements\", () => {\n  assert.ok(flattenOne([1, [2]]).includes(1));\n});\n"
+      }
+    }
+  ]
+}
