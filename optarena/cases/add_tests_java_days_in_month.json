@@ -1,0 +1,50 @@
+{
+  "name": "add_tests_java_days_in_month",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Write plain-java tests for daysInMonth/isLeapYear; java-native harness (century-rule, feb-never-leaps, august-30 mutants)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "java",
+    "testing",
+    "mutation-checked",
+    "dates"
+  ],
+  "prompts": [
+    "CalendarUtil in CalendarUtil.java (already correct - do not modify it) has isLeapYear(year) implementing the full Gregorian rule (divisible by 4, except centuries unless divisible by 400) and daysInMonth(year, month) returning 28/29 for February accordingly, 30 for Apr/Jun/Sep/Nov, 31 otherwise, throwing IllegalArgumentException for months outside 1-12. Write a plain-Java test class at exactly CalendarUtilTest.java (public static void main, throw AssertionError on mismatch, no JUnit) covering at least: February in a normal leap year (e.g. 2024), the century exception (1900 -> 28), the 400-year exception (2000 -> 29), a 30-day month AND a 31-day month from the second half of the year (August and November are the classic confusions), and that month 0 or 13 throws. The class must exit normally when everything passes."
+  ],
+  "setup_files": {
+    "CalendarUtil.java": "public final class CalendarUtil {\n    private CalendarUtil() {}\n\n    public static boolean isLeapYear(int year) {\n        return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;\n    }\n\n    /** Days in the given month (1-12) of the given year; bad months throw. */\n    public static int daysInMonth(int year, int month) {\n        if (month < 1 || month > 12) {\n            throw new IllegalArgumentException(\"month out of range: \" + month);\n        }\n        switch (month) {\n            case 4: case 6: case 9: case 11: return 30;\n            case 2: return isLeapYear(year) ? 29 : 28;\n            default: return 31;\n        }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "CalendarUtilTest.java",
+      "content_patterns": [
+        "daysInMonth",
+        "AssertionError",
+        "IllegalArgumentException"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "MutationCheck.java": "import java.io.IOException;\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic final class MutationCheck {\n    static final Path IMPL = Path.of(\"CalendarUtil.java\");\n    static final String[][] MUTANTS = {\n        // century rule dropped: 1900 becomes a leap year\n        {\"        return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;\",\n         \"        return year % 4 == 0 || year % 400 == 0;\"},\n        // February never leaps\n        {\"            case 2: return isLeapYear(year) ? 29 : 28;\",\n         \"            case 2: return 28;\"},\n        // August demoted to 30 days (and November promoted)\n        {\"            case 4: case 6: case 9: case 11: return 30;\",\n         \"            case 4: case 6: case 8: case 9: return 30;\"},\n    };\n\n    public static void main(String[] args) throws Exception {\n        String src = Files.readString(IMPL, StandardCharsets.UTF_8);\n        for (String[] m : MUTANTS) {\n            if (src.split(java.util.regex.Pattern.quote(m[0]), -1).length - 1 != 1) {\n                fail(\"protected implementation file was modified - anchor not found exactly once: \" + m[0].trim());\n            }\n        }\n        if (run() != 0) fail(\"model tests FAILED against the correct implementation\");\n        try {\n            for (int i = 0; i < MUTANTS.length; i++) {\n                Files.writeString(IMPL, src.replace(MUTANTS[i][0], MUTANTS[i][1]), StandardCharsets.UTF_8);\n                if (run() == 0) fail(\"mutation \" + (i + 1) + \" SURVIVED: the tests do not verify the required behavior\");\n            }\n        } finally {\n            Files.writeString(IMPL, src, StandardCharsets.UTF_8);\n        }\n        System.out.println(\"PASS (killed all \" + MUTANTS.length + \" mutants)\");\n    }\n\n    static int run() throws IOException, InterruptedException {\n        int compile = exec(\"javac\", \"CalendarUtil.java\", \"CalendarUtilTest.java\");\n        if (compile != 0) return compile;\n        return exec(\"java\", \"-ea\", \"CalendarUtilTest\");\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n\n    static void fail(String message) {\n        System.err.println(message);\n        System.exit(1);\n    }\n}\n"
+  },
+  "check_command": "java MutationCheck.java",
+  "reference_solution": {
+    "CalendarUtilTest.java": "public final class CalendarUtilTest {\n    public static void main(String[] args) {\n        check(2024, 2, 29);\n        check(2023, 2, 28);\n        check(1900, 2, 28);\n        check(2000, 2, 29);\n        check(2026, 8, 31);\n        check(2026, 11, 30);\n        check(2026, 4, 30);\n        check(2026, 12, 31);\n\n        expectThrow(2026, 0);\n        expectThrow(2026, 13);\n\n        System.out.println(\"all tests passed\");\n    }\n\n    static void check(int year, int month, int expected) {\n        int got = CalendarUtil.daysInMonth(year, month);\n        if (got != expected) {\n            throw new AssertionError(\"daysInMonth(\" + year + \", \" + month + \") = \" + got\n                    + \", expected \" + expected);\n        }\n    }\n\n    static void expectThrow(int year, int month) {\n        try {\n            CalendarUtil.daysInMonth(year, month);\n        } catch (IllegalArgumentException e) {\n            return;\n        }\n        throw new AssertionError(\"month \" + month + \" must throw IllegalArgumentException\");\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "CalendarUtilTest.java": "public final class CalendarUtilTest {\n    public static void main(String[] args) {\n        if (CalendarUtil.daysInMonth(2026, 1) != 31) {\n            throw new AssertionError(\"January must have 31 days\");\n        }\n        if (CalendarUtil.daysInMonth(2026, 6) != 30) {\n            throw new AssertionError(\"June must have 30 days\");\n        }\n        boolean threw = false;\n        try {\n            CalendarUtil.daysInMonth(2026, 13);\n        } catch (IllegalArgumentException e) {\n            threw = true;\n        }\n        if (!threw) {\n            throw new AssertionError(\"month 13 must throw\");\n        }\n        System.out.println(\"all tests passed\");\n    }\n}\n"
+      }
+    }
+  ]
+}

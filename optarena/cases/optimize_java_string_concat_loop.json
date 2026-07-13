@@ -1,0 +1,54 @@
+{
+  "name": "optimize_java_string_concat_loop",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "String += in a loop -> StringBuilder; budget calibrated (naive ~7.5s native at n=120k vs ~0.005s, budget 2.5s); wrong-output broken drops the trailing newline",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "java",
+    "performance",
+    "stringbuilder",
+    "big-o"
+  ],
+  "prompts": [
+    "Report.joinLines(String[] lines) in Report.java concatenates every line with `out += line + newline` - each += copies the whole accumulated string, making the method O(n^2) in total characters and far too slow for large reports. Rewrite it with a StringBuilder (or another linear approach), returning EXACTLY the same string: every line terminated by a newline, including the last one, and the empty array giving the empty string. Keep the class name, method name, and signature."
+  ],
+  "setup_files": {
+    "Report.java": "public final class Report {\n    private Report() {}\n\n    /** All lines joined, each terminated by a newline. */\n    public static String joinLines(String[] lines) {\n        String out = \"\";\n        for (int i = 0; i < lines.length; i++) {\n            out += lines[i] + \"\\n\";\n        }\n        return out;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Report.java",
+      "content_patterns": [
+        "joinLines"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "ReportTest.java": "public final class ReportTest {\n    public static void main(String[] args) {\n        checkSmall();\n        checkEmpty();\n        checkPerformance();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkSmall() {\n        String got = Report.joinLines(new String[] {\"a\", \"b\", \"c\"});\n        if (!got.equals(\"a\\nb\\nc\\n\")) {\n            throw new AssertionError(\"joinLines([a,b,c]) = \" + got.replace(\"\\n\", \"\\\\n\")\n                    + \", expected a\\\\nb\\\\nc\\\\n (every line newline-terminated)\");\n        }\n    }\n\n    static void checkEmpty() {\n        if (!Report.joinLines(new String[0]).equals(\"\")) {\n            throw new AssertionError(\"empty input must give an empty string\");\n        }\n    }\n\n    static void checkPerformance() {\n        int n = 120000;\n        String[] lines = new String[n];\n        for (int i = 0; i < n; i++) {\n            lines[i] = \"line number \" + i;\n        }\n        long start = System.nanoTime();\n        String out = Report.joinLines(lines);\n        double elapsed = (System.nanoTime() - start) / 1e9;\n\n        if (!out.startsWith(\"line number 0\\n\") || !out.endsWith(\"line number 119999\\n\")) {\n            throw new AssertionError(\"large join content wrong\");\n        }\n        // calibrated: += in the loop is ~7.5s on fast native hardware and\n        // slower in the sandbox; StringBuilder is ~0.005s\n        if (elapsed >= 2.5) {\n            throw new AssertionError(String.format(\n                    \"joinLines took %.2fs for %d lines; expected a StringBuilder, \"\n                    + \"not String += which copies the whole accumulator every iteration\",\n                    elapsed, n));\n        }\n    }\n}\n",
+    "CheckReport.java": "import java.io.IOException;\n\npublic final class CheckReport {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Report.java\", \"ReportTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"ReportTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckReport.java",
+  "reference_solution": {
+    "Report.java": "public final class Report {\n    private Report() {}\n\n    /** All lines joined, each terminated by a newline. */\n    public static String joinLines(String[] lines) {\n        StringBuilder sb = new StringBuilder();\n        for (String line : lines) {\n            sb.append(line).append('\\n');\n        }\n        return sb.toString();\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-no-trailing-newline",
+      "files": {
+        "Report.java": "public final class Report {\n    private Report() {}\n\n    /** All lines joined, each terminated by a newline. */\n    public static String joinLines(String[] lines) {\n        return String.join(\"\\n\", lines);\n    }\n}\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "Report.java": "public final class Report {\n    private Report() {}\n\n    /** All lines joined, each terminated by a newline. */\n    public static String joinLines(String[] lines) {\n        String out = \"\";\n        for (int i = 0; i < lines.length; i++) {\n            out += lines[i] + \"\\n\";\n        }\n        return out;\n    }\n}\n"
+      }
+    }
+  ]
+}

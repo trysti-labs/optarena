@@ -1,0 +1,47 @@
+{
+  "name": "fix_python_subprocess_shell_injection",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "subprocess.run(f-string, shell=True) command injection -> list args without a shell; incomplete-fix broken wraps names in single quotes but keeps the shell",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "command-injection",
+    "subprocess"
+  ],
+  "prompts": [
+    "make_thumbnail in thumbs.py builds its ImageMagick command by f-string interpolation and runs it with shell=True - a filename like photo'; rm -rf ~; echo '.png executes arbitrary commands. Fix it properly: pass the command as an argument LIST (['convert', src, '-thumbnail', size, dest]) with NO shell, so any filename - quotes, semicolons, spaces and all - arrives at convert as a single argv element. Do not try to quote or escape the interpolated string instead; keep check=True and the function's signature and default size."
+  ],
+  "setup_files": {
+    "thumbs.py": "import subprocess\n\n\ndef make_thumbnail(src, dest, size=\"128x128\"):\n    \"\"\"Shell out to ImageMagick to render a thumbnail.\"\"\"\n    cmd = f\"convert {src} -thumbnail {size} {dest}\"\n    subprocess.run(cmd, shell=True, check=True)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "thumbs.py",
+      "content_patterns": [
+        "subprocess.run"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_thumbs_hidden.py": "import subprocess\n\nimport thumbs\n\n\nclass RunRecorder:\n    def __init__(self):\n        self.calls = []\n\n    def __call__(self, *args, **kwargs):\n        self.calls.append((args, kwargs))\n\n        class Done:\n            returncode = 0\n\n        return Done()\n\n\ndef test_hostile_filename_stays_one_argument(monkeypatch):\n    rec = RunRecorder()\n    monkeypatch.setattr(thumbs.subprocess, \"run\", rec)\n\n    hostile = \"photo'; rm -rf ~; echo '.png\"\n    thumbs.make_thumbnail(hostile, \"out.png\")\n\n    assert len(rec.calls) == 1\n    (cmd,), kwargs = rec.calls[0][0][:1], rec.calls[0][1]\n    assert isinstance(cmd, (list, tuple)), (\n        f\"the command must be an argument LIST, not a shell string: {cmd!r}\")\n    assert not kwargs.get(\"shell\"), \"shell=True must be gone\"\n    assert list(cmd) == [\"convert\", hostile, \"-thumbnail\", \"128x128\", \"out.png\"], (\n        f\"the hostile filename must arrive as ONE argv element, got {cmd!r}\")\n\n\ndef test_normal_call_shape(monkeypatch):\n    rec = RunRecorder()\n    monkeypatch.setattr(thumbs.subprocess, \"run\", rec)\n\n    thumbs.make_thumbnail(\"in.jpg\", \"small.jpg\", size=\"64x64\")\n\n    (cmd,), kwargs = rec.calls[0][0][:1], rec.calls[0][1]\n    assert list(cmd) == [\"convert\", \"in.jpg\", \"-thumbnail\", \"64x64\", \"small.jpg\"]\n    assert kwargs.get(\"check\") is True, \"check=True must be preserved\"\n"
+  },
+  "check_command": "python -m pytest -q test_thumbs_hidden.py",
+  "reference_solution": {
+    "thumbs.py": "import subprocess\n\n\ndef make_thumbnail(src, dest, size=\"128x128\"):\n    \"\"\"Shell out to ImageMagick to render a thumbnail.\"\"\"\n    subprocess.run([\"convert\", src, \"-thumbnail\", size, dest], check=True)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "quotes-but-still-shell",
+      "files": {
+        "thumbs.py": "import subprocess\n\n\ndef make_thumbnail(src, dest, size=\"128x128\"):\n    \"\"\"Shell out to ImageMagick to render a thumbnail.\"\"\"\n    cmd = f\"convert '{src}' -thumbnail {size} '{dest}'\"\n    subprocess.run(cmd, shell=True, check=True)\n"
+      }
+    }
+  ]
+}
