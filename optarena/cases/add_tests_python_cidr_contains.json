@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_python_cidr_contains",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write pytest tests for an IPv4 CIDR-membership check; mutation-checked (mask off-by-one, /0-matches-nothing, /32 exact-match mutants)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "python",
+    "testing",
+    "mutation-checked",
+    "networking"
+  ],
+  "prompts": [
+    "cidr_contains(cidr, ip) in netblock.py (already correct - do not modify it) returns True iff the IPv4 address `ip` falls within the CIDR block `cidr` (e.g. '10.0.0.0/8'). Write pytest tests at exactly test_netblock.py (functions named test_*, plain asserts, exact boolean values) with at least 4 test functions covering: an address inside a /24 and one just outside it, the prefix-length boundary (an address that shares the first /8 but not the /16, tested against both), a /32 matching ONLY its exact address (and rejecting a neighbour), and a /0 matching everything (e.g. 0.0.0.0/0 contains any address). Import with `from netblock import cidr_contains`."
+  ],
+  "setup_files": {
+    "netblock.py": "def ip_to_int(ip):\n    parts = ip.split(\".\")\n    if len(parts) != 4:\n        raise ValueError(f\"bad ip: {ip}\")\n    n = 0\n    for p in parts:\n        octet = int(p)\n        if octet < 0 or octet > 255:\n            raise ValueError(f\"bad octet in {ip}\")\n        n = (n << 8) | octet\n    return n\n\n\ndef cidr_contains(cidr, ip):\n    \"\"\"True iff `ip` falls inside the `cidr` block (e.g. '10.0.0.0/8').\"\"\"\n    network, bits = cidr.split(\"/\")\n    prefix = int(bits)\n    if prefix < 0 or prefix > 32:\n        raise ValueError(f\"bad prefix: {cidr}\")\n    mask = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF if prefix else 0\n    return (ip_to_int(ip) & mask) == (ip_to_int(network) & mask)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_netblock.py",
+      "content_patterns": [
+        "cidr_contains",
+        "assert"
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nIMPL = Path(\"netblock.py\")\nTEST = \"test_netblock.py\"\nMUTANTS = [\n    # mask off-by-one: shifts by (31 - prefix), widening every block\n    [\"    mask = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF if prefix else 0\",\n     \"    mask = (0xFFFFFFFF << (31 - prefix)) & 0xFFFFFFFF if prefix else 0\"],\n    # /0 degenerates to matching nothing instead of everything\n    [\"    mask = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF if prefix else 0\",\n     \"    mask = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF if prefix else 0xFFFFFFFF\"],\n    # comparison flipped to != so membership is inverted\n    [\"    return (ip_to_int(ip) & mask) == (ip_to_int(network) & mask)\",\n     \"    return (ip_to_int(ip) & mask) != (ip_to_int(network) & mask)\"],\n]\n\n\ndef run_tests():\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    return subprocess.run(\n        [sys.executable, \"-B\", \"-m\", \"pytest\", \"-p\", \"no:cacheprovider\", \"-q\", TEST]\n    ).returncode\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified (anchor not found once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python mutation_check.py",
+  "reference_solution": {
+    "test_netblock.py": "from netblock import cidr_contains\n\n\ndef test_inside_and_outside_a_24():\n    assert cidr_contains(\"192.168.1.0/24\", \"192.168.1.55\") is True\n    assert cidr_contains(\"192.168.1.0/24\", \"192.168.2.1\") is False\n\n\ndef test_prefix_length_matters():\n    # shares the first /8 but not the /16\n    assert cidr_contains(\"10.0.0.0/8\", \"10.99.99.99\") is True\n    assert cidr_contains(\"10.1.0.0/16\", \"10.99.99.99\") is False\n\n\ndef test_slash_32_is_exact():\n    assert cidr_contains(\"10.0.0.5/32\", \"10.0.0.5\") is True\n    assert cidr_contains(\"10.0.0.5/32\", \"10.0.0.6\") is False\n\n\ndef test_slash_0_matches_everything():\n    assert cidr_contains(\"0.0.0.0/0\", \"8.8.8.8\") is True\n    assert cidr_contains(\"0.0.0.0/0\", \"255.255.255.255\") is True\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_netblock.py": "from netblock import cidr_contains\n\n\ndef test_returns_bool():\n    assert isinstance(cidr_contains(\"10.0.0.0/8\", \"10.0.0.1\"), bool)\n\n\ndef test_same_address():\n    assert cidr_contains(\"10.0.0.1/32\", \"10.0.0.1\") is True\n\n\ndef test_obvious_inside():\n    assert cidr_contains(\"10.0.0.0/8\", \"10.0.0.1\") is True\n\n\ndef test_obvious_outside():\n    assert cidr_contains(\"10.0.0.0/8\", \"192.168.0.1\") is False\n"
+      }
+    }
+  ]
+}

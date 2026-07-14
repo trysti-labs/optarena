@@ -1,0 +1,47 @@
+{
+  "name": "fix_python_html_injection_escape",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "HTML injection via unescaped f-string interpolation -> html.escape; incomplete-fix broken hand-replaces < and > only, leaving & and quotes raw",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "xss",
+    "html-escaping"
+  ],
+  "prompts": [
+    "render_comment(author, body) in render.py interpolates user-supplied author and body straight into an HTML string - a classic stored-XSS hole (<script>...</script> in a comment executes). Fix it by HTML-escaping both values with the standard library's html.escape before interpolation, so <, >, &, and quote characters are all encoded. Do not hand-roll a partial replacement of just < and > - that leaves & and quotes raw, which both mangles legitimate text (Tom & Jerry) and can still break out of an attribute context. The markup structure and class names stay exactly as they are for benign input."
+  ],
+  "setup_files": {
+    "render.py": "def render_comment(author, body):\n    \"\"\"Render a comment as an HTML snippet.\"\"\"\n    return (\n        f\"<div class=\\\"comment\\\">\"\n        f\"<span class=\\\"author\\\">{author}</span>\"\n        f\"<p>{body}</p>\"\n        f\"</div>\"\n    )\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "render.py",
+      "content_patterns": [
+        "render_comment"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_render_hidden.py": "from render import render_comment\n\n\ndef test_plain_text_passes_through():\n    out = render_comment(\"Ada\", \"hello world\")\n    assert \"<span class=\\\"author\\\">Ada</span>\" in out\n    assert \"<p>hello world</p>\" in out\n\n\ndef test_script_tag_is_neutralized():\n    out = render_comment(\"Ada\", \"<script>alert(1)</script>\")\n    assert \"<script>\" not in out\n    assert \"&lt;script&gt;\" in out\n\n\ndef test_ampersand_is_escaped():\n    # a bare & must become &amp; (html.escape does this; a naive < > only\n    # replacement leaves it raw, producing invalid/ambiguous markup)\n    out = render_comment(\"Tom & Jerry\", \"a & b\")\n    assert \"Tom &amp; Jerry\" in out\n    assert \"&amp; b\" in out\n    assert \"Tom & Jerry\" not in out\n\n\ndef test_quotes_in_value_are_escaped():\n    out = render_comment('a\" onmouseover=\"x', \"hi\")\n    # the raw attribute-breaking quote must not survive verbatim\n    assert 'a\" onmouseover=\"x' not in out\n    assert \"&quot;\" in out or \"&#x27;\" in out or \"&#34;\" in out\n"
+  },
+  "check_command": "python -m pytest -q test_render_hidden.py",
+  "reference_solution": {
+    "render.py": "import html\n\n\ndef render_comment(author, body):\n    \"\"\"Render a comment as an HTML snippet.\"\"\"\n    author = html.escape(author)\n    body = html.escape(body)\n    return (\n        f\"<div class=\\\"comment\\\">\"\n        f\"<span class=\\\"author\\\">{author}</span>\"\n        f\"<p>{body}</p>\"\n        f\"</div>\"\n    )\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "escapes-angle-brackets-only",
+      "files": {
+        "render.py": "def render_comment(author, body):\n    \"\"\"Render a comment as an HTML snippet.\"\"\"\n    def clean(s):\n        return s.replace(\"<\", \"&lt;\").replace(\">\", \"&gt;\")\n\n    author = clean(author)\n    body = clean(body)\n    return (\n        f\"<div class=\\\"comment\\\">\"\n        f\"<span class=\\\"author\\\">{author}</span>\"\n        f\"<p>{body}</p>\"\n        f\"</div>\"\n    )\n"
+      }
+    }
+  ]
+}

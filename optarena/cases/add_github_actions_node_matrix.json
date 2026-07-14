@@ -1,0 +1,53 @@
+{
+  "name": "add_github_actions_node_matrix",
+  "language": "yaml",
+  "framework": "github-actions",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Turn a single-version CI job into a node 18/20/22 matrix with fail-fast: false; broken leaves fail-fast at the default so one failure cancels the rest",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "github-actions",
+    "devops",
+    "matrix",
+    "ci"
+  ],
+  "prompts": [
+    "test.yml runs the test job on a single node version. Turn it into a matrix build across node 18, 20, and 22: add a strategy.matrix.node-version list, feed ${{ matrix.node-version }} into the setup-node step (not a hardcoded number), and set strategy.fail-fast to FALSE so that one version failing does not cancel the other versions' jobs - you want to see the full compatibility picture on every run. Keep the checkout / npm ci / npm test steps and the triggers unchanged."
+  ],
+  "setup_files": {
+    ".github/workflows/test.yml": "name: test\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/test.yml",
+      "content_patterns": [
+        "matrix"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_matrix.py": "import yaml\n\nwith open(\".github/workflows/test.yml\") as f:\n    wf = yaml.safe_load(f)\n\njob = wf[\"jobs\"][\"test\"]\nstrategy = job.get(\"strategy\")\nassert strategy, \"no strategy block - matrix build not configured\"\n\nmatrix = strategy.get(\"matrix\")\nassert matrix, \"no matrix\"\nversions = matrix.get(\"node-version\")\nassert isinstance(versions, list) and set(versions) >= {18, 20, 22}, (\n    f\"matrix must cover node 18, 20, 22, got {versions}\")\n\nassert strategy.get(\"fail-fast\") is False, (\n    \"strategy.fail-fast must be false - with the default (true), one failing \"\n    \"node version cancels the rest and you can't see the full compatibility picture\")\n\n# the setup-node step must consume the matrix value, not a hardcoded version\nsteps = job[\"steps\"]\nsetup = next((s for s in steps if str(s.get(\"uses\", \"\")).startswith(\"actions/setup-node\")), None)\nassert setup, \"setup-node step lost\"\nnv = str((setup.get(\"with\") or {}).get(\"node-version\", \"\"))\nassert \"matrix.node-version\" in nv, (\n    f\"setup-node must use ${{{{ matrix.node-version }}}}, got {nv!r}\")\n\nruns = [s.get(\"run\", \"\") for s in steps]\nassert any(\"npm ci\" in r for r in runs) and any(\"npm test\" in r for r in runs), \"build steps lost\"\n\nprint(\"PASS matrix checks\")\n"
+  },
+  "check_command": "python check_matrix.py",
+  "reference_solution": {
+    ".github/workflows/test.yml": "name: test\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    strategy:\n      fail-fast: false\n      matrix:\n        node-version: [18, 20, 22]\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: ${{ matrix.node-version }}\n      - run: npm ci\n      - run: npm test\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        ".github/workflows/test.yml": "name: test\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
+      }
+    },
+    {
+      "name": "fail-fast-left-default",
+      "files": {
+        ".github/workflows/test.yml": "name: test\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        node-version: [18, 20, 22]\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: ${{ matrix.node-version }}\n      - run: npm ci\n      - run: npm test\n"
+      }
+    }
+  ]
+}

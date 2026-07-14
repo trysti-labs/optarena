@@ -1,0 +1,50 @@
+{
+  "name": "refactor_python_nested_ifs_to_guard_clauses",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Deeply nested if/else validation -> flat guard clauses (early returns/raises); drift broken flips the weight boundary from > to >= while inverting",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "python",
+    "refactoring",
+    "guard-clauses",
+    "readability"
+  ],
+  "prompts": [
+    "shipping_quote(order) in quotes.py validates an order through four levels of nested if/else, with the happy path buried deepest and each rejection in an else branch. Refactor it to flat guard clauses: check each failure condition up front and raise immediately (early returns), so the success path is un-indented at the end. Pure refactor - every rejection must still raise ValueError with the SAME message ('order is required', 'order has no items', 'order too heavy', 'unknown destination'), the weight limit stays inclusive (a 30kg order is allowed, 31kg is too heavy - mind the boundary when you invert the condition), and the returned quote dict is unchanged. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "quotes.py": "def shipping_quote(order):\n    \"\"\"Return a quote dict, or raise ValueError with a specific message for\n    each rejection reason.\"\"\"\n    if order is not None:\n        if order.get(\"items\"):\n            weight = sum(i[\"weight\"] for i in order[\"items\"])\n            if weight <= 30:\n                dest = order.get(\"destination\")\n                if dest in (\"domestic\", \"international\"):\n                    base = 5.0 if dest == \"domestic\" else 15.0\n                    return {\"weight\": weight, \"cost\": round(base + 0.5 * weight, 2)}\n                else:\n                    raise ValueError(\"unknown destination\")\n            else:\n                raise ValueError(\"order too heavy\")\n        else:\n            raise ValueError(\"order has no items\")\n    else:\n        raise ValueError(\"order is required\")\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "quotes.py",
+      "content_patterns": [
+        "def shipping_quote"
+      ],
+      "not_content_patterns": [
+        "else:"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_quotes_hidden.py": "import pytest\n\nfrom quotes import shipping_quote\n\n\ndef test_domestic_quote():\n    order = {\"items\": [{\"weight\": 10}, {\"weight\": 10}], \"destination\": \"domestic\"}\n    assert shipping_quote(order) == {\"weight\": 20, \"cost\": 15.0}\n\n\ndef test_international_quote():\n    order = {\"items\": [{\"weight\": 4}], \"destination\": \"international\"}\n    assert shipping_quote(order) == {\"weight\": 4, \"cost\": 17.0}\n\n\ndef test_weight_exactly_at_limit_is_allowed():\n    order = {\"items\": [{\"weight\": 30}], \"destination\": \"domestic\"}\n    assert shipping_quote(order)[\"weight\"] == 30\n\n\ndef test_rejections_keep_exact_messages():\n    with pytest.raises(ValueError, match=\"order is required\"):\n        shipping_quote(None)\n    with pytest.raises(ValueError, match=\"order has no items\"):\n        shipping_quote({\"items\": []})\n    with pytest.raises(ValueError, match=\"order too heavy\"):\n        shipping_quote({\"items\": [{\"weight\": 31}], \"destination\": \"domestic\"})\n    with pytest.raises(ValueError, match=\"unknown destination\"):\n        shipping_quote({\"items\": [{\"weight\": 1}], \"destination\": \"moon\"})\n"
+  },
+  "check_command": "python -m pytest -q test_quotes_hidden.py",
+  "reference_solution": {
+    "quotes.py": "def shipping_quote(order):\n    \"\"\"Return a quote dict, or raise ValueError with a specific message for\n    each rejection reason.\"\"\"\n    if order is None:\n        raise ValueError(\"order is required\")\n    if not order.get(\"items\"):\n        raise ValueError(\"order has no items\")\n\n    weight = sum(i[\"weight\"] for i in order[\"items\"])\n    if weight > 30:\n        raise ValueError(\"order too heavy\")\n\n    dest = order.get(\"destination\")\n    if dest not in (\"domestic\", \"international\"):\n        raise ValueError(\"unknown destination\")\n\n    base = 5.0 if dest == \"domestic\" else 15.0\n    return {\"weight\": weight, \"cost\": round(base + 0.5 * weight, 2)}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "weight-boundary-drift",
+      "files": {
+        "quotes.py": "def shipping_quote(order):\n    \"\"\"Return a quote dict, or raise ValueError with a specific message for\n    each rejection reason.\"\"\"\n    if order is None:\n        raise ValueError(\"order is required\")\n    if not order.get(\"items\"):\n        raise ValueError(\"order has no items\")\n\n    weight = sum(i[\"weight\"] for i in order[\"items\"])\n    if weight >= 30:\n        raise ValueError(\"order too heavy\")\n\n    dest = order.get(\"destination\")\n    if dest not in (\"domestic\", \"international\"):\n        raise ValueError(\"unknown destination\")\n\n    base = 5.0 if dest == \"domestic\" else 15.0\n    return {\"weight\": weight, \"cost\": round(base + 0.5 * weight, 2)}\n"
+      }
+    }
+  ]
+}
