@@ -1,0 +1,48 @@
+{
+  "name": "fix_js_token_compare_timing_safe",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Timing-unsafe token equality (=== / short-circuit loop) -> crypto.timingSafeEqual; the oracle times first-char vs last-char mismatch to catch short-circuiting",
+  "difficulty": 3,
+  "task_type": "security",
+  "tags": [
+    "javascript",
+    "node",
+    "security",
+    "timing-attack",
+    "crypto"
+  ],
+  "prompts": [
+    "verifyToken(provided, expected) in tokens.js compares secret tokens with `===`, which short-circuits at the first differing character - an attacker can time responses to recover the token one character at a time. Fix it to compare in CONSTANT time: use node's crypto.timingSafeEqual over Buffers of the two values, returning false up front (without a content compare) only when the lengths differ. Do not replace it with a hand-written char-by-char loop that returns on the first mismatch - that has the exact same timing leak. Matching tokens still verify true, mismatched (including different-length) ones false. Keep the function name, signature, and module.exports."
+  ],
+  "setup_files": {
+    "tokens.js": "function verifyToken(provided, expected) {\n  // Both are hex-encoded strings of equal intended length.\n  return provided === expected;\n}\n\nmodule.exports = { verifyToken };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "tokens.js",
+      "content_patterns": [
+        "verifyToken"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_tokens_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { verifyToken } = require(\"./tokens\");\n\ntest(\"matching tokens verify\", () => {\n  assert.strictEqual(verifyToken(\"deadbeef\", \"deadbeef\"), true);\n});\n\ntest(\"different tokens do not verify\", () => {\n  assert.strictEqual(verifyToken(\"deadbeef\", \"deadbee0\"), false);\n  assert.strictEqual(verifyToken(\"deadbeef\", \"cafebabe\"), false);\n});\n\ntest(\"different lengths do not verify\", () => {\n  assert.strictEqual(verifyToken(\"dead\", \"deadbeef\"), false);\n});\n\ntest(\"comparison is constant-time (no early exit on first-char mismatch)\", () => {\n  // A short-circuiting compare returns as soon as it hits a mismatch, so a\n  // token differing only in the LAST char takes measurably longer than one\n  // differing in the FIRST. A constant-time compare must show no such gap.\n  const target = \"a\".repeat(4096);\n  const diffFirst = \"b\" + \"a\".repeat(4095);\n  const diffLast = \"a\".repeat(4095) + \"b\";\n  const N = 2000;\n\n  function timeIt(other) {\n    const start = process.hrtime.bigint();\n    for (let i = 0; i < N; i++) {\n      verifyToken(other, target);\n    }\n    return Number(process.hrtime.bigint() - start);\n  }\n\n  // warm up\n  timeIt(diffFirst);\n  timeIt(diffLast);\n\n  const tFirst = Math.min(timeIt(diffFirst), timeIt(diffFirst), timeIt(diffFirst));\n  const tLast = Math.min(timeIt(diffLast), timeIt(diffLast), timeIt(diffLast));\n\n  // A short-circuit loop makes tLast dramatically larger than tFirst\n  // (scans the whole 4096 chars vs. bailing at char 0). Constant-time keeps\n  // them within the same ballpark. Use a generous ratio to avoid flakiness.\n  // Real gap for a short-circuit loop here is ~thousands x (bail at char 0\n  // vs scan 4096 chars); a constant-time compare keeps the ratio near 1.\n  // 8x cleanly separates them with generous headroom against runner noise.\n  const ratio = tLast / Math.max(tFirst, 1);\n  assert.ok(\n    ratio < 8,\n    `comparison time depends on match position (last/first = ${ratio.toFixed(1)}x) - ` +\n      `it short-circuits and is not constant-time`,\n  );\n});\n"
+  },
+  "check_command": "node --test test_tokens_hidden.test.js",
+  "reference_solution": {
+    "tokens.js": "const crypto = require(\"node:crypto\");\n\nfunction verifyToken(provided, expected) {\n  // Both are hex-encoded strings of equal intended length.\n  const a = Buffer.from(String(provided));\n  const b = Buffer.from(String(expected));\n  if (a.length !== b.length) {\n    return false;\n  }\n  return crypto.timingSafeEqual(a, b);\n}\n\nmodule.exports = { verifyToken };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "short-circuit-loop",
+      "files": {
+        "tokens.js": "function verifyToken(provided, expected) {\n  // Both are hex-encoded strings of equal intended length.\n  if (provided.length !== expected.length) {\n    return false;\n  }\n  for (let i = 0; i < provided.length; i++) {\n    if (provided[i] !== expected[i]) {\n      return false; // early exit leaks how many chars matched\n    }\n  }\n  return true;\n}\n\nmodule.exports = { verifyToken };\n"
+      }
+    }
+  ]
+}

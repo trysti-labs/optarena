@@ -1,0 +1,53 @@
+{
+  "name": "add_tests_js_parse_cookies",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write node:test tests for a Cookie-header parser; node-native mutation harness (split-on-every-equals, no-decode, empty-entry-for-flag mutants)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "javascript",
+    "node",
+    "testing",
+    "mutation-checked",
+    "http"
+  ],
+  "prompts": [
+    "parseCookies(header) in cookies.js (already correct - do not modify it) parses a Cookie header string into an object: pairs are separated by '; ', only the FIRST '=' splits name from value (values may themselves contain '='), values are URI-decoded (decodeURIComponent), parts without any '=' are ignored entirely, and a missing or empty header returns {}. Write tests at exactly test_cookies.js using node:test + node:assert (run with `node --test`) with at least 4 test() cases asserting exact deepStrictEqual objects: a plain multi-cookie header, a value containing '=' (e.g. a base64ish token), an encoded value (e.g. %20), a part with no '=' being absent from the result, and the empty header. Import with `const { parseCookies } = require('./cookies')`."
+  ],
+  "setup_files": {
+    "cookies.js": "function parseCookies(header) {\n  // \"a=1; b=2\" -> { a: \"1\", b: \"2\" }. Values are URI-decoded; only the FIRST\n  // \"=\" separates name from value (values may contain \"=\"); parts without an\n  // \"=\" are ignored; a missing/empty header gives {}.\n  const out = {};\n  if (!header) {\n    return out;\n  }\n  for (const part of header.split(\"; \")) {\n    const eq = part.indexOf(\"=\");\n    if (eq === -1) {\n      continue;\n    }\n    out[part.slice(0, eq)] = decodeURIComponent(part.slice(eq + 1));\n  }\n  return out;\n}\n\nmodule.exports = { parseCookies };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_cookies.js",
+      "content_patterns": [
+        "parseCookies",
+        "assert"
+      ],
+      "regex_patterns": [
+        "test\\([\\s\\S]*test\\([\\s\\S]*test\\([\\s\\S]*test\\("
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.js": "const { execFileSync } = require(\"node:child_process\");\nconst fs = require(\"node:fs\");\n\nconst IMPL = \"cookies.js\";\nconst MUTANTS = [\n  // only the first \"=\" may split - this truncates values containing \"=\"\n  ['    out[part.slice(0, eq)] = decodeURIComponent(part.slice(eq + 1));',\n   '    out[part.slice(0, eq)] = decodeURIComponent(part.split(\"=\")[1]);'],\n  // decoding dropped\n  ['    out[part.slice(0, eq)] = decodeURIComponent(part.slice(eq + 1));',\n   '    out[part.slice(0, eq)] = part.slice(eq + 1);'],\n  // \"=-less\" parts get an empty entry instead of being ignored\n  ['    if (eq === -1) {\\n      continue;\\n    }',\n   '    if (eq === -1) {\\n      out[part] = \"\";\\n      continue;\\n    }'],\n];\n\nfunction runTests() {\n  try {\n    execFileSync(process.execPath, [\"--test\", \"test_cookies.js\"], { stdio: \"inherit\" });\n    return 0;\n  } catch {\n    return 1;\n  }\n}\n\nconst src = fs.readFileSync(IMPL, \"utf8\");\nfor (const [old] of MUTANTS) {\n  if (src.split(old).length - 1 !== 1) {\n    console.error(`protected implementation file ${IMPL} was modified - anchor not found exactly once: ${JSON.stringify(old)}`);\n    process.exit(1);\n  }\n}\n\nif (runTests() !== 0) {\n  console.error(\"model tests FAILED against the correct implementation\");\n  process.exit(1);\n}\n\nlet failed = false;\ntry {\n  for (let i = 0; i < MUTANTS.length; i++) {\n    fs.writeFileSync(IMPL, src.replace(MUTANTS[i][0], MUTANTS[i][1]));\n    if (runTests() === 0) {\n      console.error(`mutation ${i + 1} SURVIVED: the tests do not verify the required behavior`);\n      failed = true;\n      break;\n    }\n  }\n} finally {\n  fs.writeFileSync(IMPL, src);\n}\nif (failed) process.exit(1);\nconsole.log(`PASS (killed all ${MUTANTS.length} mutants)`);\n"
+  },
+  "check_command": "node mutation_check.js",
+  "reference_solution": {
+    "test_cookies.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\nconst { parseCookies } = require(\"./cookies\");\n\ntest(\"plain multi-cookie header\", () => {\n  assert.deepStrictEqual(parseCookies(\"a=1; b=2\"), { a: \"1\", b: \"2\" });\n});\n\ntest(\"value containing equals signs stays whole\", () => {\n  assert.deepStrictEqual(parseCookies(\"token=abc=def==\"), { token: \"abc=def==\" });\n});\n\ntest(\"values are URI-decoded\", () => {\n  assert.deepStrictEqual(parseCookies(\"name=Ada%20Lovelace\"), { name: \"Ada Lovelace\" });\n});\n\ntest(\"parts without an equals are ignored\", () => {\n  assert.deepStrictEqual(parseCookies(\"a=1; Secure; b=2\"), { a: \"1\", b: \"2\" });\n});\n\ntest(\"empty and missing headers give empty objects\", () => {\n  assert.deepStrictEqual(parseCookies(\"\"), {});\n  assert.deepStrictEqual(parseCookies(undefined), {});\n});\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_cookies.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\nconst { parseCookies } = require(\"./cookies\");\n\ntest(\"returns an object\", () => {\n  assert.strictEqual(typeof parseCookies(\"a=1\"), \"object\");\n});\n\ntest(\"simple pair parsed\", () => {\n  assert.strictEqual(parseCookies(\"a=1\").a, \"1\");\n});\n\ntest(\"empty header gives empty object\", () => {\n  assert.deepStrictEqual(parseCookies(\"\"), {});\n});\n\ntest(\"two cookies give two keys\", () => {\n  assert.strictEqual(Object.keys(parseCookies(\"a=1; b=2\")).length, 2);\n});\n"
+      }
+    }
+  ]
+}

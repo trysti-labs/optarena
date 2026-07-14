@@ -1,0 +1,56 @@
+{
+  "name": "harden_terraform_s3_bucket",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 150,
+  "timeout": 300,
+  "description": "Harden an S3 bucket with versioning, a fully-locked public access block, and default encryption; broken leaves one public-access-block flag false",
+  "difficulty": 3,
+  "task_type": "devops",
+  "tags": [
+    "terraform",
+    "hcl",
+    "devops",
+    "aws",
+    "s3",
+    "hardening"
+  ],
+  "prompts": [
+    "main.tf declares a bare aws_s3_bucket with no hardening at all. Add three sibling resources, all keyed off aws_s3_bucket.reports.id: an aws_s3_bucket_versioning resource with versioning_configuration.status = \"Enabled\"; an aws_s3_bucket_public_access_block with ALL FOUR flags (block_public_acls, block_public_policy, ignore_public_acls, restrict_public_buckets) set to true - a partial lockdown is not a lockdown; and an aws_s3_bucket_server_side_encryption_configuration defaulting to AES256. Run `terraform fmt` on whatever you write. Do not modify the existing aws_s3_bucket resource."
+  ],
+  "setup_files": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_s3_bucket\" \"reports\" {\n  bucket = \"example-reports-bucket\"\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": [
+        "aws_s3_bucket_versioning",
+        "aws_s3_bucket_public_access_block"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_hardening.py": "import json\nimport re\nimport subprocess\n\nfmt = subprocess.run([\"terraform\", \"fmt\", \"-check\", \"-diff\"], capture_output=True, text=True)\nassert fmt.returncode == 0, f\"terraform fmt -check failed:\\n{fmt.stdout}\\n{fmt.stderr}\"\n\ninit = subprocess.run([\"terraform\", \"init\", \"-backend=false\", \"-input=false\"],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f\"terraform init failed:\\n{init.stdout}\\n{init.stderr}\"\n\nvalidate = subprocess.run([\"terraform\", \"validate\", \"-no-color\", \"-json\"],\n                          capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get(\"valid\") is True, f\"terraform validate failed: {validate.stdout}\\n{validate.stderr}\"\n\ncontent = open(\"main.tf\", encoding=\"utf-8\").read()\n\nassert re.search(r'resource\\s+\"aws_s3_bucket_versioning\"', content), \"no versioning resource\"\nassert re.search(r'status\\s*=\\s*\"Enabled\"', content), \"versioning status must be Enabled\"\n\npab = re.search(\n    r'resource\\s+\"aws_s3_bucket_public_access_block\"[^}]*\\{([^}]*)\\}', content, re.DOTALL)\nassert pab, \"no aws_s3_bucket_public_access_block resource\"\nblock = pab.group(1)\nfor flag in (\"block_public_acls\", \"block_public_policy\", \"ignore_public_acls\",\n            \"restrict_public_buckets\"):\n    m = re.search(flag + r\"\\s*=\\s*(true|false)\", block)\n    assert m, f\"{flag} missing from the public access block\"\n    assert m.group(1) == \"true\", f\"{flag} must be true, got {m.group(1)} - the bucket is not locked down\"\n\nassert re.search(r'resource\\s+\"aws_s3_bucket_server_side_encryption_configuration\"', content), (\n    \"no default encryption configuration\")\n\n# the original bucket resource must survive untouched\nassert re.search(r'resource\\s+\"aws_s3_bucket\"\\s+\"reports\"\\s*\\{', content), \"bucket resource lost\"\n\nprint(\"PASS terraform S3 hardening checks\")\n"
+  },
+  "check_command": "python check_hardening.py",
+  "reference_solution": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_s3_bucket\" \"reports\" {\n  bucket = \"example-reports-bucket\"\n}\n\nresource \"aws_s3_bucket_versioning\" \"reports\" {\n  bucket = aws_s3_bucket.reports.id\n\n  versioning_configuration {\n    status = \"Enabled\"\n  }\n}\n\nresource \"aws_s3_bucket_public_access_block\" \"reports\" {\n  bucket = aws_s3_bucket.reports.id\n\n  block_public_acls       = true\n  block_public_policy     = true\n  ignore_public_acls      = true\n  restrict_public_buckets = true\n}\n\nresource \"aws_s3_bucket_server_side_encryption_configuration\" \"reports\" {\n  bucket = aws_s3_bucket.reports.id\n\n  rule {\n    apply_server_side_encryption_by_default {\n      sse_algorithm = \"AES256\"\n    }\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_s3_bucket\" \"reports\" {\n  bucket = \"example-reports-bucket\"\n}\n"
+      }
+    },
+    {
+      "name": "public-access-block-partial",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_s3_bucket\" \"reports\" {\n  bucket = \"example-reports-bucket\"\n}\n\nresource \"aws_s3_bucket_versioning\" \"reports\" {\n  bucket = aws_s3_bucket.reports.id\n\n  versioning_configuration {\n    status = \"Enabled\"\n  }\n}\n\nresource \"aws_s3_bucket_public_access_block\" \"reports\" {\n  bucket = aws_s3_bucket.reports.id\n\n  block_public_acls       = true\n  block_public_policy     = false\n  ignore_public_acls      = true\n  restrict_public_buckets = true\n}\n\nresource \"aws_s3_bucket_server_side_encryption_configuration\" \"reports\" {\n  bucket = aws_s3_bucket.reports.id\n\n  rule {\n    apply_server_side_encryption_by_default {\n      sse_algorithm = \"AES256\"\n    }\n  }\n}\n"
+      }
+    }
+  ]
+}

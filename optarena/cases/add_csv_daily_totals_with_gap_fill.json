@@ -1,0 +1,44 @@
+{
+  "name": "add_csv_daily_totals_with_gap_fill",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "data_engineering",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "CSV aggregation into a gap-filled daily time series (missing days sum to zero, not skipped) - the oracle pins the exact ordered output including gap days",
+  "difficulty": 2,
+  "task_type": "data_engineering",
+  "tags": [
+    "python",
+    "csv",
+    "data_engineering",
+    "time-series"
+  ],
+  "prompts": [
+    "This is a self-contained data_engineering exercise. Write daily_totals(csv_text, start, end) in rollup.py: csv_text is CSV text with 'date' (YYYY-MM-DD) and 'amount' columns; start and end are inclusive YYYY-MM-DD bounds. Parse the CSV with the csv module, sum amounts per date, then return an ORDERED list of (date_str, total) tuples for EVERY day from start to end inclusive - including days with no rows at all, which must appear with total 0.0 rather than being skipped (a rolling report needs a fixed-length series, not a sparse one). Round each total to 2 decimal places."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "rollup.py",
+      "content_patterns": [
+        "def daily_totals"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_rollup_hidden.py": "from rollup import daily_totals\n\nCSV = \"\"\"date,amount\n2026-07-01,10.5\n2026-07-01,4.5\n2026-07-03,20\n2026-07-03,5.25\n\"\"\"\n\n\ndef test_gap_days_fill_with_zero():\n    got = daily_totals(CSV, \"2026-07-01\", \"2026-07-04\")\n    assert got == [\n        (\"2026-07-01\", 15.0),\n        (\"2026-07-02\", 0.0),\n        (\"2026-07-03\", 25.25),\n        (\"2026-07-04\", 0.0),\n    ]\n\n\ndef test_range_narrower_than_data():\n    got = daily_totals(CSV, \"2026-07-02\", \"2026-07-03\")\n    assert got == [(\"2026-07-02\", 0.0), (\"2026-07-03\", 25.25)]\n\n\ndef test_single_day_range():\n    assert daily_totals(CSV, \"2026-07-01\", \"2026-07-01\") == [(\"2026-07-01\", 15.0)]\n\n\ndef test_no_matching_rows_all_zero():\n    got = daily_totals(CSV, \"2026-08-01\", \"2026-08-02\")\n    assert got == [(\"2026-08-01\", 0.0), (\"2026-08-02\", 0.0)]\n"
+  },
+  "check_command": "python -m pytest -q test_rollup_hidden.py",
+  "reference_solution": {
+    "rollup.py": "import csv\nimport io\nfrom datetime import date, timedelta\n\n\ndef daily_totals(csv_text, start, end):\n    \"\"\"csv_text has columns 'date' (YYYY-MM-DD) and 'amount' (a number, as\n    text). Returns an ORDERED list of (date_str, total) for every day from\n    start to end inclusive (both YYYY-MM-DD strings) - days with no rows sum\n    to 0.0. Amounts on the same date are summed.\"\"\"\n    totals = {}\n    reader = csv.DictReader(io.StringIO(csv_text))\n    for row in reader:\n        d = row[\"date\"]\n        totals[d] = totals.get(d, 0.0) + float(row[\"amount\"])\n\n    out = []\n    current = date.fromisoformat(start)\n    last = date.fromisoformat(end)\n    while current <= last:\n        key = current.isoformat()\n        out.append((key, round(totals.get(key, 0.0), 2)))\n        current += timedelta(days=1)\n    return out\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "skips-gap-days",
+      "files": {
+        "rollup.py": "import csv\nimport io\nfrom datetime import date, timedelta\n\n\ndef daily_totals(csv_text, start, end):\n    \"\"\"csv_text has columns 'date' (YYYY-MM-DD) and 'amount' (a number, as\n    text). Returns an ORDERED list of (date_str, total) for every day from\n    start to end inclusive (both YYYY-MM-DD strings) - days with no rows sum\n    to 0.0. Amounts on the same date are summed.\"\"\"\n    totals = {}\n    reader = csv.DictReader(io.StringIO(csv_text))\n    for row in reader:\n        d = row[\"date\"]\n        totals[d] = totals.get(d, 0.0) + float(row[\"amount\"])\n\n    return [(d, round(t, 2)) for d, t in sorted(totals.items())\n            if start <= d <= end]\n"
+      }
+    }
+  ]
+}

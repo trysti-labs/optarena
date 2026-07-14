@@ -1,0 +1,51 @@
+{
+  "name": "refactor_python_manual_loops_to_zip_star",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Manual index-loop matrix operations -> zip(*matrix) / comprehensions; drift broken over-generalizes row_maxes into a column operation on a non-square matrix",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "python",
+    "refactoring",
+    "zip",
+    "idiomatic"
+  ],
+  "prompts": [
+    "matrixops.py implements transpose, column_sums, and row_maxes with manual range()-indexed loops. Refactor transpose and column_sums to use zip(*matrix) (the idiomatic Python transpose pattern) with comprehensions, and row_maxes to a simple comprehension over the rows - each row's own max, not a column operation. Pure refactor: identical output for every matrix, including non-square ones (a 2x3 matrix's row_maxes has 2 elements, one per row - do not reach for zip(*matrix) there, that computes columns) and the empty-matrix edge case for transpose/column_sums. Keep all three function names and signatures."
+  ],
+  "setup_files": {
+    "matrixops.py": "def transpose(matrix):\n    \"\"\"Transpose a rectangular matrix (list of equal-length row lists).\"\"\"\n    if not matrix:\n        return []\n    rows = len(matrix)\n    cols = len(matrix[0])\n    result = []\n    for c in range(cols):\n        row = []\n        for r in range(rows):\n            row.append(matrix[r][c])\n        result.append(row)\n    return result\n\n\ndef column_sums(matrix):\n    \"\"\"Sum of each column, left to right.\"\"\"\n    if not matrix:\n        return []\n    cols = len(matrix[0])\n    sums = [0] * cols\n    for row in matrix:\n        for c in range(cols):\n            sums[c] += row[c]\n    return sums\n\n\ndef row_maxes(matrix):\n    \"\"\"Maximum value of each row, top to bottom.\"\"\"\n    maxes = []\n    for row in matrix:\n        best = row[0]\n        for v in row:\n            if v > best:\n                best = v\n        maxes.append(best)\n    return maxes\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "matrixops.py",
+      "content_patterns": [
+        "zip(*matrix)"
+      ],
+      "not_content_patterns": [
+        "range(rows)",
+        "range(cols)"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_matrixops_hidden.py": "from matrixops import column_sums, row_maxes, transpose\n\n\ndef test_transpose_rectangular():\n    assert transpose([[1, 2, 3], [4, 5, 6]]) == [[1, 4], [2, 5], [3, 6]]\n\n\ndef test_transpose_empty():\n    assert transpose([]) == []\n\n\ndef test_transpose_single_row():\n    assert transpose([[1, 2, 3]]) == [[1], [2], [3]]\n\n\ndef test_column_sums():\n    assert column_sums([[1, 2, 3], [4, 5, 6]]) == [5, 7, 9]\n\n\ndef test_row_maxes_non_square():\n    # 2 rows x 3 cols: row-wise (not column-wise) maxima\n    assert row_maxes([[1, 9, 2], [7, 3, 4]]) == [9, 7]\n\n\ndef test_row_maxes_single_row():\n    assert row_maxes([[5, 1, 5]]) == [5]\n"
+  },
+  "check_command": "python -m pytest -q test_matrixops_hidden.py",
+  "reference_solution": {
+    "matrixops.py": "def transpose(matrix):\n    \"\"\"Transpose a rectangular matrix (list of equal-length row lists).\"\"\"\n    return [list(col) for col in zip(*matrix)]\n\n\ndef column_sums(matrix):\n    \"\"\"Sum of each column, left to right.\"\"\"\n    return [sum(col) for col in zip(*matrix)]\n\n\ndef row_maxes(matrix):\n    \"\"\"Maximum value of each row, top to bottom.\"\"\"\n    return [max(row) for row in matrix]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "row-maxes-drifts-to-column-axis",
+      "files": {
+        "matrixops.py": "def transpose(matrix):\n    \"\"\"Transpose a rectangular matrix (list of equal-length row lists).\"\"\"\n    return [list(col) for col in zip(*matrix)]\n\n\ndef column_sums(matrix):\n    \"\"\"Sum of each column, left to right.\"\"\"\n    return [sum(col) for col in zip(*matrix)]\n\n\ndef row_maxes(matrix):\n    \"\"\"Maximum value of each row, top to bottom.\"\"\"\n    return [max(col) for col in zip(*matrix)]\n"
+      }
+    }
+  ]
+}

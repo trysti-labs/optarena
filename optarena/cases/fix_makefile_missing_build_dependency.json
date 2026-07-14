@@ -1,0 +1,48 @@
+{
+  "name": "fix_makefile_missing_build_dependency",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "test/lint targets don't depend on build, so `make test` can run against a stale image; add .PHONY, the build prerequisite, and a ci composite target - proven by real `make -n` dry-run ordering",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "make",
+    "makefile",
+    "devops",
+    "dependency-order"
+  ],
+  "prompts": [
+    "This Makefile's test and lint targets run `docker run --rm $(IMAGE) ...` directly, with no dependency on build - so `make test` silently runs against whatever image tag already exists (stale, or missing entirely on a clean checkout), never rebuilding first. Fix it: add a `.PHONY` declaration listing every non-file target (build test lint clean, plus the new one below), make BOTH test and lint depend on build, and add a `ci` target that depends on lint and test (in that order) so a single `make ci` runs the whole gate. Keep the build/test/lint/clean recipes themselves unchanged."
+  ],
+  "setup_files": {
+    "Makefile": "IMAGE := reportgen:local\n\nbuild:\n\tdocker build -t $(IMAGE) .\n\ntest:\n\tdocker run --rm $(IMAGE) pytest -q\n\nlint:\n\tdocker run --rm $(IMAGE) ruff check .\n\nclean:\n\tdocker rmi $(IMAGE) 2>/dev/null || true\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        ".phony",
+        "test: build"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_makefile.py": "import re\nimport subprocess\n\ncontent = open(\"Makefile\", encoding=\"utf-8\").read()\n\nphony_lines = [l for l in content.splitlines() if l.strip().startswith(\".PHONY\")]\nassert phony_lines, \"no .PHONY declaration\"\nphony_targets = set(phony_lines[0].split(\":\", 1)[1].split())\nfor t in (\"build\", \"test\", \"lint\", \"clean\"):\n    assert t in phony_targets, f\"{t} missing from .PHONY\"\n\ndef prereqs(target):\n    m = re.search(rf\"(?m)^{re.escape(target)}\\s*:(.*)$\", content)\n    assert m, f\"target {target!r} not found\"\n    return set(m.group(1).split())\n\nassert \"build\" in prereqs(\"test\"), (\n    \"the test target must depend on build - otherwise `make test` can run \"\n    \"against a stale or missing image\")\nassert \"build\" in prereqs(\"lint\"), \"the lint target must depend on build\"\n\n# `ci` must be a real composite target\nci_prereqs = prereqs(\"ci\")\nassert {\"lint\", \"test\"} <= ci_prereqs, \"ci must depend on both lint and test\"\n\n# make -n (dry run) must not error, and must show the build step exactly\n# once ahead of the test recipe for `make test` (real dependency ordering)\ndry = subprocess.run([\"make\", \"-n\", \"test\"], capture_output=True, text=True, timeout=30)\nassert dry.returncode == 0, f\"make -n test failed:\\n{dry.stdout}\\n{dry.stderr}\"\nlines = [l for l in dry.stdout.splitlines() if l.strip()]\nassert any(\"docker build\" in l for l in lines), (\n    \"`make -n test` never shows the build step - test does not actually depend on build\")\nbuild_idx = next(i for i, l in enumerate(lines) if \"docker build\" in l)\ntest_idx = next(i for i, l in enumerate(lines) if \"pytest\" in l)\nassert build_idx < test_idx, \"build must run BEFORE the test recipe\"\n\nprint(\"PASS Makefile dependency checks\")\n"
+  },
+  "check_command": "python check_makefile.py",
+  "reference_solution": {
+    "Makefile": "IMAGE := reportgen:local\n\n.PHONY: build test lint clean ci\n\nbuild:\n\tdocker build -t $(IMAGE) .\n\ntest: build\n\tdocker run --rm $(IMAGE) pytest -q\n\nlint: build\n\tdocker run --rm $(IMAGE) ruff check .\n\nci: lint test\n\nclean:\n\tdocker rmi $(IMAGE) 2>/dev/null || true\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "phony-added-but-deps-still-missing",
+      "files": {
+        "Makefile": "IMAGE := reportgen:local\n\n.PHONY: build test lint clean ci\n\nbuild:\n\tdocker build -t $(IMAGE) .\n\ntest:\n\tdocker run --rm $(IMAGE) pytest -q\n\nlint:\n\tdocker run --rm $(IMAGE) ruff check .\n\nci: lint test\n\nclean:\n\tdocker rmi $(IMAGE) 2>/dev/null || true\n"
+      }
+    }
+  ]
+}

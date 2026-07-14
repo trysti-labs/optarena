@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_python_next_business_day",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write pytest tests for a next-business-day helper; mutation-checked (saturday-counts, same-day-returned, holidays-ignored mutants)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "python",
+    "testing",
+    "mutation-checked",
+    "dates"
+  ],
+  "prompts": [
+    "next_business_day(day, holidays=()) in busday.py (already correct - do not modify it) returns the first weekday STRICTLY after the given ISO date string that is neither a Saturday/Sunday nor in the holidays iterable (also ISO strings). Write pytest tests at exactly test_busday.py (functions named test_*, plain asserts with exact date strings) with at least 4 test functions covering: a Friday rolling to Monday, a Saturday input rolling to Monday, a weekday input returning the NEXT day (never the input day itself), and a holiday landing on the next business day so it gets skipped (chain a Friday + Monday-holiday to Tuesday). 2026-07-10 was a Friday - handy anchor. Import with `from busday import next_business_day`."
+  ],
+  "setup_files": {
+    "busday.py": "from datetime import date, timedelta\n\n\ndef next_business_day(day, holidays=()):\n    \"\"\"First weekday STRICTLY AFTER `day` (ISO date string) that is neither a\n    Saturday/Sunday nor listed in `holidays` (an iterable of ISO strings).\n    Returns an ISO date string.\"\"\"\n    current = date.fromisoformat(day) + timedelta(days=1)\n    skip = set(holidays)\n    while current.weekday() >= 5 or current.isoformat() in skip:\n        current += timedelta(days=1)\n    return current.isoformat()\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_busday.py",
+      "content_patterns": [
+        "next_business_day",
+        "assert"
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "\"\"\"Mutation harness: model tests must PASS the real implementation and FAIL\neach mutant. Portable (sys.executable, list args, -B).\"\"\"\nimport shutil\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nIMPL = Path('busday.py')\nTEST = 'test_busday.py'\nMUTANTS = [\n    [\n        \"    while current.weekday() >= 5 or current.isoformat() in skip:\",\n        \"    while current.weekday() > 5 or current.isoformat() in skip:\"\n    ],\n    [\n        \"    current = date.fromisoformat(day) + timedelta(days=1)\",\n        \"    current = date.fromisoformat(day)\"\n    ],\n    [\n        \"    while current.weekday() >= 5 or current.isoformat() in skip:\",\n        \"    while current.weekday() >= 5:\"\n    ]\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    return subprocess.run(\n        [sys.executable, \"-B\", \"-m\", \"pytest\", \"-p\", \"no:cacheprovider\", \"-q\", TEST]\n    ).returncode\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken implementation, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python mutation_check.py",
+  "reference_solution": {
+    "test_busday.py": "from busday import next_business_day\n\n\ndef test_friday_rolls_to_monday():\n    assert next_business_day(\"2026-07-10\") == \"2026-07-13\"\n\n\ndef test_saturday_rolls_to_monday():\n    assert next_business_day(\"2026-07-11\") == \"2026-07-13\"\n\n\ndef test_weekday_returns_next_day_not_itself():\n    assert next_business_day(\"2026-07-14\") == \"2026-07-15\"\n\n\ndef test_holiday_on_landing_day_is_skipped():\n    assert next_business_day(\"2026-07-10\", holidays=[\"2026-07-13\"]) == \"2026-07-14\"\n\n\ndef test_holiday_chain():\n    got = next_business_day(\"2026-07-10\", holidays=[\"2026-07-13\", \"2026-07-14\"])\n    assert got == \"2026-07-15\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_busday.py": "from busday import next_business_day\n\n\ndef test_returns_iso_string():\n    assert len(next_business_day(\"2026-07-14\")) == 10\n\n\ndef test_accepts_holidays():\n    assert isinstance(next_business_day(\"2026-07-14\", holidays=[\"2026-01-01\"]), str)\n\n\ndef test_different_from_distant_past():\n    assert next_business_day(\"2026-07-14\") != \"1999-01-01\"\n\n\ndef test_month_preserved_midmonth():\n    assert next_business_day(\"2026-07-14\").startswith(\"2026-07\")\n"
+      }
+    }
+  ]
+}

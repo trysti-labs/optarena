@@ -1,0 +1,47 @@
+{
+  "name": "add_eventbus_wildcard_subscription",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Add prefix-wildcard subscriptions ('user.*') to an exact-match-only event bus, with the namespace-boundary edge case as the discriminator",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "javascript",
+    "node",
+    "event-bus",
+    "pattern-matching"
+  ],
+  "prompts": [
+    "bus.js's EventBus only supports exact event-name subscriptions. Add wildcard support: on('user.*', handler) subscribes to every event whose name starts with 'user.' (the dot matters - see below), and emit still fires every matching handler, exact matches and wildcard matches both, for any event name. Get the namespace boundary right: 'user.*' must match 'user.created' and 'user.deleted', but must NOT match the bare event 'user' (no dot follows the prefix) and must NOT match 'userprofile.updated' (shares the string 'user' but is a different namespace) - a wildcard only ever matches things properly namespaced under it. Keep the class name, constructor, and both method signatures."
+  ],
+  "setup_files": {
+    "bus.js": "class EventBus {\n  constructor() {\n    this.listeners = new Map(); // exact event name -> [handlers]\n  }\n\n  on(event, handler) {\n    if (!this.listeners.has(event)) {\n      this.listeners.set(event, []);\n    }\n    this.listeners.get(event).push(handler);\n  }\n\n  emit(event, payload) {\n    const handlers = this.listeners.get(event) || [];\n    for (const h of handlers) {\n      h(payload);\n    }\n  }\n}\n\nmodule.exports = { EventBus };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "bus.js",
+      "content_patterns": [
+        "emit"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_bus_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { EventBus } = require(\"./bus\");\n\ntest(\"wildcard subscription catches namespaced events\", () => {\n  const bus = new EventBus();\n  const seen = [];\n  bus.on(\"user.*\", (p) => seen.push(p));\n\n  bus.emit(\"user.created\", \"a\");\n  bus.emit(\"user.deleted\", \"b\");\n\n  assert.deepStrictEqual(seen, [\"a\", \"b\"]);\n});\n\ntest(\"wildcard does not match the bare prefix or an unrelated event sharing it\", () => {\n  const bus = new EventBus();\n  const seen = [];\n  bus.on(\"user.*\", (p) => seen.push(p));\n\n  bus.emit(\"user\", \"bare\");                 // no dot after prefix - must NOT match\n  bus.emit(\"userprofile.updated\", \"sneaky\"); // shares the prefix string, different namespace\n  bus.emit(\"order.created\", \"unrelated\");\n\n  assert.deepStrictEqual(seen, []);\n});\n\ntest(\"exact and wildcard subscriptions on the same bus both fire\", () => {\n  const bus = new EventBus();\n  const exact = [];\n  const wild = [];\n  bus.on(\"user.created\", (p) => exact.push(p));\n  bus.on(\"user.*\", (p) => wild.push(p));\n\n  bus.emit(\"user.created\", \"x\");\n\n  assert.deepStrictEqual(exact, [\"x\"]);\n  assert.deepStrictEqual(wild, [\"x\"]);\n});\n"
+  },
+  "check_command": "node --test test_bus_hidden.test.js",
+  "reference_solution": {
+    "bus.js": "class EventBus {\n  constructor() {\n    this.listeners = new Map(); // pattern (exact name, or \"prefix.*\") -> [handlers]\n  }\n\n  on(event, handler) {\n    if (!this.listeners.has(event)) {\n      this.listeners.set(event, []);\n    }\n    this.listeners.get(event).push(handler);\n  }\n\n  emit(event, payload) {\n    for (const [pattern, handlers] of this.listeners) {\n      if (matches(pattern, event)) {\n        for (const h of handlers) {\n          h(payload);\n        }\n      }\n    }\n  }\n}\n\nfunction matches(pattern, event) {\n  if (pattern === event) {\n    return true;\n  }\n  if (pattern.endsWith(\".*\")) {\n    const prefix = pattern.slice(0, -1); // keep the trailing \".\"\n    return event.startsWith(prefix) && event.length > prefix.length;\n  }\n  return false;\n}\n\nmodule.exports = { EventBus };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wildcard-ignores-namespace-boundary",
+      "files": {
+        "bus.js": "class EventBus {\n  constructor() {\n    this.listeners = new Map(); // pattern (exact name, or \"prefix.*\") -> [handlers]\n  }\n\n  on(event, handler) {\n    if (!this.listeners.has(event)) {\n      this.listeners.set(event, []);\n    }\n    this.listeners.get(event).push(handler);\n  }\n\n  emit(event, payload) {\n    for (const [pattern, handlers] of this.listeners) {\n      if (matches(pattern, event)) {\n        for (const h of handlers) {\n          h(payload);\n        }\n      }\n    }\n  }\n}\n\nfunction matches(pattern, event) {\n  if (pattern === event) {\n    return true;\n  }\n  if (pattern.endsWith(\".*\")) {\n    const prefix = pattern.slice(0, -2); // drop \".*\"\n    return event.startsWith(prefix);\n  }\n  return false;\n}\n\nmodule.exports = { EventBus };\n"
+      }
+    }
+  ]
+}

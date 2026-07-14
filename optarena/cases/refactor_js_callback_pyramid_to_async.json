@@ -1,0 +1,48 @@
+{
+  "name": "refactor_js_callback_pyramid_to_async",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Callback-pyramid sequential API calls -> async/await with promisify; drift broken passes the lookup id instead of the canonical user.id to the second call",
+  "difficulty": 3,
+  "task_type": "refactoring",
+  "tags": [
+    "javascript",
+    "node",
+    "refactoring",
+    "async-await",
+    "migration"
+  ],
+  "prompts": [
+    "loadDashboard(api, userId, callback) in dashboard.js chains three callback-style API calls (getUser -> getOrders -> getRecommendations) in a nested pyramid, with an `if (err) { callback(err); return; }` at each level. Refactor the body to async/await - promisify the api methods (node:util's promisify; bind them to `api`) and await them in sequence inside a try/catch that funnels any error to callback(err). Keep the exact data flow: getOrders is called with user.id (the id returned by getUser, which is NOT necessarily the same as the userId argument), getRecommendations with the orders, and the final callback still receives the same summary object { user, orderCount, recommendations }. Keep the function's callback-style signature (it still takes and calls `callback`)."
+  ],
+  "setup_files": {
+    "dashboard.js": "function loadDashboard(api, userId, callback) {\n  // api.getUser / api.getOrders / api.getRecommendations are callback-style:\n  //   fn(arg, (err, result) => ...)\n  // Load the user, then their orders, then recommendations based on the\n  // orders, and assemble a summary. Any error short-circuits to callback(err).\n  api.getUser(userId, (err, user) => {\n    if (err) {\n      callback(err);\n      return;\n    }\n    api.getOrders(user.id, (err2, orders) => {\n      if (err2) {\n        callback(err2);\n        return;\n      }\n      api.getRecommendations(orders, (err3, recs) => {\n        if (err3) {\n          callback(err3);\n          return;\n        }\n        callback(null, {\n          user: user.name,\n          orderCount: orders.length,\n          recommendations: recs,\n        });\n      });\n    });\n  });\n}\n\nmodule.exports = { loadDashboard };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dashboard.js",
+      "content_patterns": [
+        "await"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_dashboard_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { loadDashboard } = require(\"./dashboard\");\n\nfunction makeApi(overrides = {}) {\n  return {\n    getUser(id, cb) {\n      // canonical id differs from the lookup id on purpose\n      setImmediate(() => cb(null, { id: \"canon-\" + id, name: \"Ada\" }));\n    },\n    getOrders(userId, cb) {\n      setImmediate(() => cb(null, [{ id: 1, owner: userId }, { id: 2, owner: userId }]));\n    },\n    getRecommendations(orders, cb) {\n      setImmediate(() => cb(null, [\"r1\"]));\n    },\n    ...overrides,\n  };\n}\n\nfunction run(api, userId) {\n  return new Promise((resolve, reject) => {\n    loadDashboard(api, userId, (err, result) => (err ? reject(err) : resolve(result)));\n  });\n}\n\ntest(\"assembles the summary through the whole chain\", async () => {\n  const result = await run(makeApi(), \"u1\");\n  assert.deepStrictEqual(result, { user: \"Ada\", orderCount: 2, recommendations: [\"r1\"] });\n});\n\ntest(\"second call uses the canonical id from getUser, not the lookup id\", async () => {\n  let seenOwner = null;\n  const api = makeApi({\n    getOrders(userId, cb) {\n      seenOwner = userId;\n      setImmediate(() => cb(null, [{ id: 1 }]));\n    },\n  });\n  await run(api, \"u1\");\n  assert.strictEqual(seenOwner, \"canon-u1\", \"getOrders must receive user.id, not the original userId\");\n});\n\ntest(\"an error anywhere short-circuits to the callback\", async () => {\n  const api = makeApi({\n    getOrders(userId, cb) {\n      setImmediate(() => cb(new Error(\"orders down\")));\n    },\n  });\n  await assert.rejects(run(api, \"u1\"), /orders down/);\n});\n"
+  },
+  "check_command": "node --test test_dashboard_hidden.test.js",
+  "reference_solution": {
+    "dashboard.js": "const { promisify } = require(\"node:util\");\n\nasync function loadDashboard(api, userId, callback) {\n  const getUser = promisify(api.getUser.bind(api));\n  const getOrders = promisify(api.getOrders.bind(api));\n  const getRecommendations = promisify(api.getRecommendations.bind(api));\n  try {\n    const user = await getUser(userId);\n    const orders = await getOrders(user.id);\n    const recs = await getRecommendations(orders);\n    callback(null, {\n      user: user.name,\n      orderCount: orders.length,\n      recommendations: recs,\n    });\n  } catch (err) {\n    callback(err);\n  }\n}\n\nmodule.exports = { loadDashboard };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-id-passed-to-second-call",
+      "files": {
+        "dashboard.js": "const { promisify } = require(\"node:util\");\n\nasync function loadDashboard(api, userId, callback) {\n  const getUser = promisify(api.getUser.bind(api));\n  const getOrders = promisify(api.getOrders.bind(api));\n  const getRecommendations = promisify(api.getRecommendations.bind(api));\n  try {\n    const user = await getUser(userId);\n    const orders = await getOrders(userId);\n    const recs = await getRecommendations(orders);\n    callback(null, {\n      user: user.name,\n      orderCount: orders.length,\n      recommendations: recs,\n    });\n  } catch (err) {\n    callback(err);\n  }\n}\n\nmodule.exports = { loadDashboard };\n"
+      }
+    }
+  ]
+}

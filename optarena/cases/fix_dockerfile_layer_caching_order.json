@@ -1,0 +1,56 @@
+{
+  "name": "fix_dockerfile_layer_caching_order",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "COPY . . before npm ci busts the dependency cache on every source change - reorder to manifests-install-source; brokens: unmodified, lockfile copied late",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "docker",
+    "devops",
+    "layer-caching",
+    "node"
+  ],
+  "prompts": [
+    "This Dockerfile builds a small node service, but it runs `COPY . .` BEFORE `npm ci` - so every source-code change invalidates the layer cache from the copy onward and re-downloads every dependency on every build. Reorder it for layer caching: first copy ONLY the dependency manifests (package.json AND package-lock.json - npm ci requires the lockfile, and a lock change must be what busts this layer), then run the install, and only then copy the rest of the source. Everything else stays: same base image, WORKDIR, EXPOSE 3000, non-root USER, and CMD."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM node:20-bookworm-slim\nWORKDIR /app\nCOPY . .\nRUN npm ci --omit=dev\nEXPOSE 3000\nUSER node\nCMD [\"node\", \"server.js\"]\n",
+    "package.json": "{\n  \"name\": \"clip-api\",\n  \"private\": true,\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"express\": \"^4.19.0\"\n  }\n}\n",
+    "package-lock.json": "{\n  \"name\": \"clip-api\",\n  \"lockfileVersion\": 3\n}\n",
+    "server.js": "require(\"express\");\nconsole.log(\"stub\");\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "package.json"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_layers.py": "import re\nfrom pathlib import Path\n\nraw = Path(\"Dockerfile\").read_text(encoding=\"utf-8\")\njoined = re.sub(r\"\\\\\\s*\\n\", \" \", raw)\nlines = [l.strip() for l in joined.splitlines() if l.strip() and not l.strip().startswith(\"#\")]\n\ncopies = [(i, l) for i, l in enumerate(lines) if l.upper().startswith((\"COPY \", \"ADD \"))]\ninstalls = [(i, l) for i, l in enumerate(lines)\n            if l.upper().startswith(\"RUN \") and \"npm ci\" in l]\nassert installs, \"npm ci install step lost\"\ninstall_idx = installs[0][0]\n\nmanifest_copies = [(i, l) for i, l in copies\n                   if \"package.json\" in l and i < install_idx]\nassert manifest_copies, (\n    \"no COPY of package.json BEFORE npm ci - dependency install must only \"\n    \"depend on the manifests so the layer caches across source-code changes\")\nfirst_copy = manifest_copies[0][1]\nassert \"package-lock.json\" in first_copy or \"package*.json\" in first_copy, (\n    \"the lockfile must be copied alongside package.json before npm ci \"\n    \"(npm ci requires it, and lock changes must bust the dependency layer)\")\n\npre_install_copies = [l for i, l in copies if i < install_idx]\nfor l in pre_install_copies:\n    assert not re.search(r\"(COPY|ADD)\\s+(--\\S+\\s+)*\\.\\s\", l, re.IGNORECASE), (\n        f\"the whole build context is copied before npm ci ({l!r}) - every \"\n        f\"source change would bust the dependency layer\")\n\nsrc_copies = [l for i, l in copies if i > install_idx]\nassert src_copies, \"the application source is never copied after the install step\"\n\nassert any(l.upper().startswith(\"USER \") and l.split()[1] not in (\"root\", \"0\")\n           for l in lines), \"non-root USER lost\"\nassert any(\"node\" in l and \"server.js\" in l for l in lines\n           if l.upper().startswith((\"CMD \", \"ENTRYPOINT \"))), \"start command changed\"\nassert any(l.upper().startswith(\"EXPOSE \") and \"3000\" in l for l in lines), \"EXPOSE 3000 lost\"\n\nprint(\"PASS layer-caching structural checks\")\n"
+  },
+  "check_command": "python check_layers.py",
+  "reference_solution": {
+    "Dockerfile": "FROM node:20-bookworm-slim\nWORKDIR /app\nCOPY package.json package-lock.json ./\nRUN npm ci --omit=dev\nCOPY . .\nEXPOSE 3000\nUSER node\nCMD [\"node\", \"server.js\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Dockerfile": "FROM node:20-bookworm-slim\nWORKDIR /app\nCOPY . .\nRUN npm ci --omit=dev\nEXPOSE 3000\nUSER node\nCMD [\"node\", \"server.js\"]\n"
+      }
+    },
+    {
+      "name": "lockfile-copied-late",
+      "files": {
+        "Dockerfile": "FROM node:20-bookworm-slim\nWORKDIR /app\nCOPY package.json ./\nRUN npm ci --omit=dev\nCOPY . .\nEXPOSE 3000\nUSER node\nCMD [\"node\", \"server.js\"]\n"
+      }
+    }
+  ]
+}

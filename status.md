@@ -1,7 +1,7 @@
 # OptArena Status
 
-_As of 2026-07-12, on `main` (github.com/trysti-labs/optarena), through
-batch 21._
+_As of 2026-07-14, on `main` (github.com/trysti-labs/optarena), through
+batch 25 - **corpus at 410/500 (82%)**._
 
 ## Where things stand
 
@@ -9,32 +9,33 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-371 cases**, all new cases shipped with a `reference_solution` and
+410 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
-`verify-corpus` before commit. **The L3 (repo-scale) track is live with two
+`verify-corpus` before commit. **data_engineering is now at target
+(15/15)**; bug_fix has been at target (95/95) since batch 15. **The L3 (repo-scale) track is live with two
 starter repos**: `repos/fastapi-tasktracker` (python image, 9 cases) and
 `repos/express-ts-shortlink` (node image, 5 cases) - 14 L3 cases across two
 toolchains.
 
-## Corpus census (371 cases)
+## Corpus census (410 cases)
 
 | | |
 |---|---|
-| Total cases | **371** (target 500, 74%) |
-| With `reference_solution` | 267 (72%; 100% of the 251 added this expansion) |
+| Total cases | **410** (target 500, 82%) |
+| With `reference_solution` | 306 (75%; 100% of the 290 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | L3 (repo-scale, `setup_repo`) cases | 14 (fastapi-tasktracker 9, express-ts-shortlink 5) |
 | Multi-prompt session cases | 2 |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
 
 **By language** (recomputed from the case JSONs' `language` tags - the
-previous census under-counted several tracks): python 84, javascript 49,
-java 27, go 27, csharp 25, rust 24, typescript 23, sql 21, yaml 15, php 13,
-ruby 13, kotlin 12, shell 12, c 7, hcl 5, cpp 3, dockerfile 3, makefile 1 -
+previous census under-counted several tracks): python 102, javascript 59,
+java 35, go 27, csharp 25, rust 24, typescript 23, sql 22, yaml 21, php 13,
+ruby 13, kotlin 12, shell 12, c 7, hcl 7, dockerfile 4, cpp 3, makefile 2 -
 plus 7 language-neutral devops cases.
 
-**By task type:** bug_fix 95, feature 76, refactoring 52, security 40,
-testing 44, performance 27, devops 23, data_engineering 14.
+**By task type:** bug_fix 95, feature 82, refactoring 56, security 44,
+testing 53, performance 33, devops 32, data_engineering 15.
 
 ## Waves shipped (chronology)
 
@@ -58,6 +59,10 @@ Since then:
 | **L3 repo #2** - express-ts-shortlink | 1 | 354 → 359 | Batch 19: second starter repo, on the **node image** - a TypeScript + Express 4 link shortener (src/models-store-services-routes layering, strict `tsc -p .` as part of every oracle, plain-JS node:test suites against the compiled dist/, portless `listen(0)` + global fetch). Local ambient typings under types/ (function+namespace merge mirroring @types/express) since tsc does not consult NODE_PATH and the sandbox has no per-project node_modules. 5 L3 cases: link-expiry feature (410 Gone on the redirect path, expired hits not counted; brokens: redirect-unchecked, click-recorded-before-check), shared sendError refactor across 3 routers (broken: body-key drift), mutation-checked summarizeClicks tests (node-native harness recompiling TS per mutant; earliest-day tie-break mutants), URL scheme allowlist security fix (broken: case-sensitive prefix blocklist defeated by 'JavaScript:'), and a top-links aggregation endpoint whose star broken is **route shadowing** (/top registered after /:slug) |
 | **Perf + devops push #2** | 1 | 359 → 365 | Batch 20: two calibrated **performance** cases (js Array.includes-in-loop -> Set at 30k x 30k, naive ~7s native vs 2.5s budget; python max()+remove() full-ranking extraction -> one descending sort at n=50k, naive ~6.5s vs 2s budget - both with a wrong-output fast broken AND a proven still-quadratic broken). Three **devops**: bash backup-script hardening proven by REAL bash runs against paths with spaces (brokens: unmodified, strict-mode-but-still-unquoted - set -euo pipefail alone doesn't fix word-splitting), K8s HPA where the oracle demands BOTH the autoscaling/v2 HPA and the resources.requests.cpu it computes against (brokens: request-less deployment, min > max), and compose production hygiene (pin :latest, restart policies, memory limits; 3 brokens). One **testing**: java Roman-numeral parser on the java-native harness (subtractive-rule / empty-returns-0 / equal-neighbour-subtracts mutants) |
 | **Refactoring breadth** | 1 | 365 → 371 | Batch 21: six distinct refactor shapes across six languages, each with a behavior-*drift* broken - python 3x-copy-pasted retry loops -> one @retry decorator (drift: retries EVERY exception, caught by a non-transient-error-propagates-immediately test), js triple parallel switch -> lookup table (drift: fat-fingered rate; hidden test also probes 'toString'/'constructor' so plain `obj[key]` lookups fail - Object.hasOwn required), java triple if/else-if tier chains -> enum with data (drift: silver 0.05 -> 0.5; cross-platform CheckPricing driver compiles whatever .java layout the model chose), sql three correlated scalar subqueries -> grouped CTE + LEFT JOIN (drift: INNER JOIN drops zero-order customers, proven via real sqlite), python os.path -> PurePosixPath with exact splitext semantics (drift: split('.')[0] breaks 'report.tar.gz' and '.bashrc'), and bash copy-pasted env blocks -> function/loop with byte-identical appended output (drift: replica counts swapped) - the last two proven by real interpreter runs |
+| **Testing + devops + perf + security** | 1 | 371 → 381 | Batch 22: four mutation-checked **testing** cases (python next_business_day, js parseCookies with a value-containing-'=' pin, java daysInMonth/isLeapYear with the century-rule mutant, python ordinal suffix). Three **devops**: Dockerfile layer-caching reorder (manifests-install-source; broken copies package.json without the lockfile), a hardcoded-password-to-Secret migration where the broken is a secretKeyRef name/key MISMATCH (CreateContainerConfigError), and a from-scratch nightly cron workflow whose point is the guardrails (workflow_dispatch escape hatch, contents:read, job timeout, concurrency group). Two calibrated **performance**: python sort-hoisted-out-of-the-query-loop (100k samples x 400 queries, naive ~4s vs 1.5s budget) and java StringBuilder vs `+=` (n=120k, naive ~7.5s vs 2.5s budget). One **security**: python subprocess shell-injection fix (argv list, no shell) whose incomplete-fix broken quotes the filename but keeps shell=True - defeated by an embedded single quote |
+| **Broad push toward 400** | 1 | 381 → 391 | Batch 23: 2 **feature** (python notification dispatcher gains a webhook channel; js EventBus gains prefix-wildcard subscriptions with a namespace-boundary discriminator - `user.*` must not match bare `user` or `userprofile.updated`). 2 **testing**: python camelCase->snake_case with acronym handling, js one-level array flattener. 2 **devops**: terraform S3 hardening proven by a REAL `terraform init`+`validate`+`fmt -check` run (versioning + a 4-flag public-access-block + default encryption; broken leaves one PAB flag false), and a GitHub Actions docs-path-filter (broken applies `paths-ignore` to push but not pull_request - the common real-world half-fix). 2 calibrated **performance**: python dict-merge-in-loop (`{**acc,**d}` -> `.update()`, n=30k growing keys, naive ~2.5s vs 1.2s budget) and java dedup (`List.contains` -> `LinkedHashSet`, n=150k all-unique, naive ~3.2s vs 1.5s budget). 1 **security**: js static-asset path traversal, where the vulnerable code uses `path.resolve` (not `path.join`) so an absolute `requestedPath` resets off ROOT entirely - the incomplete-fix broken's `..`-substring check stops relative traversal but not the absolute-path bypass, which has no dots in it at all. 1 **refactoring**: python manual index-loops -> `zip(*matrix)`, drift over-generalizes row_maxes into a column operation on a non-square matrix |
+| **400 milestone** | 1 | 391 → 400 | Batch 24: 2 **feature** (python feature-flag evaluator gains a percentage-rollout type keyed on (flag name, user) so independent flags don't share an enabled-user set; js template renderer gains nested `{{#if}}` blocks via a depth-tracking parser - the first naive regex-loop attempt failed verify-corpus on real nesting and was rewritten). 2 **testing**: python run-length encode/decode, java greedy word-wrap (exact-width-fit and dropped-trailing-line mutants). 2 **devops**: k8s NetworkPolicy default-deny-all + scoped allow (broken deny covers Ingress only, leaving egress wide open), Makefile build-dependency fix proven by a REAL `make -n` dry-run ordering check (scoop-installed make on this host). 2 calibrated **performance**: python list-membership-in-loop -> set (n=30k, naive ~2.7s vs 1.5s budget) and js `Array.indexOf`-per-element frequency counter -> Map (n=80k all-distinct, naive ~3.5s vs 2s budget; wrong-output broken is a plain object, which reorders integer-like string keys). 1 **data_engineering** (closing that category to target, 15/15): CSV daily-totals rollup with gap-fill - days with no rows must appear at 0.0, not be skipped |
+| **Refactoring + security + feature** | 1 | 400 → 410 | Batch 25: 3 **refactoring** (python nested-if validation -> flat guard clauses, drift flips a `>` boundary to `>=`; js callback pyramid -> async/await via promisify, drift passes the lookup id instead of the canonical user.id; sql two parallel CASE ladders -> one VALUES-mapping CTE + LEFT JOIN, drift INNER JOIN drops unmapped-status rows). 2 **feature** (python fixed-window rate limiter -> true sliding window, discriminator is inclusive boundary eviction at exactly `window` seconds ago; java Money value-object gains remainder-distributing `allocate(n)`, broken loses the indivisible cent so parts don't sum back). 2 **security** (python HTML-injection f-string -> `html.escape`, incomplete-fix broken hand-replaces `<`/`>` only leaving `&` and quotes raw; js timing-unsafe token `===` -> `crypto.timingSafeEqual`, **the oracle times a first-char vs last-char mismatch** to catch a short-circuit loop that looks constant-time - stress-tested 20x locally, 8x threshold against a ~thousands-x real gap). 2 **devops** (terraform variable validation blocks bounding instance_count and allowlisting environment, proven by real `terraform validate`, broken validates only one var; GitHub Actions node 18/20/22 matrix with `fail-fast: false`, broken leaves fail-fast at the default). 1 **testing** (python IPv4 CIDR-membership, mutation-checked with mask off-by-one / `/0`-matches-nothing mutants) |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -122,7 +127,7 @@ file list to the oracle instead of a snapshot diff (which is also what the
 old mtime semantics effectively did), and both batch-17 perf budgets are
 proven by an explicit `still-quadratic` broken failing on time, not on shape.
 
-## Remaining to 500 (157 cases)
+## Remaining to 500 (90 cases)
 
 **L3 (repo-scale) is live on two toolchains.** The `setup_repo`/`git_init`
 schema fields exist (see `prepare_workspace` in cases.py; documented in the
@@ -143,15 +148,18 @@ ASP.NET, Rails, Laravel). Remaining work after L3, per the plan's
 3. **Wave F + moat hardening** — private held-out slice, paraphrase variants,
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
-Rebalance note: **bug_fix is at target (95/95) - stop adding it** (batches
-15-21 deliberately shipped zero). After batch 21 the categories still
-furthest behind are **devops (23/45), testing (44/65), refactoring (52/70),
-performance (27/45), and feature (76/95)**; data_engineering (14/15) and
-security (40/55) are closing in. Batch 17 proved host-calibrated perf
-budgets work when margins are wide (naive 3-4x over budget on fast native
-hardware, fast path 50-500x under it) with CI's in-container verify-corpus
-as the final proof; batch 18 added node-native and java-native mutation
-harnesses so testing cases in those tracks no longer need python in the
-loop. Next levers: more testing/refactoring breadth (the new harness
-patterns make js/java cheap), more calibrated perf shapes, devops/CI
-breadth, and the next starter repos.
+Rebalance note: **bug_fix (95/95) and data_engineering (15/15) are both at
+target - stop adding either** (batches 15-25 shipped zero bug_fix; batch 24
+closed out data_engineering). After batch 25 the categories still furthest
+behind are **performance (33/45), devops (32/45), security (44/55), feature
+(82/95), and testing (53/65)**; refactoring (56/70) is closing in. Batch 17
+proved host-calibrated perf budgets work when margins are wide (naive 3-4x
+over budget on fast native hardware, fast path 50-500x under it) with CI's
+in-container verify-corpus as the final proof; batch 18 added node-native
+and java-native mutation harnesses so testing cases in those tracks no
+longer need python in the loop; batch 24 added a scoop-installed `make` and
+confirmed `terraform` (via scoop) for real dry-run/validate oracles on this
+host. Next levers: devops/feature breadth, more calibrated perf shapes, and
+the next L3 starter repo (Spring multi-module, Gin, Axum, ASP.NET, Rails, or
+Laravel - each would need its own toolchain or Docker for full local
+verification).

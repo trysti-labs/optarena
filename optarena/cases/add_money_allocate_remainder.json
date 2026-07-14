@@ -1,0 +1,49 @@
+{
+  "name": "add_money_allocate_remainder",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Add remainder-distributing allocate(n) to a Money value object; broken loses the indivisible remainder so parts don't sum back to the whole",
+  "difficulty": 3,
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "value-object",
+    "money",
+    "algorithms"
+  ],
+  "prompts": [
+    "Money in Money.java is a cents-backed value object (cents(), plus(), equals/hashCode). Add `List<Money> allocate(int n)` that splits the amount into n parts as evenly as possible WITHOUT losing money to rounding: the parts must sum back to the original exactly, and differ from each other by at most one cent. Distribute the indivisible remainder one cent at a time to the FIRST parts - so 100 cents into 3 parts is [34, 33, 33] (not [33, 33, 33], which loses a cent). Throw IllegalArgumentException for n <= 0. Do not add any dependency; keep the existing methods unchanged."
+  ],
+  "setup_files": {
+    "Money.java": "public final class Money {\n    private final long cents;\n\n    public Money(long cents) {\n        this.cents = cents;\n    }\n\n    public long cents() {\n        return cents;\n    }\n\n    public Money plus(Money other) {\n        return new Money(this.cents + other.cents);\n    }\n\n    @Override\n    public boolean equals(Object o) {\n        return o instanceof Money && ((Money) o).cents == this.cents;\n    }\n\n    @Override\n    public int hashCode() {\n        return Long.hashCode(cents);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Money.java",
+      "content_patterns": [
+        "allocate"
+      ],
+      "min_lines": 20
+    }
+  ],
+  "test_setup_files": {
+    "MoneyTest.java": "import java.util.List;\n\npublic final class MoneyTest {\n    public static void main(String[] args) {\n        checkEvenSplit();\n        checkRemainderToFirstParts();\n        checkSumInvariant();\n        checkInvalidN();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkEvenSplit() {\n        List<Money> parts = new Money(100).allocate(4);\n        for (Money p : parts) {\n            if (p.cents() != 25) {\n                throw new AssertionError(\"even split of 100/4 must be all 25, got \" + p.cents());\n            }\n        }\n    }\n\n    static void checkRemainderToFirstParts() {\n        List<Money> parts = new Money(100).allocate(3);\n        long[] got = {parts.get(0).cents(), parts.get(1).cents(), parts.get(2).cents()};\n        long[] expected = {34, 33, 33};\n        for (int i = 0; i < 3; i++) {\n            if (got[i] != expected[i]) {\n                throw new AssertionError(\"allocate(3) of 100 must be [34,33,33], got part \" + i\n                        + \" = \" + got[i]);\n            }\n        }\n    }\n\n    static void checkSumInvariant() {\n        for (long total : new long[] {100, 101, 7, 1, 1000003}) {\n            for (int n : new int[] {1, 2, 3, 4, 7}) {\n                long sum = 0;\n                for (Money p : new Money(total).allocate(n)) {\n                    sum += p.cents();\n                }\n                if (sum != total) {\n                    throw new AssertionError(\"allocate(\" + n + \") of \" + total + \" summed to \" + sum);\n                }\n            }\n        }\n    }\n\n    static void checkInvalidN() {\n        try {\n            new Money(100).allocate(0);\n        } catch (IllegalArgumentException e) {\n            return;\n        }\n        throw new AssertionError(\"allocate(0) must throw IllegalArgumentException\");\n    }\n}\n",
+    "CheckMoney.java": "import java.io.IOException;\n\npublic final class CheckMoney {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Money.java\", \"MoneyTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"MoneyTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckMoney.java",
+  "reference_solution": {
+    "Money.java": "import java.util.ArrayList;\nimport java.util.List;\n\npublic final class Money {\n    private final long cents;\n\n    public Money(long cents) {\n        this.cents = cents;\n    }\n\n    public long cents() {\n        return cents;\n    }\n\n    public Money plus(Money other) {\n        return new Money(this.cents + other.cents);\n    }\n\n    /** Split this amount into `n` parts as evenly as possible, distributing\n     *  the indivisible remainder one cent at a time to the FIRST parts, so\n     *  the parts always sum back to the original and differ by at most 1. */\n    public List<Money> allocate(int n) {\n        if (n <= 0) {\n            throw new IllegalArgumentException(\"n must be positive: \" + n);\n        }\n        long base = cents / n;\n        long remainder = cents - base * n; // works for negative cents too\n        List<Money> parts = new ArrayList<>();\n        for (int i = 0; i < n; i++) {\n            long extra = i < remainder ? 1 : 0;\n            parts.add(new Money(base + extra));\n        }\n        return parts;\n    }\n\n    @Override\n    public boolean equals(Object o) {\n        return o instanceof Money && ((Money) o).cents == this.cents;\n    }\n\n    @Override\n    public int hashCode() {\n        return Long.hashCode(cents);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "loses-remainder",
+      "files": {
+        "Money.java": "import java.util.ArrayList;\nimport java.util.List;\n\npublic final class Money {\n    private final long cents;\n\n    public Money(long cents) {\n        this.cents = cents;\n    }\n\n    public long cents() {\n        return cents;\n    }\n\n    public Money plus(Money other) {\n        return new Money(this.cents + other.cents);\n    }\n\n    /** Split this amount into `n` parts as evenly as possible, distributing\n     *  the indivisible remainder one cent at a time to the FIRST parts, so\n     *  the parts always sum back to the original and differ by at most 1. */\n    public List<Money> allocate(int n) {\n        if (n <= 0) {\n            throw new IllegalArgumentException(\"n must be positive: \" + n);\n        }\n        long base = cents / n;\n        List<Money> parts = new ArrayList<>();\n        for (int i = 0; i < n; i++) {\n            parts.add(new Money(base));\n        }\n        return parts;\n    }\n\n    @Override\n    public boolean equals(Object o) {\n        return o instanceof Money && ((Money) o).cents == this.cents;\n    }\n\n    @Override\n    public int hashCode() {\n        return Long.hashCode(cents);\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "optimize_python_sort_per_query",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "sorted(samples) inside the query loop -> hoist the sort; budget calibrated (naive ~4s native at 100k x 400 vs ~0.01s, budget 1.5s)",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "python",
+    "performance",
+    "sorting",
+    "loop-invariant"
+  ],
+  "prompts": [
+    "percentile_report(samples, queries) in percentiles.py answers each percentile query with the nearest-rank method - but it re-sorts the entire samples list INSIDE the query loop, once per query. Hoist the loop-invariant work: sort once before the loop and answer every query from that one sorted copy, returning exactly the same list (same nearest-rank indexing, max(0, ceil(q/100*n) - 1)) for every input, without mutating the samples list. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "percentiles.py": "import math\n\n\ndef percentile_report(samples, queries):\n    \"\"\"Nearest-rank percentile of `samples` for each q in `queries` (0..100).\"\"\"\n    out = []\n    for q in queries:\n        ordered = sorted(samples)\n        idx = max(0, math.ceil(q / 100 * len(ordered)) - 1)\n        out.append(ordered[idx])\n    return out\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "percentiles.py",
+      "content_patterns": [
+        "def percentile_report"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_percentiles.py": "import random\nimport time\n\nfrom percentiles import percentile_report\n\n\ndef test_exact_small_case():\n    samples = [15, 20, 35, 40, 50]\n    assert percentile_report(samples, [0, 5, 30, 40, 50, 100]) == [15, 15, 20, 20, 35, 50]\n\n\ndef test_single_sample():\n    assert percentile_report([7], [0, 50, 100]) == [7, 7, 7]\n\n\ndef test_input_not_mutated():\n    samples = [3, 1, 2]\n    percentile_report(samples, [50])\n    assert samples == [3, 1, 2]\n\n\ndef test_performance_many_queries():\n    random.seed(5)\n    samples = [random.random() for _ in range(100000)]\n    queries = [random.randrange(0, 101) for _ in range(400)]\n    expected_p100 = max(samples)\n\n    start = time.perf_counter()\n    got = percentile_report(samples, queries)\n    elapsed = time.perf_counter() - start\n\n    assert len(got) == 400\n    assert got[queries.index(100)] == expected_p100 if 100 in queries else True\n    # calibrated: re-sorting 100k samples per query is ~4s on fast native\n    # hardware and slower in the sandbox; sorting once is ~0.01s\n    assert elapsed < 1.5, (\n        f\"percentile_report took {elapsed:.2f}s for 400 queries; expected the \"\n        f\"samples to be sorted ONCE outside the query loop, not once per query\"\n    )\n"
+  },
+  "check_command": "python -m pytest -q test_percentiles.py",
+  "reference_solution": {
+    "percentiles.py": "import math\n\n\ndef percentile_report(samples, queries):\n    \"\"\"Nearest-rank percentile of `samples` for each q in `queries` (0..100).\"\"\"\n    ordered = sorted(samples)\n    out = []\n    for q in queries:\n        idx = max(0, math.ceil(q / 100 * len(ordered)) - 1)\n        out.append(ordered[idx])\n    return out\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-off-by-one-rank",
+      "files": {
+        "percentiles.py": "import math\n\n\ndef percentile_report(samples, queries):\n    \"\"\"Nearest-rank percentile of `samples` for each q in `queries` (0..100).\"\"\"\n    ordered = sorted(samples)\n    out = []\n    for q in queries:\n        idx = min(len(ordered) - 1, math.ceil(q / 100 * len(ordered)))\n        out.append(ordered[idx])\n    return out\n"
+      }
+    },
+    {
+      "name": "still-sorting-per-query",
+      "files": {
+        "percentiles.py": "import math\n\n\ndef percentile_report(samples, queries):\n    \"\"\"Nearest-rank percentile of `samples` for each q in `queries` (0..100).\"\"\"\n    out = []\n    for q in queries:\n        ordered = sorted(samples)\n        idx = max(0, math.ceil(q / 100 * len(ordered)) - 1)\n        out.append(ordered[idx])\n    return out\n"
+      }
+    }
+  ]
+}

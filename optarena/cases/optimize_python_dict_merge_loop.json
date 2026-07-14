@@ -1,0 +1,53 @@
+{
+  "name": "optimize_python_dict_merge_loop",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "{**acc, **d} rebuild per iteration -> acc.update(d); budget calibrated (naive ~2.5s native at n=30k growing keys vs ~0.002s, budget 1.2s)",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "python",
+    "performance",
+    "dict",
+    "big-o"
+  ],
+  "prompts": [
+    "merge_all(dicts) in merging.py left-to-right merges a list of dicts (later keys overwrite earlier ones) - but it does `acc = {**acc, **d}` inside the loop, which copies the entire accumulated dict on every single iteration, making it O(n^2) in the number of accumulated keys. Rewrite it to accumulate in place with acc.update(d), returning exactly the same merged dict for every input, without mutating any of the input dicts. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "merging.py": "def merge_all(dicts):\n    \"\"\"Merge a list of dicts left-to-right (later keys win), like a manual\n    reduce over the | operator.\"\"\"\n    acc = {}\n    for d in dicts:\n        acc = {**acc, **d}\n    return acc\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "merging.py",
+      "content_patterns": [
+        "def merge_all"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_merging.py": "import time\n\nfrom merging import merge_all\n\n\ndef test_later_keys_win():\n    assert merge_all([{\"a\": 1, \"b\": 1}, {\"b\": 2}, {\"c\": 3}]) == {\"a\": 1, \"b\": 2, \"c\": 3}\n\n\ndef test_empty_list():\n    assert merge_all([]) == {}\n\n\ndef test_single_dict_unchanged():\n    assert merge_all([{\"x\": 1}]) == {\"x\": 1}\n\n\ndef test_inputs_not_mutated():\n    d1, d2 = {\"a\": 1}, {\"b\": 2}\n    merge_all([d1, d2])\n    assert d1 == {\"a\": 1}\n    assert d2 == {\"b\": 2}\n\n\ndef test_performance_many_dicts():\n    n = 30000\n    dicts = [{f\"k{i}\": i} for i in range(n)]\n\n    start = time.perf_counter()\n    got = merge_all(dicts)\n    elapsed = time.perf_counter() - start\n\n    assert len(got) == n\n    assert got[\"k0\"] == 0 and got[f\"k{n - 1}\"] == n - 1\n    # calibrated: {**acc, **d} rebuilds the whole dict every iteration - ~2.5s\n    # on fast native hardware at n=30000 growing keys, and slower in the\n    # sandbox; acc.update(d) is ~0.002s\n    assert elapsed < 1.2, (\n        f\"merge_all took {elapsed:.2f}s for {n} dicts; expected acc.update(d) \"\n        f\"in the loop, not acc = {{**acc, **d}} which copies the whole \"\n        f\"accumulator every iteration\"\n    )\n"
+  },
+  "check_command": "python -m pytest -q test_merging.py",
+  "reference_solution": {
+    "merging.py": "def merge_all(dicts):\n    \"\"\"Merge a list of dicts left-to-right (later keys win), like a manual\n    reduce over the | operator.\"\"\"\n    acc = {}\n    for d in dicts:\n        acc.update(d)\n    return acc\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-wrong-precedence",
+      "files": {
+        "merging.py": "def merge_all(dicts):\n    \"\"\"Merge a list of dicts left-to-right (later keys win), like a manual\n    reduce over the | operator.\"\"\"\n    acc = {}\n    for d in dicts:\n        d.update(acc)\n        acc = d\n    return acc\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "merging.py": "def merge_all(dicts):\n    \"\"\"Merge a list of dicts left-to-right (later keys win), like a manual\n    reduce over the | operator.\"\"\"\n    acc = {}\n    for d in dicts:\n        acc = {**acc, **d}\n    return acc\n"
+      }
+    }
+  ]
+}

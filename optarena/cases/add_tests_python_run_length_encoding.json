@@ -1,0 +1,53 @@
+{
+  "name": "add_tests_python_run_length_encoding",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write pytest tests for run-length encode/decode; mutation-checked (off-by-one count, decode-drops-count, single-run-not-flushed mutants)",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": [
+    "python",
+    "testing",
+    "mutation-checked",
+    "strings"
+  ],
+  "prompts": [
+    "rle_encode(s) and rle_decode(pairs) in rle.py (already correct - do not modify them) are inverses: encode turns a string into a list of (char, run_length) tuples ('aaabccc' -> [('a', 3), ('b', 1), ('c', 3)]), decode reconstructs the string. Write pytest tests at exactly test_rle.py (functions named test_*, plain asserts with exact values) with at least 4 test functions covering: a multi-run string, a single-character string (one run of length 1), the empty string encoding to [] and decoding from [] to '', and a round-trip property (rle_decode(rle_encode(s)) == s) for a string with runs of varying lengths. Import with `from rle import rle_decode, rle_encode`."
+  ],
+  "setup_files": {
+    "rle.py": "def rle_encode(s):\n    \"\"\"'aaabccc' -> [('a', 3), ('b', 1), ('c', 3)]. Empty string -> [].\"\"\"\n    if not s:\n        return []\n    out = []\n    current = s[0]\n    count = 1\n    for ch in s[1:]:\n        if ch == current:\n            count += 1\n        else:\n            out.append((current, count))\n            current = ch\n            count = 1\n    out.append((current, count))\n    return out\n\n\ndef rle_decode(pairs):\n    \"\"\"Inverse of rle_encode: [('a', 3), ('b', 1)] -> 'aaab'.\"\"\"\n    return \"\".join(ch * n for ch, n in pairs)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_rle.py",
+      "content_patterns": [
+        "rle_encode",
+        "rle_decode",
+        "assert"
+      ],
+      "regex_patterns": [
+        "def test_[\\s\\S]*def test_[\\s\\S]*def test_[\\s\\S]*def test_"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "\"\"\"Mutation harness: model tests must PASS the real implementation and FAIL\neach mutant. Portable (sys.executable, list args, -B).\"\"\"\nimport shutil\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nIMPL = Path('rle.py')\nTEST = 'test_rle.py'\nMUTANTS = [\n    [\n        \"    return \\\"\\\".join(ch * n for ch, n in pairs)\",\n        \"    return \\\"\\\".join(ch for ch, n in pairs)\"\n    ],\n    [\n        \"    out.append((current, count))\\n    return out\",\n        \"    return out\"\n    ],\n    [\n        \"        if ch == current:\\n            count += 1\",\n        \"        if ch == current:\\n            count += 2\"\n    ]\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    return subprocess.run(\n        [sys.executable, \"-B\", \"-m\", \"pytest\", \"-p\", \"no:cacheprovider\", \"-q\", TEST]\n    ).returncode\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken implementation, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python mutation_check.py",
+  "reference_solution": {
+    "test_rle.py": "from rle import rle_decode, rle_encode\n\n\ndef test_multi_run_string():\n    assert rle_encode(\"aaabccc\") == [(\"a\", 3), (\"b\", 1), (\"c\", 3)]\n\n\ndef test_single_character():\n    assert rle_encode(\"x\") == [(\"x\", 1)]\n\n\ndef test_empty_string():\n    assert rle_encode(\"\") == []\n    assert rle_decode([]) == \"\"\n\n\ndef test_decode_reconstructs():\n    assert rle_decode([(\"a\", 3), (\"b\", 1), (\"c\", 3)]) == \"aaabccc\"\n\n\ndef test_round_trip():\n    s = \"wwwwaaadexxxxxx\"\n    assert rle_decode(rle_encode(s)) == s\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_rle.py": "from rle import rle_decode, rle_encode\n\n\ndef test_returns_list():\n    assert isinstance(rle_encode(\"aaa\"), list)\n\n\ndef test_empty():\n    assert rle_encode(\"\") == []\n\n\ndef test_decode_returns_string():\n    assert isinstance(rle_decode([(\"a\", 2)]), str)\n\n\ndef test_decode_nonempty():\n    assert len(rle_decode([(\"a\", 2)])) > 0\n"
+      }
+    }
+  ]
+}
