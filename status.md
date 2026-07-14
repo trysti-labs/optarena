@@ -1,7 +1,7 @@
 # OptArena Status
 
-_As of 2026-07-13, on `main` (github.com/trysti-labs/optarena), through
-batch 24 - **corpus at 400/500 (80%)**._
+_As of 2026-07-14, on `main` (github.com/trysti-labs/optarena), through
+batch 25 - **corpus at 410/500 (82%)**._
 
 ## Where things stand
 
@@ -9,7 +9,7 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-400 cases**, all new cases shipped with a `reference_solution` and
+410 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
 `verify-corpus` before commit. **data_engineering is now at target
 (15/15)**; bug_fix has been at target (95/95) since batch 15. **The L3 (repo-scale) track is live with two
@@ -17,25 +17,25 @@ starter repos**: `repos/fastapi-tasktracker` (python image, 9 cases) and
 `repos/express-ts-shortlink` (node image, 5 cases) - 14 L3 cases across two
 toolchains.
 
-## Corpus census (400 cases)
+## Corpus census (410 cases)
 
 | | |
 |---|---|
-| Total cases | **400** (target 500, 80%) |
-| With `reference_solution` | 296 (74%; 100% of the 280 added this expansion) |
+| Total cases | **410** (target 500, 82%) |
+| With `reference_solution` | 306 (75%; 100% of the 290 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | L3 (repo-scale, `setup_repo`) cases | 14 (fastapi-tasktracker 9, express-ts-shortlink 5) |
 | Multi-prompt session cases | 2 |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
 
 **By language** (recomputed from the case JSONs' `language` tags - the
-previous census under-counted several tracks): python 97, javascript 56,
-java 34, go 27, csharp 25, rust 24, typescript 23, sql 21, yaml 20, php 13,
-ruby 13, kotlin 12, shell 12, c 7, hcl 6, dockerfile 4, cpp 3, makefile 2 -
+previous census under-counted several tracks): python 102, javascript 59,
+java 35, go 27, csharp 25, rust 24, typescript 23, sql 22, yaml 21, php 13,
+ruby 13, kotlin 12, shell 12, c 7, hcl 7, dockerfile 4, cpp 3, makefile 2 -
 plus 7 language-neutral devops cases.
 
-**By task type:** bug_fix 95, feature 80, refactoring 53, security 42,
-testing 52, performance 33, devops 30, data_engineering 15.
+**By task type:** bug_fix 95, feature 82, refactoring 56, security 44,
+testing 53, performance 33, devops 32, data_engineering 15.
 
 ## Waves shipped (chronology)
 
@@ -62,6 +62,7 @@ Since then:
 | **Testing + devops + perf + security** | 1 | 371 → 381 | Batch 22: four mutation-checked **testing** cases (python next_business_day, js parseCookies with a value-containing-'=' pin, java daysInMonth/isLeapYear with the century-rule mutant, python ordinal suffix). Three **devops**: Dockerfile layer-caching reorder (manifests-install-source; broken copies package.json without the lockfile), a hardcoded-password-to-Secret migration where the broken is a secretKeyRef name/key MISMATCH (CreateContainerConfigError), and a from-scratch nightly cron workflow whose point is the guardrails (workflow_dispatch escape hatch, contents:read, job timeout, concurrency group). Two calibrated **performance**: python sort-hoisted-out-of-the-query-loop (100k samples x 400 queries, naive ~4s vs 1.5s budget) and java StringBuilder vs `+=` (n=120k, naive ~7.5s vs 2.5s budget). One **security**: python subprocess shell-injection fix (argv list, no shell) whose incomplete-fix broken quotes the filename but keeps shell=True - defeated by an embedded single quote |
 | **Broad push toward 400** | 1 | 381 → 391 | Batch 23: 2 **feature** (python notification dispatcher gains a webhook channel; js EventBus gains prefix-wildcard subscriptions with a namespace-boundary discriminator - `user.*` must not match bare `user` or `userprofile.updated`). 2 **testing**: python camelCase->snake_case with acronym handling, js one-level array flattener. 2 **devops**: terraform S3 hardening proven by a REAL `terraform init`+`validate`+`fmt -check` run (versioning + a 4-flag public-access-block + default encryption; broken leaves one PAB flag false), and a GitHub Actions docs-path-filter (broken applies `paths-ignore` to push but not pull_request - the common real-world half-fix). 2 calibrated **performance**: python dict-merge-in-loop (`{**acc,**d}` -> `.update()`, n=30k growing keys, naive ~2.5s vs 1.2s budget) and java dedup (`List.contains` -> `LinkedHashSet`, n=150k all-unique, naive ~3.2s vs 1.5s budget). 1 **security**: js static-asset path traversal, where the vulnerable code uses `path.resolve` (not `path.join`) so an absolute `requestedPath` resets off ROOT entirely - the incomplete-fix broken's `..`-substring check stops relative traversal but not the absolute-path bypass, which has no dots in it at all. 1 **refactoring**: python manual index-loops -> `zip(*matrix)`, drift over-generalizes row_maxes into a column operation on a non-square matrix |
 | **400 milestone** | 1 | 391 → 400 | Batch 24: 2 **feature** (python feature-flag evaluator gains a percentage-rollout type keyed on (flag name, user) so independent flags don't share an enabled-user set; js template renderer gains nested `{{#if}}` blocks via a depth-tracking parser - the first naive regex-loop attempt failed verify-corpus on real nesting and was rewritten). 2 **testing**: python run-length encode/decode, java greedy word-wrap (exact-width-fit and dropped-trailing-line mutants). 2 **devops**: k8s NetworkPolicy default-deny-all + scoped allow (broken deny covers Ingress only, leaving egress wide open), Makefile build-dependency fix proven by a REAL `make -n` dry-run ordering check (scoop-installed make on this host). 2 calibrated **performance**: python list-membership-in-loop -> set (n=30k, naive ~2.7s vs 1.5s budget) and js `Array.indexOf`-per-element frequency counter -> Map (n=80k all-distinct, naive ~3.5s vs 2s budget; wrong-output broken is a plain object, which reorders integer-like string keys). 1 **data_engineering** (closing that category to target, 15/15): CSV daily-totals rollup with gap-fill - days with no rows must appear at 0.0, not be skipped |
+| **Refactoring + security + feature** | 1 | 400 → 410 | Batch 25: 3 **refactoring** (python nested-if validation -> flat guard clauses, drift flips a `>` boundary to `>=`; js callback pyramid -> async/await via promisify, drift passes the lookup id instead of the canonical user.id; sql two parallel CASE ladders -> one VALUES-mapping CTE + LEFT JOIN, drift INNER JOIN drops unmapped-status rows). 2 **feature** (python fixed-window rate limiter -> true sliding window, discriminator is inclusive boundary eviction at exactly `window` seconds ago; java Money value-object gains remainder-distributing `allocate(n)`, broken loses the indivisible cent so parts don't sum back). 2 **security** (python HTML-injection f-string -> `html.escape`, incomplete-fix broken hand-replaces `<`/`>` only leaving `&` and quotes raw; js timing-unsafe token `===` -> `crypto.timingSafeEqual`, **the oracle times a first-char vs last-char mismatch** to catch a short-circuit loop that looks constant-time - stress-tested 20x locally, 8x threshold against a ~thousands-x real gap). 2 **devops** (terraform variable validation blocks bounding instance_count and allowlisting environment, proven by real `terraform validate`, broken validates only one var; GitHub Actions node 18/20/22 matrix with `fail-fast: false`, broken leaves fail-fast at the default). 1 **testing** (python IPv4 CIDR-membership, mutation-checked with mask off-by-one / `/0`-matches-nothing mutants) |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -126,7 +127,7 @@ file list to the oracle instead of a snapshot diff (which is also what the
 old mtime semantics effectively did), and both batch-17 perf budgets are
 proven by an explicit `still-quadratic` broken failing on time, not on shape.
 
-## Remaining to 500 (100 cases)
+## Remaining to 500 (90 cases)
 
 **L3 (repo-scale) is live on two toolchains.** The `setup_repo`/`git_init`
 schema fields exist (see `prepare_workspace` in cases.py; documented in the
@@ -148,10 +149,10 @@ ASP.NET, Rails, Laravel). Remaining work after L3, per the plan's
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
 Rebalance note: **bug_fix (95/95) and data_engineering (15/15) are both at
-target - stop adding either** (batches 15-24 shipped zero bug_fix; batch 24
-closed out data_engineering). After batch 24 the categories still furthest
-behind are **devops (30/45), performance (33/45), feature (80/95), security
-(42/55), and testing (52/65)**; refactoring (53/70) is closing in. Batch 17
+target - stop adding either** (batches 15-25 shipped zero bug_fix; batch 24
+closed out data_engineering). After batch 25 the categories still furthest
+behind are **performance (33/45), devops (32/45), security (44/55), feature
+(82/95), and testing (53/65)**; refactoring (56/70) is closing in. Batch 17
 proved host-calibrated perf budgets work when margins are wide (naive 3-4x
 over budget on fast native hardware, fast path 50-500x under it) with CI's
 in-container verify-corpus as the final proof; batch 18 added node-native
