@@ -1,0 +1,47 @@
+{
+  "name": "add_tests_ts_parse_query_string",
+  "language": "typescript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Asks the model to write TypeScript tests for a query-string parser; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "typescript",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "parseQuery(qs: string): Record<string, string> in queryparser.ts (already correct - do not modify it) parses a query string like \"a=1&b=2\" into an object, URL-decoding both keys and values, stripping a leading '?' if present, treating a key with no '=' as having value \"\", and - when the same key appears twice - keeping the LAST occurrence's value. Write a TypeScript test at exactly test_queryparser.ts (compiled and run with plain node, using a small throw-based helper, no external test framework) with at least 4 checks that pin: a basic multi-pair parse; a value containing a URL-encoded character (e.g. \"name=John%20Doe\" decodes to \"John Doe\"); a duplicate key where the LAST value wins; and a leading '?' being stripped (e.g. \"?a=1\" parses the key as \"a\", not \"?a\")."
+  ],
+  "setup_files": {
+    "queryparser.ts": "// Parse a query string into an object, URL-decoding keys/values.\n// A leading '?' is stripped. A key with no '=' gets value \"\". When a key\n// repeats, the LAST occurrence wins.\nexport function parseQuery(qs: string): Record<string, string> {\n  const result: Record<string, string> = {};\n  if (qs.startsWith('?')) {\n    qs = qs.slice(1);\n  }\n  if (qs === '') return result;\n  for (const pair of qs.split('&')) {\n    const idx = pair.indexOf('=');\n    if (idx === -1) {\n      result[decodeURIComponent(pair)] = '';\n    } else {\n      const key = decodeURIComponent(pair.slice(0, idx));\n      const value = decodeURIComponent(pair.slice(idx + 1));\n      result[key] = value;\n    }\n  }\n  return result;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_queryparser.ts",
+      "content_patterns": [
+        "parsequery"
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path('queryparser.ts')\nTEST_CMD = ('tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build '\n            'queryparser.ts test_queryparser.ts && node build/test_queryparser.js')\nMUTANTS = [\n    [[\"  if (qs.startsWith('?')) {\\n    qs = qs.slice(1);\\n  }\\n\", \"\"]],\n    [['      result[key] = value;', '      if (!(key in result)) { result[key] = value; }']],\n    [['      const value = decodeURIComponent(pair.slice(idx + 1));', '      const value = pair.slice(idx + 1);']],\n]\n\ndef run_tests():\n    shutil.rmtree('build', ignore_errors=True)\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_queryparser.ts": "import { parseQuery } from \"./queryparser\";\n\nfunction expectEqual(actual: unknown, expected: unknown, label: string): void {\n  const a = JSON.stringify(actual);\n  const e = JSON.stringify(expected);\n  if (a !== e) {\n    throw new Error(`${label}: got ${a}, want ${e}`);\n  }\n}\n\nexpectEqual(parseQuery(\"a=1&b=2\"), { a: \"1\", b: \"2\" }, \"basic multi-pair\");\nexpectEqual(parseQuery(\"name=John%20Doe\"), { name: \"John Doe\" }, \"url-encoded value\");\nexpectEqual(parseQuery(\"a=1&a=2\"), { a: \"2\" }, \"duplicate key: last wins\");\nexpectEqual(parseQuery(\"?a=1\"), { a: \"1\" }, \"leading question mark stripped\");\nexpectEqual(parseQuery(\"flag\"), { flag: \"\" }, \"key with no value\");\n\nconsole.log(\"all tests passed\");\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_queryparser.ts": "import { parseQuery } from \"./queryparser\";\n\nfunction expectTrue(cond: boolean, label: string): void {\n  if (!cond) throw new Error(label);\n}\n\nexpectTrue(typeof parseQuery(\"a=1\") === \"object\", \"returns object\");\nexpectTrue(Object.keys(parseQuery(\"\")).length === 0, \"empty is empty\");\nexpectTrue(\"a\" in parseQuery(\"a=1&b=2\"), \"has key a\");\nexpectTrue(\"b\" in parseQuery(\"a=1&b=2\"), \"has key b\");\n\nconsole.log(\"all tests passed\");\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "add_k8s_service_selector_port_mapping",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Authors a ClusterIP Service that correctly selects an existing Deployment's pods and maps to its real container port",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "kubernetes",
+    "service",
+    "yaml"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml (already present, do not modify it) runs the 'catalog' Deployment, whose pods are labeled app: catalog and whose container listens on port 9090 (NOT 80). Create k8s/service.yaml defining a ClusterIP Service named 'catalog-service' that selects those pods (selector app: catalog) and exposes port 80 externally, forwarding to the container's REAL port 9090 via targetPort. Do not assume port and targetPort are the same number - use the container's actual port."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: catalog\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: catalog\n  template:\n    metadata:\n      labels:\n        app: catalog\n    spec:\n      containers:\n        - name: catalog\n          image: myorg/catalog:1.4.0\n          ports:\n            - containerPort: 9090\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/service.yaml",
+      "content_patterns": [
+        "kind: service",
+        "catalog-service"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_service.py": "import yaml\n\nwith open('k8s/service.yaml') as f:\n    svc = yaml.safe_load(f)\n\nassert svc.get('kind') == 'Service', svc.get('kind')\nassert svc.get('metadata', {}).get('name') == 'catalog-service'\n\nspec = svc['spec']\nassert spec.get('type', 'ClusterIP') == 'ClusterIP', f\"expected ClusterIP, got {spec.get('type')!r}\"\nassert spec.get('selector') == {'app': 'catalog'}, f\"selector must be exactly {{app: catalog}}, got {spec.get('selector')!r}\"\n\nports = spec.get('ports')\nassert ports and len(ports) >= 1\np0 = ports[0]\nassert p0.get('port') == 80, f\"port must be 80, got {p0.get('port')!r}\"\nassert p0.get('targetPort') == 9090, f\"targetPort must be the container's real port 9090, got {p0.get('targetPort')!r}\"\n\n# deployment untouched\nwith open('k8s/deployment.yaml') as f:\n    dep = yaml.safe_load(f)\nassert dep['spec']['replicas'] == 3, 'deployment.yaml was modified'\ncontainer_port = dep['spec']['template']['spec']['containers'][0]['ports'][0]['containerPort']\nassert container_port == 9090, 'deployment.yaml was modified'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_service.py",
+  "reference_solution": {
+    "k8s/service.yaml": "apiVersion: v1\nkind: Service\nmetadata:\n  name: catalog-service\nspec:\n  selector:\n    app: catalog\n  ports:\n    - port: 80\n      targetPort: 9090\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "target-port-copies-external-port",
+      "files": {
+        "k8s/service.yaml": "apiVersion: v1\nkind: Service\nmetadata:\n  name: catalog-service\nspec:\n  selector:\n    app: catalog\n  ports:\n    - port: 80\n      targetPort: 80\n"
+      }
+    },
+    {
+      "name": "selector-does-not-match-pods",
+      "files": {
+        "k8s/service.yaml": "apiVersion: v1\nkind: Service\nmetadata:\n  name: catalog-service\nspec:\n  selector:\n    app: catalog-service\n  ports:\n    - port: 80\n      targetPort: 9090\n"
+      }
+    }
+  ]
+}

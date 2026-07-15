@@ -1,0 +1,50 @@
+{
+  "name": "refactor_ruby_case_when_to_hash_dispatch",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Refactors a case/when currency-symbol lookup into a Hash dispatch table without changing behavior",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "ruby",
+    "refactoring",
+    "dispatch",
+    "idiom"
+  ],
+  "prompts": [
+    "Currency.symbol_for(code) in lib/currency.rb maps a currency code to its display symbol using a case/when chain: \"USD\" -> \"$\", \"EUR\" -> \"\\u20ac\", \"GBP\" -> \"\\u00a3\", \"JPY\" -> \"\\u00a5\", and any other code returns the code itself unchanged. Refactor it to use a Hash dispatch table (map each known code to its symbol) instead of the case/when chain, looked up with a sensible default for unknown codes. Do not change observable behavior: the four known codes must still map to the same symbols, and an unknown code (e.g. \"XYZ\") must still return itself unchanged. Keep the symbol_for(code) signature."
+  ],
+  "setup_files": {
+    "lib/currency.rb": "module App\n  class Currency\n    def self.symbol_for(code)\n      case code\n      when \"USD\"\n        \"$\"\n      when \"EUR\"\n        \"\\u20ac\"\n      when \"GBP\"\n        \"\\u00a3\"\n      when \"JPY\"\n        \"\\u00a5\"\n      else\n        code\n      end\n    end\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "lib/currency.rb",
+      "content_patterns": [
+        "def self.symbol_for"
+      ],
+      "not_content_patterns": [
+        "when \"usd\""
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/refactor_test.rb": "require \"minitest/autorun\"\nrequire_relative \"../lib/currency\"\n\nclass CurrencyRefactorTest < Minitest::Test\n  def test_known_codes\n    assert_equal \"$\", App::Currency.symbol_for(\"USD\")\n    assert_equal \"\\u20ac\", App::Currency.symbol_for(\"EUR\")\n    assert_equal \"\\u00a3\", App::Currency.symbol_for(\"GBP\")\n    assert_equal \"\\u00a5\", App::Currency.symbol_for(\"JPY\")\n  end\n\n  def test_unknown_code_passthrough\n    assert_equal \"XYZ\", App::Currency.symbol_for(\"XYZ\")\n  end\nend\n"
+  },
+  "check_command": "ruby -Itest -Ilib test/refactor_test.rb",
+  "reference_solution": {
+    "lib/currency.rb": "module App\n  class Currency\n    SYMBOLS = {\n      \"USD\" => \"$\",\n      \"EUR\" => \"\\u20ac\",\n      \"GBP\" => \"\\u00a3\",\n      \"JPY\" => \"\\u00a5\",\n    }.freeze\n\n    def self.symbol_for(code)\n      SYMBOLS.fetch(code, code)\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "drift-wrong-default",
+      "files": {
+        "lib/currency.rb": "module App\n  class Currency\n    SYMBOLS = {\n      \"USD\" => \"$\",\n      \"EUR\" => \"\\u20ac\",\n      \"GBP\" => \"\\u00a3\",\n      \"JPY\" => \"\\u00a5\",\n    }.freeze\n\n    # DRIFT: unknown codes now return nil instead of the code itself.\n    def self.symbol_for(code)\n      SYMBOLS[code]\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

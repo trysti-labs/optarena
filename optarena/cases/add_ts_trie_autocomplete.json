@@ -1,0 +1,49 @@
+{
+  "name": "add_ts_trie_autocomplete",
+  "language": "typescript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Implements a prefix-tree (Trie) supporting insertion and alphabetically-sorted prefix lookup",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "feature",
+    "trie",
+    "data-structures"
+  ],
+  "prompts": [
+    "Create trie.ts exporting a class Trie with insert(word: string): void, which adds word to the trie, and wordsWithPrefix(prefix: string): string[], which returns every previously-inserted word that starts with prefix, sorted alphabetically ascending. An empty prefix must return ALL inserted words (sorted). A prefix with no matches returns an empty array. A word that is itself a prefix of another inserted word (e.g. both \"car\" and \"care\" are inserted) must be returned correctly for both wordsWithPrefix(\"car\") (includes both) and exact lookups. Do not return duplicate entries if the same word is inserted more than once."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "trie.ts",
+      "content_patterns": [
+        "class trie",
+        "insert",
+        "wordswithprefix"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit trie.ts type_tests.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build trie.ts\nnode behavior_test.js\n",
+    "type_tests.ts": "import { Trie } from './trie';\n\nconst t = new Trie();\nt.insert('cat');\nconst results: string[] = t.wordsWithPrefix('ca');\nresults.map((s) => s.toUpperCase());\n\n// @ts-expect-error - insert requires a string argument\nt.insert(42);\n\n// @ts-expect-error - wordsWithPrefix returns string[], not any\nconst bad: number[] = t.wordsWithPrefix('ca');\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { Trie } = require('./build/trie.js');\n\nconst t = new Trie();\nfor (const w of ['cat', 'car', 'care', 'dog', 'do']) {\n  t.insert(w);\n}\n\nassert.deepStrictEqual(t.wordsWithPrefix('ca'), ['car', 'care', 'cat']);\nassert.deepStrictEqual(t.wordsWithPrefix('do'), ['do', 'dog']);\nassert.deepStrictEqual(t.wordsWithPrefix('xyz'), []);\nassert.deepStrictEqual(t.wordsWithPrefix(''), ['car', 'care', 'cat', 'do', 'dog']);\nassert.deepStrictEqual(t.wordsWithPrefix('c'), ['car', 'care', 'cat']);\n\n// duplicate insert must not duplicate the result\nt.insert('cat');\nassert.deepStrictEqual(t.wordsWithPrefix('cat'), ['cat']);\n\nconsole.log('ok');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "trie.ts": "export class Trie {\n  private children: Map<string, Trie> = new Map();\n  private isEnd: boolean = false;\n\n  insert(word: string): void {\n    let node: Trie = this;\n    for (const ch of word) {\n      let next = node.children.get(ch);\n      if (!next) {\n        next = new Trie();\n        node.children.set(ch, next);\n      }\n      node = next;\n    }\n    node.isEnd = true;\n  }\n\n  wordsWithPrefix(prefix: string): string[] {\n    let node: Trie = this;\n    for (const ch of prefix) {\n      const next: Trie | undefined = node.children.get(ch);\n      if (!next) return [];\n      node = next;\n    }\n    const results: string[] = [];\n    node.collect(prefix, results);\n    return results.sort();\n  }\n\n  private collect(prefix: string, results: string[]): void {\n    if (this.isEnd) results.push(prefix);\n    for (const [ch, child] of this.children) {\n      child.collect(prefix + ch, results);\n    }\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "not-sorted",
+      "files": {
+        "trie.ts": "export class Trie {\n  private children: Map<string, Trie> = new Map();\n  private isEnd: boolean = false;\n\n  insert(word: string): void {\n    let node: Trie = this;\n    for (const ch of word) {\n      let next = node.children.get(ch);\n      if (!next) {\n        next = new Trie();\n        node.children.set(ch, next);\n      }\n      node = next;\n    }\n    node.isEnd = true;\n  }\n\n  // BUG: never sorts the results, so they come back in insertion/traversal\n  // order instead of alphabetical order.\n  wordsWithPrefix(prefix: string): string[] {\n    let node: Trie = this;\n    for (const ch of prefix) {\n      const next: Trie | undefined = node.children.get(ch);\n      if (!next) return [];\n      node = next;\n    }\n    const results: string[] = [];\n    node.collect(prefix, results);\n    return results;\n  }\n\n  private collect(prefix: string, results: string[]): void {\n    if (this.isEnd) results.push(prefix);\n    for (const [ch, child] of this.children) {\n      child.collect(prefix + ch, results);\n    }\n  }\n}\n"
+      }
+    }
+  ]
+}

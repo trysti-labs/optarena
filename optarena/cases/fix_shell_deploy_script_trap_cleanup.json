@@ -1,0 +1,54 @@
+{
+  "name": "fix_shell_deploy_script_trap_cleanup",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Fixes a deploy script that silently continues past a failed step and leaves its lock file behind forever",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "shell",
+    "bash",
+    "reliability"
+  ],
+  "prompts": [
+    "scripts/deploy.sh (given as deploy.sh at the repo root) creates a lock file, runs the deployment steps, then finishes. It has two reliability bugs: (1) it has no strict mode, so if a deployment step fails, the script keeps going and still exits 0, silently reporting success on a failed deploy; (2) it never removes its lock file, so a failed OR successful run leaves it behind forever, permanently blocking every future deploy attempt (which typically check for the lock file's absence before starting). Fix deploy.sh: add `set -euo pipefail` so any failing command aborts the script immediately with a non-zero exit code, and add a `trap` that removes the lock file on EXIT (so it is cleaned up whether the script succeeds, fails, or is interrupted). Keep the LOCKFILE variable, the touch/echo lines, and the deployment commands as they are."
+  ],
+  "setup_files": {
+    "deploy.sh": "#!/bin/bash\nLOCKFILE=deploy.lock\n\ntouch \"$LOCKFILE\"\necho \"deploying...\"\nfalse\necho \"deploy finished\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "deploy.sh",
+      "content_patterns": [
+        "set -e",
+        "trap"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_deploy.py": "import os\nimport subprocess\n\nif os.path.exists('deploy.lock'):\n    os.remove('deploy.lock')\n\nresult = subprocess.run(['bash', 'deploy.sh'], capture_output=True, text=True)\n\nassert result.returncode != 0, (\n    f'deploy.sh must exit non-zero when a deployment step fails, got exit {result.returncode}')\nassert not os.path.exists('deploy.lock'), (\n     'the lock file must be removed (via a trap on EXIT) even when the deploy fails - '\n     'it must never be left behind to block future deploys')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_deploy.py",
+  "reference_solution": {
+    "deploy.sh": "#!/bin/bash\nset -euo pipefail\nLOCKFILE=deploy.lock\ntrap 'rm -f \"$LOCKFILE\"' EXIT\n\ntouch \"$LOCKFILE\"\necho \"deploying...\"\nfalse\necho \"deploy finished\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "deploy.sh": "#!/bin/bash\nLOCKFILE=deploy.lock\n\ntouch \"$LOCKFILE\"\necho \"deploying...\"\nfalse\necho \"deploy finished\"\n"
+      }
+    },
+    {
+      "name": "strict-mode-but-no-trap-cleanup",
+      "files": {
+        "deploy.sh": "#!/bin/bash\nset -euo pipefail\nLOCKFILE=deploy.lock\n\ntouch \"$LOCKFILE\"\necho \"deploying...\"\nfalse\necho \"deploy finished\"\n"
+      }
+    }
+  ]
+}

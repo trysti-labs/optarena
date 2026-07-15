@@ -1,0 +1,54 @@
+{
+  "name": "add_k8s_resourcequota_limitrange",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Adds a namespace ResourceQuota (caps total requests/limits/pod count) and a LimitRange (sane per-container defaults)",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "kubernetes",
+    "resourcequota",
+    "limitrange",
+    "yaml"
+  ],
+  "prompts": [
+    "The namespace 'team-checkout' has no governance on resource usage: any number of pods can be created with any (or no) resource requests/limits, risking one team starving the whole cluster. Create k8s/quota.yaml containing TWO Kubernetes objects (as a multi-document YAML file, separated by `---`) in namespace team-checkout: (1) a ResourceQuota named 'team-checkout-quota' whose spec.hard caps requests.cpu, requests.memory, limits.cpu, limits.memory, AND the total number of pods; (2) a LimitRange named 'team-checkout-limits' with a limit entry of type Container that sets BOTH a default (limit) and a defaultRequest for cpu and memory, so pods that don't specify their own resources still get sane values applied automatically."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "**/quota.yaml",
+      "content_patterns": [
+        "resourcequota",
+        "limitrange",
+        "defaultrequest"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_quota.py": "import yaml\n\nwith open('k8s/quota.yaml') as f:\n    docs = list(yaml.safe_load_all(f))\n\nrq = next((d for d in docs if d and d.get('kind') == 'ResourceQuota'), None)\nlr = next((d for d in docs if d and d.get('kind') == 'LimitRange'), None)\nassert rq is not None, 'no ResourceQuota document found'\nassert lr is not None, 'no LimitRange document found'\n\nassert rq['metadata'].get('namespace') == 'team-checkout', 'ResourceQuota must be in namespace team-checkout'\nhard = rq['spec']['hard']\nfor key in ('requests.cpu', 'requests.memory', 'limits.cpu', 'limits.memory', 'pods'):\n    assert key in hard, f'ResourceQuota.spec.hard is missing {key!r}'\n\nassert lr['metadata'].get('namespace') == 'team-checkout', 'LimitRange must be in namespace team-checkout'\nlimits = lr['spec']['limits']\ncontainer_limit = next((l for l in limits if l.get('type') == 'Container'), None)\nassert container_limit is not None, 'LimitRange has no limit entry of type Container'\n\ndefault = container_limit.get('default') or {}\ndefault_request = container_limit.get('defaultRequest') or {}\nfor key in ('cpu', 'memory'):\n    assert key in default, f'LimitRange Container default is missing {key!r}'\n    assert key in default_request, f'LimitRange Container defaultRequest is missing {key!r}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_quota.py",
+  "reference_solution": {
+    "k8s/quota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: team-checkout-quota\n  namespace: team-checkout\nspec:\n  hard:\n    requests.cpu: \"4\"\n    requests.memory: 8Gi\n    limits.cpu: \"8\"\n    limits.memory: 16Gi\n    pods: \"20\"\n---\napiVersion: v1\nkind: LimitRange\nmetadata:\n  name: team-checkout-limits\n  namespace: team-checkout\nspec:\n  limits:\n    - type: Container\n      default:\n        cpu: 500m\n        memory: 256Mi\n      defaultRequest:\n        cpu: 100m\n        memory: 128Mi\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "quota-missing-pod-count-cap",
+      "files": {
+        "k8s/quota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: team-checkout-quota\n  namespace: team-checkout\nspec:\n  hard:\n    requests.cpu: \"4\"\n    requests.memory: 8Gi\n    limits.cpu: \"8\"\n    limits.memory: 16Gi\n---\napiVersion: v1\nkind: LimitRange\nmetadata:\n  name: team-checkout-limits\n  namespace: team-checkout\nspec:\n  limits:\n    - type: Container\n      default:\n        cpu: 500m\n        memory: 256Mi\n      defaultRequest:\n        cpu: 100m\n        memory: 128Mi\n"
+      }
+    },
+    {
+      "name": "limitrange-missing-defaultrequest",
+      "files": {
+        "k8s/quota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: team-checkout-quota\n  namespace: team-checkout\nspec:\n  hard:\n    requests.cpu: \"4\"\n    requests.memory: 8Gi\n    limits.cpu: \"8\"\n    limits.memory: 16Gi\n    pods: \"20\"\n---\napiVersion: v1\nkind: LimitRange\nmetadata:\n  name: team-checkout-limits\n  namespace: team-checkout\nspec:\n  limits:\n    - type: Container\n      default:\n        cpu: 500m\n        memory: 256Mi\n"
+      }
+    }
+  ]
+}

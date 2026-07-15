@@ -1,0 +1,54 @@
+{
+  "name": "add_k8s_security_context_hardening",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Hardens a Deployment's container securityContext: read-only rootfs, no privilege escalation, all capabilities dropped, non-root",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "kubernetes",
+    "security",
+    "yaml"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml defines the 'api' Deployment with no securityContext at all, so the container runs as root with a writable root filesystem, full Linux capabilities, and can escalate privileges. Add a securityContext to the 'api' container (or the pod, for runAsNonRoot) setting: readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, runAsNonRoot: true, and capabilities.drop containing \"ALL\". Keep the replicas, image, ports, and existing labels/selectors unchanged."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: api\n  template:\n    metadata:\n      labels:\n        app: api\n    spec:\n      containers:\n        - name: api\n          image: myorg/api:2.0.0\n          ports:\n            - containerPort: 8080\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/deployment.yaml",
+      "content_patterns": [
+        "securitycontext",
+        "readonlyrootfilesystem"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_secctx.py": "import yaml\n\nwith open('k8s/deployment.yaml') as f:\n    d = yaml.safe_load(f)\n\npod_spec = d['spec']['template']['spec']\ncontainers = pod_spec['containers']\nassert len(containers) == 1\nc = containers[0]\n\nc_sc = c.get('securityContext') or {}\npod_sc = pod_spec.get('securityContext') or {}\n\nassert c_sc.get('readOnlyRootFilesystem') is True, 'container securityContext.readOnlyRootFilesystem must be true'\nassert c_sc.get('allowPrivilegeEscalation') is False, 'container securityContext.allowPrivilegeEscalation must be false'\n\nrun_as_non_root = c_sc.get('runAsNonRoot')\nif run_as_non_root is None:\n    run_as_non_root = pod_sc.get('runAsNonRoot')\nassert run_as_non_root is True, 'runAsNonRoot: true must be set (container or pod level)'\n\ncaps = c_sc.get('capabilities') or {}\ndrop = caps.get('drop') or []\nassert 'ALL' in drop, f'capabilities.drop must include ALL, got {drop!r}'\n\n# preserved\nassert d['spec']['replicas'] == 2, 'replicas changed'\nassert c['image'] == 'myorg/api:2.0.0', 'image changed'\nports = [p.get('containerPort') for p in c.get('ports', [])]\nassert 8080 in ports, 'containerPort changed'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_secctx.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: api\n  template:\n    metadata:\n      labels:\n        app: api\n    spec:\n      containers:\n        - name: api\n          image: myorg/api:2.0.0\n          ports:\n            - containerPort: 8080\n          securityContext:\n            readOnlyRootFilesystem: true\n            allowPrivilegeEscalation: false\n            runAsNonRoot: true\n            capabilities:\n              drop:\n                - ALL\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-no-securitycontext",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: api\n  template:\n    metadata:\n      labels:\n        app: api\n    spec:\n      containers:\n        - name: api\n          image: myorg/api:2.0.0\n          ports:\n            - containerPort: 8080\n"
+      }
+    },
+    {
+      "name": "missing-capabilities-drop",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: api\n  template:\n    metadata:\n      labels:\n        app: api\n    spec:\n      containers:\n        - name: api\n          image: myorg/api:2.0.0\n          ports:\n            - containerPort: 8080\n          securityContext:\n            readOnlyRootFilesystem: true\n            allowPrivilegeEscalation: false\n            runAsNonRoot: true\n"
+      }
+    }
+  ]
+}

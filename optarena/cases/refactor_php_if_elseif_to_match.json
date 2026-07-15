@@ -1,0 +1,50 @@
+{
+  "name": "refactor_php_if_elseif_to_match",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "description": "Refactors an if/elseif log-level severity lookup into a PHP 8 match expression",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "php",
+    "refactoring",
+    "match",
+    "idiom"
+  ],
+  "prompts": [
+    "LogLevel::severityFor(string $level): int in src/LogLevel.php maps a log level name to a numeric severity using an if/elseif chain with strict (===) string comparisons: \"debug\" -> 0, \"info\" -> 1, \"warning\" -> 2, \"error\" -> 3, \"critical\" -> 4, any other string -> -1. Refactor it to use PHP 8's `match` expression instead of if/elseif. Do not change observable behavior: all five known levels must map to the same severities, and an unknown level (e.g. \"trace\") must still return -1. Keep the class name and the severityFor(string): int signature."
+  ],
+  "setup_files": {
+    "src/LogLevel.php": "<?php\nnamespace App;\n\nclass LogLevel\n{\n    public static function severityFor(string $level): int\n    {\n        if ($level === \"debug\") {\n            return 0;\n        } elseif ($level === \"info\") {\n            return 1;\n        } elseif ($level === \"warning\") {\n            return 2;\n        } elseif ($level === \"error\") {\n            return 3;\n        } elseif ($level === \"critical\") {\n            return 4;\n        } else {\n            return -1;\n        }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/LogLevel.php",
+      "content_patterns": [
+        "match"
+      ],
+      "not_content_patterns": [
+        "elseif"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/RefactorHiddenTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/LogLevel.php';\n\nfinal class RefactorHiddenTest extends TestCase\n{\n    public function testKnownLevels(): void\n    {\n        $this->assertSame(0, \\App\\LogLevel::severityFor(\"debug\"));\n        $this->assertSame(1, \\App\\LogLevel::severityFor(\"info\"));\n        $this->assertSame(2, \\App\\LogLevel::severityFor(\"warning\"));\n        $this->assertSame(3, \\App\\LogLevel::severityFor(\"error\"));\n        $this->assertSame(4, \\App\\LogLevel::severityFor(\"critical\"));\n    }\n\n    public function testUnknownLevel(): void\n    {\n        $this->assertSame(-1, \\App\\LogLevel::severityFor(\"trace\"));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/RefactorHiddenTest.php",
+  "reference_solution": {
+    "src/LogLevel.php": "<?php\nnamespace App;\n\nclass LogLevel\n{\n    public static function severityFor(string $level): int\n    {\n        return match ($level) {\n            \"debug\" => 0,\n            \"info\" => 1,\n            \"warning\" => 2,\n            \"error\" => 3,\n            \"critical\" => 4,\n            default => -1,\n        };\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "drift-warning-shifted",
+      "files": {
+        "src/LogLevel.php": "<?php\nnamespace App;\n\nclass LogLevel\n{\n    // DRIFT: warning now maps to 1 (colliding with info) instead of 2.\n    public static function severityFor(string $level): int\n    {\n        return match ($level) {\n            \"debug\" => 0,\n            \"info\" => 1,\n            \"warning\" => 1,\n            \"error\" => 3,\n            \"critical\" => 4,\n            default => -1,\n        };\n    }\n}\n"
+      }
+    }
+  ]
+}

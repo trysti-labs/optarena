@@ -1,0 +1,48 @@
+{
+  "name": "fix_go_zip_slip_path_traversal",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Fixes a zip-slip path traversal: archive entries are extracted with no containment check against the destination directory",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "go",
+    "security",
+    "zip-slip",
+    "path-traversal"
+  ],
+  "prompts": [
+    "Extract(zipPath string, destDir string) error in extractor.go unpacks a zip archive into destDir, but it joins destDir with each entry's Name and writes there with NO containment check - a malicious entry whose name contains \"..\" components (a \"zip slip\", e.g. \"sub/../../evil.txt\") can resolve to a path OUTSIDE destDir and overwrite arbitrary files. Fix Extract so that for every entry it computes the resolved target path and verifies it is still contained within destDir (comparing the cleaned target against the cleaned destDir with a proper path-separator boundary, or using filepath.Rel and checking the result does not start with \"..\") - if an entry would escape destDir, return an error and do not write it (or anything after it). Legitimate entries, including ones in subdirectories, must still extract normally with their exact content. Keep the function signature."
+  ],
+  "setup_files": {
+    "go.mod": "module ziparchive\n\ngo 1.22\n",
+    "extractor.go": "package main\n\nimport (\n\t\"archive/zip\"\n\t\"io\"\n\t\"os\"\n\t\"path/filepath\"\n)\n\n// Extract unpacks the zip archive at zipPath into destDir.\n// BUG: joins destDir with the entry name and writes there directly, with no\n// containment check - a malicious entry name containing \"..\" (a \"zip slip\")\n// can write files outside destDir.\nfunc Extract(zipPath string, destDir string) error {\n\tr, err := zip.OpenReader(zipPath)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer r.Close()\n\n\tfor _, f := range r.File {\n\t\ttarget := filepath.Join(destDir, f.Name)\n\t\tif f.FileInfo().IsDir() {\n\t\t\tif err := os.MkdirAll(target, 0o755); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t\tcontinue\n\t\t}\n\t\tif err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {\n\t\t\treturn err\n\t\t}\n\t\trc, err := f.Open()\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tout, err := os.Create(target)\n\t\tif err != nil {\n\t\t\trc.Close()\n\t\t\treturn err\n\t\t}\n\t\tif _, err := io.Copy(out, rc); err != nil {\n\t\t\tout.Close()\n\t\t\trc.Close()\n\t\t\treturn err\n\t\t}\n\t\tout.Close()\n\t\trc.Close()\n\t}\n\treturn nil\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "extractor.go",
+      "content_patterns": [
+        "func extract"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "extractor_test.go": "package main\n\nimport (\n\t\"archive/zip\"\n\t\"os\"\n\t\"path/filepath\"\n\t\"testing\"\n)\n\nfunc writeZip(t *testing.T, path string, entries map[string]string) {\n\tt.Helper()\n\tf, err := os.Create(path)\n\tif err != nil {\n\t\tt.Fatalf(\"create zip: %v\", err)\n\t}\n\tdefer f.Close()\n\tzw := zip.NewWriter(f)\n\tfor name, content := range entries {\n\t\tw, err := zw.Create(name)\n\t\tif err != nil {\n\t\t\tt.Fatalf(\"create entry %s: %v\", name, err)\n\t\t}\n\t\tif _, err := w.Write([]byte(content)); err != nil {\n\t\t\tt.Fatalf(\"write entry %s: %v\", name, err)\n\t\t}\n\t}\n\tif err := zw.Close(); err != nil {\n\t\tt.Fatalf(\"close zip: %v\", err)\n\t}\n}\n\nfunc TestExtractsLegitimateEntries(t *testing.T) {\n\tdir := t.TempDir()\n\tzipPath := filepath.Join(dir, \"good.zip\")\n\tdestDir := filepath.Join(dir, \"dest\")\n\twriteZip(t, zipPath, map[string]string{\n\t\t\"readme.txt\":     \"hello\",\n\t\t\"sub/nested.txt\": \"nested content\",\n\t})\n\n\tif err := Extract(zipPath, destDir); err != nil {\n\t\tt.Fatalf(\"Extract failed on a legitimate archive: %v\", err)\n\t}\n\tgot, err := os.ReadFile(filepath.Join(destDir, \"readme.txt\"))\n\tif err != nil || string(got) != \"hello\" {\n\t\tt.Fatalf(\"readme.txt not extracted correctly: %v %q\", err, got)\n\t}\n\tgot2, err := os.ReadFile(filepath.Join(destDir, \"sub\", \"nested.txt\"))\n\tif err != nil || string(got2) != \"nested content\" {\n\t\tt.Fatalf(\"sub/nested.txt not extracted correctly: %v %q\", err, got2)\n\t}\n}\n\nfunc TestRejectsZipSlipEntry(t *testing.T) {\n\tdir := t.TempDir()\n\tzipPath := filepath.Join(dir, \"evil.zip\")\n\tdestDir := filepath.Join(dir, \"dest\")\n\t// Does NOT start with \"..\" but still escapes destDir after Join+Clean -\n\t// a naive strings.HasPrefix(name, \"..\") check would miss this.\n\tevilName := \"sub/../../pwned-outside.txt\"\n\twriteZip(t, zipPath, map[string]string{evilName: \"pwned\"})\n\n\terr := Extract(zipPath, destDir)\n\tif err == nil {\n\t\tt.Fatalf(\"expected Extract to reject a path-escaping entry, got nil error\")\n\t}\n\n\toutside := filepath.Join(dir, \"pwned-outside.txt\")\n\tif _, statErr := os.Stat(outside); statErr == nil {\n\t\tt.Fatalf(\"zip slip: a file was written outside destDir at %s\", outside)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "extractor.go": "package main\n\nimport (\n\t\"archive/zip\"\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n\t\"path/filepath\"\n\t\"strings\"\n)\n\n// Extract unpacks the zip archive at zipPath into destDir, refusing any\n// entry whose resolved path would escape destDir (a \"zip slip\").\nfunc Extract(zipPath string, destDir string) error {\n\tr, err := zip.OpenReader(zipPath)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer r.Close()\n\n\tcleanDest := filepath.Clean(destDir)\n\n\tfor _, f := range r.File {\n\t\ttarget := filepath.Join(destDir, f.Name)\n\t\tcleanTarget := filepath.Clean(target)\n\t\tif cleanTarget != cleanDest && !strings.HasPrefix(cleanTarget, cleanDest+string(os.PathSeparator)) {\n\t\t\treturn fmt.Errorf(\"zip slip: entry %q escapes destination directory\", f.Name)\n\t\t}\n\n\t\tif f.FileInfo().IsDir() {\n\t\t\tif err := os.MkdirAll(target, 0o755); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t\tcontinue\n\t\t}\n\t\tif err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {\n\t\t\treturn err\n\t\t}\n\t\trc, err := f.Open()\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tout, err := os.Create(target)\n\t\tif err != nil {\n\t\t\trc.Close()\n\t\t\treturn err\n\t\t}\n\t\tif _, err := io.Copy(out, rc); err != nil {\n\t\t\tout.Close()\n\t\t\trc.Close()\n\t\t\treturn err\n\t\t}\n\t\tout.Close()\n\t\trc.Close()\n\t}\n\treturn nil\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "prefix-check-only-misses-mid-path-traversal",
+      "files": {
+        "extractor.go": "package main\n\nimport (\n\t\"archive/zip\"\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n\t\"path/filepath\"\n\t\"strings\"\n)\n\n// INCOMPLETE FIX: only rejects entries whose NAME starts with \"..\", missing\n// a \"..\" component appearing later in the path (e.g. \"sub/../../evil.txt\"),\n// which still resolves outside destDir after Join.\nfunc Extract(zipPath string, destDir string) error {\n\tr, err := zip.OpenReader(zipPath)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer r.Close()\n\n\tfor _, f := range r.File {\n\t\tif strings.HasPrefix(f.Name, \"..\") {\n\t\t\treturn fmt.Errorf(\"zip slip: entry %q escapes destination directory\", f.Name)\n\t\t}\n\t\ttarget := filepath.Join(destDir, f.Name)\n\t\tif f.FileInfo().IsDir() {\n\t\t\tif err := os.MkdirAll(target, 0o755); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t\tcontinue\n\t\t}\n\t\tif err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {\n\t\t\treturn err\n\t\t}\n\t\trc, err := f.Open()\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tout, err := os.Create(target)\n\t\tif err != nil {\n\t\t\trc.Close()\n\t\t\treturn err\n\t\t}\n\t\tif _, err := io.Copy(out, rc); err != nil {\n\t\t\tout.Close()\n\t\t\trc.Close()\n\t\t\treturn err\n\t\t}\n\t\tout.Close()\n\t\trc.Close()\n\t}\n\treturn nil\n}\n"
+      }
+    }
+  ]
+}

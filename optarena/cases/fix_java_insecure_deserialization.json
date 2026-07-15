@@ -1,0 +1,47 @@
+{
+  "name": "fix_java_insecure_deserialization",
+  "language": "java",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "description": "Fixes Java native deserialization RCE: ObjectInputStream.readObject() on untrusted bytes instantiates arbitrary classes",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "java",
+    "security",
+    "deserialization"
+  ],
+  "prompts": [
+    "SessionStore.deserialize(byte[] data) in src/main/java/com/optarena/app/SessionStore.java restores a session payload back into a Map<String,Object>. It calls ObjectInputStream.readObject() directly on the untrusted bytes - Java native deserialization instantiates whatever class the stream names and runs its readObject() method, a well-known remote-code-execution vector. The session format is being migrated to JSON: legitimate payloads are now produced with Jackson (com.fasterxml.jackson.databind.ObjectMapper, already a dependency). Rewrite deserialize to parse the bytes as JSON via ObjectMapper and return the resulting Map<String,Object>, so an untrusted payload can never instantiate an arbitrary Java object. Do NOT keep any ObjectInputStream fallback for \"legacy\" sessions - that would still be exploitable. Keep the class name and the deserialize(byte[]) signature."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>plain-java-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <maven.compiler.source>17</maven.compiler.source>\n    <maven.compiler.target>17</maven.compiler.target>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>com.fasterxml.jackson.core</groupId>\n      <artifactId>jackson-databind</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+    "src/main/java/com/optarena/app/SessionStore.java": "package com.optarena.app;\n\nimport java.io.ByteArrayInputStream;\nimport java.io.ObjectInputStream;\nimport java.util.Map;\n\npublic final class SessionStore {\n    private SessionStore() {}\n\n    // Restore a session payload (serialized bytes) into a Map.\n    // BUG: ObjectInputStream.readObject() on untrusted bytes instantiates\n    // arbitrary classes and runs their readObject() - a classic Java\n    // deserialization RCE vector.\n    @SuppressWarnings(\"unchecked\")\n    public static Map<String, Object> deserialize(byte[] data) throws Exception {\n        try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(data))) {\n            return (Map<String, Object>) in.readObject();\n        }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/SessionStore.java",
+      "content_patterns": [
+        "objectmapper"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/java/com/optarena/app/SessionStoreHiddenTest.java": "package com.optarena.app;\n\nimport com.fasterxml.jackson.databind.ObjectMapper;\nimport org.junit.jupiter.api.Test;\n\nimport java.io.ByteArrayOutputStream;\nimport java.io.IOException;\nimport java.io.ObjectOutputStream;\nimport java.io.Serializable;\nimport java.util.Map;\n\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nimport static org.junit.jupiter.api.Assertions.assertFalse;\n\nclass SessionStoreHiddenTest {\n\n    // A stand-in for any class an attacker could name in a serialized\n    // payload. Its readObject fires during Java deserialization if the\n    // object is actually instantiated - never during JSON parsing.\n    static class EvilGadget implements Serializable {\n        static boolean tripped = false;\n\n        private void readObject(java.io.ObjectInputStream in) throws IOException, ClassNotFoundException {\n            in.defaultReadObject();\n            tripped = true;\n        }\n    }\n\n    @Test\n    void decodesLegitimateJsonPayload() throws Exception {\n        byte[] data = new ObjectMapper().writeValueAsBytes(Map.of(\"user\", \"ada\", \"role\", \"admin\"));\n        Map<String, Object> result = SessionStore.deserialize(data);\n        assertEquals(\"ada\", result.get(\"user\"));\n        assertEquals(\"admin\", result.get(\"role\"));\n    }\n\n    @Test\n    void doesNotDeserializeArbitraryJavaObjects() throws Exception {\n        EvilGadget.tripped = false;\n        ByteArrayOutputStream baos = new ByteArrayOutputStream();\n        try (ObjectOutputStream out = new ObjectOutputStream(baos)) {\n            out.writeObject(new EvilGadget());\n        }\n        try {\n            SessionStore.deserialize(baos.toByteArray());\n        } catch (Exception e) {\n            // a safe decoder rejects the non-JSON blob; that is acceptable\n        }\n        assertFalse(EvilGadget.tripped, \"insecure deserialization: readObject ran on an untrusted Java object\");\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=SessionStoreHiddenTest",
+  "reference_solution": {
+    "src/main/java/com/optarena/app/SessionStore.java": "package com.optarena.app;\n\nimport com.fasterxml.jackson.databind.ObjectMapper;\n\nimport java.util.Map;\n\npublic final class SessionStore {\n    private static final ObjectMapper MAPPER = new ObjectMapper();\n\n    private SessionStore() {}\n\n    @SuppressWarnings(\"unchecked\")\n    public static Map<String, Object> deserialize(byte[] data) throws Exception {\n        return MAPPER.readValue(data, Map.class);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "falls-back-to-legacy-java-serialization",
+      "files": {
+        "src/main/java/com/optarena/app/SessionStore.java": "package com.optarena.app;\n\nimport com.fasterxml.jackson.databind.ObjectMapper;\n\nimport java.io.ByteArrayInputStream;\nimport java.io.ObjectInputStream;\nimport java.util.Map;\n\npublic final class SessionStore {\n    private static final ObjectMapper MAPPER = new ObjectMapper();\n\n    private SessionStore() {}\n\n    // INCOMPLETE FIX: tries JSON first but falls back to legacy Java\n    // deserialization \"for old sessions\" - an attacker just sends a\n    // Java-serialized payload and still gets readObject() executed.\n    @SuppressWarnings(\"unchecked\")\n    public static Map<String, Object> deserialize(byte[] data) throws Exception {\n        try {\n            return MAPPER.readValue(data, Map.class);\n        } catch (Exception jsonError) {\n            try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(data))) {\n                return (Map<String, Object>) in.readObject();\n            }\n        }\n    }\n}\n"
+      }
+    }
+  ]
+}

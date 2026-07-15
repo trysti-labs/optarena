@@ -1,0 +1,54 @@
+{
+  "name": "add_github_actions_per_job_permissions",
+  "language": "yaml",
+  "framework": "github-actions",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Moves a blanket write permission grant to only the one job that needs it",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "github-actions",
+    "security",
+    "least-privilege"
+  ],
+  "prompts": [
+    ".github/workflows/ci.yml grants `contents: write` to the GITHUB_TOKEN at the top level, so EVERY job (build, test, publish-tag) gets write access - but only publish-tag (which pushes a release tag) actually needs it; build and test only checkout and run scripts. Apply least privilege: remove the top-level `permissions:` block (or set it to `contents: read`), and add a `permissions:` block with `contents: write` ONLY under the publish-tag job. The build and test jobs must end up with read-only (or no explicit write) access. Do not change the workflow name, triggers, job names, `needs` ordering, or steps."
+  ],
+  "setup_files": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\npermissions:\n  contents: write\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./build.sh\n  test:\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./test.sh\n  publish-tag:\n    runs-on: ubuntu-latest\n    needs: test\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./publish-tag.sh\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/ci.yml",
+      "content_patterns": [
+        "permissions",
+        "contents: write"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_permissions.py": "import yaml\n\nwith open('.github/workflows/ci.yml') as f:\n    wf = yaml.safe_load(f)\n\ntop_perms = wf.get('permissions')\nif top_perms is not None:\n    assert top_perms != 'write-all', 'top-level permissions still write-all'\n    if isinstance(top_perms, dict):\n        assert top_perms.get('contents') != 'write', (\n            'top-level permissions still grant contents: write - it must be removed or read-only')\n\njobs = wf['jobs']\n\ndef job_has_write(job):\n    perms = job.get('permissions')\n    if not isinstance(perms, dict):\n        return False\n    return perms.get('contents') == 'write'\n\nassert not job_has_write(jobs['build']), 'build job must not have contents: write'\nassert not job_has_write(jobs['test']), 'test job must not have contents: write'\nassert job_has_write(jobs['publish-tag']), 'publish-tag job must have its own contents: write permission'\n\n# structure preserved\nassert wf.get('name') == 'CI', 'workflow name changed'\nassert jobs['test'].get('needs') == 'build', 'needs ordering changed'\nassert jobs['publish-tag'].get('needs') == 'test', 'needs ordering changed'\nfor name in ('build', 'test', 'publish-tag'):\n    steps = jobs[name]['steps']\n    assert any(s.get('uses', '').startswith('actions/checkout') for s in steps), f'{name} lost its checkout step'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_permissions.py",
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./build.sh\n  test:\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./test.sh\n  publish-tag:\n    runs-on: ubuntu-latest\n    needs: test\n    permissions:\n      contents: write\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./publish-tag.sh\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-blanket-write",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\npermissions:\n  contents: write\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./build.sh\n  test:\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./test.sh\n  publish-tag:\n    runs-on: ubuntu-latest\n    needs: test\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./publish-tag.sh\n"
+      }
+    },
+    {
+      "name": "write-granted-to-wrong-job",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./build.sh\n  test:\n    runs-on: ubuntu-latest\n    needs: build\n    permissions:\n      contents: write\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./test.sh\n  publish-tag:\n    runs-on: ubuntu-latest\n    needs: test\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./publish-tag.sh\n"
+      }
+    }
+  ]
+}

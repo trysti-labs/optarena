@@ -1,0 +1,55 @@
+{
+  "name": "add_k8s_ingress_tls_routing",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Authors an Ingress with TLS and host-based routing to an existing Service",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "kubernetes",
+    "ingress",
+    "yaml"
+  ],
+  "prompts": [
+    "k8s/service.yaml (already present, do not modify it) defines the ClusterIP Service 'web-service' on port 80. Create k8s/ingress.yaml defining an Ingress that exposes it externally: apiVersion networking.k8s.io/v1, kind Ingress, metadata.name web-ingress; spec.tls with a single entry whose hosts list contains \"app.example.com\" and whose secretName is \"web-tls-cert\"; spec.rules with a single rule for host \"app.example.com\" routing path \"/\" (pathType Prefix) to backend service \"web-service\" on port 80. TLS must actually be configured - do not leave the connection as plain HTTP."
+  ],
+  "setup_files": {
+    "k8s/service.yaml": "apiVersion: v1\nkind: Service\nmetadata:\n  name: web-service\nspec:\n  selector:\n    app: web\n  ports:\n    - port: 80\n      targetPort: 8080\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/ingress.yaml",
+      "content_patterns": [
+        "kind: ingress",
+        "tls",
+        "secretname"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_ingress.py": "import yaml\n\nwith open('k8s/ingress.yaml') as f:\n    d = yaml.safe_load(f)\n\nassert d.get('apiVersion') == 'networking.k8s.io/v1', d.get('apiVersion')\nassert d.get('kind') == 'Ingress', d.get('kind')\nassert d.get('metadata', {}).get('name') == 'web-ingress'\n\nspec = d['spec']\ntls = spec.get('tls')\nassert tls and isinstance(tls, list) and len(tls) >= 1, 'spec.tls must be a non-empty list'\nt0 = tls[0]\nassert 'app.example.com' in (t0.get('hosts') or []), 'tls hosts must include app.example.com'\nassert t0.get('secretName') == 'web-tls-cert', f\"tls secretName must be web-tls-cert, got {t0.get('secretName')!r}\"\n\nrules = spec.get('rules')\nassert rules and len(rules) >= 1, 'spec.rules must be non-empty'\nr0 = rules[0]\nassert r0.get('host') == 'app.example.com', f\"rule host must be app.example.com, got {r0.get('host')!r}\"\n\npaths = r0['http']['paths']\nassert len(paths) >= 1\np0 = paths[0]\nassert p0.get('path') == '/', p0.get('path')\nassert p0.get('pathType') == 'Prefix', p0.get('pathType')\n\nbackend = p0['backend']['service']\nassert backend.get('name') == 'web-service', f\"backend service name must be web-service, got {backend.get('name')!r}\"\nassert backend['port'].get('number') == 80, f\"backend service port must be 80, got {backend['port'].get('number')!r}\"\n\n# service.yaml untouched\nwith open('k8s/service.yaml') as f:\n    svc = yaml.safe_load(f)\nassert svc['spec']['ports'][0]['port'] == 80, 'service.yaml was modified'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_ingress.py",
+  "reference_solution": {
+    "k8s/ingress.yaml": "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: web-ingress\nspec:\n  tls:\n    - hosts:\n        - app.example.com\n      secretName: web-tls-cert\n  rules:\n    - host: app.example.com\n      http:\n        paths:\n          - path: /\n            pathType: Prefix\n            backend:\n              service:\n                name: web-service\n                port:\n                  number: 80\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-tls-plain-http",
+      "files": {
+        "k8s/ingress.yaml": "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: web-ingress\nspec:\n  rules:\n    - host: app.example.com\n      http:\n        paths:\n          - path: /\n            pathType: Prefix\n            backend:\n              service:\n                name: web-service\n                port:\n                  number: 80\n"
+      }
+    },
+    {
+      "name": "backend-points-to-wrong-service",
+      "files": {
+        "k8s/ingress.yaml": "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: web-ingress\nspec:\n  tls:\n    - hosts:\n        - app.example.com\n      secretName: web-tls-cert\n  rules:\n    - host: app.example.com\n      http:\n        paths:\n          - path: /\n            pathType: Prefix\n            backend:\n              service:\n                name: web-svc\n                port:\n                  number: 80\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "add_k8s_pod_disruption_budget",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Authors a PodDisruptionBudget guaranteeing availability of the web Deployment during voluntary disruptions",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "kubernetes",
+    "yaml",
+    "availability"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml (already present, do not modify it) runs 3 replicas of the 'web' Deployment, labeled app: web. Create k8s/pdb.yaml defining a PodDisruptionBudget so voluntary disruptions (node drains, cluster upgrades) never take down more than one replica at a time: apiVersion policy/v1, kind PodDisruptionBudget, metadata.name `web-pdb`, spec.minAvailable set to an INTEGER of at least 2 (so at least 2 of the 3 replicas always stay up), and spec.selector.matchLabels matching the Deployment's pod labels exactly (app: web) so it actually applies to those pods."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      containers:\n        - name: web\n          image: myorg/web:1.2.3\n          ports:\n            - containerPort: 8080\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/pdb.yaml",
+      "content_patterns": [
+        "poddisruptionbudget",
+        "minavailable"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_pdb.py": "import yaml\n\nwith open('k8s/pdb.yaml') as f:\n    d = yaml.safe_load(f)\n\nassert d.get('apiVersion') == 'policy/v1', d.get('apiVersion')\nassert d.get('kind') == 'PodDisruptionBudget', d.get('kind')\nassert d.get('metadata', {}).get('name') == 'web-pdb', d.get('metadata')\n\nspec = d['spec']\nmin_available = spec.get('minAvailable')\nassert isinstance(min_available, int), f'minAvailable must be an integer, got {min_available!r}'\nassert min_available >= 2, f'minAvailable must be >= 2 (out of 3 replicas), got {min_available}'\n\nmatch_labels = spec.get('selector', {}).get('matchLabels')\nassert match_labels == {'app': 'web'}, f'selector.matchLabels must be exactly {{app: web}}, got {match_labels!r}'\n\n# the Deployment itself must be untouched\nwith open('k8s/deployment.yaml') as f:\n    dep = yaml.safe_load(f)\nassert dep['spec']['replicas'] == 3, 'deployment.yaml was modified (replicas)'\nassert dep['spec']['template']['metadata']['labels'] == {'app': 'web'}, 'deployment.yaml was modified (labels)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_pdb.py",
+  "reference_solution": {
+    "k8s/pdb.yaml": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: web-pdb\nspec:\n  minAvailable: 2\n  selector:\n    matchLabels:\n      app: web\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "min-available-too-low",
+      "files": {
+        "k8s/pdb.yaml": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: web-pdb\nspec:\n  minAvailable: 1\n  selector:\n    matchLabels:\n      app: web\n"
+      }
+    },
+    {
+      "name": "selector-does-not-match-pods",
+      "files": {
+        "k8s/pdb.yaml": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: web-pdb\nspec:\n  minAvailable: 2\n  selector:\n    matchLabels:\n      app: webapp\n"
+      }
+    }
+  ]
+}
