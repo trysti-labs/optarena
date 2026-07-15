@@ -1,0 +1,52 @@
+{
+  "name": "add_tests_rust_binary_search",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 400,
+  "timeout": 500,
+  "description": "Asks the model to write Rust integration tests for a binary-search function; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "rust",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "`find(items: &[i32], target: i32) -> Option<usize>` in src/lib.rs (already correct - do not modify it) binary-searches a SORTED ascending slice for target, returning Some(index) of any matching element or None if absent. Write a Rust integration test at exactly tests/find_test.rs (bring the function into scope with `use binsearch::find;`) with at least 4 #[test] functions that pin: a target present in the middle of the slice; a target that is the FIRST element; a target that is absent (falls between two elements); and an empty slice returns None. Use assert_eq! comparing against the exact expected Option<usize>."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"binsearch\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "/// Binary search a sorted ascending slice for target.\n/// Returns Some(index) of a matching element, or None if absent.\npub fn find(items: &[i32], target: i32) -> Option<usize> {\n    let mut lo = 0usize;\n    let mut hi = items.len();\n    while lo < hi {\n        let mid = lo + (hi - lo) / 2;\n        if items[mid] == target {\n            return Some(mid);\n        } else if items[mid] < target {\n            lo = mid + 1;\n        } else {\n            hi = mid;\n        }\n    }\n    None\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "tests/find_test.rs",
+      "content_patterns": [
+        "find(",
+        "assert_eq!"
+      ],
+      "regex_patterns": [
+        "#\\[test\\][\\s\\S]*#\\[test\\][\\s\\S]*#\\[test\\][\\s\\S]*#\\[test\\]"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('src/lib.rs')\nTEST_CMD = 'cargo test --offline'\n# Each mutant must be a CLEAN kill (a fast test failure or panic) - never a\n# mutant that can leave the search loop non-terminating (e.g. an off-by-one\n# on the lo/hi advance can spin forever). PER_CALL_TIMEOUT below is a backstop\n# in case a model's own broken solution hangs the same way.\nMUTANTS = [\n    ['if items[mid] == target {', 'if items[mid] <= target {'],\n    ['let mut hi = items.len();', 'let mut hi = items.len() + 1;'],\n    ['let mid = lo + (hi - lo) / 2;', 'let mid = lo + (hi - lo);'],\n]\nPER_CALL_TIMEOUT = 60\n\nimport shutil\nshutil.rmtree('__pycache__', ignore_errors=True)  # avoid stale bytecode across mutants\n\n\ndef run_tests():\n    try:\n        return subprocess.run(TEST_CMD, shell=True, timeout=PER_CALL_TIMEOUT).returncode\n    except subprocess.TimeoutExpired:\n        return 124\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (killed all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "tests/find_test.rs": "use binsearch::find;\n\n#[test]\nfn finds_middle_element() {\n    assert_eq!(find(&[1, 3, 5, 7, 9], 5), Some(2));\n}\n\n#[test]\nfn finds_first_element() {\n    assert_eq!(find(&[2, 4, 6, 8], 2), Some(0));\n}\n\n#[test]\nfn absent_target_returns_none() {\n    assert_eq!(find(&[1, 3, 5, 7], 4), None);\n}\n\n#[test]\nfn empty_slice_returns_none() {\n    assert_eq!(find(&[], 1), None);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "tests/find_test.rs": "use binsearch::find;\n\n#[test]\nfn returns_option() {\n    let _ = find(&[1, 2, 3], 2);\n}\n\n#[test]\nfn empty_is_none() {\n    assert_eq!(find(&[], 1), None);\n}\n\n#[test]\nfn present_is_some() {\n    assert!(find(&[1, 2, 3], 2).is_some());\n}\n\n#[test]\nfn absent_is_none_ish() {\n    let r = find(&[1, 2, 3], 99);\n    assert!(r.is_none() || r.is_some());\n}\n"
+      }
+    }
+  ]
+}

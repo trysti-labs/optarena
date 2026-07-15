@@ -1,0 +1,46 @@
+{
+  "name": "add_php_lru_cache",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Implements a fixed-capacity LRU cache class with get/put eviction semantics",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "feature",
+    "lru-cache",
+    "data-structures"
+  ],
+  "prompts": [
+    "Create src/LruCache.php defining namespace App and class LruCache with a constructor __construct(int $capacity), a method get(string $key) that returns the cached value if $key is present (marking it as most-recently-used) or null if absent, and a method put(string $key, $value): void that inserts or updates the value for $key (marking it most-recently-used) and, if inserting a NEW key pushes the cache size above capacity, evicts the LEAST recently used entry. Recency must be updated by BOTH get and put - accessing or updating a key must protect it from the next eviction. Assume capacity is always a positive integer."
+  ],
+  "setup_files": {},
+  "expected_files": [
+    {
+      "path_pattern": "**/LruCache.php",
+      "content_patterns": [
+        "function get",
+        "function put"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/LruCacheTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/LruCache.php';\n\nfinal class LruCacheTest extends TestCase\n{\n    public function testBasicPutGet(): void\n    {\n        $cache = new \\App\\LruCache(2);\n        $cache->put(\"a\", 1);\n        $cache->put(\"b\", 2);\n        $this->assertSame(1, $cache->get(\"a\"));\n        $this->assertSame(2, $cache->get(\"b\"));\n    }\n\n    public function testMissingKeyReturnsNull(): void\n    {\n        $cache = new \\App\\LruCache(2);\n        $this->assertNull($cache->get(\"nope\"));\n    }\n\n    public function testEvictsLeastRecentlyUsedNotOldestInserted(): void\n    {\n        $cache = new \\App\\LruCache(2);\n        $cache->put(\"a\", 1);\n        $cache->put(\"b\", 2);\n        // Access \"a\" so \"b\" becomes the least recently used.\n        $cache->get(\"a\");\n        $cache->put(\"c\", 3); // should evict \"b\", not \"a\"\n        $this->assertSame(1, $cache->get(\"a\"));\n        $this->assertNull($cache->get(\"b\"));\n        $this->assertSame(3, $cache->get(\"c\"));\n    }\n\n    public function testUpdatingExistingKeyRefreshesRecency(): void\n    {\n        $cache = new \\App\\LruCache(2);\n        $cache->put(\"a\", 1);\n        $cache->put(\"b\", 2);\n        $cache->put(\"a\", 10); // update marks \"a\" most-recently-used\n        $cache->put(\"c\", 3); // should evict \"b\"\n        $this->assertSame(10, $cache->get(\"a\"));\n        $this->assertNull($cache->get(\"b\"));\n        $this->assertSame(3, $cache->get(\"c\"));\n    }\n\n    public function testCapacityNeverExceeded(): void\n    {\n        $cache = new \\App\\LruCache(1);\n        $cache->put(\"a\", 1);\n        $cache->put(\"b\", 2);\n        $this->assertNull($cache->get(\"a\"));\n        $this->assertSame(2, $cache->get(\"b\"));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/LruCacheTest.php",
+  "reference_solution": {
+    "src/LruCache.php": "<?php\nnamespace App;\n\nclass LruCache\n{\n    private int $capacity;\n    private array $store = [];\n\n    public function __construct(int $capacity)\n    {\n        $this->capacity = $capacity;\n    }\n\n    public function get(string $key)\n    {\n        if (!array_key_exists($key, $this->store)) {\n            return null;\n        }\n        $value = $this->store[$key];\n        unset($this->store[$key]);\n        $this->store[$key] = $value; // move to most-recently-used (end)\n        return $value;\n    }\n\n    public function put(string $key, $value): void\n    {\n        if (array_key_exists($key, $this->store)) {\n            unset($this->store[$key]);\n        }\n        $this->store[$key] = $value;\n        if (count($this->store) > $this->capacity) {\n            $oldestKey = array_key_first($this->store);\n            unset($this->store[$oldestKey]);\n        }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fifo-not-lru-get-does-not-refresh",
+      "files": {
+        "src/LruCache.php": "<?php\nnamespace App;\n\nclass LruCache\n{\n    private int $capacity;\n    private array $store = [];\n\n    public function __construct(int $capacity)\n    {\n        $this->capacity = $capacity;\n    }\n\n    public function get(string $key)\n    {\n        // BUG: does not refresh recency - this behaves like FIFO, not LRU.\n        return $this->store[$key] ?? null;\n    }\n\n    public function put(string $key, $value): void\n    {\n        if (!array_key_exists($key, $this->store)) {\n            if (count($this->store) >= $this->capacity) {\n                $oldestKey = array_key_first($this->store);\n                unset($this->store[$oldestKey]);\n            }\n        }\n        $this->store[$key] = $value;\n    }\n}\n"
+      }
+    }
+  ]
+}

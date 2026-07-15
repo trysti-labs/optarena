@@ -1,0 +1,47 @@
+{
+  "name": "optimize_go_regex_compile_in_loop",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Optimizes a validator that recompiles the same regexp on every call to compiling it once",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "go",
+    "performance",
+    "regexp"
+  ],
+  "prompts": [
+    "CountValid(lines []string) int in validator.go counts how many strings in lines match the email-like pattern `^user-\\d+@example\\.com$`. It calls regexp.MustCompile(pattern) INSIDE the loop, once per line - recompiling (parsing + building the automaton for) the same fixed pattern on every call is wasted work and makes the function far too slow for large inputs. Rewrite CountValid so the regexp is compiled ONCE (e.g. compiled outside the loop, or as a package-level var) and reused for every line, while returning the exact same count. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "go.mod": "module regexvalidator\n\ngo 1.22\n",
+    "validator.go": "package main\n\nimport \"regexp\"\n\n// CountValid returns how many lines match the fixed email-like pattern.\n// BUG: regexp.MustCompile(pattern) re-parses and rebuilds the automaton on\n// EVERY call inside the loop, instead of once - unusably slow for large\n// inputs since the pattern never changes.\nfunc CountValid(lines []string) int {\n\tpattern := `^user-\\d+@example\\.com$`\n\tcount := 0\n\tfor _, line := range lines {\n\t\tre := regexp.MustCompile(pattern)\n\t\tif re.MatchString(line) {\n\t\t\tcount++\n\t\t}\n\t}\n\treturn count\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "validator.go",
+      "content_patterns": [
+        "func countvalid"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "validator_test.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestCountValidCorrectness(t *testing.T) {\n\tlines := []string{\"user-1@example.com\", \"nope\", \"user-42@example.com\", \"user-x@example.com\"}\n\tgot := CountValid(lines)\n\tif got != 2 {\n\t\tt.Fatalf(\"got %d, want 2\", got)\n\t}\n}\n\nfunc TestCountValidEmpty(t *testing.T) {\n\tif got := CountValid(nil); got != 0 {\n\t\tt.Fatalf(\"got %d, want 0\", got)\n\t}\n}\n\nfunc TestCountValidPerformance(t *testing.T) {\n\tn := 150000\n\tlines := make([]string, n)\n\texpected := 0\n\tfor i := 0; i < n; i++ {\n\t\tif i%3 == 0 {\n\t\t\tlines[i] = fmt.Sprintf(\"user-%d@example.com\", i)\n\t\t\texpected++\n\t\t} else {\n\t\t\tlines[i] = fmt.Sprintf(\"nope-%d\", i)\n\t\t}\n\t}\n\n\tstart := time.Now()\n\tgot := CountValid(lines)\n\telapsed := time.Since(start)\n\n\tif got != expected {\n\t\tt.Fatalf(\"large-input count wrong: got %d, want %d\", got, expected)\n\t}\n\tif elapsed > 500*time.Millisecond {\n\t\tt.Fatalf(\"CountValid took %v for n=%d, expected < 500ms (looks like the \"+\n\t\t\t\"regexp is still being recompiled every iteration)\", elapsed, n)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "validator.go": "package main\n\nimport \"regexp\"\n\nvar validPattern = regexp.MustCompile(`^user-\\d+@example\\.com$`)\n\n// CountValid returns how many lines match the fixed email-like pattern.\nfunc CountValid(lines []string) int {\n\tcount := 0\n\tfor _, line := range lines {\n\t\tif validPattern.MatchString(line) {\n\t\t\tcount++\n\t\t}\n\t}\n\treturn count\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-recompiles-every-call",
+      "files": {
+        "validator.go": "package main\n\nimport \"regexp\"\n\n// Correct output but still recompiles inside the loop via a helper - the\n// compile cost is paid every iteration either way.\nfunc compilePattern() *regexp.Regexp {\n\treturn regexp.MustCompile(`^user-\\d+@example\\.com$`)\n}\n\nfunc CountValid(lines []string) int {\n\tcount := 0\n\tfor _, line := range lines {\n\t\tre := compilePattern()\n\t\tif re.MatchString(line) {\n\t\t\tcount++\n\t\t}\n\t}\n\treturn count\n}\n"
+      }
+    }
+  ]
+}
