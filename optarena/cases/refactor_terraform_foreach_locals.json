@@ -1,0 +1,54 @@
+{
+  "name": "refactor_terraform_foreach_locals",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 150,
+  "timeout": 250,
+  "description": "Refactors three copy-pasted null_resource blocks into one for_each over a locals list, proven by real terraform validate",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "terraform",
+    "refactoring",
+    "hcl"
+  ],
+  "prompts": [
+    "main.tf declares three near-identical null_resource blocks (app_dev, app_staging, app_prod), each differing only in the triggers.environment value. Remove the duplication: define a `locals` block with a list of the three environment names (\"dev\", \"staging\", \"prod\"), and replace the three resource blocks with ONE `resource \"null_resource\" \"app\"` block using `for_each` over that list (e.g. `for_each = toset(local.environments)`), with `triggers = { environment = each.value }`. The file must still effectively create one instance per environment name, and `terraform validate` must still succeed."
+  ],
+  "setup_files": {
+    "main.tf": "resource \"null_resource\" \"app_dev\" {\n  triggers = {\n    environment = \"dev\"\n  }\n}\n\nresource \"null_resource\" \"app_staging\" {\n  triggers = {\n    environment = \"staging\"\n  }\n}\n\nresource \"null_resource\" \"app_prod\" {\n  triggers = {\n    environment = \"prod\"\n  }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": [
+        "for_each",
+        "locals"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_refactor.py": "import json\nimport re\nimport subprocess\n\nfmt = subprocess.run(['terraform', 'fmt', '-check'], capture_output=True, text=True)\nassert fmt.returncode == 0, f'terraform fmt -check failed:\\n{fmt.stdout}\\n{fmt.stderr}'\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'],\n                          capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}'\n\ncontent = open('main.tf', encoding='utf-8').read()\nresource_blocks = re.findall(r'resource\\s+\"null_resource\"\\s+\"(\\w+)\"', content)\nassert len(resource_blocks) == 1, f'expected exactly one null_resource block, found {resource_blocks}'\nassert 'for_each' in content, 'must use for_each instead of three duplicated blocks'\nfor env in ('dev', 'staging', 'prod'):\n    assert env in content, f'environment name {env!r} must still appear somewhere in main.tf'\n\nprint('PASS terraform for_each refactor checks')\n"
+  },
+  "check_command": "python3 check_refactor.py",
+  "reference_solution": {
+    "main.tf": "locals {\n  environments = [\"dev\", \"staging\", \"prod\"]\n}\n\nresource \"null_resource\" \"app\" {\n  for_each = toset(local.environments)\n\n  triggers = {\n    environment = each.value\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-duplicated",
+      "files": {
+        "main.tf": "resource \"null_resource\" \"app_dev\" {\n  triggers = {\n    environment = \"dev\"\n  }\n}\n\nresource \"null_resource\" \"app_staging\" {\n  triggers = {\n    environment = \"staging\"\n  }\n}\n\nresource \"null_resource\" \"app_prod\" {\n  triggers = {\n    environment = \"prod\"\n  }\n}\n"
+      }
+    },
+    {
+      "name": "drops-one-environment",
+      "files": {
+        "main.tf": "locals {\n  environments = [\"dev\", \"staging\"]\n}\n\nresource \"null_resource\" \"app\" {\n  for_each = toset(local.environments)\n\n  triggers = {\n    environment = each.value\n  }\n}\n"
+      }
+    }
+  ]
+}

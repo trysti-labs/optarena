@@ -1,0 +1,54 @@
+{
+  "name": "refactor_dockerfile_go_multistage_scratch",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Converts a single-stage Go Dockerfile shipping the full toolchain into a multi-stage build with a minimal final image",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "docker",
+    "dockerfile",
+    "multistage",
+    "go"
+  ],
+  "prompts": [
+    "The Dockerfile builds a Go binary but ships the ENTIRE golang:1.22 toolchain (compiler, full Go distribution, source code) in the production image - hundreds of MB and a much larger attack surface than the single static binary actually needs at runtime. Convert it to a multi-stage build: a 'builder' stage (still FROM golang:1.22) that compiles a statically-linked binary (CGO_ENABLED=0 go build -o /app/server .), and a final stage FROM a minimal base (scratch, or gcr.io/distroless/static-debian12) that only COPY --from=builder the compiled /app/server binary and runs it. The final stage must NOT contain the Go toolchain or any `go build`/`RUN go` command - only the compiled binary. Keep EXPOSE 8080 and the same startup behavior (running the server binary)."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM golang:1.22\n\nWORKDIR /app\nCOPY go.mod ./\nCOPY main.go ./\nRUN go build -o server .\n\nEXPOSE 8080\nCMD [\"./server\"]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "copy --from"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_dockerfile_multistage.py": "import re\n\ntext = open('Dockerfile', encoding='utf-8').read()\nlow = text.lower()\n\nfrom_lines = re.findall(r'(?mi)^\\s*FROM\\s+(\\S+)(?:\\s+AS\\s+(\\S+))?', text)\nassert len(from_lines) >= 2, f'expected a multi-stage build (>= 2 FROM lines), found {len(from_lines)}'\n\nfinal_base = from_lines[-1][0]\nassert not final_base.lower().startswith('golang'), (\n    f'final stage must not be the golang toolchain image, got {final_base!r}')\nassert ('scratch' in final_base.lower()) or ('distroless' in final_base.lower()), (\n    f'final stage should be a minimal base (scratch or distroless), got {final_base!r}')\n\nassert 'copy --from' in low, 'no COPY --from=<builder stage> instruction found'\n\n# the final stage (everything after the last FROM) must not build Go code\nfinal_stage_text = text[text.lower().rfind('\\nfrom '):]\nassert 'go build' not in final_stage_text.lower(), 'final stage still runs `go build` - toolchain not actually removed'\n\nassert re.search(r'(?mi)^\\s*EXPOSE\\s+8080', text), 'EXPOSE 8080 was dropped'\nassert 'server' in low, 'the server binary/CMD reference was lost'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_dockerfile_multistage.py",
+  "reference_solution": {
+    "Dockerfile": "FROM golang:1.22 AS builder\n\nWORKDIR /app\nCOPY go.mod ./\nCOPY main.go ./\nRUN CGO_ENABLED=0 go build -o /app/server .\n\nFROM scratch\n\nCOPY --from=builder /app/server /server\n\nEXPOSE 8080\nCMD [\"/server\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-single-stage",
+      "files": {
+        "Dockerfile": "FROM golang:1.22\n\nWORKDIR /app\nCOPY go.mod ./\nCOPY main.go ./\nRUN go build -o server .\n\nEXPOSE 8080\nCMD [\"./server\"]\n"
+      }
+    },
+    {
+      "name": "final-stage-still-golang-slim",
+      "files": {
+        "Dockerfile": "FROM golang:1.22 AS builder\n\nWORKDIR /app\nCOPY go.mod ./\nCOPY main.go ./\nRUN CGO_ENABLED=0 go build -o /app/server .\n\nFROM golang:1.22-slim\n\nCOPY --from=builder /app/server /server\n\nEXPOSE 8080\nCMD [\"/server\"]\n"
+      }
+    }
+  ]
+}

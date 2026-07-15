@@ -1,0 +1,54 @@
+{
+  "name": "add_github_actions_artifact_passing",
+  "language": "yaml",
+  "framework": "github-actions",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Passes a build output directory between jobs via upload-artifact/download-artifact instead of assuming shared filesystem state",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "github-actions",
+    "artifacts",
+    "yaml"
+  ],
+  "prompts": [
+    ".github/workflows/ci.yml has a build job that runs `npm run build` (producing dist/) and a separate deploy job that runs `./deploy.sh dist/` - but each job runs on its OWN fresh runner with its own filesystem, so deploy's dist/ never actually contains build's output. Fix this by adding an actions/upload-artifact step at the end of the build job (name it \"dist\", path dist/) and an actions/download-artifact step at the start of the deploy job (name \"dist\", downloading to path dist/) BEFORE the ./deploy.sh step. The artifact name must match between the upload and download steps. Keep both jobs' existing steps, the checkout steps, and the needs: build ordering."
+  ],
+  "setup_files": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm ci\n      - run: npm run build\n  deploy:\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./deploy.sh dist/\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/ci.yml",
+      "content_patterns": [
+        "upload-artifact",
+        "download-artifact"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_artifacts.py": "import yaml\n\nwith open('.github/workflows/ci.yml') as f:\n    wf = yaml.safe_load(f)\n\njobs = wf['jobs']\nbuild_steps = jobs['build']['steps']\ndeploy_steps = jobs['deploy']['steps']\n\nupload = next((s for s in build_steps if s.get('uses', '').startswith('actions/upload-artifact')), None)\nassert upload is not None, 'build job has no actions/upload-artifact step'\nupload_name = (upload.get('with') or {}).get('name')\nupload_path = (upload.get('with') or {}).get('path')\nassert upload_path and 'dist' in upload_path, f'upload-artifact path must include dist, got {upload_path!r}'\n\ndownload = next((s for s in deploy_steps if s.get('uses', '').startswith('actions/download-artifact')), None)\nassert download is not None, 'deploy job has no actions/download-artifact step'\ndownload_name = (download.get('with') or {}).get('name')\ndownload_path = (download.get('with') or {}).get('path')\n\nassert upload_name == download_name, (\n    f'artifact name mismatch: uploaded as {upload_name!r}, downloaded as {download_name!r}')\nassert download_path and 'dist' in download_path, f'download-artifact path must include dist, got {download_path!r}'\n\n# download must happen before deploy.sh runs\nrun_steps = [i for i, s in enumerate(deploy_steps) if 'deploy.sh' in (s.get('run') or '')]\ndownload_idx = deploy_steps.index(download)\nassert run_steps and download_idx < run_steps[0], 'download-artifact must run BEFORE ./deploy.sh'\n\n# structure preserved\nassert jobs['deploy'].get('needs') == 'build', 'needs ordering changed'\nfor name in ('build', 'deploy'):\n    assert any(s.get('uses', '').startswith('actions/checkout') for s in jobs[name]['steps']), f'{name} lost its checkout step'\nassert any('npm run build' in (s.get('run') or '') for s in build_steps), 'build step removed'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_artifacts.py",
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm ci\n      - run: npm run build\n      - uses: actions/upload-artifact@v4\n        with:\n          name: dist\n          path: dist/\n  deploy:\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/download-artifact@v4\n        with:\n          name: dist\n          path: dist/\n      - run: ./deploy.sh dist/\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-no-artifact-passing",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm ci\n      - run: npm run build\n  deploy:\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - uses: actions/checkout@v4\n      - run: ./deploy.sh dist/\n"
+      }
+    },
+    {
+      "name": "artifact-name-mismatch",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm ci\n      - run: npm run build\n      - uses: actions/upload-artifact@v4\n        with:\n          name: build-output\n          path: dist/\n  deploy:\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/download-artifact@v4\n        with:\n          name: dist\n          path: dist/\n      - run: ./deploy.sh dist/\n"
+      }
+    }
+  ]
+}

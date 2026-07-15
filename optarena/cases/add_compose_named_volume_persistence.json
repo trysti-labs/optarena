@@ -1,0 +1,54 @@
+{
+  "name": "add_compose_named_volume_persistence",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Adds a named volume so Postgres data survives container recreation, instead of being lost every restart",
+  "difficulty": 1,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "docker-compose",
+    "yaml",
+    "persistence"
+  ],
+  "prompts": [
+    "In docker-compose.yml, the 'db' (postgres) service has no volume at all - every time the container is recreated (an image update, `docker compose down`, a host reboot), all database data is permanently lost. Fix this: add a NAMED volume (not a host bind-mount path) mounted at /var/lib/postgresql/data in the db service, and declare that same named volume in the top-level `volumes:` section of the file. Keep the image, environment, and ports unchanged."
+  ],
+  "setup_files": {
+    "docker-compose.yml": "services:\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: secret\n    ports:\n      - \"5432:5432\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "volumes",
+        "/var/lib/postgresql/data"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_compose_volume.py": "import yaml\n\nwith open('docker-compose.yml') as f:\n    d = yaml.safe_load(f)\n\ndb = d['services']['db']\nmounts = db.get('volumes') or []\nassert mounts, 'db service has no volumes at all'\n\ndef parse_mount(m):\n    if isinstance(m, str):\n        parts = m.split(':')\n        return parts[0], parts[1] if len(parts) > 1 else None\n    if isinstance(m, dict):\n        return m.get('source'), m.get('target')\n    return None, None\n\nmatch = None\nfor m in mounts:\n    src, target = parse_mount(m)\n    if target == '/var/lib/postgresql/data':\n        match = src\n        break\nassert match is not None, 'no mount targets /var/lib/postgresql/data'\nassert not match.startswith('/') and not match.startswith('.'), (\n    f'must be a NAMED volume, not a host bind-mount path, got {match!r}')\n\ntop_volumes = d.get('volumes') or {}\nassert match in top_volumes, f'named volume {match!r} used in db service but not declared under top-level volumes:'\n\n# preserved\nassert db['image'] == 'postgres:16', 'db image changed'\nassert db['environment']['POSTGRES_PASSWORD'] == 'secret', 'db environment changed'\nassert '5432:5432' in [str(p) for p in db.get('ports', [])], 'db ports changed'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_compose_volume.py",
+  "reference_solution": {
+    "docker-compose.yml": "services:\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: secret\n    ports:\n      - \"5432:5432\"\n    volumes:\n      - db_data:/var/lib/postgresql/data\n\nvolumes:\n  db_data:\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified-no-volume",
+      "files": {
+        "docker-compose.yml": "services:\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: secret\n    ports:\n      - \"5432:5432\"\n"
+      }
+    },
+    {
+      "name": "host-bind-mount-not-named-volume",
+      "files": {
+        "docker-compose.yml": "services:\n  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: secret\n    ports:\n      - \"5432:5432\"\n    volumes:\n      - ./pgdata:/var/lib/postgresql/data\n"
+      }
+    }
+  ]
+}
