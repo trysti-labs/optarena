@@ -1,0 +1,53 @@
+{
+  "name": "add_tests_csharp_caesar_cipher",
+  "language": "csharp",
+  "framework": "xunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "description": "Asks the model to write xUnit tests for a Caesar cipher encoder; mutation-checked",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "csharp",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "CaesarCipher.Encode(string text, int shift) in CaesarCipher.cs (already correct - do not modify it) shifts every letter in text forward by shift positions in the alphabet, wrapping around (mod 26), preserving each letter's case, and passing non-letter characters through UNCHANGED. shift may be negative (shifting backward) or larger than 26. Write xUnit tests at exactly tests/CaesarCipherTests.cs (public class CaesarCipherTests) with at least 4 [Fact] methods using Assert.Equal that pin: a basic forward shift with no wraparound (e.g. \"abc\" shift 3 -> \"def\"); a shift that wraps around the end of the alphabet (e.g. \"xyz\" shift 3 -> \"abc\"); a NEGATIVE shift (e.g. \"abc\" shift -1 -> \"zab\"); and a string with mixed case and punctuation/spaces where non-letters and case are preserved (e.g. \"Hello, World!\" shift 3 -> \"Khoor, Zruog!\")."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <!-- tests/ has its own project; without this the SDK's default glob\n         compiles tests/*.cs into the app itself, where xunit isn't referenced -->\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "CaesarCipher.cs": "using System.Text;\n\npublic static class CaesarCipher\n{\n    public static string Encode(string text, int shift)\n    {\n        int s = ((shift % 26) + 26) % 26;\n        var sb = new StringBuilder();\n        foreach (char c in text)\n        {\n            if (c >= 'a' && c <= 'z')\n            {\n                sb.Append((char)('a' + (c - 'a' + s) % 26));\n            }\n            else if (c >= 'A' && c <= 'Z')\n            {\n                sb.Append((char)('A' + (c - 'A' + s) % 26));\n            }\n            else\n            {\n                sb.Append(c);\n            }\n        }\n        return sb.ToString();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/CaesarCipherTests.cs",
+      "content_patterns": [
+        "assert.equal",
+        "encode("
+      ],
+      "regex_patterns": [
+        "\\[Fact\\][\\s\\S]*\\[Fact\\][\\s\\S]*\\[Fact\\][\\s\\S]*\\[Fact\\]"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"Microsoft.AspNetCore.Mvc.Testing\" Version=\"8.0.10\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "mutation_check.py": "import subprocess\nfrom pathlib import Path\n\nIMPL = Path('CaesarCipher.cs')\nTEST_CMD = 'dotnet test tests/tests.csproj'\nMUTANTS = [\n    ['int s = ((shift % 26) + 26) % 26;', 'int s = shift % 26;'],\n    [\"sb.Append((char)('a' + (c - 'a' + s) % 26));\", \"sb.Append((char)('a' + (c - 'a' + s)));\"],\n    ['                sb.Append(c);', \"                sb.Append(' ');\"],\n]\n\n\ndef run_tests():\n    return subprocess.run(TEST_CMD, shell=True).returncode\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f'protected implementation file {IMPL} was modified - the task said not to '\n        f'change it (anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately '\n            f'broken implementation, so they do not verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint(f'PASS (killed all {len(MUTANTS)} mutants)')\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "tests/CaesarCipherTests.cs": "using Xunit;\n\npublic class CaesarCipherTests\n{\n    [Fact]\n    public void BasicForwardShift()\n    {\n        Assert.Equal(\"def\", CaesarCipher.Encode(\"abc\", 3));\n    }\n\n    [Fact]\n    public void WrapsAroundAlphabetEnd()\n    {\n        Assert.Equal(\"abc\", CaesarCipher.Encode(\"xyz\", 3));\n    }\n\n    [Fact]\n    public void NegativeShiftWrapsBackward()\n    {\n        Assert.Equal(\"zab\", CaesarCipher.Encode(\"abc\", -1));\n    }\n\n    [Fact]\n    public void PreservesCaseAndNonLetters()\n    {\n        Assert.Equal(\"Khoor, Zruog!\", CaesarCipher.Encode(\"Hello, World!\", 3));\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "tests/CaesarCipherTests.cs": "using Xunit;\n\npublic class CaesarCipherTests\n{\n    [Fact]\n    public void ReturnsSameLength()\n    {\n        Assert.Equal(\"abc\".Length, CaesarCipher.Encode(\"abc\", 3).Length);\n    }\n\n    [Fact]\n    public void ShiftZeroIsIdentity()\n    {\n        Assert.Equal(\"abc\", CaesarCipher.Encode(\"abc\", 0));\n    }\n\n    [Fact]\n    public void NotEmpty()\n    {\n        Assert.NotEmpty(CaesarCipher.Encode(\"abc\", 5));\n    }\n\n    [Fact]\n    public void Another()\n    {\n        Assert.Equal(\"abc\".Length, CaesarCipher.Encode(\"abc\", -3).Length);\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "optimize_csharp_regex_compiled_per_call",
+  "language": "csharp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Optimizes a validator that constructs a new Regex on every call to a single compiled instance",
+  "difficulty": 1,
+  "task_type": "performance",
+  "tags": [
+    "csharp",
+    "performance",
+    "regex"
+  ],
+  "prompts": [
+    "Validator.CountValid(string[] lines) in Validator.cs counts how many strings in lines match the email-like pattern `^user-\\d+@example\\.com$`. It constructs `new Regex(pattern)` INSIDE the loop, once per line - parsing and building the regex engine state for the same fixed pattern on every call is wasted work and makes the function far too slow for large inputs. Rewrite CountValid so the Regex is constructed ONCE (e.g. a static readonly field) and reused for every line, returning the exact same count. Keep the class name and the CountValid(string[]) signature."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <!-- tests/ has its own project; without this the SDK's default glob\n         compiles tests/*.cs into the app itself, where xunit isn't referenced -->\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "Validator.cs": "using System.Text.RegularExpressions;\n\npublic static class Validator\n{\n    // BUG: constructs a new Regex INSIDE the loop - re-parses the same fixed\n    // pattern on every call, unusably slow for large inputs.\n    public static int CountValid(string[] lines)\n    {\n        int count = 0;\n        foreach (var line in lines)\n        {\n            var re = new Regex(@\"^user-\\d+@example\\.com$\");\n            if (re.IsMatch(line))\n            {\n                count++;\n            }\n        }\n        return count;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Validator.cs",
+      "content_patterns": [
+        "countvalid"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"Microsoft.AspNetCore.Mvc.Testing\" Version=\"8.0.10\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/ValidatorTests.cs": "using System;\nusing System.Diagnostics;\nusing Xunit;\n\npublic class ValidatorTests\n{\n    [Fact]\n    public void CountsValidLines()\n    {\n        var lines = new[] { \"user-1@example.com\", \"nope\", \"user-42@example.com\", \"user-x@example.com\" };\n        Assert.Equal(2, Validator.CountValid(lines));\n    }\n\n    [Fact]\n    public void EmptyIsZero()\n    {\n        Assert.Equal(0, Validator.CountValid(Array.Empty<string>()));\n    }\n\n    [Fact]\n    public void PerformanceLargeInput()\n    {\n        int n = 300_000;\n        var lines = new string[n];\n        int expected = 0;\n        for (int i = 0; i < n; i++)\n        {\n            if (i % 3 == 0)\n            {\n                lines[i] = $\"user-{i}@example.com\";\n                expected++;\n            }\n            else\n            {\n                lines[i] = $\"nope-{i}\";\n            }\n        }\n\n        var sw = Stopwatch.StartNew();\n        var got = Validator.CountValid(lines);\n        sw.Stop();\n\n        Assert.Equal(expected, got);\n        Assert.True(\n            sw.ElapsedMilliseconds < 800,\n            $\"CountValid took {sw.ElapsedMilliseconds}ms for {n} lines; expected a Regex compiled once, not per call\");\n    }\n}\n"
+  },
+  "check_command": "dotnet test tests/tests.csproj",
+  "reference_solution": {
+    "Validator.cs": "using System.Text.RegularExpressions;\n\npublic static class Validator\n{\n    private static readonly Regex ValidPattern = new Regex(@\"^user-\\d+@example\\.com$\");\n\n    public static int CountValid(string[] lines)\n    {\n        int count = 0;\n        foreach (var line in lines)\n        {\n            if (ValidPattern.IsMatch(line))\n            {\n                count++;\n            }\n        }\n        return count;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-constructs-every-call",
+      "files": {
+        "Validator.cs": "using System.Text.RegularExpressions;\n\npublic static class Validator\n{\n    // Correct output but still constructs a Regex per call via a helper -\n    // the parse cost is paid every iteration either way.\n    private static Regex MakePattern() => new Regex(@\"^user-\\d+@example\\.com$\");\n\n    public static int CountValid(string[] lines)\n    {\n        int count = 0;\n        foreach (var line in lines)\n        {\n            var re = MakePattern();\n            if (re.IsMatch(line))\n            {\n                count++;\n            }\n        }\n        return count;\n    }\n}\n"
+      }
+    }
+  ]
+}
