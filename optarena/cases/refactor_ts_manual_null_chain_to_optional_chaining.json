@@ -1,0 +1,52 @@
+{
+  "name": "refactor_ts_manual_null_chain_to_optional_chaining",
+  "language": "typescript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Refactors a manual null/undefined-chasing chain into optional chaining and nullish coalescing",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "typescript",
+    "refactoring",
+    "optional-chaining",
+    "idiom"
+  ],
+  "prompts": [
+    "cityOf(user) in cityof.ts extracts user.address.city, falling back to \"Unknown\" whenever user, user.address, or user.address.city is missing (null/undefined at any level). It does this with a manual `if (user && user.address && ...)` chain of explicit checks. Refactor it to use optional chaining (`?.`) and the nullish-coalescing operator (`??`) instead of the manual chain. Do not change observable behavior: a fully-populated user still returns the city, and a missing user / missing address / missing or null city all still return exactly \"Unknown\". Keep the function name and signature (user: User | null | undefined)."
+  ],
+  "setup_files": {
+    "cityof.ts": "interface Address {\n  city?: string;\n}\n\ninterface User {\n  address?: Address;\n}\n\nexport function cityOf(user: User | null | undefined): string {\n  if (user && user.address && user.address.city !== undefined && user.address.city !== null) {\n    return user.address.city;\n  }\n  return \"Unknown\";\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "cityof.ts",
+      "content_patterns": [
+        "?.",
+        "??"
+      ],
+      "not_content_patterns": [
+        "user.address.city !== undefined"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build cityof.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require('assert');\nconst { cityOf } = require('./build/cityof.js');\n\nassert.strictEqual(cityOf({ address: { city: 'Paris' } }), 'Paris');\nassert.strictEqual(cityOf(null), 'Unknown');\nassert.strictEqual(cityOf(undefined), 'Unknown');\nassert.strictEqual(cityOf({}), 'Unknown');\nassert.strictEqual(cityOf({ address: {} }), 'Unknown');\nassert.strictEqual(cityOf({ address: { city: undefined } }), 'Unknown');\n\nconsole.log('ok');\n"
+  },
+  "check_command": "sh run_checks.sh",
+  "reference_solution": {
+    "cityof.ts": "interface Address {\n  city?: string;\n}\n\ninterface User {\n  address?: Address;\n}\n\nexport function cityOf(user: User | null | undefined): string {\n  return user?.address?.city ?? \"Unknown\";\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "drift-empty-string-not-unknown",
+      "files": {
+        "cityof.ts": "interface Address {\n  city?: string;\n}\n\ninterface User {\n  address?: Address;\n}\n\n// DRIFT: falls back to an empty string instead of the required \"Unknown\"\n// sentinel when the city is missing.\nexport function cityOf(user: User | null | undefined): string {\n  return user?.address?.city ?? \"\";\n}\n"
+      }
+    }
+  ]
+}

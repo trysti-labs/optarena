@@ -1,0 +1,49 @@
+{
+  "name": "refactor_c_duplicated_validation_to_helper",
+  "language": "c",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Extracts a duplicated NULL/empty-array guard clause into a shared validation helper across three functions",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "c",
+    "refactoring",
+    "dry"
+  ],
+  "prompts": [
+    "stats.c defines array_sum, array_min, and array_max, each taking (const int *arr, int len, int *out) and returning 0 on success or -1 if arr is NULL or len <= 0. All three start with the IDENTICAL guard clause `if (arr == NULL || len <= 0) { return -1; }` before doing their own computation. Refactor stats.c to eliminate this duplication: add a static helper function (e.g. `static int is_valid_array(const int *arr, int len)`) that performs the check once, and have all three functions call it instead of repeating the raw condition. Do not change any function's signature or behavior - each must still return -1 for a NULL array or non-positive length, and the same computed result as before otherwise."
+  ],
+  "setup_files": {
+    "stats.c": "#include <stddef.h>\n\nint array_sum(const int *arr, int len, int *out) {\n    if (arr == NULL || len <= 0) {\n        return -1;\n    }\n    int total = 0;\n    for (int i = 0; i < len; i++) {\n        total += arr[i];\n    }\n    *out = total;\n    return 0;\n}\n\nint array_min(const int *arr, int len, int *out) {\n    if (arr == NULL || len <= 0) {\n        return -1;\n    }\n    int m = arr[0];\n    for (int i = 1; i < len; i++) {\n        if (arr[i] < m) {\n            m = arr[i];\n        }\n    }\n    *out = m;\n    return 0;\n}\n\nint array_max(const int *arr, int len, int *out) {\n    if (arr == NULL || len <= 0) {\n        return -1;\n    }\n    int m = arr[0];\n    for (int i = 1; i < len; i++) {\n        if (arr[i] > m) {\n            m = arr[i];\n        }\n    }\n    *out = m;\n    return 0;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "stats.c",
+      "content_patterns": [
+        "array_sum",
+        "array_min",
+        "array_max"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_stats_main.c": "#include <stdio.h>\n\nint array_sum(const int *arr, int len, int *out);\nint array_min(const int *arr, int len, int *out);\nint array_max(const int *arr, int len, int *out);\n\nint main(void) {\n    int data[] = {5, 2, 9, 1, 7};\n    int out;\n\n    if (array_sum(data, 5, &out) != 0 || out != 24) {\n        printf(\"FAIL sum: got %d\\n\", out);\n        return 1;\n    }\n    if (array_min(data, 5, &out) != 0 || out != 1) {\n        printf(\"FAIL min: got %d\\n\", out);\n        return 1;\n    }\n    if (array_max(data, 5, &out) != 0 || out != 9) {\n        printf(\"FAIL max: got %d\\n\", out);\n        return 1;\n    }\n\n    if (array_sum(NULL, 5, &out) != -1) {\n        printf(\"FAIL: sum should reject NULL array\\n\");\n        return 1;\n    }\n    if (array_min(data, 0, &out) != -1) {\n        printf(\"FAIL: min should reject zero length\\n\");\n        return 1;\n    }\n    if (array_max(data, -1, &out) != -1) {\n        printf(\"FAIL: max should reject negative length\\n\");\n        return 1;\n    }\n\n    printf(\"PASS\\n\");\n    return 0;\n}\n",
+    "test_stats.py": "import re\nimport subprocess\n\nsubprocess.run(['gcc', 'stats.c', 'test_stats_main.c', '-o', 'test_stats_bin'], check=True)\nproc = subprocess.run(['./test_stats_bin'], capture_output=True, text=True, timeout=10)\nassert proc.returncode == 0, f'refactor test failed: exit {proc.returncode}, stdout={proc.stdout}, stderr={proc.stderr[-300:]}'\nassert 'PASS' in proc.stdout\n\nsource = open('stats.c', encoding='utf-8').read()\n# Match the guard condition regardless of which direction it was written\n# (arr == NULL or arr != NULL) - it must appear as an inline check at most\n# once (inside a shared helper), not once per function.\ninline_checks = len(re.findall(r'arr\\s*[=!]=\\s*NULL', source))\nassert inline_checks <= 1, (\n    f'the NULL/length guard condition still appears inline {inline_checks} times - it must be '\n    f'extracted into one shared helper, not repeated per function')\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_stats.py",
+  "reference_solution": {
+    "stats.c": "#include <stddef.h>\n\nstatic int is_valid_array(const int *arr, int len) {\n    return arr != NULL && len > 0;\n}\n\nint array_sum(const int *arr, int len, int *out) {\n    if (!is_valid_array(arr, len)) {\n        return -1;\n    }\n    int total = 0;\n    for (int i = 0; i < len; i++) {\n        total += arr[i];\n    }\n    *out = total;\n    return 0;\n}\n\nint array_min(const int *arr, int len, int *out) {\n    if (!is_valid_array(arr, len)) {\n        return -1;\n    }\n    int m = arr[0];\n    for (int i = 1; i < len; i++) {\n        if (arr[i] < m) {\n            m = arr[i];\n        }\n    }\n    *out = m;\n    return 0;\n}\n\nint array_max(const int *arr, int len, int *out) {\n    if (!is_valid_array(arr, len)) {\n        return -1;\n    }\n    int m = arr[0];\n    for (int i = 1; i < len; i++) {\n        if (arr[i] > m) {\n            m = arr[i];\n        }\n    }\n    *out = m;\n    return 0;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "drift-helper-off-by-one",
+      "files": {
+        "stats.c": "#include <stddef.h>\n\n// DRIFT: len >= 0 wrongly accepts a zero-length array as valid, then reads\n// arr[0] out of bounds in array_min/array_max.\nstatic int is_valid_array(const int *arr, int len) {\n    return arr != NULL && len >= 0;\n}\n\nint array_sum(const int *arr, int len, int *out) {\n    if (!is_valid_array(arr, len)) {\n        return -1;\n    }\n    int total = 0;\n    for (int i = 0; i < len; i++) {\n        total += arr[i];\n    }\n    *out = total;\n    return 0;\n}\n\nint array_min(const int *arr, int len, int *out) {\n    if (!is_valid_array(arr, len)) {\n        return -1;\n    }\n    int m = arr[0];\n    for (int i = 1; i < len; i++) {\n        if (arr[i] < m) {\n            m = arr[i];\n        }\n    }\n    *out = m;\n    return 0;\n}\n\nint array_max(const int *arr, int len, int *out) {\n    if (!is_valid_array(arr, len)) {\n        return -1;\n    }\n    int m = arr[0];\n    for (int i = 1; i < len; i++) {\n        if (arr[i] > m) {\n            m = arr[i];\n        }\n    }\n    *out = m;\n    return 0;\n}\n"
+      }
+    }
+  ]
+}

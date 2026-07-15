@@ -1,0 +1,50 @@
+{
+  "name": "refactor_go_duplicated_env_checks_to_helper",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Extracts duplicated required-environment-variable boilerplate into a shared requireEnv helper",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "go",
+    "refactoring",
+    "dry"
+  ],
+  "prompts": [
+    "config.go defines LoadDatabaseURL, LoadAPIKey, and LoadRegion, each reading one environment variable via os.Getenv and returning the IDENTICAL error `fmt.Errorf(\"missing required environment variable: %s\", name)` when it's empty. Refactor config.go to remove this duplication: add a helper `func requireEnv(name string) (string, error)` that performs the getenv-and-check-empty logic once, and have all three Load* functions call it with their own variable name instead of repeating the pattern. Keep every function's signature and behavior identical: each must still return the value when set and the exact same error message (naming its OWN variable) when the corresponding environment variable is unset or empty."
+  ],
+  "setup_files": {
+    "go.mod": "module envconfig\n\ngo 1.22\n",
+    "config.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc LoadDatabaseURL() (string, error) {\n\tv := os.Getenv(\"DATABASE_URL\")\n\tif v == \"\" {\n\t\treturn \"\", fmt.Errorf(\"missing required environment variable: %s\", \"DATABASE_URL\")\n\t}\n\treturn v, nil\n}\n\nfunc LoadAPIKey() (string, error) {\n\tv := os.Getenv(\"API_KEY\")\n\tif v == \"\" {\n\t\treturn \"\", fmt.Errorf(\"missing required environment variable: %s\", \"API_KEY\")\n\t}\n\treturn v, nil\n}\n\nfunc LoadRegion() (string, error) {\n\tv := os.Getenv(\"REGION\")\n\tif v == \"\" {\n\t\treturn \"\", fmt.Errorf(\"missing required environment variable: %s\", \"REGION\")\n\t}\n\treturn v, nil\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "config.go",
+      "content_patterns": [
+        "loaddatabaseurl",
+        "loadapikey",
+        "loadregion"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "config_test.go": "package main\n\nimport (\n\t\"os\"\n\t\"strings\"\n\t\"testing\"\n)\n\nfunc TestLoadersReturnSetValue(t *testing.T) {\n\tos.Setenv(\"DATABASE_URL\", \"postgres://x\")\n\tdefer os.Unsetenv(\"DATABASE_URL\")\n\n\tgot, err := LoadDatabaseURL()\n\tif err != nil || got != \"postgres://x\" {\n\t\tt.Fatalf(\"LoadDatabaseURL() = %q, %v\", got, err)\n\t}\n}\n\nfunc TestLoadersErrorWhenUnset(t *testing.T) {\n\tos.Unsetenv(\"API_KEY\")\n\n\t_, err := LoadAPIKey()\n\tif err == nil {\n\t\tt.Fatal(\"expected an error when API_KEY is unset\")\n\t}\n\tif !strings.Contains(err.Error(), \"API_KEY\") {\n\t\tt.Fatalf(\"error message must name the missing variable API_KEY, got: %v\", err)\n\t}\n}\n\nfunc TestEachLoaderNamesItsOwnVariable(t *testing.T) {\n\tos.Unsetenv(\"REGION\")\n\t_, err := LoadRegion()\n\tif err == nil || !strings.Contains(err.Error(), \"REGION\") {\n\t\tt.Fatalf(\"expected an error naming REGION, got: %v\", err)\n\t}\n\n\tos.Unsetenv(\"DATABASE_URL\")\n\t_, err = LoadDatabaseURL()\n\tif err == nil || !strings.Contains(err.Error(), \"DATABASE_URL\") {\n\t\tt.Fatalf(\"expected an error naming DATABASE_URL, got: %v\", err)\n\t}\n}\n",
+    "check_dedup.py": "import re\n\nsource = open('config.go', encoding='utf-8').read()\n# Match the error FORMAT STRING literal, not a fully-rendered message (which\n# would legitimately appear once per call site even after a correct\n# refactor) - the format string itself must appear only once, inside one\n# shared helper, not once per Load* function.\noccurrences = len(re.findall(r'missing required environment variable: %s', source))\nassert occurrences <= 1, (\n    f'the error format string still appears {occurrences} times - it must be extracted into '\n    f'one shared helper (e.g. requireEnv), not repeated per function')\nprint('PASS')\n"
+  },
+  "check_command": "sh -c \"go test ./... && python3 check_dedup.py\"",
+  "reference_solution": {
+    "config.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc requireEnv(name string) (string, error) {\n\tv := os.Getenv(name)\n\tif v == \"\" {\n\t\treturn \"\", fmt.Errorf(\"missing required environment variable: %s\", name)\n\t}\n\treturn v, nil\n}\n\nfunc LoadDatabaseURL() (string, error) {\n\treturn requireEnv(\"DATABASE_URL\")\n}\n\nfunc LoadAPIKey() (string, error) {\n\treturn requireEnv(\"API_KEY\")\n}\n\nfunc LoadRegion() (string, error) {\n\treturn requireEnv(\"REGION\")\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "drift-wrong-var-names-swapped",
+      "files": {
+        "config.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc requireEnv(name string) (string, error) {\n\tv := os.Getenv(name)\n\tif v == \"\" {\n\t\treturn \"\", fmt.Errorf(\"missing required environment variable: %s\", name)\n\t}\n\treturn v, nil\n}\n\n// DRIFT: LoadAPIKey and LoadRegion now check the WRONG environment variables\n// (copy-paste mistake while extracting the helper).\nfunc LoadDatabaseURL() (string, error) {\n\treturn requireEnv(\"DATABASE_URL\")\n}\n\nfunc LoadAPIKey() (string, error) {\n\treturn requireEnv(\"REGION\")\n}\n\nfunc LoadRegion() (string, error) {\n\treturn requireEnv(\"API_KEY\")\n}\n"
+      }
+    }
+  ]
+}

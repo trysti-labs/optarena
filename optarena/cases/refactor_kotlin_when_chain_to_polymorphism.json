@@ -1,0 +1,51 @@
+{
+  "name": "refactor_kotlin_when_chain_to_polymorphism",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Refactors an external type-checking when-chain over a sealed class into polymorphic per-subclass area() methods",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "kotlin",
+    "refactoring",
+    "polymorphism",
+    "sealed-class"
+  ],
+  "prompts": [
+    "Shapes.area(shape: Shape) in src/main/kotlin/com/optarena/app/Shape.kt computes the area of a Shape (a sealed class with data classes Circle, Rectangle, Triangle) using an external `when (shape) { is Circle -> ...; is Rectangle -> ...; is Triangle -> ... }` chain. Refactor this to polymorphism: give Shape an abstract `fun area(): Double`, and implement it directly in each subclass (Circle, Rectangle, Triangle) with its own formula, removing the external type-switching entirely. Circle's area is pi * radius^2, Rectangle's is width * height, Triangle's is 0.5 * base * height - keep these exact formulas. The Shapes object and its area(shape: Shape): Double function may remain as a thin wrapper that calls shape.area(), or be removed entirely - either way, calling code that computes an area for a Circle/Rectangle/Triangle must still get the same numeric result. The file declares package com.optarena.app."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Shape.kt": "package com.optarena.app\n\nsealed class Shape\ndata class Circle(val radius: Double) : Shape()\ndata class Rectangle(val width: Double, val height: Double) : Shape()\ndata class Triangle(val base: Double, val height: Double) : Shape()\n\nobject Shapes {\n    fun area(shape: Shape): Double = when (shape) {\n        is Circle -> Math.PI * shape.radius * shape.radius\n        is Rectangle -> shape.width * shape.height\n        is Triangle -> 0.5 * shape.base * shape.height\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Shape.kt",
+      "content_patterns": [
+        "fun area"
+      ],
+      "not_content_patterns": [
+        "is circle ->"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/ShapePolymorphismTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass ShapePolymorphismTest {\n\n    @Test\n    fun circleArea() {\n        val c = Circle(2.0)\n        assertEquals(Math.PI * 4.0, c.area(), 1e-9)\n    }\n\n    @Test\n    fun rectangleArea() {\n        val r = Rectangle(3.0, 4.0)\n        assertEquals(12.0, r.area(), 1e-9)\n    }\n\n    @Test\n    fun triangleArea() {\n        val t = Triangle(6.0, 5.0)\n        assertEquals(15.0, t.area(), 1e-9)\n    }\n\n    @Test\n    fun polymorphicListSum() {\n        val shapes: List<Shape> = listOf(Circle(1.0), Rectangle(2.0, 3.0), Triangle(4.0, 2.0))\n        val total = shapes.sumOf { it.area() }\n        assertEquals(Math.PI + 6.0 + 4.0, total, 1e-9)\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=ShapePolymorphismTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Shape.kt": "package com.optarena.app\n\nsealed class Shape {\n    abstract fun area(): Double\n}\n\ndata class Circle(val radius: Double) : Shape() {\n    override fun area(): Double = Math.PI * radius * radius\n}\n\ndata class Rectangle(val width: Double, val height: Double) : Shape() {\n    override fun area(): Double = width * height\n}\n\ndata class Triangle(val base: Double, val height: Double) : Shape() {\n    override fun area(): Double = 0.5 * base * height\n}\n\nobject Shapes {\n    fun area(shape: Shape): Double = shape.area()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "drift-triangle-formula-wrong",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Shape.kt": "package com.optarena.app\n\nsealed class Shape {\n    abstract fun area(): Double\n}\n\ndata class Circle(val radius: Double) : Shape() {\n    override fun area(): Double = Math.PI * radius * radius\n}\n\ndata class Rectangle(val width: Double, val height: Double) : Shape() {\n    override fun area(): Double = width * height\n}\n\n// DRIFT: dropped the 0.5 factor - triangle area is now double what it should be.\ndata class Triangle(val base: Double, val height: Double) : Shape() {\n    override fun area(): Double = base * height\n}\n\nobject Shapes {\n    fun area(shape: Shape): Double = shape.area()\n}\n"
+      }
+    }
+  ]
+}

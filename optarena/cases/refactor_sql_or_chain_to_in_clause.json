@@ -1,0 +1,50 @@
+{
+  "name": "refactor_sql_or_chain_to_in_clause",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Refactors a manual OR-chain of equality checks on the same column into a single IN clause",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "sql",
+    "refactoring",
+    "idiom",
+    "sqlite"
+  ],
+  "prompts": [
+    "query.sql selects active orders using `WHERE status = 'pending' OR status = 'processing' OR status = 'shipped'` - three equality checks on the SAME column, OR'd together. Refactor it to use a single `WHERE status IN ('pending', 'processing', 'shipped')` clause instead. The result set must be identical: the same rows, in the same order (ORDER BY id), with the same columns."
+  ],
+  "setup_files": {
+    "query.sql": "-- Orders that are still \"active\" in the fulfillment pipeline.\nSELECT id, customer, status\nFROM orders\nWHERE status = 'pending' OR status = 'processing' OR status = 'shipped'\nORDER BY id;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "query.sql",
+      "content_patterns": [
+        " in ("
+      ],
+      "not_content_patterns": [
+        "status = 'pending' or"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_query.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nconn.executescript('''\n    CREATE TABLE orders (id INTEGER PRIMARY KEY, customer TEXT, status TEXT);\n    INSERT INTO orders VALUES\n        (1, 'Ada', 'pending'),\n        (2, 'Bob', 'delivered'),\n        (3, 'Cy', 'processing'),\n        (4, 'Dee', 'cancelled'),\n        (5, 'Eve', 'shipped'),\n        (6, 'Fay', 'pending');\n''')\n\nsql = open('query.sql').read()\ngot = [tuple(r) for r in conn.execute(sql).fetchall()]\nexpected = [\n    (1, 'Ada', 'pending'),\n    (3, 'Cy', 'processing'),\n    (5, 'Eve', 'shipped'),\n    (6, 'Fay', 'pending'),\n]\nassert got == expected, f'result set changed: {got}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_query.py",
+  "reference_solution": {
+    "query.sql": "-- Orders that are still \"active\" in the fulfillment pipeline.\nSELECT id, customer, status\nFROM orders\nWHERE status IN ('pending', 'processing', 'shipped')\nORDER BY id;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "drift-dropped-one-status",
+      "files": {
+        "query.sql": "-- DRIFT: dropped 'shipped' from the IN list.\nSELECT id, customer, status\nFROM orders\nWHERE status IN ('pending', 'processing')\nORDER BY id;\n"
+      }
+    }
+  ]
+}

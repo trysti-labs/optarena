@@ -1,0 +1,52 @@
+{
+  "name": "refactor_rust_manual_loop_to_iterator_chain",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Refactors a manual index-based while loop into an iterator chain (enumerate/map/collect)",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "rust",
+    "refactoring",
+    "iterators",
+    "idiom"
+  ],
+  "prompts": [
+    "ranked_labels(scores: &[i32]) -> Vec<String> in src/lib.rs builds one \"<rank>: <score>\" label per score (1-based rank, in input order) using a manual index-based `while` loop with a mutable counter. Refactor it to use an iterator chain instead - `.iter().enumerate()` (or `.iter().zip(1..)`), `.map(...)`, `.collect()` - with no manual index variable or while loop. Do not change observable behavior: the output must be the exact same Vec<String> in the exact same order for any input, including an empty slice returning an empty Vec. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"ranked_labels\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub fn ranked_labels(scores: &[i32]) -> Vec<String> {\n    let mut result = Vec::new();\n    let mut i = 0;\n    while i < scores.len() {\n        result.push(format!(\"{}: {}\", i + 1, scores[i]));\n        i += 1;\n    }\n    result\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "fn ranked_labels",
+        "enumerate"
+      ],
+      "not_content_patterns": [
+        "while i <"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/ranked_labels_test.rs": "use ranked_labels::ranked_labels;\n\n#[test]\nfn basic_ranking() {\n    assert_eq!(\n        ranked_labels(&[10, 20, 30]),\n        vec![\"1: 10\".to_string(), \"2: 20\".to_string(), \"3: 30\".to_string()]\n    );\n}\n\n#[test]\nfn preserves_input_order_including_duplicates() {\n    assert_eq!(\n        ranked_labels(&[5, 5, 1]),\n        vec![\"1: 5\".to_string(), \"2: 5\".to_string(), \"3: 1\".to_string()]\n    );\n}\n\n#[test]\nfn empty_slice_returns_empty_vec() {\n    let empty: &[i32] = &[];\n    assert_eq!(ranked_labels(empty), Vec::<String>::new());\n}\n\n#[test]\nfn single_element() {\n    assert_eq!(ranked_labels(&[42]), vec![\"1: 42\".to_string()]);\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "pub fn ranked_labels(scores: &[i32]) -> Vec<String> {\n    scores\n        .iter()\n        .enumerate()\n        .map(|(i, score)| format!(\"{}: {}\", i + 1, score))\n        .collect()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "drift-zero-based-rank",
+      "files": {
+        "src/lib.rs": "// DRIFT: rank is now 0-based instead of 1-based.\npub fn ranked_labels(scores: &[i32]) -> Vec<String> {\n    scores\n        .iter()\n        .enumerate()\n        .map(|(i, score)| format!(\"{}: {}\", i, score))\n        .collect()\n}\n"
+      }
+    }
+  ]
+}
