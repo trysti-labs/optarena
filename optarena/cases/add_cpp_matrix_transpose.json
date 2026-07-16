@@ -1,0 +1,46 @@
+{
+  "name": "add_cpp_matrix_transpose",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Add transpose() to a Matrix class; broken iterates the loop but never swaps the (r, c) coordinates, so the result is just a same-shape deep copy - wrong shape and values for any non-square matrix",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "matrix",
+    "data-structures"
+  ],
+  "prompts": [
+    "Matrix in matrix.h wraps a 2D vector<vector<int>> with rows(), cols(), and at(r, c), but has no transpose(). Add a transpose() method that returns a NEW Matrix with rows and columns swapped: the returned matrix's row count equals this->cols(), its column count equals this->rows(), and result.at(c, r) == this->at(r, c) for every valid (r, c). Must work correctly for non-square matrices (including a single row or a single column), not just square ones. Do not mutate the original Matrix."
+  ],
+  "setup_files": {
+    "matrix.h": "#pragma once\n#include <vector>\n\nclass Matrix {\npublic:\n    explicit Matrix(std::vector<std::vector<int>> data) : data_(std::move(data)) {}\n\n    int rows() const { return (int)data_.size(); }\n    int cols() const { return data_.empty() ? 0 : (int)data_[0].size(); }\n    int at(int r, int c) const { return data_[r][c]; }\n\n    // TODO: add transpose()\n\nprivate:\n    std::vector<std::vector<int>> data_;\n};\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "matrix.h",
+      "content_patterns": [
+        "transpose"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_matrix.cpp": "#include \"matrix.h\"\n#include <cassert>\n#include <iostream>\n\nint main() {\n    // non-square, so a coordinate-swap bug or a wrong-shape bug both show up\n    Matrix m({{1, 2, 3}, {4, 5, 6}});\n    Matrix t = m.transpose();\n\n    assert(t.rows() == 3);\n    assert(t.cols() == 2);\n    assert(t.at(0, 0) == 1 && t.at(0, 1) == 4);\n    assert(t.at(1, 0) == 2 && t.at(1, 1) == 5);\n    assert(t.at(2, 0) == 3 && t.at(2, 1) == 6);\n\n    // transposing twice returns the original shape and values\n    Matrix tt = t.transpose();\n    assert(tt.rows() == 2 && tt.cols() == 3);\n    for (int r = 0; r < 2; r++) {\n        for (int c = 0; c < 3; c++) {\n            assert(tt.at(r, c) == m.at(r, c));\n        }\n    }\n\n    // single row / single column edge cases\n    Matrix row({{7, 8, 9}});\n    Matrix rowT = row.transpose();\n    assert(rowT.rows() == 3 && rowT.cols() == 1);\n    assert(rowT.at(0, 0) == 7 && rowT.at(1, 0) == 8 && rowT.at(2, 0) == 9);\n\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  },
+  "check_command": "g++ -std=c++17 test_matrix.cpp -o test_matrix_bin && ./test_matrix_bin",
+  "reference_solution": {
+    "matrix.h": "#pragma once\n#include <vector>\n\nclass Matrix {\npublic:\n    explicit Matrix(std::vector<std::vector<int>> data) : data_(std::move(data)) {}\n\n    int rows() const { return (int)data_.size(); }\n    int cols() const { return data_.empty() ? 0 : (int)data_[0].size(); }\n    int at(int r, int c) const { return data_[r][c]; }\n\n    // Returns a new Matrix with rows/cols swapped: result(c, r) == this->at(r, c).\n    Matrix transpose() const {\n        std::vector<std::vector<int>> result(cols(), std::vector<int>(rows()));\n        for (int r = 0; r < rows(); r++) {\n            for (int c = 0; c < cols(); c++) {\n                result[c][r] = data_[r][c];\n            }\n        }\n        return Matrix(result);\n    }\n\nprivate:\n    std::vector<std::vector<int>> data_;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "forgot-to-swap-coordinates",
+      "files": {
+        "matrix.h": "#pragma once\n#include <vector>\n\nclass Matrix {\npublic:\n    explicit Matrix(std::vector<std::vector<int>> data) : data_(std::move(data)) {}\n\n    int rows() const { return (int)data_.size(); }\n    int cols() const { return data_.empty() ? 0 : (int)data_[0].size(); }\n    int at(int r, int c) const { return data_[r][c]; }\n\n    Matrix transpose() const {\n        std::vector<std::vector<int>> result;\n        for (int r = 0; r < rows(); r++) {\n            std::vector<int> row;\n            for (int c = 0; c < cols(); c++) {\n                row.push_back(data_[r][c]);\n            }\n            result.push_back(row);\n        }\n        return Matrix(result);\n    }\n\nprivate:\n    std::vector<std::vector<int>> data_;\n};\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "add_tests_c_balanced_brackets",
+  "language": "c",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 90,
+  "timeout": 200,
+  "description": "Write C tests (assert.h) for a fixed-size-stack multi-type balanced-bracket checker (already correct - do not modify it); mutation-checked (empty-stack-pop guard dropped, closer-type check dropped, final all-closed check dropped)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "c",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "is_balanced(const char *s) in is_balanced.h (already correct - do not modify it) returns 1 if every (), [], {} in s is matched by the correct TYPE and properly nested, and 0 otherwise (non-bracket characters are ignored). Write a C test file at exactly test_is_balanced.c that #includes \"is_balanced.h\" and uses assert() (from <assert.h>) to check at least 8 cases in a main() function that prints something and returns 0 on success: simple balanced pairs, nested/mixed brackets, non-bracket characters mixed in, the empty string, an unmatched opener, an unmatched closer, mismatched TYPES (e.g. \"(]\" and \"([)]\"), and unclosed opens at the end (e.g. \"(((\")."
+  ],
+  "setup_files": {
+    "is_balanced.h": "#pragma once\n#include <string.h>\n\n// Returns 1 if s contains a balanced mix of (), [], {} - matched by TYPE and\n// properly nested - and 0 otherwise. Non-bracket characters are ignored.\nstatic int is_balanced(const char *s) {\n    char stack[256];\n    int top = 0;\n    size_t n = strlen(s);\n\n    for (size_t i = 0; i < n; i++) {\n        char c = s[i];\n        if (c == '(' || c == '[' || c == '{') {\n            if (top >= (int)(sizeof(stack) / sizeof(stack[0]))) {\n                return 0; // too deeply nested for this fixed-size stack\n            }\n            stack[top++] = c;\n        } else if (c == ')' || c == ']' || c == '}') {\n            if (top == 0) {\n                return 0; // closer with nothing open\n            }\n            char open = stack[top - 1];\n            int matches = (c == ')' && open == '(') ||\n                          (c == ']' && open == '[') ||\n                          (c == '}' && open == '{');\n            if (!matches) {\n                return 0; // wrong type of closer\n            }\n            top--;\n        }\n    }\n    return top == 0;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_is_balanced.c",
+      "content_patterns": [
+        "is_balanced.h",
+        "assert"
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"is_balanced.h\")\nTEST_CMD = [\"gcc\", \"-O0\", \"-std=c11\", \"-Wall\", \"test_is_balanced.c\", \"-o\", \"test_is_balanced_bin\"]\nRUN_CMD = [\"./test_is_balanced_bin\"]\n\nMUTANTS = [\n    # forgot to pop on a matched closer - the stack never shrinks, so a\n    # perfectly balanced \"()()\" still reports top != 0 at the end\n    [\"            top--;\\n        }\\n    }\\n    return top == 0;\",\n     \"        }\\n    }\\n    return top == 0;\"],\n    # closer TYPE check dropped entirely - \"(]\" or \"{)\" now counted as a match\n    [\"int matches = (c == ')' && open == '(') ||\\n                          (c == ']' && open == '[') ||\\n                          (c == '}' && open == '{');\",\n     \"int matches = 1;\"],\n    # final \"everything closed\" check dropped - \"(((\" (unclosed opens) wrongly reports balanced\n    [\"return top == 0;\", \"return 1;\"],\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    try:\n        compile_rc = subprocess.run(TEST_CMD, timeout=60).returncode\n        if compile_rc != 0:\n            return compile_rc\n        return subprocess.run(RUN_CMD, timeout=30).returncode\n    except subprocess.TimeoutExpired:\n        return 124\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken implementation, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_is_balanced.c": "#include \"is_balanced.h\"\n#include <assert.h>\n#include <stdio.h>\n\nint main(void) {\n    assert(is_balanced(\"()\") == 1);\n    assert(is_balanced(\"([{}])\") == 1);\n    assert(is_balanced(\"a(b)c[d]e\") == 1);\n    assert(is_balanced(\"\") == 1);\n\n    assert(is_balanced(\"(\") == 0);\n    assert(is_balanced(\")\") == 0);\n    assert(is_balanced(\"(]\") == 0);\n    assert(is_balanced(\"([)]\") == 0);\n    assert(is_balanced(\"(((\") == 0);\n\n    printf(\"PASS\\n\");\n    return 0;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_is_balanced.c": "#include \"is_balanced.h\"\n#include <assert.h>\n#include <stdio.h>\n\nint main(void) {\n    assert(is_balanced(\"()\") == 1 || is_balanced(\"()\") == 0);\n    int r = is_balanced(\"(\");\n    (void)r;\n    printf(\"PASS\\n\");\n    return 0;\n}\n"
+      }
+    }
+  ]
+}

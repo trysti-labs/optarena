@@ -1,0 +1,53 @@
+{
+  "name": "optimize_c_strlen_in_loop_condition",
+  "language": "c",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "rtrim_spaces() recomputes strlen(s) on every loop iteration (O(n*k) for k trailing spaces) -> cache the length once (O(n)); calibrated in-container: naive ~2.1s on a 700000-char string with 685000 trailing spaces vs a 1000ms budget, the O(n) version clears in under 1ms",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "c",
+    "performance",
+    "strlen",
+    "quadratic"
+  ],
+  "prompts": [
+    "rtrim_spaces(char *s) in rtrim.h right-trims trailing ' ' characters from s in place. It is too slow on long strings with many trailing spaces because it calls strlen(s) again on every loop iteration. Rewrite it to compute the length ONCE and then walk backward from the cached length, giving O(n) instead of O(n*k) total work. Keep the exact same behavior: trims only trailing ' ' (space) characters, leaves everything else untouched, handles an all-spaces string (result is empty) and a string with no trailing spaces (unchanged) correctly."
+  ],
+  "setup_files": {
+    "rtrim.h": "#pragma once\n#include <string.h>\n\n// Right-trims trailing spaces from s IN PLACE.\n// BUG (perf): strlen(s) is recomputed on every loop iteration, so trimming a\n// string with k trailing spaces off a string of length n costs O(n*k) - for\n// a long, mostly-trailing-space string this is effectively O(n^2).\nstatic void rtrim_spaces(char *s) {\n    while (strlen(s) > 0 && s[strlen(s) - 1] == ' ') {\n        s[strlen(s) - 1] = '\\0';\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "rtrim.h",
+      "content_patterns": [
+        "rtrim_spaces"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "perf_test.c": "#include \"rtrim.h\"\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <time.h>\n\nint main(void) {\n    // A long string with a huge run of trailing spaces - the O(n*k) shape\n    // is at its worst when trailing spaces dominate the string length.\n    const int total_len = 700000;\n    const int trailing = 685000;\n    char *s = malloc(total_len + 1);\n    for (int i = 0; i < total_len - trailing; i++) s[i] = 'x';\n    for (int i = total_len - trailing; i < total_len; i++) s[i] = ' ';\n    s[total_len] = '\\0';\n\n    clock_t start = clock();\n    rtrim_spaces(s);\n    clock_t end = clock();\n    double elapsed_ms = 1000.0 * (double)(end - start) / CLOCKS_PER_SEC;\n\n    int expected_len = total_len - trailing;\n    int ok = (int)strlen(s) == expected_len;\n    for (int i = 0; i < expected_len && ok; i++) {\n        if (s[i] != 'x') ok = 0;\n    }\n\n    fprintf(stderr, \"elapsed_ms=%.1f len=%d expected_len=%d\\n\", elapsed_ms, (int)strlen(s), expected_len);\n    if (!ok) {\n        printf(\"WRONG_OUTPUT\\n\");\n        return 1;\n    }\n    if (elapsed_ms > 1000.0) {\n        printf(\"TOO_SLOW %.1fms\\n\", elapsed_ms);\n        return 1;\n    }\n    printf(\"PASS %.1fms\\n\", elapsed_ms);\n    return 0;\n}\n"
+  },
+  "check_command": "gcc -O0 -std=c11 -Wall perf_test.c -o perf_test_bin && ./perf_test_bin",
+  "reference_solution": {
+    "rtrim.h": "#pragma once\n#include <string.h>\n\n// Right-trims trailing spaces from s IN PLACE. O(n): strlen is computed\n// once, then the trim walks backward from the cached end.\nstatic void rtrim_spaces(char *s) {\n    size_t len = strlen(s);\n    while (len > 0 && s[len - 1] == ' ') {\n        len--;\n    }\n    s[len] = '\\0';\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-quadratic",
+      "files": {
+        "rtrim.h": "#pragma once\n#include <string.h>\n\n// Right-trims trailing spaces from s IN PLACE.\n// BUG (perf): strlen(s) is recomputed on every loop iteration, so trimming a\n// string with k trailing spaces off a string of length n costs O(n*k) - for\n// a long, mostly-trailing-space string this is effectively O(n^2).\nstatic void rtrim_spaces(char *s) {\n    while (strlen(s) > 0 && s[strlen(s) - 1] == ' ') {\n        s[strlen(s) - 1] = '\\0';\n    }\n}\n"
+      }
+    },
+    {
+      "name": "off-by-one-eats-last-char",
+      "files": {
+        "rtrim.h": "#pragma once\n#include <string.h>\n\nstatic void rtrim_spaces(char *s) {\n    size_t len = strlen(s);\n    while (len > 0 && s[len - 1] == ' ') {\n        len--;\n    }\n    if (len > 0) {\n        len--;\n    }\n    s[len] = '\\0';\n}\n"
+      }
+    }
+  ]
+}
