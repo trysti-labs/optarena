@@ -1,0 +1,49 @@
+{
+  "name": "fix_csharp_redos_nested_quantifier",
+  "language": "csharp",
+  "framework": "dotnet",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Catastrophic-backtracking regex (nested quantifier) -> a linear pattern; budget calibrated in-container (vulnerable ~2.6s on a 26-char near-miss vs 0ms fixed, budget 500ms); incomplete-fix broken adds a MatchTimeout band-aid but keeps the vulnerable pattern, still tying up the caller for close to the full timeout",
+  "difficulty": 3,
+  "task_type": "security",
+  "tags": [
+    "csharp",
+    "dotnet",
+    "security",
+    "redos"
+  ],
+  "prompts": [
+    "EmailValidator.IsValid(email) in EmailValidator.cs uses the pattern ^([a-zA-Z0-9]+)+@[a-zA-Z]+\\.[a-zA-Z]+$ - the nested quantifier ([a-zA-Z0-9]+)+ has exponentially many ways to partition a run of matching characters, so a hostile near-miss input (many valid characters followed by one that breaks the match) triggers catastrophic backtracking and can hang the thread for seconds. Fix the REGEX itself: rewrite the pattern with no nested quantifier (a single [a-zA-Z0-9]+ for the local part is enough - it doesn't need to be wrapped in an outer +). Do not just bolt a MatchTimeout onto the existing vulnerable pattern as the fix - that still ties up the caller for close to the full timeout window on every hostile request, which is still a denial-of-service at scale. Valid addresses like user@example.com must still validate true."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "EmailValidator.cs": "using System.Text.RegularExpressions;\n\npublic static class EmailValidator\n{\n    // BUG: the nested quantifier ([a-zA-Z0-9]+)+ has exponentially many ways\n    // to partition a run of matching characters - catastrophic backtracking\n    // on a hostile input that almost-but-doesn't match (many 'a's followed\n    // by a character the pattern rejects) can hang the process for seconds\n    // to minutes.\n    private static readonly Regex Pattern = new Regex(@\"^([a-zA-Z0-9]+)+@[a-zA-Z]+\\.[a-zA-Z]+$\");\n\n    public static bool IsValid(string email) => Pattern.IsMatch(email);\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "EmailValidator.cs",
+      "content_patterns": [
+        "isvalid"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"Microsoft.AspNetCore.Mvc.Testing\" Version=\"8.0.10\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/EmailValidatorTests.cs": "using System;\nusing System.Diagnostics;\nusing Xunit;\n\npublic class EmailValidatorTests\n{\n    [Fact]\n    public void ValidEmailsPass()\n    {\n        Assert.True(EmailValidator.IsValid(\"user@example.com\"));\n        Assert.True(EmailValidator.IsValid(\"a1b2@example.org\"));\n    }\n\n    [Fact]\n    public void ObviouslyInvalidEmailsFail()\n    {\n        Assert.False(EmailValidator.IsValid(\"not-an-email\"));\n        Assert.False(EmailValidator.IsValid(\"@example.com\"));\n    }\n\n    [Fact]\n    public void HostileInputIsRejectedQuickly()\n    {\n        // Calibrated: the vulnerable nested-quantifier pattern takes ~2.6s\n        // in-container on this 26-character near-miss; a fixed (non-nested)\n        // pattern - or one with an actual guard - resolves in low\n        // milliseconds. A timeout-only band-aid still ties up the caller for\n        // close to its full timeout window instead of failing fast.\n        var hostile = new string('a', 26) + \"!\";\n\n        var sw = Stopwatch.StartNew();\n        var result = EmailValidator.IsValid(hostile);\n        sw.Stop();\n\n        Assert.False(result);\n        Assert.True(\n            sw.ElapsedMilliseconds < 500,\n            $\"IsValid took {sw.ElapsedMilliseconds}ms on a hostile near-miss string - \" +\n                \"expected a regex with no catastrophic backtracking, not a timeout band-aid \" +\n                \"on the same vulnerable pattern\"\n        );\n    }\n}\n"
+  },
+  "check_command": "dotnet test tests/tests.csproj",
+  "reference_solution": {
+    "EmailValidator.cs": "using System.Text.RegularExpressions;\n\npublic static class EmailValidator\n{\n    // No nested quantifier - the local-part group matches once, linearly,\n    // with nothing left to backtrack over.\n    private static readonly Regex Pattern = new Regex(@\"^[a-zA-Z0-9]+@[a-zA-Z]+\\.[a-zA-Z]+$\");\n\n    public static bool IsValid(string email) => Pattern.IsMatch(email);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "timeout-bandaid-pattern-unfixed",
+      "files": {
+        "EmailValidator.cs": "using System.Text.RegularExpressions;\n\npublic static class EmailValidator\n{\n    private static readonly Regex Pattern = new Regex(\n        @\"^([a-zA-Z0-9]+)+@[a-zA-Z]+\\.[a-zA-Z]+$\",\n        RegexOptions.None,\n        TimeSpan.FromSeconds(1));\n\n    public static bool IsValid(string email)\n    {\n        try\n        {\n            return Pattern.IsMatch(email);\n        }\n        catch (RegexMatchTimeoutException)\n        {\n            return false;\n        }\n    }\n}\n"
+      }
+    }
+  ]
+}
