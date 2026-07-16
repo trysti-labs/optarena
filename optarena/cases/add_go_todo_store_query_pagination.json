@@ -1,0 +1,47 @@
+{
+  "name": "add_go_todo_store_query_pagination",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Add status-filter + offset/limit pagination to an in-memory todo store; broken paginates the UNFILTERED store first then filters, so filter+pagination interact wrongly",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "pagination",
+    "in-memory-store"
+  ],
+  "prompts": [
+    "Store in store.go only supports Add and All. Add a Query(status string, offset, limit int) method: status filters to that value ('' means no filter), and offset/limit apply to the FILTERED result set (not the raw, unfiltered store) - skip `offset` MATCHING items, then return up to `limit` of what's left, preserving insertion order. An offset at or past the number of matches returns an empty (non-nil-vs-nil doesn't matter) slice. Keep Add/All unchanged."
+  ],
+  "setup_files": {
+    "store.go": "package store\n\ntype Todo struct {\n\tID     int\n\tTitle  string\n\tStatus string // \"open\" or \"done\"\n}\n\ntype Store struct {\n\ttodos []Todo\n}\n\nfunc New() *Store {\n\treturn &Store{}\n}\n\nfunc (s *Store) Add(title string) Todo {\n\tt := Todo{ID: len(s.todos) + 1, Title: title, Status: \"open\"}\n\ts.todos = append(s.todos, t)\n\treturn t\n}\n\nfunc (s *Store) All() []Todo {\n\tout := make([]Todo, len(s.todos))\n\tcopy(out, s.todos)\n\treturn out\n}\n",
+    "go.mod": "module store\n\ngo 1.22\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "store.go",
+      "content_patterns": [
+        "func (s *Store) Query"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "query_hidden_test.go": "package store\n\nimport \"testing\"\n\nfunc titles(ts []Todo) []string {\n\tout := make([]string, len(ts))\n\tfor i, t := range ts {\n\t\tout[i] = t.Title\n\t}\n\treturn out\n}\n\n// White-box: this test file lives in `package store`, so it can reach the\n// unexported todos slice directly to seed a REALISTIC interleaved status\n// pattern - Store has no setter to mark an item done, but the whole point\n// of this test is to distinguish filter-before-paginate from\n// paginate-before-filter, which is invisible if every item shares one\n// status (paginating an all-open store gives identical pages either way).\nfunc TestQueryPaginatesWithinTheFilteredSet(t *testing.T) {\n\ts := New()\n\t// done, open, done, open, open, done, open  (interleaved on purpose)\n\tpattern := []string{\"done\", \"open\", \"done\", \"open\", \"open\", \"done\", \"open\"}\n\tfor i, status := range pattern {\n\t\ts.Add(\"item\" + string(rune('1'+i)))\n\t\ts.todos[i].Status = status\n\t}\n\t// open items, in store order: item2, item4, item5, item7\n\n\tpage1 := s.Query(\"open\", 0, 2)\n\tpage2 := s.Query(\"open\", 2, 2)\n\tpage3 := s.Query(\"open\", 4, 2)\n\n\tif got := titles(page1); len(got) != 2 || got[0] != \"item2\" || got[1] != \"item4\" {\n\t\tt.Fatalf(\"page1 = %v, want [item2 item4]\", got)\n\t}\n\tif got := titles(page2); len(got) != 2 || got[0] != \"item5\" || got[1] != \"item7\" {\n\t\tt.Fatalf(\"page2 = %v, want [item5 item7]\", got)\n\t}\n\tif got := titles(page3); len(got) != 0 {\n\t\tt.Fatalf(\"page3 = %v, want []\", got)\n\t}\n}\n\nfunc TestQueryEmptyStatusMeansNoFilter(t *testing.T) {\n\ts := New()\n\ts.Add(\"a\")\n\ts.Add(\"b\")\n\ts.Add(\"c\")\n\n\tgot := s.Query(\"\", 0, 10)\n\tif len(got) != 3 {\n\t\tt.Fatalf(\"Query('', ...) = %d items, want 3\", len(got))\n\t}\n}\n\nfunc TestQueryOffsetBeyondMatchesIsEmpty(t *testing.T) {\n\ts := New()\n\ts.Add(\"a\")\n\tgot := s.Query(\"open\", 5, 10)\n\tif len(got) != 0 {\n\t\tt.Fatalf(\"offset beyond matches should be empty, got %d\", len(got))\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "store.go": "package store\n\ntype Todo struct {\n\tID     int\n\tTitle  string\n\tStatus string // \"open\" or \"done\"\n}\n\ntype Store struct {\n\ttodos []Todo\n}\n\nfunc New() *Store {\n\treturn &Store{}\n}\n\nfunc (s *Store) Add(title string) Todo {\n\tt := Todo{ID: len(s.todos) + 1, Title: title, Status: \"open\"}\n\ts.todos = append(s.todos, t)\n\treturn t\n}\n\nfunc (s *Store) All() []Todo {\n\tout := make([]Todo, len(s.todos))\n\tcopy(out, s.todos)\n\treturn out\n}\n\n// Query filters by status (\"\" means no filter) and returns at most `limit`\n// results starting after skipping `offset` MATCHING items, preserving Add\n// order. offset/limit apply to the FILTERED set, not the whole store.\nfunc (s *Store) Query(status string, offset, limit int) []Todo {\n\tvar matched []Todo\n\tfor _, t := range s.todos {\n\t\tif status == \"\" || t.Status == status {\n\t\t\tmatched = append(matched, t)\n\t\t}\n\t}\n\tif offset >= len(matched) {\n\t\treturn []Todo{}\n\t}\n\tend := offset + limit\n\tif end > len(matched) || limit < 0 {\n\t\tend = len(matched)\n\t}\n\tout := make([]Todo, end-offset)\n\tcopy(out, matched[offset:end])\n\treturn out\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "paginates-before-filtering",
+      "files": {
+        "store.go": "package store\n\ntype Todo struct {\n\tID     int\n\tTitle  string\n\tStatus string // \"open\" or \"done\"\n}\n\ntype Store struct {\n\ttodos []Todo\n}\n\nfunc New() *Store {\n\treturn &Store{}\n}\n\nfunc (s *Store) Add(title string) Todo {\n\tt := Todo{ID: len(s.todos) + 1, Title: title, Status: \"open\"}\n\ts.todos = append(s.todos, t)\n\treturn t\n}\n\nfunc (s *Store) All() []Todo {\n\tout := make([]Todo, len(s.todos))\n\tcopy(out, s.todos)\n\treturn out\n}\n\nfunc (s *Store) Query(status string, offset, limit int) []Todo {\n\tend := offset + limit\n\tif end > len(s.todos) || limit < 0 {\n\t\tend = len(s.todos)\n\t}\n\tif offset >= len(s.todos) {\n\t\treturn []Todo{}\n\t}\n\tpage := s.todos[offset:end]\n\n\tvar out []Todo\n\tfor _, t := range page {\n\t\tif status == \"\" || t.Status == status {\n\t\t\tout = append(out, t)\n\t\t}\n\t}\n\treturn out\n}\n"
+      }
+    }
+  ]
+}

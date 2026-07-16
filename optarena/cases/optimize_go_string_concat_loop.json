@@ -1,0 +1,54 @@
+{
+  "name": "optimize_go_string_concat_loop",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "String += in a loop -> strings.Builder; budget calibrated in-container (naive ~2.5s at n=40k vs ~0.001s, budget 1.2s); wrong-output broken drops the trailing newline",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "go",
+    "performance",
+    "strings-builder",
+    "big-o"
+  ],
+  "prompts": [
+    "JoinLines(lines []string) in report.go concatenates every line with `out += line + \"\\n\"` - each += copies the whole accumulated string, making the function O(n^2) in total characters and far too slow for large reports. Rewrite it using strings.Builder (WriteString / WriteByte), returning EXACTLY the same string: every line terminated by a newline, including the last one, and the empty slice giving the empty string. Keep the package name, function name, and signature."
+  ],
+  "setup_files": {
+    "report.go": "package report\n\n// BUG: += on a string COPIES the whole accumulator on every iteration -\n// O(n^2) in total characters and far too slow for large reports.\nfunc JoinLines(lines []string) string {\n\tout := \"\"\n\tfor _, line := range lines {\n\t\tout += line + \"\\n\"\n\t}\n\treturn out\n}\n",
+    "go.mod": "module report\n\ngo 1.22\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "report.go",
+      "content_patterns": [
+        "JoinLines"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "report_test.go": "package report\n\nimport (\n\t\"strings\"\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestJoinLinesBasic(t *testing.T) {\n\tgot := JoinLines([]string{\"a\", \"b\", \"c\"})\n\twant := \"a\\nb\\nc\\n\"\n\tif got != want {\n\t\tt.Fatalf(\"JoinLines(...) = %q, want %q (every line newline-terminated)\", got, want)\n\t}\n}\n\nfunc TestJoinLinesEmpty(t *testing.T) {\n\tif got := JoinLines(nil); got != \"\" {\n\t\tt.Fatalf(\"empty input must give an empty string, got %q\", got)\n\t}\n}\n\nfunc TestJoinLinesPerformance(t *testing.T) {\n\tn := 40000\n\tlines := make([]string, n)\n\tfor i := range lines {\n\t\tlines[i] = \"line of representative report text here\"\n\t}\n\n\tstart := time.Now()\n\tgot := JoinLines(lines)\n\telapsed := time.Since(start)\n\n\tif !strings.HasPrefix(got, lines[0]+\"\\n\") || !strings.HasSuffix(got, lines[n-1]+\"\\n\") {\n\t\tt.Fatalf(\"large-input content wrong\")\n\t}\n\t// calibrated: += in the loop is ~2.5s on fast native hardware at\n\t// n=40000 and slower in the sandbox; strings.Builder is ~0.001s\n\tif elapsed >= 1200*time.Millisecond {\n\t\tt.Fatalf(\"JoinLines took %v for %d lines; expected a strings.Builder, \"+\n\t\t\t\"not += which copies the whole accumulator every iteration\", elapsed, n)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "report.go": "package report\n\nimport \"strings\"\n\nfunc JoinLines(lines []string) string {\n\tvar b strings.Builder\n\tfor _, line := range lines {\n\t\tb.WriteString(line)\n\t\tb.WriteByte('\\n')\n\t}\n\treturn b.String()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-no-trailing-newline",
+      "files": {
+        "report.go": "package report\n\nimport \"strings\"\n\nfunc JoinLines(lines []string) string {\n\treturn strings.Join(lines, \"\\n\")\n}\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "report.go": "package report\n\n// BUG: += on a string COPIES the whole accumulator on every iteration -\n// O(n^2) in total characters and far too slow for large reports.\nfunc JoinLines(lines []string) string {\n\tout := \"\"\n\tfor _, line := range lines {\n\t\tout += line + \"\\n\"\n\t}\n\treturn out\n}\n"
+      }
+    }
+  ]
+}

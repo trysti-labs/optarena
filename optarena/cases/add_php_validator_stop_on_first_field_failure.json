@@ -1,0 +1,46 @@
+{
+  "name": "add_php_validator_stop_on_first_field_failure",
+  "language": "php",
+  "framework": "plain-php",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Validator chain gains per-field stop-on-first-failure so a later rule on an already-failed field doesn't also fire; broken stops ALL validation instead of just that one field",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "validation",
+    "chain-of-responsibility"
+  ],
+  "prompts": [
+    "Validator::validate() in validator.php runs every registered rule unconditionally, even when an earlier rule on the SAME field already failed - so a chain like ->rule('email', 'required')->rule('email', 'looks like an email') runs the format check on a null value too, adding a confusing second error for a field that's simply missing. Change validate() to skip any FURTHER rules for a field once one of its rules has failed, while rules for OTHER fields are completely unaffected and all still run. Keep the public interface (rule()/validate()) and the error-message ordering (registration order) unchanged."
+  ],
+  "setup_files": {
+    "validator.php": "<?php\n\nclass Validator\n{\n    private array $rules = [];\n\n    public function rule(string $field, callable $check, string $message): self\n    {\n        $this->rules[] = [$field, $check, $message];\n        return $this;\n    }\n\n    /** @return string[] error messages, in rule-registration order */\n    public function validate(array $data): array\n    {\n        $errors = [];\n        foreach ($this->rules as [$field, $check, $message]) {\n            $value = $data[$field] ?? null;\n            if (!$check($value)) {\n                $errors[] = $message;\n            }\n        }\n        return $errors;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "validator.php",
+      "content_patterns": [
+        "function validate"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "hidden_test.php": "<?php\nrequire __DIR__ . '/validator.php';\n\nfunction assertEqualArrays(array $expected, array $actual, string $msg): void\n{\n    if ($expected !== $actual) {\n        fwrite(STDERR, \"$msg\\nexpected: \" . json_encode($expected) . \"\\nactual:   \" . json_encode($actual) . \"\\n\");\n        exit(1);\n    }\n}\n\n$v = (new Validator())\n    ->rule('email', fn($v) => $v !== null, 'email is required')\n    ->rule('email', fn($v) => $v === null || str_contains($v, '@'), 'email must contain @')\n    ->rule('age', fn($v) => $v !== null, 'age is required');\n\n// email missing entirely: the FORMAT check must not also fire (it would\n// crash-equivalent / confuse on a null value) - only ONE email error, plus\n// the unrelated age error (a different field, unaffected by email's failure)\nassertEqualArrays(\n    ['email is required', 'age is required'],\n    $v->validate(['age' => null]),\n    'missing email should short-circuit to one email error, plus the age error',\n);\n\n// email present but malformed: only the format rule fails (the required\n// rule for email already passed)\nassertEqualArrays(\n    ['email must contain @'],\n    $v->validate(['email' => 'not-an-email', 'age' => 30]),\n    'malformed email only',\n);\n\n// everything valid\nassertEqualArrays([], $v->validate(['email' => 'a@b.com', 'age' => 30]), 'all valid');\n\necho \"PASS\\n\";\n"
+  },
+  "check_command": "php hidden_test.php",
+  "reference_solution": {
+    "validator.php": "<?php\n\nclass Validator\n{\n    private array $rules = [];\n\n    public function rule(string $field, callable $check, string $message): self\n    {\n        $this->rules[] = [$field, $check, $message];\n        return $this;\n    }\n\n    /**\n     * Runs rules in registration order but STOPS at the first field that\n     * fails - a chain like ->rule('email', 'required')->rule('email', 'looks\n     * like an email') must not run the format check (and crash or produce a\n     * confusing second error) on a field that is already known to be\n     * missing. Rules on DIFFERENT fields are unaffected by one field's\n     * failure and all still run.\n     *\n     * @return string[] error messages, in rule-registration order\n     */\n    public function validate(array $data): array\n    {\n        $errors = [];\n        $failedFields = [];\n        foreach ($this->rules as [$field, $check, $message]) {\n            if (in_array($field, $failedFields, true)) {\n                continue;\n            }\n            $value = $data[$field] ?? null;\n            if (!$check($value)) {\n                $errors[] = $message;\n                $failedFields[] = $field;\n            }\n        }\n        return $errors;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stops-all-fields-not-just-the-failed-one",
+      "files": {
+        "validator.php": "<?php\n\nclass Validator\n{\n    private array $rules = [];\n\n    public function rule(string $field, callable $check, string $message): self\n    {\n        $this->rules[] = [$field, $check, $message];\n        return $this;\n    }\n\n    public function validate(array $data): array\n    {\n        $errors = [];\n        foreach ($this->rules as [$field, $check, $message]) {\n            $value = $data[$field] ?? null;\n            if (!$check($value)) {\n                $errors[] = $message;\n                break;\n            }\n        }\n        return $errors;\n    }\n}\n"
+      }
+    }
+  ]
+}

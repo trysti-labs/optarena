@@ -1,0 +1,46 @@
+{
+  "name": "add_ruby_cart_bulk_discount_tiers",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Add per-line-item bulk discount tiers (10/50/100 units) to a shopping cart; broken orders the tier table ascending so Array#find matches the FIRST satisfied (lowest) threshold instead of the highest",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "minitest",
+    "pricing"
+  ],
+  "prompts": [
+    "Cart#subtotal in cart.rb sums unit_price * quantity for each line item with no discounting at all. Add bulk discount tiers, applied PER LINE ITEM based on that item's own quantity: 10 or more units gets 5% off that line, 50 or more gets 10% off, 100 or more gets 15% off (the tiers are about one item's quantity, not the cart's total item count, and each line is discounted independently). A quantity that qualifies for multiple tiers gets the BEST (highest) applicable discount - a 100-unit line gets 15%, not 5%. Keep the public interface (new/add/subtotal) unchanged."
+  ],
+  "setup_files": {
+    "cart.rb": "class Cart\n  Item = Struct.new(:name, :unit_price, :quantity)\n\n  def initialize\n    @items = []\n  end\n\n  def add(name, unit_price, quantity)\n    @items << Item.new(name, unit_price, quantity)\n    self\n  end\n\n  def subtotal\n    @items.sum { |i| i.unit_price * i.quantity }\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "cart.rb",
+      "content_patterns": [
+        "def subtotal"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "cart_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"cart\"\n\nclass CartDiscountTest < Minitest::Test\n  def test_below_any_tier_gets_no_discount\n    cart = Cart.new.add(\"widget\", 10.0, 5)\n    assert_in_delta 50.0, cart.subtotal, 0.001\n  end\n\n  def test_ten_unit_tier_gets_five_percent\n    cart = Cart.new.add(\"widget\", 10.0, 10)\n    assert_in_delta 95.0, cart.subtotal, 0.001\n  end\n\n  def test_hundred_unit_tier_gets_fifteen_percent_not_five\n    cart = Cart.new.add(\"widget\", 10.0, 100)\n    assert_in_delta 850.0, cart.subtotal, 0.001\n  end\n\n  def test_tiers_apply_per_line_independently\n    cart = Cart.new\n      .add(\"small-order-item\", 10.0, 5)    # no discount: 50.0\n      .add(\"bulk-item\", 10.0, 100)          # 15% off: 850.0\n    assert_in_delta 900.0, cart.subtotal, 0.001\n  end\nend\n"
+  },
+  "check_command": "ruby cart_hidden_test.rb",
+  "reference_solution": {
+    "cart.rb": "class Cart\n  Item = Struct.new(:name, :unit_price, :quantity)\n\n  # Bulk discount tiers, applied PER LINE ITEM based on that item's own\n  # quantity: 10+ units gets 5% off, 50+ gets 10% off, 100+ gets 15% off.\n  # Tiers are on total units of an item, not the cart as a whole.\n  TIERS = [[100, 0.15], [50, 0.10], [10, 0.05]].freeze\n\n  def initialize\n    @items = []\n  end\n\n  def add(name, unit_price, quantity)\n    @items << Item.new(name, unit_price, quantity)\n    self\n  end\n\n  def subtotal\n    @items.sum { |i| line_total(i) }\n  end\n\n  private\n\n  def line_total(item)\n    line = item.unit_price * item.quantity\n    tier = TIERS.find { |min_qty, _rate| item.quantity >= min_qty }\n    rate = tier ? tier.last : 0\n    line * (1 - rate)\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "tier-table-wrong-order",
+      "files": {
+        "cart.rb": "class Cart\n  Item = Struct.new(:name, :unit_price, :quantity)\n\n  # Bulk discount tiers, applied PER LINE ITEM based on that item's own\n  # quantity: 10+ units gets 5% off, 50+ gets 10% off, 100+ gets 15% off.\n  # Tiers are on total units of an item, not the cart as a whole.\n  TIERS = [[10, 0.05], [50, 0.10], [100, 0.15]].freeze\n\n  def initialize\n    @items = []\n  end\n\n  def add(name, unit_price, quantity)\n    @items << Item.new(name, unit_price, quantity)\n    self\n  end\n\n  def subtotal\n    @items.sum { |i| line_total(i) }\n  end\n\n  private\n\n  def line_total(item)\n    line = item.unit_price * item.quantity\n    tier = TIERS.find { |min_qty, _rate| item.quantity >= min_qty }\n    rate = tier ? tier.last : 0\n    line * (1 - rate)\n  end\nend\n"
+      }
+    }
+  ]
+}

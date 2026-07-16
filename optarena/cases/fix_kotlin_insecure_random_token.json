@@ -1,0 +1,48 @@
+{
+  "name": "fix_kotlin_insecure_random_token",
+  "language": "kotlin",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "description": "java.util.Random for session tokens (predictable LCG seeded from clock time) -> java.security.SecureRandom; incomplete-fix broken uses SecureRandom but with a hardcoded seed, making it deterministic again",
+  "difficulty": 3,
+  "task_type": "security",
+  "tags": [
+    "kotlin",
+    "security",
+    "insecure-randomness",
+    "tokens"
+  ],
+  "prompts": [
+    "TokenGenerator.generate() in TokenGenerator.kt uses java.util.Random to produce session tokens. java.util.Random is a linear-congruential PRNG seeded from the clock by default - not cryptographically secure, and an attacker who narrows down the seed (often just the millisecond the process started) can predict every token it will ever produce. Replace it with java.security.SecureRandom, constructed with NO explicit seed (let the platform seed it from a real entropy source) - a hardcoded or fixed seed is just as predictable as the original bug, even with SecureRandom. Keep generate()'s signature and output shape (32 lowercase hex characters from 16 random bytes)."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/TokenGenerator.kt": "package com.optarena.app\n\nimport java.util.Random\n\nobject TokenGenerator {\n    // BUG: java.util.Random is seeded from the current time and is a\n    // predictable linear-congruential generator - an attacker who can guess\n    // (or brute-force) the seed window can predict every \"random\" token.\n    private val random = Random()\n\n    fun generate(): String {\n        val bytes = ByteArray(16)\n        random.nextBytes(bytes)\n        return bytes.joinToString(\"\") { \"%02x\".format(it) }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "TokenGenerator.kt",
+      "content_patterns": [
+        "securerandom"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/TokenGeneratorTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertFalse\nimport org.junit.jupiter.api.Assertions.assertNotEquals\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\nimport java.security.SecureRandom\n\nclass TokenGeneratorTest {\n\n    // Everything in ONE test method so call order can't matter: JUnit does\n    // not guarantee method-execution order, and the discriminator below\n    // needs to know exactly how many prior TokenGenerator.generate() calls\n    // happened before it runs.\n    @Test\n    fun tokenBehavesLikeARealCryptoRandomSource() {\n        val first = TokenGenerator.generate()\n        assertEquals(32, first.length)\n        assertTrue(first.all { it.isDigit() || it in 'a'..'f' })\n\n        val second = TokenGenerator.generate()\n        assertNotEquals(first, second)\n\n        // A SHA1PRNG seeded with a fixed value produces the exact same\n        // sequence every time - precompute a generous window of it (30\n        // calls) and confirm NEITHER of our two real calls appears in that\n        // window. This is order-independent: it doesn't matter whether\n        // `first`/`second` were literally the 1st/2nd calls to the fixed-seed\n        // generator or the 3rd/4th - 30 calls is far more headroom than this\n        // test file could ever consume, so a fixed-seed implementation is\n        // caught regardless of exactly which of the 30 it lines up with,\n        // while a properly-seeded SecureRandom has no meaningful chance of\n        // colliding with any of them.\n        val seeded = SecureRandom.getInstance(\"SHA1PRNG\").also { it.setSeed(42L) }\n        val fixedSeedWindow = (1..30).map {\n            ByteArray(16).also { b -> seeded.nextBytes(b) }.joinToString(\"\") { b -> \"%02x\".format(b) }\n        }.toSet()\n\n        assertFalse(\n            first in fixedSeedWindow || second in fixedSeedWindow,\n            \"TokenGenerator must not be seeded with a fixed value (42L via SHA1PRNG) - \" +\n                \"that makes every run's token sequence identical and predictable\",\n        )\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=TokenGeneratorTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/TokenGenerator.kt": "package com.optarena.app\n\nimport java.security.SecureRandom\n\nobject TokenGenerator {\n    private val random = SecureRandom()\n\n    fun generate(): String {\n        val bytes = ByteArray(16)\n        random.nextBytes(bytes)\n        return bytes.joinToString(\"\") { \"%02x\".format(it) }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "securerandom-with-fixed-seed",
+      "files": {
+        "src/main/kotlin/com/optarena/app/TokenGenerator.kt": "package com.optarena.app\n\nimport java.security.SecureRandom\n\nobject TokenGenerator {\n    // \"reproducible for tests\" - but this makes every run deterministic,\n    // defeating the whole point of using SecureRandom.\n    private val random = SecureRandom.getInstance(\"SHA1PRNG\").also { it.setSeed(42L) }\n\n    fun generate(): String {\n        val bytes = ByteArray(16)\n        random.nextBytes(bytes)\n        return bytes.joinToString(\"\") { \"%02x\".format(it) }\n    }\n}\n"
+      }
+    }
+  ]
+}
