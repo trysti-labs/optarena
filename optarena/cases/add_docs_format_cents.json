@@ -1,0 +1,54 @@
+{
+  "name": "add_docs_format_cents",
+  "language": "python",
+  "framework": "doctest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Add a doctest-verified docstring to format_cents() (already correct - do not modify its behavior); broken has a docstring example with an incorrect expected output for negative cents",
+  "difficulty": 1,
+  "task_type": "documentation",
+  "tags": [
+    "python",
+    "documentation",
+    "doctest"
+  ],
+  "prompts": [
+    "format_cents(cents: int) -> str in money.py (the implementation is already correct - do not change its behavior) converts an integer number of cents into a dollar string like '$10.50', with a leading '-' for negative amounts (e.g. -50 -> '-$0.50'). It currently has no docstring at all. Add a docstring with at least 3 runnable doctest `>>>` examples (verified by `python -m doctest`) that document its behavior: a typical positive amount, zero, and a negative amount - each example's expected output must be the function's REAL, exact output."
+  ],
+  "setup_files": {
+    "money.py": "def format_cents(cents: int) -> str:\n    sign = \"-\" if cents < 0 else \"\"\n    cents = abs(cents)\n    return f\"{sign}${cents // 100}.{cents % 100:02d}\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "money.py",
+      "content_patterns": [
+        ">>>",
+        "def format_cents"
+      ],
+      "min_lines": 5
+    }
+  ],
+  "test_setup_files": {
+    "check_doctest.py": "import doctest\nimport money\n\nresults = doctest.testmod(money, verbose=False)\nassert results.attempted >= 3, (\n    f\"expected at least 3 runnable doctest examples (>>> lines), found \"\n    f\"{results.attempted} - a docstring with no >>> examples, or examples doctest can't \"\n    f\"parse, don't count\")\nassert results.failed == 0, f\"{results.failed} doctest example(s) failed out of {results.attempted}\"\nprint(f\"PASS ({results.attempted} doctest examples, 0 failed)\")\n"
+  },
+  "check_command": "python3 check_doctest.py",
+  "reference_solution": {
+    "money.py": "def format_cents(cents: int) -> str:\n    \"\"\"Format an integer number of cents as a dollar string.\n\n    >>> format_cents(1050)\n    '$10.50'\n    >>> format_cents(0)\n    '$0.00'\n    >>> format_cents(-50)\n    '-$0.50'\n    \"\"\"\n    sign = \"-\" if cents < 0 else \"\"\n    cents = abs(cents)\n    return f\"{sign}${cents // 100}.{cents % 100:02d}\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "money.py": "def format_cents(cents: int) -> str:\n    sign = \"-\" if cents < 0 else \"\"\n    cents = abs(cents)\n    return f\"{sign}${cents // 100}.{cents % 100:02d}\"\n"
+      }
+    },
+    {
+      "name": "wrong-expected-output-for-negative",
+      "files": {
+        "money.py": "def format_cents(cents: int) -> str:\n    \"\"\"Format an integer number of cents as a dollar string.\n\n    >>> format_cents(1050)\n    '$10.50'\n    >>> format_cents(0)\n    '$0.00'\n    >>> format_cents(-50)\n    '-$50.00'\n    \"\"\"\n    sign = \"-\" if cents < 0 else \"\"\n    cents = abs(cents)\n    return f\"{sign}${cents // 100}.{cents % 100:02d}\"\n"
+      }
+    }
+  ]
+}

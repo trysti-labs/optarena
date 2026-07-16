@@ -1,0 +1,54 @@
+{
+  "name": "upgrade_pydantic_orm_mode_to_from_attributes",
+  "language": "python",
+  "framework": "pydantic",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Migrate pydantic 1.x class Config: orm_mode=True + .from_orm() to 2.x model_config = ConfigDict(from_attributes=True) + .model_validate() - the unmigrated code raises PydanticUserError immediately (from_orm requires from_attributes=True); incomplete-fix broken updates the call site to model_validate() but forgets to set from_attributes=True, so validating a plain (non-dict, non-model) object raises a ValidationError",
+  "difficulty": 2,
+  "task_type": "dependency_upgrade",
+  "tags": [
+    "python",
+    "pydantic",
+    "dependency-upgrade",
+    "migration",
+    "orm"
+  ],
+  "prompts": [
+    "This project is being upgraded from pydantic 1.x to pydantic 2.x (the version actually installed and imported by `import pydantic` in this sandbox - you can check the old behavior against a real pydantic 1.10 install at /opt/venv-pydantic1/bin/python if useful, but the code you write must work under the installed pydantic 2.x). UserOut in user_out.py uses the pydantic 1.x `class Config: orm_mode = True` plus `UserOut.from_orm(row)` pattern to build a UserOut from an arbitrary object with matching attributes (not a dict, not already a UserOut - e.g. a database row object). Under the installed pydantic 2.x, calling `.from_orm()` without `from_attributes=True` set raises a PydanticUserError immediately. Migrate to the pydantic 2.x pattern: `model_config = ConfigDict(from_attributes=True)` as a class attribute, and use `UserOut.model_validate(row)` instead of `.from_orm(row)` in to_user_out(). Preserve the exact behavior: to_user_out(row) returns a UserOut built from row's id and name attributes."
+  ],
+  "setup_files": {
+    "user_out.py": "from pydantic import BaseModel\n\n\nclass UserOut(BaseModel):\n    id: int\n    name: str\n\n    class Config:\n        orm_mode = True\n\n\ndef to_user_out(row):\n    return UserOut.from_orm(row)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "user_out.py",
+      "content_patterns": [
+        "to_user_out"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_user_out.py": "from user_out import to_user_out\n\n\nclass UserRow:\n    def __init__(self, id, name):\n        self.id = id\n        self.name = name\n\n\nrow = UserRow(1, \"Ada\")\nout = to_user_out(row)\nassert out.id == 1 and out.name == \"Ada\", f\"unexpected result: {out}\"\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_user_out.py",
+  "reference_solution": {
+    "user_out.py": "from pydantic import BaseModel, ConfigDict\n\n\nclass UserOut(BaseModel):\n    model_config = ConfigDict(from_attributes=True)\n\n    id: int\n    name: str\n\n\ndef to_user_out(row):\n    return UserOut.model_validate(row)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "user_out.py": "from pydantic import BaseModel\n\n\nclass UserOut(BaseModel):\n    id: int\n    name: str\n\n    class Config:\n        orm_mode = True\n\n\ndef to_user_out(row):\n    return UserOut.from_orm(row)\n"
+      }
+    },
+    {
+      "name": "model_validate-but-missing-from_attributes-config",
+      "files": {
+        "user_out.py": "from pydantic import BaseModel\n\n\nclass UserOut(BaseModel):\n    id: int\n    name: str\n\n\ndef to_user_out(row):\n    return UserOut.model_validate(row)\n"
+      }
+    }
+  ]
+}

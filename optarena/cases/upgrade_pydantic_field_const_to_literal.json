@@ -1,0 +1,53 @@
+{
+  "name": "upgrade_pydantic_field_const_to_literal",
+  "language": "python",
+  "framework": "pydantic",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Migrate pydantic 1.x Field(const=True) to 2.x Literal[...] typing - the const kwarg was REMOVED and raises PydanticUserError immediately at class-definition time under pydantic 2.x; incomplete-fix broken swaps in Field(frozen=True) instead, which only blocks post-construction mutation and does not reject a different value being passed in at construction time",
+  "difficulty": 2,
+  "task_type": "dependency_upgrade",
+  "tags": [
+    "python",
+    "pydantic",
+    "dependency-upgrade",
+    "migration"
+  ],
+  "prompts": [
+    "This project is being upgraded from pydantic 1.x to pydantic 2.x (the version actually installed and imported by `import pydantic` in this sandbox - you can check the old behavior against a real pydantic 1.10 install at /opt/venv-pydantic1/bin/python if useful, but the code you write must work under the installed pydantic 2.x). Settings in settings.py uses the pydantic 1.x `Field(default=\"1.0\", const=True)` pattern to pin schema_version to always be exactly \"1.0\". The `const` kwarg was REMOVED in pydantic 2.x - it now raises a PydanticUserError immediately when the class is defined, telling you to use `Literal` instead. Migrate schema_version to a `Literal[\"1.0\"]` type annotation (still defaulting to \"1.0\"). After the fix, constructing Settings with any schema_version other than \"1.0\" must raise a validation error, not silently succeed."
+  ],
+  "setup_files": {
+    "settings.py": "from pydantic import BaseModel, Field\n\n\nclass Settings(BaseModel):\n    schema_version: str = Field(default=\"1.0\", const=True)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "settings.py",
+      "content_patterns": [
+        "schema_version"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_settings.py": "from settings import Settings\n\ns = Settings()\nassert s.schema_version == \"1.0\", f\"default schema_version wrong: {s.schema_version}\"\n\ntry:\n    Settings(schema_version=\"2.0\")\n    raise AssertionError(\"expected a validation error for a schema_version other than '1.0'\")\nexcept AssertionError:\n    raise\nexcept Exception:\n    pass\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_settings.py",
+  "reference_solution": {
+    "settings.py": "from typing import Literal\n\nfrom pydantic import BaseModel\n\n\nclass Settings(BaseModel):\n    schema_version: Literal[\"1.0\"] = \"1.0\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "settings.py": "from pydantic import BaseModel, Field\n\n\nclass Settings(BaseModel):\n    schema_version: str = Field(default=\"1.0\", const=True)\n"
+      }
+    },
+    {
+      "name": "frozen-field-does-not-restrict-values",
+      "files": {
+        "settings.py": "from pydantic import BaseModel, Field\n\n\nclass Settings(BaseModel):\n    schema_version: str = Field(default=\"1.0\", frozen=True)\n"
+      }
+    }
+  ]
+}
