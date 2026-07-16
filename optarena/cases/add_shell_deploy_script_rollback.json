@@ -1,0 +1,51 @@
+{
+  "name": "add_shell_deploy_script_rollback",
+  "language": "shell",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Add a --rollback flag to deploy.sh that restores the release immediately before the current one; incomplete-fix broken only records PREVIOUS on the very first deploy (guarded by \"not already present\"), so after a third deploy, --rollback still jumps all the way back to the first release instead of the one right before the current one",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "shell",
+    "deploy",
+    "rollback"
+  ],
+  "prompts": [
+    "deploy.sh <tag> records a new release under releases/<tag>/ and points the CURRENT file at it - there is no way to undo a bad deploy. Add a --rollback flag: `sh deploy.sh --rollback` must restore CURRENT to whatever release was active immediately BEFORE the current one (not the very first release ever deployed, if there have been more than two). If there is no previous release to roll back to (e.g. right after the very first deploy, or before any deploy at all), print an error to stderr and exit non-zero instead of doing anything. A normal deploy (no --rollback) must keep working exactly as before, and must now also remember the release it is REPLACING so a later rollback can restore it."
+  ],
+  "setup_files": {
+    "deploy.sh": "#!/bin/sh\n# Deploys a new release: records it in releases/<tag>/ and points CURRENT\n# at it. No way to undo a bad deploy.\nset -e\nts=\"$1\"\nmkdir -p \"releases/$ts\"\necho \"release $ts\" > \"releases/$ts/marker.txt\"\necho \"$ts\" > CURRENT\necho \"deployed $ts\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "deploy.sh",
+      "content_patterns": [
+        "rollback"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_rollback.py": "import subprocess\n\n\ndef deploy(tag):\n    r = subprocess.run([\"sh\", \"deploy.sh\", tag], capture_output=True, text=True, timeout=10)\n    assert r.returncode == 0, f\"deploy {tag} failed: {r.stderr!r}\"\n\n\ndef rollback():\n    return subprocess.run([\"sh\", \"deploy.sh\", \"--rollback\"], capture_output=True, text=True, timeout=10)\n\n\ndef current():\n    with open(\"CURRENT\") as f:\n        return f.read().strip()\n\n\n# a fresh deploy with no history: rollback must fail cleanly (no PREVIOUS yet)\nr0 = rollback()\nassert r0.returncode != 0, \"rollback with no history should fail, not silently succeed\"\n\ndeploy(\"v1\")\nassert current() == \"v1\"\n\ndeploy(\"v2\")\nassert current() == \"v2\"\n\ndeploy(\"v3\")\nassert current() == \"v3\"\n\n# rollback must go to the release immediately BEFORE the current one (v2),\n# not all the way back to the first deploy (v1)\nr1 = rollback()\nassert r1.returncode == 0, f\"rollback after 3 deploys failed: {r1.stderr!r}\"\nassert current() == \"v2\", f\"rollback should restore v2 (the release before v3), got {current()!r}\"\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_rollback.py",
+  "reference_solution": {
+    "deploy.sh": "#!/bin/sh\n# Deploys a new release, or rolls back to the one before the current one\n# with --rollback.\nset -e\n\nif [ \"$1\" = \"--rollback\" ]; then\n    if [ ! -f PREVIOUS ]; then\n        echo \"no previous release to roll back to\" >&2\n        exit 1\n    fi\n    prev=$(cat PREVIOUS)\n    echo \"$prev\" > CURRENT\n    echo \"rolled back to $prev\"\n    exit 0\nfi\n\nts=\"$1\"\nmkdir -p \"releases/$ts\"\necho \"release $ts\" > \"releases/$ts/marker.txt\"\nif [ -f CURRENT ]; then\n    cp CURRENT PREVIOUS\nfi\necho \"$ts\" > CURRENT\necho \"deployed $ts\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "deploy.sh": "#!/bin/sh\n# Deploys a new release: records it in releases/<tag>/ and points CURRENT\n# at it. No way to undo a bad deploy.\nset -e\nts=\"$1\"\nmkdir -p \"releases/$ts\"\necho \"release $ts\" > \"releases/$ts/marker.txt\"\necho \"$ts\" > CURRENT\necho \"deployed $ts\"\n"
+      }
+    },
+    {
+      "name": "previous-never-refreshed-after-first-deploy",
+      "files": {
+        "deploy.sh": "#!/bin/sh\nset -e\n\nif [ \"$1\" = \"--rollback\" ]; then\n    if [ ! -f PREVIOUS ]; then\n        echo \"no previous release to roll back to\" >&2\n        exit 1\n    fi\n    prev=$(cat PREVIOUS)\n    echo \"$prev\" > CURRENT\n    echo \"rolled back to $prev\"\n    exit 0\nfi\n\nts=\"$1\"\nmkdir -p \"releases/$ts\"\necho \"release $ts\" > \"releases/$ts/marker.txt\"\nif [ -f CURRENT ] && [ ! -f PREVIOUS ]; then\n    cp CURRENT PREVIOUS\nfi\necho \"$ts\" > CURRENT\necho \"deployed $ts\"\n"
+      }
+    }
+  ]
+}

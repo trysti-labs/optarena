@@ -1,0 +1,54 @@
+{
+  "name": "fix_terraform_security_group_open_ssh",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 150,
+  "timeout": 300,
+  "description": "aws_security_group allows SSH (port 22) from 0.0.0.0/0 -> restrict to a specific admin CIDR, proven by real terraform validate; incomplete-fix broken adds a new properly-scoped ingress rule but leaves the original wide-open rule in place, so port 22 is still reachable from the entire internet through it",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "terraform",
+    "hcl",
+    "aws",
+    "security-group",
+    "ssh"
+  ],
+  "prompts": [
+    "The aws_security_group named app in main.tf has an ingress rule allowing SSH (port 22) from cidr_blocks = [\"0.0.0.0/0\"] - the entire internet, not just administrators. Fix this so port 22 is only reachable from a specific admin CIDR block: add a new string variable admin_cidr (default \"10.0.0.0/16\") and change the ingress rule's cidr_blocks to reference it instead of the wildcard. There must be NO ingress rule left anywhere in the security group that allows port 22 from 0.0.0.0/0 - do not just add a second, more restricted rule alongside the original one. Run `terraform fmt`."
+  ],
+  "setup_files": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_security_group\" \"app\" {\n  name        = \"app-sg\"\n  description = \"Security group for the app instances\"\n\n  ingress {\n    description = \"SSH admin access\"\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": [
+        "admin_cidr"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_security_group.py": "import json\nimport re\nimport subprocess\n\nfmt = subprocess.run([\"terraform\", \"fmt\", \"-check\", \"-diff\"], capture_output=True, text=True)\nassert fmt.returncode == 0, f\"terraform fmt -check failed:\\n{fmt.stdout}\\n{fmt.stderr}\"\n\ninit = subprocess.run([\"terraform\", \"init\", \"-backend=false\", \"-input=false\"],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f\"terraform init failed:\\n{init.stdout}\\n{init.stderr}\"\n\nvalidate = subprocess.run([\"terraform\", \"validate\", \"-no-color\", \"-json\"],\n                          capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get(\"valid\") is True, f\"terraform validate failed: {validate.stdout}\\n{validate.stderr}\"\n\ncontent = open(\"main.tf\", encoding=\"utf-8\").read()\n\nassert re.search(r'resource\\s+\"aws_security_group\"\\s+\"app\"\\s*\\{', content), \"security group resource lost\"\n\n# the whole point: NO ingress rule may leave port 22 open to the entire\n# internet, whether it's the only rule or one of several\nassert '\"0.0.0.0/0\"' not in content, (\n    \"main.tf still contains a 0.0.0.0/0 CIDR block - port 22 is reachable from the entire \"\n    \"internet, even if a more restricted rule was ALSO added alongside it\")\n\nassert re.search(r\"from_port\\s*=\\s*22\", content), \"the SSH ingress rule (port 22) was removed entirely\"\n\nprint(\"PASS terraform security-group CIDR checks\")\n"
+  },
+  "check_command": "python check_security_group.py",
+  "reference_solution": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nvariable \"admin_cidr\" {\n  type    = string\n  default = \"10.0.0.0/16\"\n}\n\nresource \"aws_security_group\" \"app\" {\n  name        = \"app-sg\"\n  description = \"Security group for the app instances\"\n\n  ingress {\n    description = \"SSH admin access\"\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [var.admin_cidr]\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_security_group\" \"app\" {\n  name        = \"app-sg\"\n  description = \"Security group for the app instances\"\n\n  ingress {\n    description = \"SSH admin access\"\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n"
+      }
+    },
+    {
+      "name": "restricted-rule-added-but-wildcard-left-in-place",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nvariable \"admin_cidr\" {\n  type    = string\n  default = \"10.0.0.0/16\"\n}\n\nresource \"aws_security_group\" \"app\" {\n  name        = \"app-sg\"\n  description = \"Security group for the app instances\"\n\n  ingress {\n    description = \"SSH admin access\"\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  ingress {\n    description = \"SSH admin access (restricted)\"\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [var.admin_cidr]\n  }\n}\n"
+      }
+    }
+  ]
+}
