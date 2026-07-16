@@ -1,7 +1,7 @@
 # OptArena Status
 
-_As of 2026-07-15, on `main` (github.com/trysti-labs/optarena), through
-batch 29 - **corpus at 442/500 (88%)**._
+_As of 2026-07-16, on `main` (github.com/trysti-labs/optarena), through
+batch 30 - **corpus at 450/500 (90%)**._
 
 ## Where things stand
 
@@ -9,7 +9,7 @@ The 0.1 platform cut is done and stable (see ARCH.md): verify-corpus CI gate,
 driver telemetry, trials stability, p95 aggregation, GHCR-published sandbox
 images, Apache-2.0 licensing. Since then the work has been entirely corpus
 expansion per [CORPUS_EXPANSION_PLAN.md](CORPUS_EXPANSION_PLAN.md): **120 →
-442 cases**, all new cases shipped with a `reference_solution` and
+450 cases**, all new cases shipped with a `reference_solution` and
 behaviorally-failing `broken_solutions`, every variant proven through
 `verify-corpus` before commit. **data_engineering is now at target
 (15/15)**; bug_fix has been at target (95/95) since batch 15; **devops is
@@ -19,6 +19,16 @@ starter repos**: `repos/fastapi-tasktracker` (python image, 9 cases) and
 `repos/express-ts-shortlink` (node image, 5 cases) - 14 L3 cases across two
 toolchains.
 
+**Docker became available in the working environment as of batch 30** -
+every case verified since then (and the whole kotlin track, retroactively)
+has been proven through the actual `--network none` sandbox, not a bare
+host toolchain. This immediately paid for itself: it caught a corpus-wide
+gate breach across all 15 kotlin cases (a missing Maven `<executions>`
+block meant the image's Kotlin-plugin warmup - and every case's own build -
+silently never invoked the Kotlin compiler) and a stale, too-loose
+performance budget. Both fixed; see
+[Quality gates](#quality-gates-in-practice) below.
+
 A full-corpus `verify-corpus` sweep (891 variants / 368 verifiable cases)
 done alongside batch 26 found and fixed two real pre-existing gate breaches:
 CI has very likely been red on `main` since the first Terraform devops case
@@ -27,25 +37,25 @@ the public registry and the sandbox runs with `--network none` - fixed by
 baking an offline provider mirror into the base image. See
 [Quality gates](#quality-gates-in-practice) below for both fixes.
 
-## Corpus census (442 cases)
+## Corpus census (450 cases)
 
 | | |
 |---|---|
-| Total cases | **442** (target 500, 88%) |
-| With `reference_solution` | 338 (76%; 100% of the 322 added this expansion) |
+| Total cases | **450** (target 500, 90%) |
+| With `reference_solution` | 346 (77%; 100% of the 330 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | L3 (repo-scale, `setup_repo`) cases | 14 (fastapi-tasktracker 9, express-ts-shortlink 5) |
 | Multi-prompt session cases | 2 |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
 
 **By language** (directly recomputed from the case JSONs' `language` tags):
-python 100, javascript 57, java 34, go 30, yaml 28, csharp 27,
-typescript 26, rust 26, sql 23, ruby 15, php 15, kotlin 14, shell 13,
+python 100, javascript 57, java 34, go 33, yaml 28, csharp 28,
+typescript 27, rust 26, sql 23, ruby 16, php 16, kotlin 15, shell 13,
 c 8, hcl 8, dockerfile 6, cpp 3, makefile 2 - plus 7 language-neutral devops
 cases.
 
-**By task type:** bug_fix 95, feature 84, **refactoring 64**, testing 57,
-security 46, devops 44, performance 37, data_engineering 15.
+**By task type:** bug_fix 95, feature 87, **refactoring 64**, testing 58,
+security 48, devops 44, performance 39, data_engineering 15.
 
 ## Waves shipped (chronology)
 
@@ -77,6 +87,7 @@ Since then:
 | **Perf + devops + testing + security + feature #2** | 1 | 418 → 426 | Batch 27, in csharp/java/typescript: 2 **performance** (C# `new Regex(...)` constructed per-call -> static readonly field, budget 800ms at n=300000; java naive exponential recursive Fibonacci -> **memoized** (HashMap cache) - a deliberately different fix shape from batch 26's Kotlin iterative-fib, on the java-native javac+java bootstrap with no maven). 2 **devops** (GitHub Actions blanket `contents: write` moved to only the one job that needs it, broken grants it to the wrong job; k8s container securityContext hardening - readOnlyRootFilesystem/no-priv-escalation/non-root/capabilities-drop-ALL). 2 **testing**, mutation-checked (C# xUnit Caesar cipher; TypeScript query-string parser on the plain tsc+node harness, no test framework). 1 **security** (java `ObjectInputStream.readObject()` on untrusted bytes -> Jackson JSON - Java's version of the pickle/YAML/unserialize RCE family already covered for Python/Ruby/PHP; incomplete-fix broken falls back to legacy Java deserialization "for old sessions", caught by an EvilGadget tripwire). 1 **feature** (TypeScript Trie/prefix-tree with sorted prefix lookup; broken returns unsorted traversal-order results). All 21 variants passed verify-corpus on the first attempt |
 | **Devops-only push** | 1 | 426 → 434 | Batch 28, all 8 cases devops - closes the category to 44/45. Fresh K8s object types the corpus lacked entirely: Ingress (TLS + host routing), a Service correctly mapping an external port to the container's real (different) port, ResourceQuota+LimitRange (default AND defaultRequest, not just limits). Fresh workflow shapes: GitHub Actions cross-job artifact upload/download (separate runners don't share a filesystem), a Compose named volume for Postgres persistence (vs. a host bind-mount), a Terraform for_each+locals dedup of 3 copy-pasted resources (real offline `terraform init`+`validate` via the batch-26 provider mirror), a Go Dockerfile multi-stage rewrite to a `scratch` final image (still-ships-the-toolchain broken swaps in `golang:1.22-slim`), and a deploy script needing both `set -euo pipefail` AND a `trap`-based lock-file cleanup (proven by a real bash run with a forced-failing step). All 24 variants passed verify-corpus on the first attempt |
 | **Refactoring-only push** | 1 | 434 → 442 | Batch 29, one case per language (8 languages) - closes the category to 64/70. ruby case/when -> Hash dispatch; php if/elseif -> PHP 8 `match`; kotlin external when-chain type-switching over a sealed class -> polymorphic per-subclass methods; c duplicated NULL/length guard clause -> one static helper; rust manual index-based while loop -> iterator chain (enumerate+map+collect); go three functions repeating an identical error format string -> one `requireEnv()` helper; typescript manual `&&`-chained null checks -> optional chaining + nullish coalescing; sql manual `OR`-chain of equality checks -> a single `IN (...)` clause, proven via real sqlite3. Each has a behavior-drift broken. verify-corpus caught the same authoring mistake twice (go and, earlier in the design pass, c): an `expected_files` regex assuming duplicated literal text survives a *correct* refactor, which it doesn't by definition - both fixed pre-commit (see [Quality gates](#quality-gates-in-practice)) |
+| **Real-Docker verification begins + perf/security/feature push** | 1 | 442 → 450 | Batch 30, the first batch verified through the actual `--network none` sandbox rather than a bare host toolchain (Docker became available in-environment). Found and fixed a corpus-wide gate breach affecting **all 15 kotlin cases** and a stale performance budget - see [Quality gates](#quality-gates-in-practice). New cases, each Docker-verified: 2 **performance** (typescript `Array.find()`-in-loop -> a Map, first-wins tie-break preserved, n=60k naive ~3.7s vs 1.5s budget; go string `+=` -> `strings.Builder`, n=40k naive ~2.5s vs 1.2s budget, both calibrated *inside* the real sandbox container). 2 **security** (csharp SQL built by string interpolation -> a parameterized query text+params pair, no live DB needed, broken escapes quotes but still interpolates; kotlin `java.util.Random` session tokens -> `SecureRandom`, broken switches to `SecureRandom` but hardcodes its seed - an order-independent discriminator checks the token against a 30-deep window of the known fixed-seed sequence rather than assuming call order). 3 **feature** (ruby cart bulk-discount tiers, broken orders the tier table ascending so `Array#find` matches the lowest satisfied threshold instead of the highest; php validator chain gains per-field stop-on-first-failure, broken stops *all* fields instead of just the failed one; go in-memory todo store gains status-filter + pagination, broken paginates the unfiltered store before filtering - the discriminator needed a white-box same-package test to seed genuinely interleaved statuses, since the store has no public setter). 1 **testing** (go alphanumeric-only palindrome check, mutation-checked) |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -197,7 +208,34 @@ phrasing (e.g. matching `arr\s*[=!]=\s*NULL` instead of requiring the exact
 losing-side spelling) and asserting `<= 1`, not requiring an exact broken
 phrasing to persist.
 
-## Remaining to 500 (58 cases)
+**Batch 30: Docker became available in-environment, and the first real
+`--network none` sandbox run of the kotlin track immediately failed every
+single one of its 15 cases** (14 pre-existing + the one new to that batch).
+Root cause: `docker/jvm/kotlin-pom.xml`'s `kotlin-maven-plugin` declaration
+had no `<executions>` block, so Maven's default `jar`-packaging lifecycle
+never actually bound its compile/test-compile goals - `mvn package` "built"
+successfully during image warmup by silently never touching a single `.kt`
+file, so the plugin (and its own dependencies) never got resolved into the
+image's offline `~/.m2` cache at all. Every kotlin case's own `mvn -o test`
+then failed offline for the same structural reason, previously invisible
+because prior verification ran on a host with live network access (which
+masks a *caching* gap - the plugin resolves fine online, it's specifically
+absent from the image's *offline* mirror). Fixed by adding the standard
+`<executions>` block (`compile` + `test-compile` goals) to
+`docker/jvm/kotlin-pom.xml`, rebuilding the jvm image, confirming the
+`~/.m2` cache actually populates (`kotlin-maven-plugin`, `kotlin-compiler`,
+etc. now present, versus only `kotlin-bom` before), then bulk-patching the
+identical missing block into all 14 pre-existing kotlin cases' own
+`pom.xml` (case files ship a full project skeleton in `setup_files`, so the
+same bug existed independently in each one). All 15 now build and test
+correctly through the real sandbox. The same sweep also caught
+`optimize_kotlin_fib_naive_recursion`'s performance budget as too loose -
+naive exponential `fib(45)` completes in under 2s on this container's
+hardware (~1.9s), comfortably under its 2500ms budget; recalibrated to
+`fib(48)` (naive ~7.9s in-container) with a 3000ms budget, timed directly
+inside the sandbox rather than assumed.
+
+## Remaining to 500 (50 cases)
 
 **L3 (repo-scale) is live on two toolchains.** The `setup_repo`/`git_init`
 schema fields exist (see `prepare_workspace` in cases.py; documented in the
@@ -219,25 +257,21 @@ ASP.NET, Rails, Laravel). Remaining work after L3, per the plan's
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
 Rebalance note: **bug_fix (95/95), data_engineering (15/15), devops (44/45),
-and now refactoring (64/70) are all effectively at target - stop adding any
-of them** (batches 15-25 shipped zero bug_fix; batch 24 closed out
+and refactoring (64/70) are all effectively at target - stop adding any of
+them** (batches 15-25 shipped zero bug_fix; batch 24 closed out
 data_engineering; batch 28 closed out devops; batch 29 closed out
-refactoring). After batch 29 the categories still furthest behind are
-**performance (37/45), security (46/55), and feature (84/95)**; testing
-(57/65) is nearly closed too. Batch 17
+refactoring). After batch 30 the categories still furthest behind are
+**performance (39/45), feature (87/95), and security (48/55)**; testing
+(58/65) is nearly closed too. Batch 17
 proved host-calibrated perf budgets work when margins are wide (naive 3-4x
-over budget on fast native hardware, fast path 50-500x under it) with CI's
-in-container verify-corpus as the final proof; batch 18 added node-native
-and java-native mutation harnesses so testing cases in those tracks no
-longer need python in the loop. **Correction to an earlier entry here:**
-batch 24's claimed "real dry-run/validate oracles" for a scoop-installed
-terraform were run on a host with real network access, not through the
-sandboxed `--network none` Docker path `verify-corpus` actually gates on in
-CI - that gap is exactly what caused the terraform regression batch 26 found
-and fixed (see [Quality gates](#quality-gates-in-practice)). Going forward,
-"verified" for a case with a `docker_image` set means proven through the
-real Docker sandbox, not a bare host run, even when a host toolchain happens
-to be installed and network-connected. Next levers: devops/feature breadth,
-more calibrated perf shapes, and the next L3 starter repo (Spring
-multi-module, Gin, Axum, ASP.NET, Rails, or Laravel - each would need its own
-toolchain or Docker for full local verification).
+over budget on fast native hardware, fast path 50-500x under it); batch 18
+added node-native and java-native mutation harnesses so testing cases in
+those tracks no longer need python in the loop. **Update: as of batch 30,
+Docker is available in-environment**, so "verified" now means proven
+through the real Docker sandbox directly (not a bare host run standing in
+for it) - the gap flagged in this note previously (the terraform regression
+batch 26 found, see [Quality gates](#quality-gates-in-practice)) no longer
+applies going forward; batch 30's kotlin fix is the second real gate breach
+this same real-sandbox verification has caught. Next levers: performance/
+feature/security breadth (all Docker-verifiable now), and the next L3
+starter repo (Spring multi-module, Gin, Axum, ASP.NET, Rails, or Laravel).
