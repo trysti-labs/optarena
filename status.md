@@ -1,7 +1,7 @@
 # OptArena Status
 
 _As of 2026-07-16, on `main` (github.com/trysti-labs/optarena), through
-batch 33 - **corpus at 478/500 (96%)**._
+batch 34 - **corpus at 487/500 (97%)**._
 
 ## Where things stand
 
@@ -37,28 +37,28 @@ the public registry and the sandbox runs with `--network none` - fixed by
 baking an offline provider mirror into the base image. See
 [Quality gates](#quality-gates-in-practice) below for both fixes.
 
-## Corpus census (478 cases)
+## Corpus census (487 cases)
 
 | | |
 |---|---|
-| Total cases | **478** (target 500, 96%) |
-| With `reference_solution` | 374 (78%; 100% of the 358 added this expansion) |
+| Total cases | **487** (target 500, 97%) |
+| With `reference_solution` | 383 (79%; 100% of the 367 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | L3 (repo-scale, `setup_repo`) cases | 14 (fastapi-tasktracker 9, express-ts-shortlink 5) |
 | Multi-prompt session cases | 2 |
-| Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
+| Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix; python now also carries an offline pydantic-1.10 venv at `/opt/venv-pydantic1` for dependency_upgrade cases |
 
 **By language** (directly recomputed from the case JSONs' `language` tags):
-python 100, javascript 57, go 34, java 34, yaml 30, csharp 29, typescript 29,
+python 109, javascript 57, go 34, java 34, yaml 30, csharp 29, typescript 29,
 rust 28, sql 25, php 18, ruby 18, kotlin 17, shell 16, hcl 11, c 11, cpp 6,
 dockerfile 6, makefile 2 - plus 7 language-neutral devops cases.
 
-**By task type:** bug_fix 95, **feature 95 (target)**, refactoring 64,
-**testing 65 (target)**, **security 55 (target)**, devops 44,
-**performance 45 (target)**, data_engineering 15. Four categories closed
-out this batch; only refactoring (64/70) and devops (44/45) remain below
-target among the original eight, plus the two categories the corpus hasn't
-started yet (see below).
+**By task type:** bug_fix 95, feature 95, refactoring 64, testing 65,
+security 55, devops 44, performance 45, data_engineering 15,
+**documentation 5 (target, new this batch)**, dependency_upgrade 4
+(target 10, new this batch). Six of the plan's eight original categories
+are now exactly at target; only refactoring (64/70) and devops (44/45)
+remain open among them, alongside the two brand-new categories.
 
 ## Waves shipped (chronology)
 
@@ -94,6 +94,7 @@ Since then:
 | **460 push - underused languages** | 1 | 450 → 460 | Batch 31, all Docker-verified, deliberately targeting the corpus's thinnest language cells. 2 **performance**, both calibrated on the *debug* build profile (matching `cargo test`'s default, not `--release`) since a release-optimized O(n^2) is too fast to bust any sane budget: rust `Vec::contains` dedup -> `HashSet` (n=30k, naive ~1.5s vs 700ms budget; wrong-output broken sorts first, losing first-occurrence order), ruby `Array#delete`-per-id -> `reject` + `Set` (n=20k, naive ~0.86s vs 0.4s budget; wrong-output broken dedupes surviving items via Set arithmetic). 3 **security**: rust `sh -c` shell interpolation -> direct argv (no shell at all - the discriminator just asserts `cmd.get_program() == "ping"`, not `"sh"`); csharp ReDoS from a nested-quantifier regex -> a linear pattern, calibrated in-container (vulnerable ~2.6s on a 26-char near-miss vs 0ms fixed) with an incomplete-fix broken that bolts on a `MatchTimeout` band-aid instead of fixing the pattern; typescript CSV/formula injection (`=`/`+`/`-`/`@` prefixes execute as formulas in Excel) -> neutralize with a leading apostrophe, broken guards only the `=` prefix. 3 **feature**: kotlin `Cache` gains TTL expiry via an injectable `Clock` (broken uses an exclusive expiry boundary); terraform S3 lifecycle rule (transition + noncurrent-version expiration), proven by real `terraform validate`, broken leaves the rule `status = "Disabled"` (AWS silently ignores a disabled rule entirely); C++ `RingBuffer` gains overwrite-oldest-when-full semantics, broken forgets to advance `head_` so ordering breaks across multiple wraparounds. 2 **testing**, mutation-checked: kotlin Roman-numeral formatter, and a SQL `RANK() OVER (PARTITION BY ...)` top-spender-per-region view exercised via real sqlite3 (mutants: ranking direction flipped, ties widened, `LEFT JOIN` leaking an orderless customer into the results) |
 | **470 push - c/php/ruby/shell/cpp/hcl breadth** | 1 | 460 → 470 | Batch 32, all Docker-verified, targeting the categories still below target (performance/testing/feature/security) in languages the corpus was thinnest on (c, php, shell, ruby, cpp, hcl). 2 **performance**, both calibrated in-container: C `rtrim_spaces()` recomputing `strlen()` on every loop iteration (O(n·k) for k trailing spaces) -> cache the length once (n=700000/685000 trailing, naive ~2.1s vs 1000ms budget), PHP `in_array()` per item against an allowlist (O(n·m)) -> `array_flip()` once + `isset()` (n=m=100000, naive ~2.7s vs 1200ms budget; a wrong-output broken flips the wrong side of the comparison, losing duplicate items). 3 **testing**, mutation-checked: PHP title-case formatter with small-word exceptions (first/last-word capitalization dropped, small-word check inverted), a POSIX-sh IPv4 dotted-quad validator (octet bound off-by-one both directions, octet-count check loosened), and a C fixed-size-stack balanced-bracket checker (forgot-to-pop stack corruption, closer-type check dropped, final all-closed check dropped). 3 **feature**: Ruby `Order` gains percentage AND fixed-amount coupons with a minimum-order-value gate on fixed coupons only, broken forgets to clamp the fixed discount at 0 (goes negative); C++ `Matrix` gains `transpose()`, broken iterates the loop but never swaps the (r, c) coordinates, so it's just a same-shape deep copy; Terraform `aws_iam_policy` scoped to one S3 bucket's ARN, proven by real `terraform validate`, broken scopes `Resource` to a bare `"*"` wildcard (every bucket in the account). 2 **security**: C `printf(msg)` format-string vulnerability -> pass `msg` via `"%s"`, incomplete-fix broken routes it through `snprintf(buf, n, msg)` instead - still format-string-vulnerable, just one function later; shell `read_report.sh` path traversal via unvalidated `".."` segments -> canonicalize with `realpath -m` and verify the result stays inside the base dir, incomplete-fix broken only rejects a name that *starts with* `"../"`, missing the equally-effective escape through a real subdirectory (`subdir/../../secret.txt`). All 28 variants passed `verify-corpus` on the second attempt per case (a handful of first-pass authoring bugs - a mistyped test expectation, an under-calibrated perf budget, a mutant with no observable effect - were each caught and fixed before commit, consistent with the corpus's established discipline) |
 | **478 push - closes performance/testing/feature/security to target** | 1 | 470 → 478 | Batch 33, all Docker-verified: the last 8 cases needed to bring performance, testing, feature, and security exactly to their plan targets (45/65/95/55), in the languages the corpus was thinnest on (typescript, go, cpp, sql, yaml, shell, hcl). 2 **performance**: typescript `Array.prototype.unshift()` per item (O(n) per call, O(n^2) total) -> `push()` + one `reverse()` (n=300000, naive ~2.4s vs 1.2s budget - a first attempt at a string-`+=`-in-a-loop case was scrapped after in-container calibration showed V8's rope-string internals make that pattern genuinely fast, not quadratic); go `Dedup()` rescanning a growing slice with a linear `contains()` helper -> `map[string]struct{}` (n=100000, naive ~2.9s vs 1.2s budget; wrong-output broken iterates the map to build the result, losing order since Go's map iteration is randomized). 2 **testing**, mutation-checked: a C++ case-insensitive anagram checker (case-fold dropped on one side, only one side sorted before comparing, non-alphabetic filtering dropped), and a SQL `ROW_NUMBER() OVER (PARTITION BY ...)` first-login-per-user view exercised via real sqlite3 (ordering flipped to keep the latest instead of earliest, `rn=1` loosened to `rn<=2`, `PARTITION BY` dropped so only one row survives across all users). 2 **feature**: a docker-compose gains a `worker` service reusing the app's own image with an overridden command, broken gives it a separate image lacking the `worker.py` entrypoint; a shell deploy script gains a `--rollback` flag, incomplete-fix broken only records the previous release once (guarded by "not already present"), so after a third deploy, rollback still jumps all the way back to the first release instead of the one immediately before the current one. 2 **security**: a Terraform `aws_security_group` open to SSH from `0.0.0.0/0` -> scoped to an `admin_cidr` variable, proven by real `terraform validate`, incomplete-fix broken adds the restricted rule but leaves the original wildcard rule in place too; a GitHub Actions workflow triggering on `pull_request_target` while checking out untrusted PR code and using a repo secret (the classic "pwn request" supply-chain hole) -> switch the trigger to `pull_request`, incomplete-fix broken bolts on a read-only `permissions` block while leaving the dangerous trigger unchanged. All 25 variants passed `verify-corpus` on the first attempt per case after in-container calibration, except the TS case, whose original string-concatenation premise was replaced entirely once measurement showed it didn't hold |
+| **New categories: dependency_upgrade + documentation** | 1 | 478 → 487 | Batch 34 - the plan's two categories that had never shipped a single case. **Image work**: `docker/python/Dockerfile` now installs `python3-venv` and builds an offline `/opt/venv-pydantic1` venv pinned to pydantic 1.10.14 alongside the main env's pydantic 2.13 - both installed at build time so `--network none` still holds at test time. **4 `dependency_upgrade` cases**, all migrating genuine pydantic 1.x -> 2.x hard breaks (verified in-container first - several plausible v1 patterns turned out to be soft-deprecated, not hard breaks, and were rejected before authoring): `@root_validator` -> `@model_validator(mode="after")` (v1 form raises `PydanticUserError` at class-definition time; incomplete-fix broken renames the decorator but keeps `mode="before"` with `self`-style access, raising `AttributeError` since "before" hands the validator raw unvalidated data); `class Config: allow_mutation=False` -> `model_config = ConfigDict(frozen=True)` (the v1 key is silently ignored under v2 - model stays mutable; incomplete-fix broken moves to the `ConfigDict` container but keeps the stale key name, same silent no-op); `Field(const=True)` -> `Literal[...]` (removed kwarg, hard `PydanticUserError`; incomplete-fix broken swaps in `Field(frozen=True)`, which blocks post-construction mutation but not construction-time value); `class Config: orm_mode=True` + `.from_orm()` -> `ConfigDict(from_attributes=True)` + `.model_validate()` (hard `PydanticUserError`; incomplete-fix broken updates the call site but forgets the config flag, so `model_validate()` on a plain object raises `ValidationError`). Every incomplete-fix broken was re-tuned so the real hidden test - not the `expected_files` shape gate - is what catches it: an early `content_patterns` draft required the exact target keyword (e.g. `"literal"`), which made two brokens fail at the shape-check layer before ever exercising the actual pydantic behavior; loosened to a structural signal (e.g. the field name) so the broken reaches the real assertion. **5 `documentation` cases**, closing that category to target (5/5): a small, reusable doctest harness (`doctest.testmod(module)`, asserting `attempted >= 3` and `failed == 0`) applied to five already-correct stdlib-style functions with NO docstring at all (`format_cents`, `dedupe_preserve_order`, `is_palindrome`, `chunk_list`, `flatten_one_level`) - the model must add a docstring with real, runnable `>>>` examples covering a typical case, an edge case, and one more; each broken ships a docstring with one deliberately WRONG expected output (verified to genuinely mismatch the real function's output, not just look different) alongside the `unmodified` (no docstring at all, `attempted == 0`) broken. All 27 variants passed `verify-corpus` on the second attempt per case (the shape-gate retuning above) |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -241,7 +242,7 @@ hardware (~1.9s), comfortably under its 2500ms budget; recalibrated to
 `fib(48)` (naive ~7.9s in-container) with a 3000ms budget, timed directly
 inside the sandbox rather than assumed.
 
-## Remaining to 500 (22 cases)
+## Remaining to 500 (13 cases)
 
 **L3 (repo-scale) is live on two toolchains.** The `setup_repo`/`git_init`
 schema fields exist (see `prepare_workspace` in cases.py; documented in the
@@ -266,24 +267,30 @@ Rebalance note: **batch 33 closed performance (45/45), testing (65/65),
 feature (95/95), and security (55/55) out exactly to their plan targets** -
 stop adding any of them. Combined with bug_fix (95/95, at target since
 batch 15) and data_engineering (15/15, closed at batch 24), **six of the
-plan's original eight categories are now fully at target**. Only devops
+plan's original eight categories are fully at target**. Only devops
 (44/45, one case short) and refactoring (64/70, six short) remain open in
 that original set - both were previously called "effectively at target" by
 this note, but the plan's target table (`CORPUS_EXPANSION_PLAN.md`) actually
 puts refactoring's target at 70, not 64, so that gap is real and worth
-closing, not just rounding. **The bigger remaining gap: the plan's two
-categories that have never shipped a single case - `dependency_upgrade`
-(target 10) and `documentation` (target 5) - account for 15 of the 22 cases
-left to reach 500.** Both are Wave E ("new workflow shapes," see
-[the plan](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies))
-and need one-time infra before any cases can be authored: dependency_upgrade
-needs an image warmed with two side-by-side versions of some library (so a
-hidden test can import through whichever one the model migrated to);
-documentation needs a `python -m doctest`-as-oracle harness (no schema
-change, just a new `check_command` shape). Next batch should scope that
-infra work rather than reaching for more performance/testing/feature/
-security cases, since those are now at target and further additions would
-overshoot the plan's category balance. Batch 17
+closing, not just rounding. **Update: batch 34 stood up the two categories
+that had never shipped a single case.** `documentation` is now closed to
+target (5/5) via a small doctest harness - no schema change needed, just a
+`python -m doctest`-shaped `check_command`. `dependency_upgrade` is at
+4/10: the python image now carries an offline pydantic-1.10 venv
+(`/opt/venv-pydantic1`) alongside the main env's pydantic 2.13, and four
+cases migrate genuine v1->v2 hard breaks (`@root_validator`, `Config.
+allow_mutation`, `Field(const=True)`, `Config.orm_mode`/`.from_orm()`) -
+see the wave table below for which v1 patterns are hard breaks under the
+installed v2 versus merely soft-deprecated (and therefore useless as a
+broken variant, since unmigrated code would still pass). **What's left for
+500: 6 more dependency_upgrade cases (ideas not yet used: `.dict()`/`.json()`
+are only soft-deprecated so don't work as-is, but `GetterDict` removal,
+`Field(min_items=)`/`max_items=` -> `min_length=`/`max_length=`, and
+`__fields__` -> `model_fields` are worth checking the same way - verify the
+hard-break behavior in-container before authoring, per the batch-34
+lesson), the 1 remaining devops case, and the 6 remaining refactoring
+cases.** Every one of those is now closable with the established
+methodology - no further infra should be needed. Batch 17
 proved host-calibrated perf budgets work when margins are wide (naive 3-4x
 over budget on fast native hardware, fast path 50-500x under it); batch 18
 added node-native and java-native mutation harnesses so testing cases in
