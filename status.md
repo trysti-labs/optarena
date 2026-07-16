@@ -1,7 +1,7 @@
 # OptArena Status
 
 _As of 2026-07-16, on `main` (github.com/trysti-labs/optarena), through
-batch 32 - **corpus at 470/500 (94%)**._
+batch 33 - **corpus at 478/500 (96%)**._
 
 ## Where things stand
 
@@ -37,24 +37,28 @@ the public registry and the sandbox runs with `--network none` - fixed by
 baking an offline provider mirror into the base image. See
 [Quality gates](#quality-gates-in-practice) below for both fixes.
 
-## Corpus census (470 cases)
+## Corpus census (478 cases)
 
 | | |
 |---|---|
-| Total cases | **470** (target 500, 94%) |
-| With `reference_solution` | 366 (78%; 100% of the 350 added this expansion) |
+| Total cases | **478** (target 500, 96%) |
+| With `reference_solution` | 374 (78%; 100% of the 358 added this expansion) |
 | Mutation-checked testing cases | every `testing` case added since Wave A |
 | L3 (repo-scale, `setup_repo`) cases | 14 (fastapi-tasktracker 9, express-ts-shortlink 5) |
 | Multi-prompt session cases | 2 |
 | Sandbox images | 9 (base, python, node, jvm, go, rust, dotnet, php, ruby) - all in the GHCR publish matrix |
 
 **By language** (directly recomputed from the case JSONs' `language` tags):
-python 100, javascript 57, java 34, go 33, csharp 29, rust 28, yaml 28,
-typescript 28, sql 24, php 18, ruby 18, kotlin 17, shell 15, c 11, hcl 10,
-dockerfile 6, cpp 5, makefile 2 - plus 7 language-neutral devops cases.
+python 100, javascript 57, go 34, java 34, yaml 30, csharp 29, typescript 29,
+rust 28, sql 25, php 18, ruby 18, kotlin 17, shell 16, hcl 11, c 11, cpp 6,
+dockerfile 6, makefile 2 - plus 7 language-neutral devops cases.
 
-**By task type:** bug_fix 95, feature 93, **refactoring 64**, testing 63,
-security 53, devops 44, performance 43, data_engineering 15.
+**By task type:** bug_fix 95, **feature 95 (target)**, refactoring 64,
+**testing 65 (target)**, **security 55 (target)**, devops 44,
+**performance 45 (target)**, data_engineering 15. Four categories closed
+out this batch; only refactoring (64/70) and devops (44/45) remain below
+target among the original eight, plus the two categories the corpus hasn't
+started yet (see below).
 
 ## Waves shipped (chronology)
 
@@ -89,6 +93,7 @@ Since then:
 | **Real-Docker verification begins + perf/security/feature push** | 1 | 442 → 450 | Batch 30, the first batch verified through the actual `--network none` sandbox rather than a bare host toolchain (Docker became available in-environment). Found and fixed a corpus-wide gate breach affecting **all 15 kotlin cases** and a stale performance budget - see [Quality gates](#quality-gates-in-practice). New cases, each Docker-verified: 2 **performance** (typescript `Array.find()`-in-loop -> a Map, first-wins tie-break preserved, n=60k naive ~3.7s vs 1.5s budget; go string `+=` -> `strings.Builder`, n=40k naive ~2.5s vs 1.2s budget, both calibrated *inside* the real sandbox container). 2 **security** (csharp SQL built by string interpolation -> a parameterized query text+params pair, no live DB needed, broken escapes quotes but still interpolates; kotlin `java.util.Random` session tokens -> `SecureRandom`, broken switches to `SecureRandom` but hardcodes its seed - an order-independent discriminator checks the token against a 30-deep window of the known fixed-seed sequence rather than assuming call order). 3 **feature** (ruby cart bulk-discount tiers, broken orders the tier table ascending so `Array#find` matches the lowest satisfied threshold instead of the highest; php validator chain gains per-field stop-on-first-failure, broken stops *all* fields instead of just the failed one; go in-memory todo store gains status-filter + pagination, broken paginates the unfiltered store before filtering - the discriminator needed a white-box same-package test to seed genuinely interleaved statuses, since the store has no public setter). 1 **testing** (go alphanumeric-only palindrome check, mutation-checked) |
 | **460 push - underused languages** | 1 | 450 → 460 | Batch 31, all Docker-verified, deliberately targeting the corpus's thinnest language cells. 2 **performance**, both calibrated on the *debug* build profile (matching `cargo test`'s default, not `--release`) since a release-optimized O(n^2) is too fast to bust any sane budget: rust `Vec::contains` dedup -> `HashSet` (n=30k, naive ~1.5s vs 700ms budget; wrong-output broken sorts first, losing first-occurrence order), ruby `Array#delete`-per-id -> `reject` + `Set` (n=20k, naive ~0.86s vs 0.4s budget; wrong-output broken dedupes surviving items via Set arithmetic). 3 **security**: rust `sh -c` shell interpolation -> direct argv (no shell at all - the discriminator just asserts `cmd.get_program() == "ping"`, not `"sh"`); csharp ReDoS from a nested-quantifier regex -> a linear pattern, calibrated in-container (vulnerable ~2.6s on a 26-char near-miss vs 0ms fixed) with an incomplete-fix broken that bolts on a `MatchTimeout` band-aid instead of fixing the pattern; typescript CSV/formula injection (`=`/`+`/`-`/`@` prefixes execute as formulas in Excel) -> neutralize with a leading apostrophe, broken guards only the `=` prefix. 3 **feature**: kotlin `Cache` gains TTL expiry via an injectable `Clock` (broken uses an exclusive expiry boundary); terraform S3 lifecycle rule (transition + noncurrent-version expiration), proven by real `terraform validate`, broken leaves the rule `status = "Disabled"` (AWS silently ignores a disabled rule entirely); C++ `RingBuffer` gains overwrite-oldest-when-full semantics, broken forgets to advance `head_` so ordering breaks across multiple wraparounds. 2 **testing**, mutation-checked: kotlin Roman-numeral formatter, and a SQL `RANK() OVER (PARTITION BY ...)` top-spender-per-region view exercised via real sqlite3 (mutants: ranking direction flipped, ties widened, `LEFT JOIN` leaking an orderless customer into the results) |
 | **470 push - c/php/ruby/shell/cpp/hcl breadth** | 1 | 460 → 470 | Batch 32, all Docker-verified, targeting the categories still below target (performance/testing/feature/security) in languages the corpus was thinnest on (c, php, shell, ruby, cpp, hcl). 2 **performance**, both calibrated in-container: C `rtrim_spaces()` recomputing `strlen()` on every loop iteration (O(n·k) for k trailing spaces) -> cache the length once (n=700000/685000 trailing, naive ~2.1s vs 1000ms budget), PHP `in_array()` per item against an allowlist (O(n·m)) -> `array_flip()` once + `isset()` (n=m=100000, naive ~2.7s vs 1200ms budget; a wrong-output broken flips the wrong side of the comparison, losing duplicate items). 3 **testing**, mutation-checked: PHP title-case formatter with small-word exceptions (first/last-word capitalization dropped, small-word check inverted), a POSIX-sh IPv4 dotted-quad validator (octet bound off-by-one both directions, octet-count check loosened), and a C fixed-size-stack balanced-bracket checker (forgot-to-pop stack corruption, closer-type check dropped, final all-closed check dropped). 3 **feature**: Ruby `Order` gains percentage AND fixed-amount coupons with a minimum-order-value gate on fixed coupons only, broken forgets to clamp the fixed discount at 0 (goes negative); C++ `Matrix` gains `transpose()`, broken iterates the loop but never swaps the (r, c) coordinates, so it's just a same-shape deep copy; Terraform `aws_iam_policy` scoped to one S3 bucket's ARN, proven by real `terraform validate`, broken scopes `Resource` to a bare `"*"` wildcard (every bucket in the account). 2 **security**: C `printf(msg)` format-string vulnerability -> pass `msg` via `"%s"`, incomplete-fix broken routes it through `snprintf(buf, n, msg)` instead - still format-string-vulnerable, just one function later; shell `read_report.sh` path traversal via unvalidated `".."` segments -> canonicalize with `realpath -m` and verify the result stays inside the base dir, incomplete-fix broken only rejects a name that *starts with* `"../"`, missing the equally-effective escape through a real subdirectory (`subdir/../../secret.txt`). All 28 variants passed `verify-corpus` on the second attempt per case (a handful of first-pass authoring bugs - a mistyped test expectation, an under-calibrated perf budget, a mutant with no observable effect - were each caught and fixed before commit, consistent with the corpus's established discipline) |
+| **478 push - closes performance/testing/feature/security to target** | 1 | 470 → 478 | Batch 33, all Docker-verified: the last 8 cases needed to bring performance, testing, feature, and security exactly to their plan targets (45/65/95/55), in the languages the corpus was thinnest on (typescript, go, cpp, sql, yaml, shell, hcl). 2 **performance**: typescript `Array.prototype.unshift()` per item (O(n) per call, O(n^2) total) -> `push()` + one `reverse()` (n=300000, naive ~2.4s vs 1.2s budget - a first attempt at a string-`+=`-in-a-loop case was scrapped after in-container calibration showed V8's rope-string internals make that pattern genuinely fast, not quadratic); go `Dedup()` rescanning a growing slice with a linear `contains()` helper -> `map[string]struct{}` (n=100000, naive ~2.9s vs 1.2s budget; wrong-output broken iterates the map to build the result, losing order since Go's map iteration is randomized). 2 **testing**, mutation-checked: a C++ case-insensitive anagram checker (case-fold dropped on one side, only one side sorted before comparing, non-alphabetic filtering dropped), and a SQL `ROW_NUMBER() OVER (PARTITION BY ...)` first-login-per-user view exercised via real sqlite3 (ordering flipped to keep the latest instead of earliest, `rn=1` loosened to `rn<=2`, `PARTITION BY` dropped so only one row survives across all users). 2 **feature**: a docker-compose gains a `worker` service reusing the app's own image with an overridden command, broken gives it a separate image lacking the `worker.py` entrypoint; a shell deploy script gains a `--rollback` flag, incomplete-fix broken only records the previous release once (guarded by "not already present"), so after a third deploy, rollback still jumps all the way back to the first release instead of the one immediately before the current one. 2 **security**: a Terraform `aws_security_group` open to SSH from `0.0.0.0/0` -> scoped to an `admin_cidr` variable, proven by real `terraform validate`, incomplete-fix broken adds the restricted rule but leaves the original wildcard rule in place too; a GitHub Actions workflow triggering on `pull_request_target` while checking out untrusted PR code and using a repo secret (the classic "pwn request" supply-chain hole) -> switch the trigger to `pull_request`, incomplete-fix broken bolts on a read-only `permissions` block while leaving the dangerous trigger unchanged. All 25 variants passed `verify-corpus` on the first attempt per case after in-container calibration, except the TS case, whose original string-concatenation premise was replaced entirely once measurement showed it didn't hold |
 
 Each C/D batch follows the same shape per track: L1 idiom bug_fixes,
 an L2 cross-file feature, a behavior-preserving refactor with a
@@ -236,7 +241,7 @@ hardware (~1.9s), comfortably under its 2500ms budget; recalibrated to
 `fib(48)` (naive ~7.9s in-container) with a 3000ms budget, timed directly
 inside the sandbox rather than assumed.
 
-## Remaining to 500 (30 cases)
+## Remaining to 500 (22 cases)
 
 **L3 (repo-scale) is live on two toolchains.** The `setup_repo`/`git_init`
 schema fields exist (see `prepare_workspace` in cases.py; documented in the
@@ -257,14 +262,28 @@ ASP.NET, Rails, Laravel). Remaining work after L3, per the plan's
 3. **Wave F + moat hardening** — private held-out slice, paraphrase variants,
    anti-memorization checks ([moat hardening](CORPUS_EXPANSION_PLAN.md#moat-hardening-do-alongside-wave-f)).
 
-Rebalance note: **bug_fix (95/95), data_engineering (15/15), devops (44/45),
-and refactoring (64/70) are all effectively at target - stop adding any of
-them** (batches 15-25 shipped zero bug_fix; batch 24 closed out
-data_engineering; batch 28 closed out devops; batch 29 closed out
-refactoring). After batch 32 the remaining categories are **performance
-(43/45), testing (63/65), feature (93/95), and security (53/55)** - all four
-now within 2 cases of target, so essentially any mix of them closes the
-corpus out. Batch 17
+Rebalance note: **batch 33 closed performance (45/45), testing (65/65),
+feature (95/95), and security (55/55) out exactly to their plan targets** -
+stop adding any of them. Combined with bug_fix (95/95, at target since
+batch 15) and data_engineering (15/15, closed at batch 24), **six of the
+plan's original eight categories are now fully at target**. Only devops
+(44/45, one case short) and refactoring (64/70, six short) remain open in
+that original set - both were previously called "effectively at target" by
+this note, but the plan's target table (`CORPUS_EXPANSION_PLAN.md`) actually
+puts refactoring's target at 70, not 64, so that gap is real and worth
+closing, not just rounding. **The bigger remaining gap: the plan's two
+categories that have never shipped a single case - `dependency_upgrade`
+(target 10) and `documentation` (target 5) - account for 15 of the 22 cases
+left to reach 500.** Both are Wave E ("new workflow shapes," see
+[the plan](CORPUS_EXPANSION_PLAN.md#the-waves-380-cases-ordered-by-machinery-dependencies))
+and need one-time infra before any cases can be authored: dependency_upgrade
+needs an image warmed with two side-by-side versions of some library (so a
+hidden test can import through whichever one the model migrated to);
+documentation needs a `python -m doctest`-as-oracle harness (no schema
+change, just a new `check_command` shape). Next batch should scope that
+infra work rather than reaching for more performance/testing/feature/
+security cases, since those are now at target and further additions would
+overshoot the plan's category balance. Batch 17
 proved host-calibrated perf budgets work when margins are wide (naive 3-4x
 over budget on fast native hardware, fast path 50-500x under it); batch 18
 added node-native and java-native mutation harnesses so testing cases in
