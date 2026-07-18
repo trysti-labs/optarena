@@ -1,0 +1,55 @@
+{
+  "name": "refactor_kotlin_currency_formatters_to_shared_function",
+  "language": "kotlin",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Collapses three copy-pasted currency formatters (formatUsd/formatEur/formatGbp, identical logic apart from the symbol) into one formatMoney(cents, symbol) function, keeping the three original names as thin wrappers; behavior-drift broken puts the negative sign AFTER the symbol instead of before it",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "kotlin",
+    "refactoring"
+  ],
+  "prompts": [
+    "Money.kt defines formatUsd, formatEur, and formatGbp - three functions with IDENTICAL cents-to-string formatting logic, differing only in which currency symbol they use. Refactor this into one shared function `formatMoney(cents: Int, symbol: String): String` holding the one copy of the logic (sign handling, symbol, decimal places), and reimplement formatUsd/formatEur/formatGbp as one-line wrappers calling it with their respective symbol. Preserve the exact existing output format for all three, including that a negative amount's '-' sign comes BEFORE the currency symbol (e.g. -500 cents in USD is \"-$5.00\", not \"$-5.00\")."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Money.kt": "package com.optarena.app\n\nfun formatUsd(cents: Int): String {\n    val sign = if (cents < 0) \"-\" else \"\"\n    val c = kotlin.math.abs(cents)\n    return \"$sign$${c / 100}.${(c % 100).toString().padStart(2, '0')}\"\n}\n\nfun formatEur(cents: Int): String {\n    val sign = if (cents < 0) \"-\" else \"\"\n    val c = kotlin.math.abs(cents)\n    return \"$sign\u20ac${c / 100}.${(c % 100).toString().padStart(2, '0')}\"\n}\n\nfun formatGbp(cents: Int): String {\n    val sign = if (cents < 0) \"-\" else \"\"\n    val c = kotlin.math.abs(cents)\n    return \"$sign\u00a3${c / 100}.${(c % 100).toString().padStart(2, '0')}\"\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Money.kt",
+      "content_patterns": [
+        "formatmoney",
+        "formatusd",
+        "formateur",
+        "formatgbp"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/MoneyFormatTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass MoneyFormatTest {\n\n    @Test\n    fun positiveAmounts() {\n        assertEquals(\"$10.50\", formatUsd(1050))\n        assertEquals(\"\u20ac10.50\", formatEur(1050))\n        assertEquals(\"\u00a310.50\", formatGbp(1050))\n    }\n\n    @Test\n    fun zeroAmount() {\n        assertEquals(\"$0.00\", formatUsd(0))\n    }\n\n    @Test\n    fun negativeAmountsSignBeforeSymbol() {\n        assertEquals(\"-$5.00\", formatUsd(-500))\n        assertEquals(\"-\u20ac5.00\", formatEur(-500))\n        assertEquals(\"-\u00a35.00\", formatGbp(-500))\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=MoneyFormatTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Money.kt": "package com.optarena.app\n\nfun formatMoney(cents: Int, symbol: String): String {\n    val sign = if (cents < 0) \"-\" else \"\"\n    val c = kotlin.math.abs(cents)\n    return \"$sign$symbol${c / 100}.${(c % 100).toString().padStart(2, '0')}\"\n}\n\nfun formatUsd(cents: Int): String = formatMoney(cents, \"$\")\nfun formatEur(cents: Int): String = formatMoney(cents, \"\u20ac\")\nfun formatGbp(cents: Int): String = formatMoney(cents, \"\u00a3\")\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Money.kt": "package com.optarena.app\n\nfun formatUsd(cents: Int): String {\n    val sign = if (cents < 0) \"-\" else \"\"\n    val c = kotlin.math.abs(cents)\n    return \"$sign$${c / 100}.${(c % 100).toString().padStart(2, '0')}\"\n}\n\nfun formatEur(cents: Int): String {\n    val sign = if (cents < 0) \"-\" else \"\"\n    val c = kotlin.math.abs(cents)\n    return \"$sign\u20ac${c / 100}.${(c % 100).toString().padStart(2, '0')}\"\n}\n\nfun formatGbp(cents: Int): String {\n    val sign = if (cents < 0) \"-\" else \"\"\n    val c = kotlin.math.abs(cents)\n    return \"$sign\u00a3${c / 100}.${(c % 100).toString().padStart(2, '0')}\"\n}\n"
+      }
+    },
+    {
+      "name": "sign-after-symbol",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Money.kt": "package com.optarena.app\n\nfun formatMoney(cents: Int, symbol: String): String {\n    val sign = if (cents < 0) \"-\" else \"\"\n    val c = kotlin.math.abs(cents)\n    return \"$symbol$sign${c / 100}.${(c % 100).toString().padStart(2, '0')}\"\n}\n\nfun formatUsd(cents: Int): String = formatMoney(cents, \"$\")\nfun formatEur(cents: Int): String = formatMoney(cents, \"\u20ac\")\nfun formatGbp(cents: Int): String = formatMoney(cents, \"\u00a3\")\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "upgrade_pydantic_min_anystr_length_to_str_min_length",
+  "language": "python",
+  "framework": "pydantic",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Migrate pydantic 1.x class Config: min_anystr_length=3 to 2.x ConfigDict(str_min_length=3) - the v1 key is silently ignored under pydantic 2.x, so the minimum-length constraint is never enforced on any string field; incomplete-fix broken switches to the ConfigDict container but keeps the stale v1 key name, so nothing actually changes",
+  "difficulty": 1,
+  "task_type": "dependency_upgrade",
+  "tags": [
+    "python",
+    "pydantic",
+    "dependency-upgrade",
+    "migration"
+  ],
+  "prompts": [
+    "This project is being upgraded from pydantic 1.x to pydantic 2.x (the version actually installed and imported by `import pydantic` in this sandbox - you can check the old behavior against a real pydantic 1.10 install at /opt/venv-pydantic1/bin/python if useful, but the code you write must work under the installed pydantic 2.x). Tag in tag.py uses the pydantic 1.x `class Config: min_anystr_length = 3` pattern to reject any string field shorter than 3 characters, project-wide. Under the installed pydantic 2.x, this key is silently ignored (unrecognized), so a name like \"ab\" is now wrongly accepted. Migrate to the pydantic 2.x pattern: `model_config = ConfigDict(str_min_length=3)` as a class attribute. A name shorter than 3 characters must be rejected after the fix; \"abc\" (exactly 3) must still be accepted."
+  ],
+  "setup_files": {
+    "tag.py": "from pydantic import BaseModel\n\n\nclass Tag(BaseModel):\n    name: str\n\n    class Config:\n        min_anystr_length = 3\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "tag.py",
+      "content_patterns": [
+        "configdict"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_tag.py": "from tag import Tag\n\nt = Tag(name=\"abc\")\nassert t.name == \"abc\"\n\ntry:\n    Tag(name=\"ab\")\n    raise AssertionError(\"expected a name shorter than 3 characters to be rejected\")\nexcept AssertionError:\n    raise\nexcept Exception:\n    pass\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_tag.py",
+  "reference_solution": {
+    "tag.py": "from pydantic import BaseModel, ConfigDict\n\n\nclass Tag(BaseModel):\n    model_config = ConfigDict(str_min_length=3)\n\n    name: str\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "tag.py": "from pydantic import BaseModel\n\n\nclass Tag(BaseModel):\n    name: str\n\n    class Config:\n        min_anystr_length = 3\n"
+      }
+    },
+    {
+      "name": "configdict-with-stale-key-name",
+      "files": {
+        "tag.py": "from pydantic import BaseModel, ConfigDict\n\n\nclass Tag(BaseModel):\n    model_config = ConfigDict(min_anystr_length=3)\n\n    name: str\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "upgrade_pydantic_config_fields_alias_to_field_alias",
+  "language": "python",
+  "framework": "pydantic",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Migrate pydantic 1.x class Config: fields={'internal_id': 'id'} dict-based aliasing to 2.x Field(alias='id') - the v1 pattern is silently ignored under pydantic 2.x, so constructing via the external key 'id' fails validation entirely; incomplete-fix broken migrates to Field(alias=...) but with the wrong casing ('Id' instead of 'id'), so the real external key no longer matches",
+  "difficulty": 2,
+  "task_type": "dependency_upgrade",
+  "tags": [
+    "python",
+    "pydantic",
+    "dependency-upgrade",
+    "migration"
+  ],
+  "prompts": [
+    "This project is being upgraded from pydantic 1.x to pydantic 2.x (the version actually installed and imported by `import pydantic` in this sandbox - you can check the old behavior against a real pydantic 1.10 install at /opt/venv-pydantic1/bin/python if useful, but the code you write must work under the installed pydantic 2.x). User in user.py uses the pydantic 1.x `class Config: fields = {\"internal_id\": \"id\"}` dict-based aliasing pattern, so external callers construct it as `User(id=5)` while the field is named internal_id internally. Under the installed pydantic 2.x, this Config.fields dict is completely ignored (not even a recognized config key), so `User(id=5)` now fails validation - it expects the literal field name instead. Migrate to the pydantic 2.x pattern: declare the alias directly on the field with `Field(alias=\"id\")`. Preserve the exact external contract: `User(id=5).internal_id == 5`."
+  ],
+  "setup_files": {
+    "user.py": "from pydantic import BaseModel\n\n\nclass User(BaseModel):\n    internal_id: int\n\n    class Config:\n        fields = {\"internal_id\": \"id\"}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "user.py",
+      "content_patterns": [
+        "internal_id"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_user.py": "from user import User\n\nu = User(id=5)\nassert u.internal_id == 5, f\"unexpected internal_id: {u.internal_id}\"\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_user.py",
+  "reference_solution": {
+    "user.py": "from pydantic import BaseModel, Field\n\n\nclass User(BaseModel):\n    internal_id: int = Field(alias=\"id\")\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "user.py": "from pydantic import BaseModel\n\n\nclass User(BaseModel):\n    internal_id: int\n\n    class Config:\n        fields = {\"internal_id\": \"id\"}\n"
+      }
+    },
+    {
+      "name": "alias-wrong-casing",
+      "files": {
+        "user.py": "from pydantic import BaseModel, Field\n\n\nclass User(BaseModel):\n    internal_id: int = Field(alias=\"Id\")\n"
+      }
+    }
+  ]
+}

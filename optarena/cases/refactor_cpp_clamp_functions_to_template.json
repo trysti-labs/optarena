@@ -1,0 +1,48 @@
+{
+  "name": "refactor_cpp_clamp_functions_to_template",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Collapses three copy-pasted clamp functions (int/float/double, identical logic) into one function template, keeping the original three entry points as thin wrappers; behavior-drift broken has a typo in the shared template's low-bound branch, returning hi instead of lo for values below the range",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "cpp",
+    "templates",
+    "refactoring"
+  ],
+  "prompts": [
+    "clamp.h defines clamp_int, clamp_float, and clamp_double - three functions with IDENTICAL logic (clamp v to [lo, hi]), copy-pasted once per type. Refactor this into a single function template `clamp_value<T>(T v, T lo, T hi)` holding the one copy of the logic, and reimplement clamp_int/clamp_float/clamp_double as thin wrappers that call it - keeping all three original function names, signatures, and behavior exactly as they are now (do not change any call site elsewhere; only clamp.h needs to change)."
+  ],
+  "setup_files": {
+    "clamp.h": "#pragma once\n\ninline int clamp_int(int v, int lo, int hi) {\n    if (v < lo) return lo;\n    if (v > hi) return hi;\n    return v;\n}\n\ninline float clamp_float(float v, float lo, float hi) {\n    if (v < lo) return lo;\n    if (v > hi) return hi;\n    return v;\n}\n\ninline double clamp_double(double v, double lo, double hi) {\n    if (v < lo) return lo;\n    if (v > hi) return hi;\n    return v;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "clamp.h",
+      "content_patterns": [
+        "clamp_int",
+        "clamp_float",
+        "clamp_double"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_clamp.cpp": "#include \"clamp.h\"\n#include <cassert>\n#include <iostream>\n\nint main() {\n    assert(clamp_int(5, 0, 10) == 5);\n    assert(clamp_int(-5, 0, 10) == 0);\n    assert(clamp_int(15, 0, 10) == 10);\n\n    assert(clamp_float(-1.5f, 0.0f, 1.0f) == 0.0f);\n    assert(clamp_float(0.5f, 0.0f, 1.0f) == 0.5f);\n    assert(clamp_float(2.5f, 0.0f, 1.0f) == 1.0f);\n\n    assert(clamp_double(-100.0, -10.0, 10.0) == -10.0);\n    assert(clamp_double(0.0, -10.0, 10.0) == 0.0);\n    assert(clamp_double(100.0, -10.0, 10.0) == 10.0);\n\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  },
+  "check_command": "g++ -std=c++17 test_clamp.cpp -o test_clamp_bin && ./test_clamp_bin",
+  "reference_solution": {
+    "clamp.h": "#pragma once\n\ntemplate <typename T>\ninline T clamp_value(T v, T lo, T hi) {\n    if (v < lo) return lo;\n    if (v > hi) return hi;\n    return v;\n}\n\ninline int clamp_int(int v, int lo, int hi) { return clamp_value<int>(v, lo, hi); }\ninline float clamp_float(float v, float lo, float hi) { return clamp_value<float>(v, lo, hi); }\ninline double clamp_double(double v, double lo, double hi) { return clamp_value<double>(v, lo, hi); }\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "low-bound-returns-hi-instead-of-lo",
+      "files": {
+        "clamp.h": "#pragma once\n\ntemplate <typename T>\ninline T clamp_value(T v, T lo, T hi) {\n    if (v < lo) return hi;\n    if (v > hi) return hi;\n    return v;\n}\n\ninline int clamp_int(int v, int lo, int hi) { return clamp_value<int>(v, lo, hi); }\ninline float clamp_float(float v, float lo, float hi) { return clamp_value<float>(v, lo, hi); }\ninline double clamp_double(double v, double lo, double hi) { return clamp_value<double>(v, lo, hi); }\n"
+      }
+    }
+  ]
+}

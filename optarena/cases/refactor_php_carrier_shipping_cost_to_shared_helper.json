@@ -1,0 +1,52 @@
+{
+  "name": "refactor_php_carrier_shipping_cost_to_shared_helper",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Collapses three copy-pasted tiered shipping-cost methods (fedexCost/upsCost/dhlCost, identical tier logic, only the base fee differs) into one private tieredCost($weightKg, $base) helper; behavior-drift broken changes the shared middle-tier per-kg rate from 2.0 to 2.5",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "php",
+    "phpunit",
+    "refactoring"
+  ],
+  "prompts": [
+    "Shipping::fedexCost, ::upsCost, and ::dhlCost in src/Shipping.php compute a tiered shipping cost from a weight in kg - all three have IDENTICAL tier logic (a flat rate up to 1kg, $2/kg for the next 4kg, $3/kg beyond that), differing only in their base fee ($5.0, $6.0, $7.5 respectively). Extract the shared tier logic into one private static helper `tieredCost(float $weightKg, float $base): float`, and reimplement all three public methods as one-line calls to it with their own base fee. Preserve the exact existing costs for all three carriers at every weight."
+  ],
+  "setup_files": {
+    "src/Shipping.php": "<?php\nnamespace App;\n\nclass Shipping\n{\n    public static function fedexCost(float $weightKg): float\n    {\n        $base = 5.0;\n        if ($weightKg <= 1.0) {\n            return $base;\n        }\n        if ($weightKg <= 5.0) {\n            return $base + ($weightKg - 1.0) * 2.0;\n        }\n        return $base + 4.0 * 2.0 + ($weightKg - 5.0) * 3.0;\n    }\n\n    public static function upsCost(float $weightKg): float\n    {\n        $base = 6.0;\n        if ($weightKg <= 1.0) {\n            return $base;\n        }\n        if ($weightKg <= 5.0) {\n            return $base + ($weightKg - 1.0) * 2.0;\n        }\n        return $base + 4.0 * 2.0 + ($weightKg - 5.0) * 3.0;\n    }\n\n    public static function dhlCost(float $weightKg): float\n    {\n        $base = 7.5;\n        if ($weightKg <= 1.0) {\n            return $base;\n        }\n        if ($weightKg <= 5.0) {\n            return $base + ($weightKg - 1.0) * 2.0;\n        }\n        return $base + 4.0 * 2.0 + ($weightKg - 5.0) * 3.0;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/Shipping.php",
+      "content_patterns": [
+        "tieredcost"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/ShippingTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Shipping.php';\n\nfinal class ShippingTest extends TestCase\n{\n    public function testBaseTierIsJustTheFlatFee(): void\n    {\n        $this->assertEqualsWithDelta(5.0, \\App\\Shipping::fedexCost(1.0), 0.001);\n        $this->assertEqualsWithDelta(6.0, \\App\\Shipping::upsCost(0.5), 0.001);\n    }\n\n    public function testMiddleTierRateIsTwoPerKg(): void\n    {\n        // fedex: base 5.0 + (3.0 - 1.0) * 2.0 = 9.0\n        $this->assertEqualsWithDelta(9.0, \\App\\Shipping::fedexCost(3.0), 0.001);\n        // ups: base 6.0 + (5.0 - 1.0) * 2.0 = 14.0\n        $this->assertEqualsWithDelta(14.0, \\App\\Shipping::upsCost(5.0), 0.001);\n    }\n\n    public function testTopTierRateIsThreePerKg(): void\n    {\n        // dhl: base 7.5 + 4*2.0 + (8.0 - 5.0) * 3.0 = 7.5 + 8.0 + 9.0 = 24.5\n        $this->assertEqualsWithDelta(24.5, \\App\\Shipping::dhlCost(8.0), 0.001);\n    }\n\n    public function testDifferentCarriersDifferByBaseFeeOnly(): void\n    {\n        $weight = 3.0;\n        $fedex = \\App\\Shipping::fedexCost($weight);\n        $ups = \\App\\Shipping::upsCost($weight);\n        $this->assertEqualsWithDelta(1.0, $ups - $fedex, 0.001);\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/ShippingTest.php",
+  "reference_solution": {
+    "src/Shipping.php": "<?php\nnamespace App;\n\nclass Shipping\n{\n    private static function tieredCost(float $weightKg, float $base): float\n    {\n        if ($weightKg <= 1.0) {\n            return $base;\n        }\n        if ($weightKg <= 5.0) {\n            return $base + ($weightKg - 1.0) * 2.0;\n        }\n        return $base + 4.0 * 2.0 + ($weightKg - 5.0) * 3.0;\n    }\n\n    public static function fedexCost(float $weightKg): float\n    {\n        return self::tieredCost($weightKg, 5.0);\n    }\n\n    public static function upsCost(float $weightKg): float\n    {\n        return self::tieredCost($weightKg, 6.0);\n    }\n\n    public static function dhlCost(float $weightKg): float\n    {\n        return self::tieredCost($weightKg, 7.5);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "src/Shipping.php": "<?php\nnamespace App;\n\nclass Shipping\n{\n    public static function fedexCost(float $weightKg): float\n    {\n        $base = 5.0;\n        if ($weightKg <= 1.0) {\n            return $base;\n        }\n        if ($weightKg <= 5.0) {\n            return $base + ($weightKg - 1.0) * 2.0;\n        }\n        return $base + 4.0 * 2.0 + ($weightKg - 5.0) * 3.0;\n    }\n\n    public static function upsCost(float $weightKg): float\n    {\n        $base = 6.0;\n        if ($weightKg <= 1.0) {\n            return $base;\n        }\n        if ($weightKg <= 5.0) {\n            return $base + ($weightKg - 1.0) * 2.0;\n        }\n        return $base + 4.0 * 2.0 + ($weightKg - 5.0) * 3.0;\n    }\n\n    public static function dhlCost(float $weightKg): float\n    {\n        $base = 7.5;\n        if ($weightKg <= 1.0) {\n            return $base;\n        }\n        if ($weightKg <= 5.0) {\n            return $base + ($weightKg - 1.0) * 2.0;\n        }\n        return $base + 4.0 * 2.0 + ($weightKg - 5.0) * 3.0;\n    }\n}\n"
+      }
+    },
+    {
+      "name": "middle-tier-rate-drift",
+      "files": {
+        "src/Shipping.php": "<?php\nnamespace App;\n\nclass Shipping\n{\n    private static function tieredCost(float $weightKg, float $base): float\n    {\n        if ($weightKg <= 1.0) {\n            return $base;\n        }\n        if ($weightKg <= 5.0) {\n            return $base + ($weightKg - 1.0) * 2.5;\n        }\n        return $base + 4.0 * 2.0 + ($weightKg - 5.0) * 3.0;\n    }\n\n    public static function fedexCost(float $weightKg): float\n    {\n        return self::tieredCost($weightKg, 5.0);\n    }\n\n    public static function upsCost(float $weightKg): float\n    {\n        return self::tieredCost($weightKg, 6.0);\n    }\n\n    public static function dhlCost(float $weightKg): float\n    {\n        return self::tieredCost($weightKg, 7.5);\n    }\n}\n"
+      }
+    }
+  ]
+}
