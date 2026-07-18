@@ -210,25 +210,30 @@ command, run in the workspace after the file checks pass, that compiles/runs
 the generated code and asserts on its actual behavior. Pair it with
 `test_setup_files` - real test code (pytest-style asserts, a Node script, a
 compile-and-run harness) written into the workspace **after** the model's
-run, so the model never sees what it's graded against. All 120 built-in
-cases use this, spanning the Phase 1 benchmark-corpus target from
-`OptArena_Benchmark_Corpus_Specification.md`: Python (20, FastAPI/Flask/
-SQLAlchemy/Pydantic/Typer), JavaScript/TypeScript (20, Express/
-NestJS/React/Vue/plain Node), Java (15, Spring Boot), Go (10, Gin/Fiber),
-Rust (10, Axum/Actix-web), C# (10, ASP.NET Core), C/C++ (10), SQL (10),
-Shell (5), Docker Compose (5, static validation only), and Terraform (5,
-`fmt`/`validate` only, no cloud provider blocks). Every case covers one of
-the spec's task categories (feature, bug fix, refactoring, testing,
-security, performance, devops) and was hand-verified end-to-end - a correct
-reference solution passes, a broken one fails - before being counted as
-done. The testing-category cases (`add_tests_*`) are additionally
-**mutation-checked**: the hidden oracle first runs the model's tests against
-the correct implementation (they must pass), then against deliberately broken
-variants of it (each must make the tests fail) - so a vacuous test file that
-matches the keyword shape but asserts nothing real cannot pass. See `ARCH.md`
-for exactly what's built versus explicitly deferred
-(the full corpus is 100-150 cases; the rest of that range, plus
-repository-scale Level 3+ benchmarks, is future work).
+run, so the model never sees what it's graded against. The built-in
+catalogue is **500 cases across 18 languages and frameworks**, the full
+target from `CORPUS_EXPANSION_PLAN.md`: Python (115, FastAPI/Flask/Django/
+SQLAlchemy/Pydantic/Typer/pandas), JavaScript (57) and TypeScript (29,
+Express/NestJS/React/Vue/plain Node), Java (34, Spring Boot/plain),
+Kotlin (18, Spring Boot/plain), Go (34, Gin/stdlib), Rust (28, Axum/
+Actix-web/stdlib), C# (29, ASP.NET Core/plain), C (11) and C++ (7), PHP
+(19) and Ruby (19), SQL (25), Shell (16), YAML (32, Docker Compose/
+Kubernetes/GitHub Actions), HCL/Terraform (12), Dockerfile (10), and
+Makefile (5). Every case covers one of ten task categories - feature, bug
+fix, refactoring, testing, security, performance, devops, data
+engineering, documentation, dependency upgrade - each landing exactly on
+its plan target, and was hand-verified end-to-end - a correct reference
+solution passes, a broken one fails, through the real `--network none`
+Docker sandbox - before being counted as done. The testing-category cases
+(`add_tests_*`) are additionally **mutation-checked**: the hidden oracle
+first runs the model's tests against the correct implementation (they must
+pass), then against deliberately broken variants of it (each must make the
+tests fail) - so a vacuous test file that matches the keyword shape but
+asserts nothing real cannot pass. See `ARCH.md` and `CORPUS_EXPANSION_PLAN.md`
+for what's built versus explicitly deferred (frontier stacks like
+Next.js/Svelte/Deno-Bun, moat hardening, and further repository-scale
+Level 3+ starter repos beyond the two already live - `fastapi-tasktracker`
+and `express-ts-shortlink`).
 
 `check_command` runs inside a Docker sandbox whenever Docker is available -
 the shared `optarena-tester` base image (gcc + python3 + node,
