@@ -1,0 +1,54 @@
+{
+  "name": "optimize_ts_unshift_in_loop",
+  "language": "typescript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "prependAll() calls Array.prototype.unshift() per item (O(n) per call, O(n^2) total) -> push() each item then reverse() once at the end (O(n)); calibrated in-container at n=300000, naive ~2.4s vs a 1.2s budget, fast clears it in ~10ms",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "typescript",
+    "node",
+    "performance",
+    "array",
+    "big-o"
+  ],
+  "prompts": [
+    "prependAll(items: number[]) in prepend.ts builds a new array by calling result.unshift(item) for every item, prepending each one to the front. unshift() has to shift every existing element one slot to the right, so it's O(n) per call - O(n^2) total across all items, far too slow for large inputs. Rewrite it to run in O(n): push each item onto the end of the array as you iterate, then reverse the whole array ONCE at the end. The output must be identical: items in the reverse of their input order. Keep the function name, signature, and export."
+  ],
+  "setup_files": {
+    "prepend.ts": "// BUG: Array.prototype.unshift() prepends by shifting every existing\n// element one slot to the right - O(n) per call, so calling it once per\n// input item is O(n^2) total.\nexport function prependAll(items: number[]): number[] {\n  const result: number[] = [];\n  for (const item of items) {\n    result.unshift(item);\n  }\n  return result;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "prepend.ts",
+      "content_patterns": [
+        "prependAll"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_prepend.ts": "function assertEqual(actual: unknown, expected: unknown, message: string): void {\n  if (JSON.stringify(actual) !== JSON.stringify(expected)) {\n    throw new Error(`${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);\n  }\n}\n\nimport { prependAll } from \"./prepend\";\n\n// basic correctness: each item is prepended, so the result is the reverse\n// of the input order\nassertEqual(prependAll([1, 2, 3]), [3, 2, 1], \"basic reverse order\");\n\n// empty input\nassertEqual(prependAll([]), [], \"empty input\");\n\n// single item\nassertEqual(prependAll([7]), [7], \"single item\");\n\n// performance\n{\n  const n = 300000;\n  const items = Array.from({ length: n }, (_, i) => i);\n  const expected = [...items].reverse();\n\n  const start = Date.now();\n  const got = prependAll(items);\n  const elapsed = (Date.now() - start) / 1000;\n\n  assertEqual(got[0], expected[0], \"large-input first element\");\n  assertEqual(got[n - 1], expected[n - 1], \"large-input last element\");\n  assertEqual(got.length, n, \"large-input length\");\n  // calibrated: unshift() per item is ~2.4s on fast native hardware at\n  // n=300000; push+reverse is ~0.01s\n  if (elapsed >= 1.2) {\n    throw new Error(\n      `prependAll took ${elapsed.toFixed(2)}s for ${n} items; expected push() + a single ` +\n        `reverse() at the end, not unshift() per item (O(n^2))`,\n    );\n  }\n}\n\nconsole.log(\"PASS\");\n"
+  },
+  "check_command": "tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build prepend.ts test_prepend.ts && node build/test_prepend.js",
+  "reference_solution": {
+    "prepend.ts": "// push() is amortized O(1); reversing the fully-built array once at the\n// end is O(n) - O(n) total instead of O(n^2).\nexport function prependAll(items: number[]): number[] {\n  const result: number[] = [];\n  for (const item of items) {\n    result.push(item);\n  }\n  result.reverse();\n  return result;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-forgot-reverse",
+      "files": {
+        "prepend.ts": "export function prependAll(items: number[]): number[] {\n  const result: number[] = [];\n  for (const item of items) {\n    result.push(item);\n  }\n  return result;\n}\n"
+      }
+    },
+    {
+      "name": "still-quadratic-splice",
+      "files": {
+        "prepend.ts": "export function prependAll(items: number[]): number[] {\n  const result: number[] = [];\n  for (const item of items) {\n    result.splice(0, 0, item);\n  }\n  return result;\n}\n"
+      }
+    }
+  ]
+}

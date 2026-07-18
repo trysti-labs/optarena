@@ -1,0 +1,54 @@
+{
+  "name": "add_docs_dedupe_preserve_order",
+  "language": "python",
+  "framework": "doctest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Add a doctest-verified docstring to dedupe_preserve_order() (already correct - do not modify its behavior); broken has a docstring example whose expected output is just the unmodified input (i.e. claims nothing was deduped)",
+  "difficulty": 1,
+  "task_type": "documentation",
+  "tags": [
+    "python",
+    "documentation",
+    "doctest"
+  ],
+  "prompts": [
+    "dedupe_preserve_order(items) in dedupe.py (the implementation is already correct - do not change its behavior) removes duplicate values from a list, keeping only the FIRST occurrence of each, in original order. It currently has no docstring at all. Add a docstring with at least 3 runnable doctest `>>>` examples (verified by `python -m doctest`) that document its behavior: a list with duplicates spread throughout, an empty list, and a list of all-identical values - each example's expected output must be the function's REAL, exact output."
+  ],
+  "setup_files": {
+    "dedupe.py": "def dedupe_preserve_order(items):\n    seen = set()\n    out = []\n    for x in items:\n        if x not in seen:\n            seen.add(x)\n            out.append(x)\n    return out\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dedupe.py",
+      "content_patterns": [
+        ">>>",
+        "def dedupe_preserve_order"
+      ],
+      "min_lines": 5
+    }
+  ],
+  "test_setup_files": {
+    "check_doctest.py": "import doctest\nimport dedupe\n\nresults = doctest.testmod(dedupe, verbose=False)\nassert results.attempted >= 3, (\n    f\"expected at least 3 runnable doctest examples (>>> lines), found \"\n    f\"{results.attempted} - a docstring with no >>> examples, or examples doctest can't \"\n    f\"parse, don't count\")\nassert results.failed == 0, f\"{results.failed} doctest example(s) failed out of {results.attempted}\"\nprint(f\"PASS ({results.attempted} doctest examples, 0 failed)\")\n"
+  },
+  "check_command": "python3 check_doctest.py",
+  "reference_solution": {
+    "dedupe.py": "def dedupe_preserve_order(items):\n    \"\"\"Remove duplicates from items, keeping the FIRST occurrence of each,\n    in original order.\n\n    >>> dedupe_preserve_order([1, 2, 1, 3, 2])\n    [1, 2, 3]\n    >>> dedupe_preserve_order([])\n    []\n    >>> dedupe_preserve_order(['a', 'a', 'a'])\n    ['a']\n    \"\"\"\n    seen = set()\n    out = []\n    for x in items:\n        if x not in seen:\n            seen.add(x)\n            out.append(x)\n    return out\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "dedupe.py": "def dedupe_preserve_order(items):\n    seen = set()\n    out = []\n    for x in items:\n        if x not in seen:\n            seen.add(x)\n            out.append(x)\n    return out\n"
+      }
+    },
+    {
+      "name": "wrong-expected-output-claims-no-dedup",
+      "files": {
+        "dedupe.py": "def dedupe_preserve_order(items):\n    \"\"\"Remove duplicates from items, keeping the FIRST occurrence of each,\n    in original order.\n\n    >>> dedupe_preserve_order([1, 2, 1, 3, 2])\n    [1, 2, 3, 1, 2]\n    >>> dedupe_preserve_order([])\n    []\n    >>> dedupe_preserve_order(['a', 'a', 'a'])\n    ['a']\n    \"\"\"\n    seen = set()\n    out = []\n    for x in items:\n        if x not in seen:\n            seen.add(x)\n            out.append(x)\n    return out\n"
+      }
+    }
+  ]
+}

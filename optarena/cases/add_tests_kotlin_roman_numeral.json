@@ -1,0 +1,49 @@
+{
+  "name": "add_tests_kotlin_roman_numeral",
+  "language": "kotlin",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "description": "Write kotlin tests for an int-to-Roman-numeral formatter; mutation-checked (900/CM dropped from the subtractive table, >= loosened to >, range off-by-one)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "kotlin",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "RomanNumeral.format(n) in RomanNumeral.kt (already correct - do not modify it) formats an int from 1 to 3999 as a Roman numeral, using the standard subtractive notation (4 is IV, 9 is IX, 1994 is MCMXCIV), and throws IllegalArgumentException for n outside that range. Write a JUnit 5 test class at exactly RomanNumeralTest.kt (functions annotated @Test, org.junit.jupiter.api.Assertions, exact expected strings) with at least 5 test functions covering: simple single-symbol values, at least two subtractive pairs including 900 (CM), a compound value like 1994, the boundary value 3999, and both ends of the invalid range (0 and 4000) throwing IllegalArgumentException."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/RomanNumeral.kt": "package com.optarena.app\n\nobject RomanNumeral {\n    private val VALUES = listOf(\n        1000 to \"M\", 900 to \"CM\", 500 to \"D\", 400 to \"CD\",\n        100 to \"C\", 90 to \"XC\", 50 to \"L\", 40 to \"XL\",\n        10 to \"X\", 9 to \"IX\", 5 to \"V\", 4 to \"IV\", 1 to \"I\",\n    )\n\n    /** Format n (1..3999) as a Roman numeral. Out-of-range n throws. */\n    fun format(n: Int): String {\n        require(n in 1..3999) { \"n out of range: $n\" }\n        var remaining = n\n        val sb = StringBuilder()\n        for ((value, symbol) in VALUES) {\n            while (remaining >= value) {\n                sb.append(symbol)\n                remaining -= value\n            }\n        }\n        return sb.toString()\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "RomanNumeralTest.kt",
+      "content_patterns": [
+        "romannumeral",
+        "assertequals"
+      ],
+      "min_lines": 15
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "\"\"\"Mutation harness: model tests must PASS the real implementation and FAIL\neach mutant. Uses a Python-level subprocess timeout (not a shell `timeout`\nwrapper) so a hung mutant can never corrupt this host-mounted workspace.\"\"\"\nimport shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"src/main/kotlin/com/optarena/app/RomanNumeral.kt\")\nMUTANTS = [\n    # 900 (CM) dropped from the subtractive table - 900 built the \"wrong\"\n    # way as DCD-ish nonsense once C's below 900 keep firing\n    ['1000 to \"M\", 900 to \"CM\", 500 to \"D\", 400 to \"CD\",',\n     '1000 to \"M\", 500 to \"D\", 400 to \"CD\",'],\n    # >= loosened to > : a value exactly equal to remaining is skipped once\n    ['            while (remaining >= value) {',\n     '            while (remaining > value) {'],\n    # range upper bound off by one\n    ['        require(n in 1..3999) { \"n out of range: $n\" }',\n     '        require(n in 1..4000) { \"n out of range: $n\" }'],\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    try:\n        return subprocess.run(\n            [\"mvn\", \"-o\", \"-q\", \"test\", \"-Dtest=RomanNumeralTest\"], timeout=180\n        ).returncode\n    except subprocess.TimeoutExpired:\n        return 124\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken implementation, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "src/test/kotlin/com/optarena/app/RomanNumeralTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertThrows\nimport org.junit.jupiter.api.Test\n\nclass RomanNumeralTest {\n\n    @Test\n    fun simpleValues() {\n        assertEquals(\"I\", RomanNumeral.format(1))\n        assertEquals(\"V\", RomanNumeral.format(5))\n        assertEquals(\"X\", RomanNumeral.format(10))\n    }\n\n    @Test\n    fun subtractivePairs() {\n        assertEquals(\"IV\", RomanNumeral.format(4))\n        assertEquals(\"IX\", RomanNumeral.format(9))\n        assertEquals(\"XC\", RomanNumeral.format(90))\n        assertEquals(\"CM\", RomanNumeral.format(900))\n    }\n\n    @Test\n    fun compoundValue() {\n        assertEquals(\"MCMXCIV\", RomanNumeral.format(1994))\n    }\n\n    @Test\n    fun boundaryValues() {\n        assertEquals(\"MMMCMXCIX\", RomanNumeral.format(3999))\n    }\n\n    @Test\n    fun outOfRangeThrows() {\n        assertThrows(IllegalArgumentException::class.java) { RomanNumeral.format(0) }\n        assertThrows(IllegalArgumentException::class.java) { RomanNumeral.format(4000) }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "src/test/kotlin/com/optarena/app/RomanNumeralTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\n\nclass RomanNumeralTest {\n\n    @Test\n    fun resultIsNotEmpty() {\n        assertTrue(RomanNumeral.format(5).isNotEmpty())\n    }\n\n    @Test\n    fun oneIsI() {\n        assertEquals(\"I\", RomanNumeral.format(1))\n    }\n\n    @Test\n    fun resultOnlyContainsRomanLetters() {\n        assertTrue(RomanNumeral.format(42).all { it in \"IVXLCDM\" })\n    }\n\n    @Test\n    fun largerNumbersGiveLongerOrEqualStrings() {\n        assertTrue(RomanNumeral.format(100).length >= RomanNumeral.format(1).length)\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "name": "add_k8s_configmap_env_from",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Extract an existing Deployment's hardcoded env vars into a ConfigMap, wired in via envFrom/configMapRef; incomplete-fix broken creates the ConfigMap correctly but has the Deployment's envFrom reference a differently-named (nonexistent) ConfigMap, which would fail to start the pods (CreateContainerConfigError)",
+  "difficulty": 2,
+  "task_type": "devops",
+  "tags": [
+    "devops",
+    "kubernetes",
+    "configmap",
+    "yaml"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml (already present) runs the 'reports' Deployment with three env vars (LOG_LEVEL, PAGE_SIZE, REPORT_FORMAT) hardcoded directly in the container spec - changing any of them means editing and redeploying the Deployment itself. Extract these into a new k8s/configmap.yaml (a ConfigMap named reports-config with the same three key/value pairs, unchanged), and update deployment.yaml to load them via envFrom + configMapRef instead of the hardcoded env list. Do not change replicas, the image, or any of the three values themselves."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: reports\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: reports\n  template:\n    metadata:\n      labels:\n        app: reports\n    spec:\n      containers:\n        - name: reports\n          image: myorg/reports:2.1.0\n          env:\n            - name: LOG_LEVEL\n              value: \"info\"\n            - name: PAGE_SIZE\n              value: \"50\"\n            - name: REPORT_FORMAT\n              value: \"pdf\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/configmap.yaml",
+      "content_patterns": [
+        "kind: ConfigMap",
+        "reports-config"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_configmap.py": "import yaml\n\nwith open('k8s/configmap.yaml') as f:\n    cm = yaml.safe_load(f)\n\nassert cm.get('kind') == 'ConfigMap', cm.get('kind')\ncm_name = cm.get('metadata', {}).get('name')\nassert cm_name, 'ConfigMap has no name'\n\ndata = cm.get('data') or {}\nassert data.get('LOG_LEVEL') == 'info', f\"LOG_LEVEL wrong or missing: {data}\"\nassert data.get('PAGE_SIZE') == '50', f\"PAGE_SIZE wrong or missing: {data}\"\nassert data.get('REPORT_FORMAT') == 'pdf', f\"REPORT_FORMAT wrong or missing: {data}\"\n\nwith open('k8s/deployment.yaml') as f:\n    dep = yaml.safe_load(f)\n\nassert dep.get('kind') == 'Deployment'\nassert dep['spec']['replicas'] == 2, 'deployment replicas changed unexpectedly'\n\ncontainer = dep['spec']['template']['spec']['containers'][0]\nassert container.get('image') == 'myorg/reports:2.1.0', 'container image changed unexpectedly'\n\n# the whole point: no more hardcoded env vars, and envFrom must point at\n# the ConfigMap that ACTUALLY EXISTS (the one just asserted above)\nassert 'env' not in container or not container['env'], (\n    f\"container still has hardcoded env vars: {container.get('env')}\")\n\nenv_from = container.get('envFrom') or []\nreferenced_names = [\n    e.get('configMapRef', {}).get('name') for e in env_from if 'configMapRef' in e\n]\nassert cm_name in referenced_names, (\n    f\"deployment's envFrom does not reference the ConfigMap that actually exists \"\n    f\"({cm_name!r}); found references: {referenced_names}\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_configmap.py",
+  "reference_solution": {
+    "k8s/configmap.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: reports-config\ndata:\n  LOG_LEVEL: \"info\"\n  PAGE_SIZE: \"50\"\n  REPORT_FORMAT: \"pdf\"\n",
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: reports\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: reports\n  template:\n    metadata:\n      labels:\n        app: reports\n    spec:\n      containers:\n        - name: reports\n          image: myorg/reports:2.1.0\n          envFrom:\n            - configMapRef:\n                name: reports-config\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: reports\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: reports\n  template:\n    metadata:\n      labels:\n        app: reports\n    spec:\n      containers:\n        - name: reports\n          image: myorg/reports:2.1.0\n          env:\n            - name: LOG_LEVEL\n              value: \"info\"\n            - name: PAGE_SIZE\n              value: \"50\"\n            - name: REPORT_FORMAT\n              value: \"pdf\"\n"
+      }
+    },
+    {
+      "name": "envfrom-references-wrong-configmap-name",
+      "files": {
+        "k8s/configmap.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: reports-config\ndata:\n  LOG_LEVEL: \"info\"\n  PAGE_SIZE: \"50\"\n  REPORT_FORMAT: \"pdf\"\n",
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: reports\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: reports\n  template:\n    metadata:\n      labels:\n        app: reports\n    spec:\n      containers:\n        - name: reports\n          image: myorg/reports:2.1.0\n          envFrom:\n            - configMapRef:\n                name: report-config\n"
+      }
+    }
+  ]
+}

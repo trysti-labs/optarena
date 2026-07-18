@@ -1,0 +1,53 @@
+{
+  "name": "optimize_ruby_array_delete_loop",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Array#delete called once per blocked id inside a loop -> reject + Set; budget calibrated in-container (naive ~0.86s at n=20k vs ~0.0015s, budget 0.4s); wrong-output broken dedupes surviving items via Set arithmetic",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "ruby",
+    "performance",
+    "set",
+    "big-o"
+  ],
+  "prompts": [
+    "Remover.remove_blocked(items, blocked_ids) in remover.rb removes every blocked id from items - but it calls items.delete(id) once per blocked id, and each delete call rescans (and shifts) the entire array, making the whole method O(n*m). Rewrite it as ONE pass: build a Set from blocked_ids, then items.reject against it, returning exactly the same result for every input - original order preserved AND duplicate surviving items kept (reject only removes matches, it does not deduplicate). Keep the method name and signature."
+  ],
+  "setup_files": {
+    "remover.rb": "require \"set\"\n\nclass Remover\n  # BUG: Array#delete(id) rescans (and shifts) the WHOLE items array for\n  # every blocked id - O(n*m) and far too slow when both lists are large.\n  def self.remove_blocked(items, blocked_ids)\n    items = items.dup\n    blocked_ids.each do |id|\n      items.delete(id)\n    end\n    items\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "remover.rb",
+      "content_patterns": [
+        "remove_blocked"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "remover_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"remover\"\n\nclass RemoverTest < Minitest::Test\n  def test_removes_blocked_items\n    assert_equal [1, 3], Remover.remove_blocked([1, 2, 3], [2])\n  end\n\n  def test_preserves_order_and_duplicates\n    assert_equal [1, 1, 3], Remover.remove_blocked([1, 2, 1, 3, 2], [2])\n  end\n\n  def test_empty_blocked_list_is_a_no_op\n    assert_equal [5, 4, 3], Remover.remove_blocked([5, 4, 3], [])\n  end\n\n  def test_performance_large_input\n    n = 20_000\n    items = (0...n).to_a\n    blocked = (0...(n / 2)).to_a\n    expected = ((n / 2)...n).to_a\n\n    start = Time.now\n    got = Remover.remove_blocked(items, blocked)\n    elapsed = Time.now - start\n\n    assert_equal expected, got\n    # calibrated in-container: Array#delete per blocked id is ~0.86s at\n    # n=20000/half blocked; reject+Set is ~0.0015s\n    assert elapsed < 0.4,\n      \"remove_blocked took #{elapsed}s for #{n} items; expected reject + a Set, \" \\\n      \"not Array#delete per blocked id (O(n*m))\"\n  end\nend\n"
+  },
+  "check_command": "ruby remover_hidden_test.rb",
+  "reference_solution": {
+    "remover.rb": "require \"set\"\n\nclass Remover\n  def self.remove_blocked(items, blocked_ids)\n    blocked = blocked_ids.to_set\n    items.reject { |x| blocked.include?(x) }\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-dedupes-via-set-arithmetic",
+      "files": {
+        "remover.rb": "require \"set\"\n\nclass Remover\n  def self.remove_blocked(items, blocked_ids)\n    blocked = blocked_ids.to_set\n    (items.to_set - blocked).to_a\n  end\nend\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "remover.rb": "require \"set\"\n\nclass Remover\n  # BUG: Array#delete(id) rescans (and shifts) the WHOLE items array for\n  # every blocked id - O(n*m) and far too slow when both lists are large.\n  def self.remove_blocked(items, blocked_ids)\n    items = items.dup\n    blocked_ids.each do |id|\n      items.delete(id)\n    end\n    items\n  end\nend\n"
+      }
+    }
+  ]
+}

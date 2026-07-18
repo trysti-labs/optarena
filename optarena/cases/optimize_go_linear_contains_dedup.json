@@ -1,0 +1,55 @@
+{
+  "name": "optimize_go_linear_contains_dedup",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dedup() rescans a growing slice with a linear contains() helper for every item (O(n^2)) -> a map[string]struct{} for O(1) membership (O(n)); calibrated in-container at n=100000, naive ~2.9s vs a 1.2s budget, fast clears it in ~5ms",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "go",
+    "performance",
+    "map",
+    "dedup",
+    "big-o"
+  ],
+  "prompts": [
+    "Dedup(items []string) in dedup.go removes duplicates while preserving the order of first occurrence. It checks membership with a hand-written contains(seen, s) helper that linearly scans the whole `seen` slice for every item - O(n^2) overall, far too slow for large inputs with many duplicates. Rewrite it to use a map[string]struct{} for O(1) membership checks, giving O(n) overall. The output must be IDENTICAL: each distinct value's first occurrence, in the same relative order as the input - do not build the result by iterating a map, since Go's map iteration order is randomized."
+  ],
+  "setup_files": {
+    "dedup.go": "package dedup\n\n// BUG: contains() linearly rescans the whole \"seen\" slice for every item,\n// making Dedup O(n^2) overall - far too slow for large inputs with many\n// duplicates.\nfunc contains(seen []string, s string) bool {\n\tfor _, x := range seen {\n\t\tif x == s {\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}\n\n// Dedup returns items with duplicates removed, keeping the FIRST\n// occurrence of each value and preserving relative order.\nfunc Dedup(items []string) []string {\n\tvar seen []string\n\tvar out []string\n\tfor _, it := range items {\n\t\tif !contains(seen, it) {\n\t\t\tseen = append(seen, it)\n\t\t\tout = append(out, it)\n\t\t}\n\t}\n\treturn out\n}\n",
+    "go.mod": "module dedup\n\ngo 1.22\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dedup.go",
+      "content_patterns": [
+        "Dedup"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "dedup_test.go": "package dedup\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestDedupBasic(t *testing.T) {\n\tgot := Dedup([]string{\"a\", \"b\", \"a\", \"c\", \"b\"})\n\twant := []string{\"a\", \"b\", \"c\"}\n\tif len(got) != len(want) {\n\t\tt.Fatalf(\"Dedup(...) = %v, want %v\", got, want)\n\t}\n\tfor i := range want {\n\t\tif got[i] != want[i] {\n\t\t\tt.Fatalf(\"Dedup(...) = %v, want %v (order must match first occurrence)\", got, want)\n\t\t}\n\t}\n}\n\nfunc TestDedupEmpty(t *testing.T) {\n\tif got := Dedup(nil); len(got) != 0 {\n\t\tt.Fatalf(\"empty input must give an empty result, got %v\", got)\n\t}\n}\n\nfunc TestDedupPerformance(t *testing.T) {\n\tn := 100000\n\titems := make([]string, n)\n\tfor i := 0; i < n; i++ {\n\t\titems[i] = fmt.Sprintf(\"item-%d\", i%(n/2))\n\t}\n\n\tstart := time.Now()\n\tgot := Dedup(items)\n\telapsed := time.Since(start)\n\n\tif len(got) != n/2 {\n\t\tt.Fatalf(\"large-input dedup count = %d, want %d\", len(got), n/2)\n\t}\n\tif got[0] != \"item-0\" || got[1] != \"item-1\" {\n\t\tt.Fatalf(\"large-input order wrong: first two are %v\", got[:2])\n\t}\n\t// calibrated: a linear contains() scan is ~2.9s on fast native\n\t// hardware at n=100000; a map is ~5ms\n\tif elapsed >= 1200*time.Millisecond {\n\t\tt.Fatalf(\"Dedup took %v for %d items; expected a map[string]struct{} for membership, \"+\n\t\t\t\"not a linear scan per item (O(n^2))\", elapsed, n)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "dedup.go": "package dedup\n\n// Dedup returns items with duplicates removed, keeping the FIRST\n// occurrence of each value and preserving relative order. A map gives O(1)\n// membership checks, so this runs in O(n) overall.\nfunc Dedup(items []string) []string {\n\tseen := make(map[string]struct{}, len(items))\n\tvar out []string\n\tfor _, it := range items {\n\t\tif _, ok := seen[it]; !ok {\n\t\t\tseen[it] = struct{}{}\n\t\t\tout = append(out, it)\n\t\t}\n\t}\n\treturn out\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-map-iteration-order",
+      "files": {
+        "dedup.go": "package dedup\n\nfunc Dedup(items []string) []string {\n\tseen := make(map[string]bool)\n\tfor _, it := range items {\n\t\tseen[it] = true\n\t}\n\tvar out []string\n\tfor k := range seen {\n\t\tout = append(out, k)\n\t}\n\treturn out\n}\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "dedup.go": "package dedup\n\n// BUG: contains() linearly rescans the whole \"seen\" slice for every item,\n// making Dedup O(n^2) overall - far too slow for large inputs with many\n// duplicates.\nfunc contains(seen []string, s string) bool {\n\tfor _, x := range seen {\n\t\tif x == s {\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}\n\n// Dedup returns items with duplicates removed, keeping the FIRST\n// occurrence of each value and preserving relative order.\nfunc Dedup(items []string) []string {\n\tvar seen []string\n\tvar out []string\n\tfor _, it := range items {\n\t\tif !contains(seen, it) {\n\t\t\tseen = append(seen, it)\n\t\t\tout = append(out, it)\n\t\t}\n\t}\n\treturn out\n}\n"
+      }
+    }
+  ]
+}

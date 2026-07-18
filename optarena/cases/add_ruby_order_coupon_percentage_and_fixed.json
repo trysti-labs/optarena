@@ -1,0 +1,47 @@
+{
+  "name": "add_ruby_order_coupon_percentage_and_fixed",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Add percentage AND fixed-amount coupon support to Order#total_with_coupon, with a minimum-order-value gate on fixed coupons only; broken forgets to clamp the fixed discount at 0, letting a large fixed coupon push the total negative",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "minitest",
+    "pricing",
+    "coupons"
+  ],
+  "prompts": [
+    "Order#total in order.rb just returns the subtotal with no coupon support at all. Add a total_with_coupon(coupon) method where coupon is a Hash with a :type key. For type: :percentage, apply coupon[:value] as a percent-off discount with NO minimum order requirement. For type: :fixed, subtract coupon[:value] dollars off the subtotal, but ONLY if the subtotal is at or above coupon[:min_order] (if min_order is present and the subtotal is below it, the fixed coupon has no effect at all) - and the resulting total must never go below 0, no matter how large the fixed discount is relative to the subtotal. Keep the existing total method unchanged."
+  ],
+  "setup_files": {
+    "order.rb": "class Order\n  def initialize(subtotal)\n    @subtotal = subtotal\n  end\n\n  def total\n    @subtotal\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "order.rb",
+      "content_patterns": [
+        "def total_with_coupon"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "order_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"order\"\n\nclass OrderCouponTest < Minitest::Test\n  def test_percentage_coupon_no_minimum\n    order = Order.new(200.0)\n    assert_in_delta 180.0, order.total_with_coupon(type: :percentage, value: 10)\n  end\n\n  def test_fixed_coupon_applies_when_at_or_above_minimum\n    order = Order.new(100.0)\n    coupon = { type: :fixed, value: 20, min_order: 50 }\n    assert_in_delta 80.0, order.total_with_coupon(coupon)\n  end\n\n  def test_fixed_coupon_does_not_apply_below_minimum\n    order = Order.new(40.0)\n    coupon = { type: :fixed, value: 20, min_order: 50 }\n    assert_in_delta 40.0, order.total_with_coupon(coupon)\n  end\n\n  def test_fixed_coupon_never_goes_negative\n    order = Order.new(15.0)\n    coupon = { type: :fixed, value: 20, min_order: 10 }\n    assert_in_delta 0.0, order.total_with_coupon(coupon)\n  end\n\n  def test_percentage_coupon_ignores_min_order_key_if_present\n    order = Order.new(10.0)\n    coupon = { type: :percentage, value: 50, min_order: 1000 }\n    assert_in_delta 5.0, order.total_with_coupon(coupon)\n  end\nend\n"
+  },
+  "check_command": "ruby order_hidden_test.rb",
+  "reference_solution": {
+    "order.rb": "class Order\n  def initialize(subtotal)\n    @subtotal = subtotal\n  end\n\n  def total\n    @subtotal\n  end\n\n  # coupon is a Hash:\n  #   { type: :percentage, value: 10 }                 -> 10% off, no minimum\n  #   { type: :fixed, value: 20, min_order: 50 }        -> $20 off, only if\n  #     @subtotal >= min_order (a fixed coupon has no effect below that);\n  #     the discount can never take the total below 0.\n  def total_with_coupon(coupon)\n    case coupon[:type]\n    when :percentage\n      @subtotal * (1 - coupon[:value] / 100.0)\n    when :fixed\n      if coupon[:min_order] && @subtotal < coupon[:min_order]\n        @subtotal\n      else\n        [@subtotal - coupon[:value], 0].max\n      end\n    else\n      @subtotal\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fixed-coupon-not-clamped-to-zero",
+      "files": {
+        "order.rb": "class Order\n  def initialize(subtotal)\n    @subtotal = subtotal\n  end\n\n  def total\n    @subtotal\n  end\n\n  def total_with_coupon(coupon)\n    case coupon[:type]\n    when :percentage\n      @subtotal * (1 - coupon[:value] / 100.0)\n    when :fixed\n      if coupon[:min_order] && @subtotal < coupon[:min_order]\n        @subtotal\n      else\n        @subtotal - coupon[:value]\n      end\n    else\n      @subtotal\n    end\n  end\nend\n"
+      }
+    }
+  ]
+}

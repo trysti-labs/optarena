@@ -1,0 +1,53 @@
+{
+  "name": "refactor_compose_env_blocks_to_yaml_anchor",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Collapses three services' copy-pasted DATABASE_URL/REDIS_URL environment entries into one YAML anchor (x-common-env) merged in via <<: *common-env, each service keeping its own distinct env var; behavior-drift broken drops the worker service's own WORKER_CONCURRENCY var entirely while deduping",
+  "difficulty": 2,
+  "task_type": "refactoring",
+  "tags": [
+    "yaml",
+    "docker-compose",
+    "refactoring",
+    "anchors"
+  ],
+  "prompts": [
+    "docker-compose.yml defines three services (web, worker, scheduler), each repeating the IDENTICAL DATABASE_URL and REDIS_URL environment entries verbatim, alongside one service-specific env var each (web: PORT, worker: WORKER_CONCURRENCY, scheduler: CRON_SCHEDULE). Deduplicate the shared entries using a YAML anchor: define an x-common-env top-level key (compose ignores x- prefixed keys, so this is safe) holding DATABASE_URL and REDIS_URL, and have each service's environment merge it in via `<<: *common-env` alongside its own distinct var. Every service must end up with the exact same three env vars it has now (the two shared ones plus its own) - none may be lost."
+  ],
+  "setup_files": {
+    "docker-compose.yml": "services:\n  web:\n    image: myorg/app-web:latest\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n      REDIS_URL: redis://cache:6379/0\n      PORT: \"8080\"\n\n  worker:\n    image: myorg/app-worker:latest\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n      REDIS_URL: redis://cache:6379/0\n      WORKER_CONCURRENCY: \"4\"\n\n  scheduler:\n    image: myorg/app-scheduler:latest\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n      REDIS_URL: redis://cache:6379/0\n      CRON_SCHEDULE: \"*/5 * * * *\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "common-env"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_anchor.py": "import yaml\n\nraw = open('docker-compose.yml', encoding='utf-8').read()\n\n# the whole point: the shared env vars must be defined ONCE, not copy-pasted\n# into all three services\nassert raw.count('DATABASE_URL') == 1, (\n    f\"expected DATABASE_URL to appear exactly once in the raw file (in the shared anchor \"\n    f\"definition, referenced via the merge key elsewhere) - got {raw.count('DATABASE_URL')}, \"\n    f\"suggesting it's still duplicated per-service instead of shared via an anchor\")\n\ndata = yaml.safe_load(raw)\nservices = data.get('services') or {}\nassert set(services) == {'web', 'worker', 'scheduler'}, f\"unexpected services: {list(services)}\"\n\nexpected_own_keys = {\n    'web': ('PORT', '8080'),\n    'worker': ('WORKER_CONCURRENCY', '4'),\n    'scheduler': ('CRON_SCHEDULE', '*/5 * * * *'),\n}\n\nfor name, svc in services.items():\n    env = svc.get('environment') or {}\n    assert env.get('DATABASE_URL') == 'postgres://app:app@db:5432/appdb', (\n        f\"{name} missing/wrong DATABASE_URL: {env}\")\n    assert env.get('REDIS_URL') == 'redis://cache:6379/0', f\"{name} missing/wrong REDIS_URL: {env}\"\n\n    own_key, own_value = expected_own_keys[name]\n    assert env.get(own_key) == own_value, (\n        f\"{name} lost its own distinguishing env var {own_key} (got: {env})\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_anchor.py",
+  "reference_solution": {
+    "docker-compose.yml": "x-common-env: &common-env\n  DATABASE_URL: postgres://app:app@db:5432/appdb\n  REDIS_URL: redis://cache:6379/0\n\nservices:\n  web:\n    image: myorg/app-web:latest\n    environment:\n      <<: *common-env\n      PORT: \"8080\"\n\n  worker:\n    image: myorg/app-worker:latest\n    environment:\n      <<: *common-env\n      WORKER_CONCURRENCY: \"4\"\n\n  scheduler:\n    image: myorg/app-scheduler:latest\n    environment:\n      <<: *common-env\n      CRON_SCHEDULE: \"*/5 * * * *\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "docker-compose.yml": "services:\n  web:\n    image: myorg/app-web:latest\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n      REDIS_URL: redis://cache:6379/0\n      PORT: \"8080\"\n\n  worker:\n    image: myorg/app-worker:latest\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n      REDIS_URL: redis://cache:6379/0\n      WORKER_CONCURRENCY: \"4\"\n\n  scheduler:\n    image: myorg/app-scheduler:latest\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n      REDIS_URL: redis://cache:6379/0\n      CRON_SCHEDULE: \"*/5 * * * *\"\n"
+      }
+    },
+    {
+      "name": "worker-lost-its-own-env-var",
+      "files": {
+        "docker-compose.yml": "x-common-env: &common-env\n  DATABASE_URL: postgres://app:app@db:5432/appdb\n  REDIS_URL: redis://cache:6379/0\n\nservices:\n  web:\n    image: myorg/app-web:latest\n    environment:\n      <<: *common-env\n      PORT: \"8080\"\n\n  worker:\n    image: myorg/app-worker:latest\n    environment:\n      <<: *common-env\n\n  scheduler:\n    image: myorg/app-scheduler:latest\n    environment:\n      <<: *common-env\n      CRON_SCHEDULE: \"*/5 * * * *\"\n"
+      }
+    }
+  ]
+}

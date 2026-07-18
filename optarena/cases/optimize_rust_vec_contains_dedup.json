@@ -1,0 +1,54 @@
+{
+  "name": "optimize_rust_vec_contains_dedup",
+  "language": "rust",
+  "framework": "cargo",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Vec::contains per element inside a dedup loop -> HashSet; budget calibrated in-container on the debug profile (naive ~1.5s at n=30k vs ~11ms, budget 700ms); wrong-output broken sorts first, losing first-occurrence order",
+  "difficulty": 2,
+  "task_type": "performance",
+  "tags": [
+    "rust",
+    "performance",
+    "hashset",
+    "big-o"
+  ],
+  "prompts": [
+    "unique(items) in src/lib.rs returns the distinct values from items in FIRST-OCCURRENCE order - but it checks `out.contains(&x)` against the growing output Vec for every input element, a full linear scan each time, making the function O(n^2). Rewrite it using a HashSet for O(1) membership, returning exactly the same Vec for every input: same first-occurrence order preserved (do not sort). Keep the function name and signature."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"dedup_perf\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub fn unique(items: &[i32]) -> Vec<i32> {\n    // BUG: out.contains(&x) rescans the whole (growing) output vector for\n    // every input element - O(n^2) and far too slow for large inputs.\n    let mut out: Vec<i32> = Vec::new();\n    for &x in items {\n        if !out.contains(&x) {\n            out.push(x);\n        }\n    }\n    out\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "lib.rs",
+      "content_patterns": [
+        "pub fn unique"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/perf_test.rs": "use dedup_perf::unique;\nuse std::time::Instant;\n\n#[test]\nfn preserves_first_occurrence_order() {\n    assert_eq!(unique(&[3, 1, 3, 2, 1, 4]), vec![3, 1, 2, 4]);\n}\n\n#[test]\nfn empty_input() {\n    assert_eq!(unique(&[]), Vec::<i32>::new());\n}\n\n#[test]\nfn no_duplicates_unchanged() {\n    assert_eq!(unique(&[5, 4, 3]), vec![5, 4, 3]);\n}\n\n#[test]\nfn performance_large_input() {\n    let n = 30_000;\n    let items: Vec<i32> = (0..n).collect();\n\n    let start = Instant::now();\n    let got = unique(&items);\n    let elapsed = start.elapsed();\n\n    assert_eq!(got, items, \"all-unique input must come back unchanged and in order\");\n    // calibrated in-container (debug profile, matching `cargo test`'s\n    // default): Vec::contains per element is ~1.5s at n=30000; a HashSet\n    // is ~11ms\n    assert!(\n        elapsed.as_millis() < 700,\n        \"unique() took {:?} for {} items; expected a HashSet, not Vec::contains per element (O(n^2))\",\n        elapsed, n\n    );\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "use std::collections::HashSet;\n\npub fn unique(items: &[i32]) -> Vec<i32> {\n    // First-occurrence order preserved; a HashSet gives O(1) membership.\n    let mut seen: HashSet<i32> = HashSet::new();\n    let mut out: Vec<i32> = Vec::new();\n    for &x in items {\n        if seen.insert(x) {\n            out.push(x);\n        }\n    }\n    out\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fast-but-sorts-losing-order",
+      "files": {
+        "src/lib.rs": "pub fn unique(items: &[i32]) -> Vec<i32> {\n    let mut out: Vec<i32> = items.to_vec();\n    out.sort_unstable();\n    out.dedup();\n    out\n}\n"
+      }
+    },
+    {
+      "name": "still-quadratic",
+      "files": {
+        "src/lib.rs": "pub fn unique(items: &[i32]) -> Vec<i32> {\n    // BUG: out.contains(&x) rescans the whole (growing) output vector for\n    // every input element - O(n^2) and far too slow for large inputs.\n    let mut out: Vec<i32> = Vec::new();\n    for &x in items {\n        if !out.contains(&x) {\n            out.push(x);\n        }\n    }\n    out\n}\n"
+      }
+    }
+  ]
+}

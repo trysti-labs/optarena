@@ -1,0 +1,54 @@
+{
+  "name": "add_docs_flatten_one_level",
+  "language": "python",
+  "framework": "doctest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Add a doctest-verified docstring to flatten_one_level() (already correct - do not modify its behavior); broken has a docstring example claiming a doubly-nested list gets fully flattened instead of only one level",
+  "difficulty": 1,
+  "task_type": "documentation",
+  "tags": [
+    "python",
+    "documentation",
+    "doctest"
+  ],
+  "prompts": [
+    "flatten_one_level(nested) in flatten.py (the implementation is already correct - do not change its behavior) flattens exactly ONE level of nested lists: a top-level list element is spliced in, but anything nested two levels deep stays nested one level. It currently has no docstring at all. Add a docstring with at least 3 runnable doctest `>>>` examples (verified by `python -m doctest`) that document its behavior: a simple one-level flatten, a DOUBLY-nested input showing the inner list is preserved (not fully flattened), and an empty list - each example's expected output must be the function's REAL, exact output."
+  ],
+  "setup_files": {
+    "flatten.py": "def flatten_one_level(nested):\n    out = []\n    for x in nested:\n        if isinstance(x, list):\n            out.extend(x)\n        else:\n            out.append(x)\n    return out\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "flatten.py",
+      "content_patterns": [
+        ">>>",
+        "def flatten_one_level"
+      ],
+      "min_lines": 5
+    }
+  ],
+  "test_setup_files": {
+    "check_doctest.py": "import doctest\nimport flatten\n\nresults = doctest.testmod(flatten, verbose=False)\nassert results.attempted >= 3, (\n    f\"expected at least 3 runnable doctest examples (>>> lines), found \"\n    f\"{results.attempted} - a docstring with no >>> examples, or examples doctest can't \"\n    f\"parse, don't count\")\nassert results.failed == 0, f\"{results.failed} doctest example(s) failed out of {results.attempted}\"\nprint(f\"PASS ({results.attempted} doctest examples, 0 failed)\")\n"
+  },
+  "check_command": "python3 check_doctest.py",
+  "reference_solution": {
+    "flatten.py": "def flatten_one_level(nested):\n    \"\"\"Flatten exactly ONE level of nested lists. Non-list elements are\n    kept as-is; a doubly-nested list stays nested one level deep.\n\n    >>> flatten_one_level([1, [2, 3], 4])\n    [1, 2, 3, 4]\n    >>> flatten_one_level([[1, [2]], 3])\n    [1, [2], 3]\n    >>> flatten_one_level([])\n    []\n    \"\"\"\n    out = []\n    for x in nested:\n        if isinstance(x, list):\n            out.extend(x)\n        else:\n            out.append(x)\n    return out\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "flatten.py": "def flatten_one_level(nested):\n    out = []\n    for x in nested:\n        if isinstance(x, list):\n            out.extend(x)\n        else:\n            out.append(x)\n    return out\n"
+      }
+    },
+    {
+      "name": "wrong-expected-output-fully-flattens",
+      "files": {
+        "flatten.py": "def flatten_one_level(nested):\n    \"\"\"Flatten exactly ONE level of nested lists. Non-list elements are\n    kept as-is; a doubly-nested list stays nested one level deep.\n\n    >>> flatten_one_level([1, [2, 3], 4])\n    [1, 2, 3, 4]\n    >>> flatten_one_level([[1, [2]], 3])\n    [1, 2, 3]\n    >>> flatten_one_level([])\n    []\n    \"\"\"\n    out = []\n    for x in nested:\n        if isinstance(x, list):\n            out.extend(x)\n        else:\n            out.append(x)\n    return out\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "fix_shell_report_path_traversal",
+  "language": "shell",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 120,
+  "description": "read_report.sh concatenates an unvalidated filename onto a base directory with no traversal check -> canonicalize with realpath -m and verify the result is still inside the base dir; incomplete-fix broken only rejects a name that STARTS WITH \"../\", missing the equally-effective escape via a real subdirectory (\"subdir/../../secret.txt\")",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "shell",
+    "security",
+    "path-traversal"
+  ],
+  "prompts": [
+    "read_report.sh takes one argument, a report filename, and prints its contents by running `cat \"$base/$name\"` where base is the reports/ directory - with no validation that the resulting path actually stays inside reports/. A name containing \"..\" path segments (however they're arranged - a leading \"../\", or a real subdirectory followed by enough \"..\" to climb back out and further) can read arbitrary files elsewhere on the filesystem. Fix read_report.sh so any name that resolves to a path outside reports/ is rejected (print an error to stderr and exit non-zero), while a name that resolves to a real file inside reports/ (including inside a subdirectory of reports/) still prints its contents exactly as before."
+  ],
+  "setup_files": {
+    "read_report.sh": "#!/bin/sh\n# Print the contents of a report file named $1, which must live inside the\n# reports/ directory.\n# VULNERABLE: $1 is concatenated onto the base path with no validation at\n# all, so a name containing \"..\" segments can escape reports/ entirely.\nbase=\"reports\"\nname=\"$1\"\ncat \"$base/$name\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "read_report.sh",
+      "content_patterns": [
+        "cat "
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_traversal.py": "import os\nimport subprocess\n\nos.makedirs(\"reports/subdir\", exist_ok=True)\nwith open(\"reports/q1.txt\", \"w\") as f:\n    f.write(\"Q1 revenue: 42\\n\")\nwith open(\"reports/subdir/note.txt\", \"w\") as f:\n    f.write(\"just a note\\n\")\nwith open(\"secret.txt\", \"w\") as f:\n    f.write(\"TOP SECRET DO NOT LEAK\\n\")\n\n\ndef run(name):\n    return subprocess.run([\"sh\", \"read_report.sh\", name], capture_output=True, text=True, timeout=10)\n\n\n# normal read still works\nr1 = run(\"q1.txt\")\nassert r1.returncode == 0, f\"normal read failed: exit {r1.returncode}, stderr={r1.stderr!r}\"\nassert \"Q1 revenue: 42\" in r1.stdout, f\"unexpected output for normal read: {r1.stdout!r}\"\n\n# leading \"..\" traversal must not leak the secret\nr2 = run(\"../secret.txt\")\nassert \"TOP SECRET\" not in r2.stdout, \"leading-../ traversal leaked the secret file\"\n\n# the same escape via a real subdirectory (not just a leading \"../\" prefix)\n# must ALSO not leak - this is the case a naive \"starts with ../\" check misses\nr3 = run(\"subdir/../../secret.txt\")\nassert \"TOP SECRET\" not in r3.stdout, \"subdir-prefixed traversal leaked the secret file\"\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_traversal.py",
+  "reference_solution": {
+    "read_report.sh": "#!/bin/sh\n# Print the contents of a report file named $1, which must live inside the\n# reports/ directory. Any name that resolves outside reports/ (via \"..\"\n# segments, however many levels deep) is rejected.\nbase=$(cd reports && pwd)\nname=\"$1\"\ntarget=$(realpath -m \"$base/$name\")\n\ncase \"$target\" in\n    \"$base\"/*)\n        cat \"$target\"\n        ;;\n    *)\n        echo \"invalid path\" >&2\n        exit 1\n        ;;\nesac\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "read_report.sh": "#!/bin/sh\n# Print the contents of a report file named $1, which must live inside the\n# reports/ directory.\n# VULNERABLE: $1 is concatenated onto the base path with no validation at\n# all, so a name containing \"..\" segments can escape reports/ entirely.\nbase=\"reports\"\nname=\"$1\"\ncat \"$base/$name\"\n"
+      }
+    },
+    {
+      "name": "only-checks-leading-dotdot-prefix",
+      "files": {
+        "read_report.sh": "#!/bin/sh\nbase=\"reports\"\nname=\"$1\"\ncase \"$name\" in\n    ../*)\n        echo \"invalid path\" >&2\n        exit 1\n        ;;\nesac\ncat \"$base/$name\"\n"
+      }
+    }
+  ]
+}

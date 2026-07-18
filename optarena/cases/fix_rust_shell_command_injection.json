@@ -1,0 +1,47 @@
+{
+  "name": "fix_rust_shell_command_injection",
+  "language": "rust",
+  "framework": "cargo",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "std::process::Command via `sh -c` + interpolated string -> direct argv, no shell; incomplete-fix broken single-quote-escapes the value but still shells out",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "rust",
+    "security",
+    "command-injection"
+  ],
+  "prompts": [
+    "build_ping_command(host) in src/lib.rs builds its command by interpolating host into a shell string and running it via `Command::new(\"sh\").arg(\"-c\").arg(cmd_str)` - a hostile host value injects arbitrary shell commands. Fix it to invoke `ping` directly with its arguments passed individually (Command::new(\"ping\").arg(\"-c\").arg(\"1\").arg(host)) - no shell involved at all, so the host value can never be interpreted as anything but a single literal argument. Do not try to escape/quote the value while still going through `sh -c`; that is not the fix. Keep the function name and signature."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"ping_cmd\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::process::Command;\n\n/// BUG: builds a shell command string by interpolation and runs it through\n/// `sh -c` - a hostile host value can inject arbitrary shell commands\n/// (e.g. \"8.8.8.8; rm -rf /tmp/data\").\npub fn build_ping_command(host: &str) -> Command {\n    let cmd_str = format!(\"ping -c 1 {}\", host);\n    let mut cmd = Command::new(\"sh\");\n    cmd.arg(\"-c\").arg(cmd_str);\n    cmd\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "lib.rs",
+      "content_patterns": [
+        "command::new(\"ping\")"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/injection_test.rs": "use ping_cmd::build_ping_command;\n\n#[test]\nfn normal_host_still_works() {\n    let cmd = build_ping_command(\"8.8.8.8\");\n    assert_eq!(cmd.get_program(), \"ping\");\n    let args: Vec<_> = cmd.get_args().collect();\n    assert!(args.iter().any(|a| *a == \"8.8.8.8\"));\n}\n\n#[test]\nfn program_is_never_a_shell() {\n    // The fix is not \"escape the value\" - it's \"never hand the value to a\n    // shell at all\". A hostile host string must arrive as ONE argv element\n    // to the real `ping` binary, never interpreted by sh.\n    let hostile = \"8.8.8.8; touch /tmp/pwned\";\n    let cmd = build_ping_command(hostile);\n    assert_eq!(\n        cmd.get_program(),\n        \"ping\",\n        \"the command must invoke ping directly, not a shell (sh -c ...)\"\n    );\n    let args: Vec<_> = cmd.get_args().collect();\n    assert!(\n        args.iter().any(|a| *a == hostile),\n        \"the hostile string must arrive as a single, intact argument to ping\"\n    );\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "use std::process::Command;\n\npub fn build_ping_command(host: &str) -> Command {\n    let mut cmd = Command::new(\"ping\");\n    cmd.arg(\"-c\").arg(\"1\").arg(host);\n    cmd\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "escaped-but-still-shells-out",
+      "files": {
+        "src/lib.rs": "use std::process::Command;\n\npub fn build_ping_command(host: &str) -> Command {\n    let sanitized: String = host.chars().filter(|c| *c != ';' && *c != '|').collect();\n    let cmd_str = format!(\"ping -c 1 {}\", sanitized);\n    let mut cmd = Command::new(\"sh\");\n    cmd.arg(\"-c\").arg(cmd_str);\n    cmd\n}\n"
+      }
+    }
+  ]
+}

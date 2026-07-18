@@ -1,0 +1,53 @@
+{
+  "name": "add_tests_go_palindrome_alphanumeric",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write go test cases for an alphanumeric-only, case-insensitive palindrome check; mutation-checked (case-fold dropped, digits ignored, comparison inverted)",
+  "difficulty": 1,
+  "task_type": "testing",
+  "tags": [
+    "go",
+    "testing",
+    "mutation-checked",
+    "strings"
+  ],
+  "prompts": [
+    "IsPalindrome(s string) in palindrome.go (already correct - do not modify it) reports whether s reads the same forwards and backwards once every non-alphanumeric character is dropped and letters are compared case-insensitively. Write go tests at exactly palindrome_test.go (functions named Test*, using *testing.T, run with `go test ./...`) with at least 5 test functions covering: a simple palindrome, mixed-case equivalence, a phrase with punctuation and spaces stripped ('A man, a plan, a canal: Panama'), digits counting as comparable characters, and a clear non-palindrome. Package must be `palindrome`."
+  ],
+  "setup_files": {
+    "palindrome.go": "package palindrome\n\nimport \"unicode\"\n\n// IsPalindrome reports whether s reads the same forwards and backwards once\n// non-alphanumeric characters are dropped and case is ignored.\nfunc IsPalindrome(s string) bool {\n\tvar letters []rune\n\tfor _, r := range s {\n\t\tif unicode.IsLetter(r) || unicode.IsDigit(r) {\n\t\t\tletters = append(letters, unicode.ToLower(r))\n\t\t}\n\t}\n\tfor i, j := 0, len(letters)-1; i < j; i, j = i+1, j-1 {\n\t\tif letters[i] != letters[j] {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true\n}\n",
+    "go.mod": "module palindrome\n\ngo 1.22\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "palindrome_test.go",
+      "content_patterns": [
+        "IsPalindrome",
+        "func Test"
+      ],
+      "regex_patterns": [
+        "func Test[\\s\\S]*func Test[\\s\\S]*func Test[\\s\\S]*func Test[\\s\\S]*func Test"
+      ],
+      "min_lines": 10
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "\"\"\"Mutation harness: model tests must PASS the real implementation and FAIL\neach mutant. Uses a Python-level subprocess timeout (not a shell `timeout`\nwrapper) so a hung mutant (e.g. an off-by-one that spins) can never corrupt\nthis host-mounted workspace mid-run.\"\"\"\nimport shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path(\"palindrome.go\")\nTEST_CMD = \"go test ./...\"\nMUTANTS = [\n    # case-folding dropped: \"Racecar\" no longer equals its reverse\n    [\"\\t\\t\\tletters = append(letters, unicode.ToLower(r))\",\n     \"\\t\\t\\tletters = append(letters, r)\"],\n    # digits no longer treated as letters worth keeping\n    [\"\\t\\tif unicode.IsLetter(r) || unicode.IsDigit(r) {\",\n     \"\\t\\tif unicode.IsLetter(r) {\"],\n    # comparison inverted\n    [\"\\t\\tif letters[i] != letters[j] {\",\n     \"\\t\\tif letters[i] == letters[j] {\"],\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    try:\n        return subprocess.run(TEST_CMD, shell=True, timeout=60).returncode\n    except subprocess.TimeoutExpired:\n        return 124\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct implementation (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken implementation, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "palindrome_test.go": "package palindrome\n\nimport \"testing\"\n\nfunc TestSimplePalindrome(t *testing.T) {\n\tif !IsPalindrome(\"racecar\") {\n\t\tt.Fatal(\"racecar must be a palindrome\")\n\t}\n}\n\nfunc TestCaseInsensitive(t *testing.T) {\n\tif !IsPalindrome(\"Racecar\") {\n\t\tt.Fatal(\"case must be ignored\")\n\t}\n}\n\nfunc TestIgnoresPunctuationAndSpaces(t *testing.T) {\n\tif !IsPalindrome(\"A man, a plan, a canal: Panama\") {\n\t\tt.Fatal(\"punctuation and spaces must be ignored\")\n\t}\n}\n\nfunc TestDigitsCount(t *testing.T) {\n\tif !IsPalindrome(\"12321\") {\n\t\tt.Fatal(\"12321 must be a palindrome\")\n\t}\n\tif IsPalindrome(\"12345\") {\n\t\tt.Fatal(\"12345 must not be a palindrome\")\n\t}\n}\n\nfunc TestNotAPalindrome(t *testing.T) {\n\tif IsPalindrome(\"hello world\") {\n\t\tt.Fatal(\"hello world must not be a palindrome\")\n\t}\n}\n\nfunc TestEmptyAndAllPunctuationAreTriviallyPalindromes(t *testing.T) {\n\tif !IsPalindrome(\"\") {\n\t\tt.Fatal(\"empty string must be a palindrome\")\n\t}\n\tif !IsPalindrome(\"!!!\") {\n\t\tt.Fatal(\"all-punctuation string must be a palindrome (no letters/digits to compare)\")\n\t}\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "palindrome_test.go": "package palindrome\n\nimport \"testing\"\n\nfunc TestReturnsBool(t *testing.T) {\n\t_ = IsPalindrome(\"racecar\")\n}\n\nfunc TestEmptyIsTrue(t *testing.T) {\n\tif !IsPalindrome(\"\") {\n\t\tt.Fatal(\"empty must be true\")\n\t}\n}\n\nfunc TestSameCharRepeated(t *testing.T) {\n\tif !IsPalindrome(\"aaaa\") {\n\t\tt.Fatal(\"aaaa must be a palindrome\")\n\t}\n}\n\nfunc TestObviousNonPalindrome(t *testing.T) {\n\tif IsPalindrome(\"abcdef\") {\n\t\tt.Fatal(\"abcdef must not be a palindrome\")\n\t}\n}\n"
+      }
+    }
+  ]
+}

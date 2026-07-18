@@ -1,0 +1,53 @@
+{
+  "name": "upgrade_pydantic_root_validator_to_model_validator",
+  "language": "python",
+  "framework": "pydantic",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Migrate a pydantic 1.x @root_validator to 2.x @model_validator(mode='after') - the v1 decorator raises PydanticUserError immediately at class-definition time under the installed pydantic 2.x; incomplete-fix broken renames the decorator but keeps mode='before' with self-style access, which raises AttributeError since 'before' hands the validator raw unvalidated data, not the model instance",
+  "difficulty": 2,
+  "task_type": "dependency_upgrade",
+  "tags": [
+    "python",
+    "pydantic",
+    "dependency-upgrade",
+    "migration"
+  ],
+  "prompts": [
+    "This project is being upgraded from pydantic 1.x to pydantic 2.x (the version actually installed and imported by `import pydantic` in this sandbox - you can check the old behavior against a real pydantic 1.10 install at /opt/venv-pydantic1/bin/python if useful, but the code you write must work under the installed pydantic 2.x). Order in order.py uses the pydantic 1.x `@root_validator` decorator (classmethod receiving `values: dict`) to reject a non-positive quantity. Under the installed pydantic 2.x, `@root_validator` without `pre=True` raises a PydanticUserError the moment the class is defined - it's a hard removal, not just a deprecation warning. Migrate check_quantity_positive to the pydantic 2.x `@model_validator(mode='after')` pattern: an instance method receiving `self` (the already-validated model), returning `self`. Preserve the exact behavior: quantity <= 0 raises a validation error, and total() still returns quantity * unit_price for valid orders."
+  ],
+  "setup_files": {
+    "order.py": "from pydantic import BaseModel, root_validator\n\n\nclass Order(BaseModel):\n    quantity: int\n    unit_price: float\n\n    @root_validator\n    def check_quantity_positive(cls, values):\n        if values.get(\"quantity\", 0) <= 0:\n            raise ValueError(\"quantity must be positive\")\n        return values\n\n    def total(self):\n        return self.quantity * self.unit_price\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "order.py",
+      "content_patterns": [
+        "model_validator"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_order.py": "from order import Order\n\no = Order(quantity=2, unit_price=3.5)\nassert o.total() == 7.0, f\"total() wrong: {o.total()}\"\n\ntry:\n    Order(quantity=0, unit_price=1.0)\n    raise AssertionError(\"expected a validation error for non-positive quantity\")\nexcept AssertionError:\n    raise\nexcept Exception:\n    pass\n\ntry:\n    Order(quantity=-5, unit_price=1.0)\n    raise AssertionError(\"expected a validation error for negative quantity\")\nexcept AssertionError:\n    raise\nexcept Exception:\n    pass\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_order.py",
+  "reference_solution": {
+    "order.py": "from pydantic import BaseModel, model_validator\n\n\nclass Order(BaseModel):\n    quantity: int\n    unit_price: float\n\n    @model_validator(mode=\"after\")\n    def check_quantity_positive(self):\n        if self.quantity <= 0:\n            raise ValueError(\"quantity must be positive\")\n        return self\n\n    def total(self):\n        return self.quantity * self.unit_price\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "order.py": "from pydantic import BaseModel, root_validator\n\n\nclass Order(BaseModel):\n    quantity: int\n    unit_price: float\n\n    @root_validator\n    def check_quantity_positive(cls, values):\n        if values.get(\"quantity\", 0) <= 0:\n            raise ValueError(\"quantity must be positive\")\n        return values\n\n    def total(self):\n        return self.quantity * self.unit_price\n"
+      }
+    },
+    {
+      "name": "wrong-mode-before-with-self-access",
+      "files": {
+        "order.py": "from pydantic import BaseModel, model_validator\n\n\nclass Order(BaseModel):\n    quantity: int\n    unit_price: float\n\n    @model_validator(mode=\"before\")\n    def check_quantity_positive(self):\n        if self.quantity <= 0:\n            raise ValueError(\"quantity must be positive\")\n        return self\n\n    def total(self):\n        return self.quantity * self.unit_price\n"
+      }
+    }
+  ]
+}

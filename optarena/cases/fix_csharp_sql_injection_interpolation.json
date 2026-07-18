@@ -1,0 +1,49 @@
+{
+  "name": "fix_csharp_sql_injection_interpolation",
+  "language": "csharp",
+  "framework": "dotnet",
+  "domain": "backend",
+  "docker_image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "SQL built by string interpolation -> a parameterized query (text + bound parameters dictionary); incomplete-fix broken quote-escapes the value but still interpolates it into the SQL text instead of binding it",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "csharp",
+    "dotnet",
+    "security",
+    "sql-injection"
+  ],
+  "prompts": [
+    "UserRepository.BuildLookupQuery(username) in UserRepository.cs builds a SQL query by interpolating the raw username straight into the query text - textbook SQL injection. Fix it to build a PARAMETERIZED query: the returned Query.Sql must reference the value only via a named placeholder (@username), and the actual value must go in Query.Parameters keyed by that same placeholder name - never embedded in the SQL text itself, escaped or not. Do not try to sanitize/escape the value while still interpolating it into the string; that is not the fix. A normal username like 'ada' still resolves the same way as before conceptually (placeholder + bound value)."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <!-- tests/ has its own project; without this the SDK's default glob\n         compiles tests/*.cs into the app itself, where xunit isn't referenced -->\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "UserRepository.cs": "using System.Collections.Generic;\n\npublic static class UserRepository\n{\n    public sealed record Query(string Sql, Dictionary<string, object> Parameters);\n\n    // BUG: interpolates the raw username straight into the SQL text - a\n    // classic injection (a username of \"' OR '1'='1\" changes the query's\n    // meaning entirely).\n    public static Query BuildLookupQuery(string username)\n    {\n        var sql = $\"SELECT * FROM Users WHERE Username = '{username}'\";\n        return new Query(sql, new Dictionary<string, object>());\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "UserRepository.cs",
+      "content_patterns": [
+        "Parameters"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"Microsoft.AspNetCore.Mvc.Testing\" Version=\"8.0.10\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/UserRepositoryTests.cs": "using System;\nusing Xunit;\n\npublic class UserRepositoryTests\n{\n    [Fact]\n    public void NormalUsernameProducesAParameterizedQuery()\n    {\n        var q = UserRepository.BuildLookupQuery(\"ada\");\n        Assert.Contains(\"@username\", q.Sql);\n        Assert.Equal(\"ada\", q.Parameters[\"@username\"]);\n    }\n\n    [Fact]\n    public void HostilePayloadNeverAppearsInTheSqlText()\n    {\n        const string payload = \"' OR '1'='1\";\n        var q = UserRepository.BuildLookupQuery(payload);\n\n        // the raw payload must not be embedded in the SQL string itself -\n        // it belongs in the parameter, not the query text\n        Assert.DoesNotContain(payload, q.Sql);\n        Assert.DoesNotContain(\"OR '1'='1\", q.Sql);\n    }\n\n    [Fact]\n    public void HostilePayloadArrivesIntactAsABoundParameter()\n    {\n        const string payload = \"' OR '1'='1\";\n        var q = UserRepository.BuildLookupQuery(payload);\n\n        Assert.True(q.Parameters.ContainsKey(\"@username\"));\n        Assert.Equal(payload, q.Parameters[\"@username\"]);\n    }\n\n    [Fact]\n    public void SqlTextIsStableAcrossDifferentInputValues()\n    {\n        // a parameterized query's TEXT does not change with the input value\n        // (only the bound parameter does) - this is what lets a DB cache\n        // and safely reuse the query plan, and it's what an interpolated\n        // (even escaped) query can never guarantee\n        var q1 = UserRepository.BuildLookupQuery(\"ada\");\n        var q2 = UserRepository.BuildLookupQuery(\"grace\");\n        Assert.Equal(q1.Sql, q2.Sql);\n    }\n}\n"
+  },
+  "check_command": "dotnet test tests/tests.csproj",
+  "reference_solution": {
+    "UserRepository.cs": "using System.Collections.Generic;\n\npublic static class UserRepository\n{\n    public sealed record Query(string Sql, Dictionary<string, object> Parameters);\n\n    public static Query BuildLookupQuery(string username)\n    {\n        var sql = \"SELECT * FROM Users WHERE Username = @username\";\n        var parameters = new Dictionary<string, object> { [\"@username\"] = username };\n        return new Query(sql, parameters);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "escaped-quotes-but-still-interpolated",
+      "files": {
+        "UserRepository.cs": "using System.Collections.Generic;\n\npublic static class UserRepository\n{\n    public sealed record Query(string Sql, Dictionary<string, object> Parameters);\n\n    public static Query BuildLookupQuery(string username)\n    {\n        var escaped = username.Replace(\"'\", \"''\");\n        var sql = $\"SELECT * FROM Users WHERE Username = '{escaped}'\";\n        return new Query(sql, new Dictionary<string, object>());\n    }\n}\n"
+      }
+    }
+  ]
+}

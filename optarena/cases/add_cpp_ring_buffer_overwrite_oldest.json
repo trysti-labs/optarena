@@ -1,0 +1,46 @@
+{
+  "name": "add_cpp_ring_buffer_overwrite_oldest",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Change a full-buffer-throws RingBuffer to sliding-window overwrite-oldest semantics; broken overwrites the oldest slot but forgets to advance head, breaking ordering across multiple wraparounds",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "ring-buffer",
+    "data-structures"
+  ],
+  "prompts": [
+    "RingBuffer::push in ring_buffer.h throws std::overflow_error once the buffer reaches capacity. Change it to sliding-window behavior instead: once full, push(value) overwrites the OLDEST element and the buffer keeps exactly the `capacity` most recent values (no more throwing on a full buffer). at(0) must always be the current oldest element and at(size()-1) the newest, correctly maintained across MANY pushes past capacity (not just one wraparound) - e.g. pushing 1..7 into a capacity-2 buffer must leave exactly [6, 7]. size() never exceeds capacity. at() still throws std::out_of_range for an index outside [0, size())."
+  ],
+  "setup_files": {
+    "ring_buffer.h": "#pragma once\n#include <stdexcept>\n\nclass RingBuffer {\npublic:\n    explicit RingBuffer(int capacity) : capacity_(capacity), size_(0), head_(0) {\n        data_ = new int[capacity_];\n    }\n\n    ~RingBuffer() {\n        delete[] data_;\n    }\n\n    // BUG (feature gap): throws once the buffer is full, instead of the\n    // sliding-window behavior this task asks for (overwrite the oldest\n    // element and keep going).\n    void push(int value) {\n        if (size_ == capacity_) {\n            throw std::overflow_error(\"RingBuffer is full\");\n        }\n        data_[(head_ + size_) % capacity_] = value;\n        size_++;\n    }\n\n    // index 0 is the OLDEST element currently held, index size()-1 is the newest.\n    int at(int index) const {\n        if (index < 0 || index >= size_) {\n            throw std::out_of_range(\"index out of range\");\n        }\n        return data_[(head_ + index) % capacity_];\n    }\n\n    int size() const { return size_; }\n\nprivate:\n    int* data_;\n    int capacity_;\n    int size_;\n    int head_;\n};\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ring_buffer.h",
+      "content_patterns": [
+        "ringbuffer"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_ring_buffer.cpp": "#include \"ring_buffer.h\"\n#include <cassert>\n#include <iostream>\n#include <stdexcept>\n\nint main() {\n    // fills to capacity normally\n    {\n        RingBuffer rb(3);\n        rb.push(1);\n        rb.push(2);\n        rb.push(3);\n        assert(rb.size() == 3);\n        assert(rb.at(0) == 1 && rb.at(1) == 2 && rb.at(2) == 3);\n    }\n\n    // pushing past capacity overwrites the OLDEST element, sliding forward,\n    // and size never exceeds capacity\n    {\n        RingBuffer rb(3);\n        rb.push(1);\n        rb.push(2);\n        rb.push(3);\n        rb.push(4);  // evicts 1\n        rb.push(5);  // evicts 2\n        assert(rb.size() == 3);\n        assert(rb.at(0) == 3 && rb.at(1) == 4 && rb.at(2) == 5);\n    }\n\n    // works correctly across MULTIPLE wraparounds, not just one\n    {\n        RingBuffer rb(2);\n        for (int i = 1; i <= 7; i++) {\n            rb.push(i);\n        }\n        // capacity 2, pushed 1..7: the last two survive\n        assert(rb.at(0) == 6 && rb.at(1) == 7);\n    }\n\n    // out-of-range access still throws\n    {\n        RingBuffer rb(2);\n        rb.push(1);\n        bool threw = false;\n        try {\n            rb.at(1);\n        } catch (const std::out_of_range&) {\n            threw = true;\n        }\n        assert(threw);\n    }\n\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  },
+  "check_command": "g++ -std=c++17 test_ring_buffer.cpp -o test_ring_buffer_bin && ./test_ring_buffer_bin",
+  "reference_solution": {
+    "ring_buffer.h": "#pragma once\n#include <stdexcept>\n\nclass RingBuffer {\npublic:\n    explicit RingBuffer(int capacity) : capacity_(capacity), size_(0), head_(0) {\n        data_ = new int[capacity_];\n    }\n\n    ~RingBuffer() {\n        delete[] data_;\n    }\n\n    // Sliding-window: once full, pushing overwrites the oldest element and\n    // the buffer keeps exactly `capacity` of the most recent values.\n    void push(int value) {\n        if (size_ == capacity_) {\n            data_[head_] = value;\n            head_ = (head_ + 1) % capacity_;\n        } else {\n            data_[(head_ + size_) % capacity_] = value;\n            size_++;\n        }\n    }\n\n    // index 0 is the OLDEST element currently held, index size()-1 is the newest.\n    int at(int index) const {\n        if (index < 0 || index >= size_) {\n            throw std::out_of_range(\"index out of range\");\n        }\n        return data_[(head_ + index) % capacity_];\n    }\n\n    int size() const { return size_; }\n\nprivate:\n    int* data_;\n    int capacity_;\n    int size_;\n    int head_;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "head-not-advanced-on-overwrite",
+      "files": {
+        "ring_buffer.h": "#pragma once\n#include <stdexcept>\n\nclass RingBuffer {\npublic:\n    explicit RingBuffer(int capacity) : capacity_(capacity), size_(0), head_(0) {\n        data_ = new int[capacity_];\n    }\n\n    ~RingBuffer() {\n        delete[] data_;\n    }\n\n    // Sliding-window: once full, pushing overwrites the oldest element and\n    // the buffer keeps exactly `capacity` of the most recent values.\n    void push(int value) {\n        if (size_ == capacity_) {\n            data_[head_] = value;\n        } else {\n            data_[(head_ + size_) % capacity_] = value;\n            size_++;\n        }\n    }\n\n    // index 0 is the OLDEST element currently held, index size()-1 is the newest.\n    int at(int index) const {\n        if (index < 0 || index >= size_) {\n            throw std::out_of_range(\"index out of range\");\n        }\n        return data_[(head_ + index) % capacity_];\n    }\n\n    int size() const { return size_; }\n\nprivate:\n    int* data_;\n    int capacity_;\n    int size_;\n    int head_;\n};\n"
+      }
+    }
+  ]
+}

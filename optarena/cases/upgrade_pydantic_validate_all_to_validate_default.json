@@ -1,0 +1,53 @@
+{
+  "name": "upgrade_pydantic_validate_all_to_validate_default",
+  "language": "python",
+  "framework": "pydantic",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Migrate pydantic 1.x class Config: validate_all=True to 2.x ConfigDict(validate_default=True) - the v1 key is silently ignored under pydantic 2.x, so a field's own invalid DEFAULT value is never actually run through its validator; incomplete-fix broken correctly migrates the validator decorator to @field_validator but replaces the config with an unrelated, also-plausible-looking extra='forbid' hardening flag instead of validate_default=True",
+  "difficulty": 2,
+  "task_type": "dependency_upgrade",
+  "tags": [
+    "python",
+    "pydantic",
+    "dependency-upgrade",
+    "migration"
+  ],
+  "prompts": [
+    "This project is being upgraded from pydantic 1.x to pydantic 2.x (the version actually installed and imported by `import pydantic` in this sandbox - you can check the old behavior against a real pydantic 1.10 install at /opt/venv-pydantic1/bin/python if useful, but the code you write must work under the installed pydantic 2.x). Stock in stock.py defaults quantity to an invalid value (-1) and relies on pydantic 1.x `class Config: validate_all = True` to make sure even the DEFAULT value gets run through quantity_must_be_nonneg (normally pydantic skips validating values that were never actually supplied). Under the installed pydantic 2.x, validate_all is silently ignored (unrecognized), so `Stock()` no longer raises - the bad default slips through uncaught. Migrate to the pydantic 2.x pattern: `model_config = ConfigDict(validate_default=True)`, and update the validator itself to the `@field_validator` + `@classmethod` pydantic 2.x pattern. `Stock()` (no arguments) must raise a validation error; `Stock(quantity=5)` must still work."
+  ],
+  "setup_files": {
+    "stock.py": "from pydantic import BaseModel, validator\n\n\nclass Stock(BaseModel):\n    quantity: int = -1\n\n    class Config:\n        validate_all = True\n\n    @validator(\"quantity\")\n    def quantity_must_be_nonneg(cls, v):\n        if v < 0:\n            raise ValueError(\"quantity must be >= 0\")\n        return v\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "stock.py",
+      "content_patterns": [
+        "quantity"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_stock.py": "from stock import Stock\n\ntry:\n    Stock()\n    raise AssertionError(\"expected the invalid default quantity (-1) to be rejected\")\nexcept AssertionError:\n    raise\nexcept Exception:\n    pass\n\ns = Stock(quantity=5)\nassert s.quantity == 5\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_stock.py",
+  "reference_solution": {
+    "stock.py": "from pydantic import BaseModel, ConfigDict, field_validator\n\n\nclass Stock(BaseModel):\n    model_config = ConfigDict(validate_default=True)\n\n    quantity: int = -1\n\n    @field_validator(\"quantity\")\n    @classmethod\n    def quantity_must_be_nonneg(cls, v):\n        if v < 0:\n            raise ValueError(\"quantity must be >= 0\")\n        return v\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "stock.py": "from pydantic import BaseModel, validator\n\n\nclass Stock(BaseModel):\n    quantity: int = -1\n\n    class Config:\n        validate_all = True\n\n    @validator(\"quantity\")\n    def quantity_must_be_nonneg(cls, v):\n        if v < 0:\n            raise ValueError(\"quantity must be >= 0\")\n        return v\n"
+      }
+    },
+    {
+      "name": "unrelated-hardening-instead-of-validate_default",
+      "files": {
+        "stock.py": "from pydantic import BaseModel, ConfigDict, field_validator\n\n\nclass Stock(BaseModel):\n    model_config = ConfigDict(extra=\"forbid\")\n\n    quantity: int = -1\n\n    @field_validator(\"quantity\")\n    @classmethod\n    def quantity_must_be_nonneg(cls, v):\n        if v < 0:\n            raise ValueError(\"quantity must be >= 0\")\n        return v\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "add_tests_shell_ipv4_validator",
+  "language": "shell",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 90,
+  "timeout": 150,
+  "description": "Write shell tests for a POSIX-sh IPv4 dotted-quad validator (already correct - do not modify it); mutation-checked (octet upper bound off-by-one both directions, octet-count check loosened to allow extra octets)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "shell",
+    "testing",
+    "mutation-checked",
+    "ipv4"
+  ],
+  "prompts": [
+    "ipv4check.sh (already working correctly - do not modify it) takes one argument and prints \"valid\" to stdout if it is a well-formed IPv4 dotted-quad (exactly four decimal octets, each 0-255, separated by '.'), otherwise prints \"invalid\" - it always exits 0 regardless of the verdict. Write a POSIX shell test script named test_ipv4check.sh that exercises ipv4check.sh against several inputs and asserts on the printed verdict. Cover at least: a normal valid address, the boundary octet value 255, too few octets, too many octets, an octet that is out of range (e.g. 256), and a non-numeric octet. The script must print a clear result for each case and exit non-zero if any assertion fails, or exit 0 if everything passes."
+  ],
+  "setup_files": {
+    "ipv4check.sh": "#!/bin/sh\n# ipv4check.sh - print \"valid\" if $1 is a well-formed IPv4 dotted-quad\n# (exactly four decimal octets 0-255, separated by '.'), otherwise print\n# \"invalid\". Always exits 0 regardless of the verdict.\ns=\"$1\"\nold_ifs=\"$IFS\"\nIFS='.'\nset -- $s\nIFS=\"$old_ifs\"\n\nif [ \"$#\" -ne 4 ]; then\n    echo \"invalid\"\n    exit 0\nfi\n\nfor octet in \"$@\"; do\n    case \"$octet\" in\n        ''|*[!0-9]*)\n            echo \"invalid\"\n            exit 0\n            ;;\n    esac\n    if [ \"$octet\" -gt 255 ]; then\n        echo \"invalid\"\n        exit 0\n    fi\ndone\n\necho \"valid\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_ipv4check.sh",
+      "content_patterns": [
+        "ipv4check.sh",
+        "invalid"
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "import shutil\nimport subprocess\nfrom pathlib import Path\n\nIMPL = Path('ipv4check.sh')\nTEST_CMD = 'sh test_ipv4check.sh'\n# Each entry is one mutant: a list of (original, replacement) edits applied\n# together. Every `original` anchor must appear exactly once in the pristine\n# implementation - which also enforces the prompt's \"do not modify it\".\nMUTANTS = [\n    # octet upper bound loosened by one - 256 wrongly accepted\n    [[\"if [ \\\"$octet\\\" -gt 255 ]; then\", \"if [ \\\"$octet\\\" -gt 256 ]; then\"]],\n    # octet upper bound tightened by one - the legitimate boundary 255 wrongly rejected\n    [[\"if [ \\\"$octet\\\" -gt 255 ]; then\", \"if [ \\\"$octet\\\" -ge 255 ]; then\"]],\n    # octet-count check loosened - a 5th (or 6th, ...) octet is silently accepted\n    [[\"if [ \\\"$#\\\" -ne 4 ]; then\", \"if [ \\\"$#\\\" -lt 4 ]; then\"]],\n]\n\n\ndef run_tests():\n    shutil.rmtree('__pycache__', ignore_errors=True)\n    try:\n        return subprocess.run(TEST_CMD, shell=True, timeout=30).returncode\n    except subprocess.TimeoutExpired:\n        return 124\n\n\nsrc = IMPL.read_text(encoding='utf-8')\nfor group in MUTANTS:\n    for old, _new in group:\n        assert src.count(old) == 1, (\n            f'protected implementation file {IMPL} was modified - the task said not to change it '\n            f'(anchor not found exactly once: {old!r})')\n\nrc = run_tests()\nassert rc == 0, f'model tests FAILED against the correct implementation (exit {rc})'\n\ntry:\n    for i, group in enumerate(MUTANTS, 1):\n        mutated = src\n        for old, new in group:\n            mutated = mutated.replace(old, new)\n        IMPL.write_text(mutated, encoding='utf-8')\n        rc = run_tests()\n        assert rc != 0, (\n            f'mutation {i} SURVIVED: the tests still pass against a deliberately broken '\n            f'implementation, so they do not actually verify the required behavior')\nfinally:\n    IMPL.write_text(src, encoding='utf-8')\n\nprint('PASS (tests pass on correct impl and kill all {n} mutants)'.format(n=len(MUTANTS)))\n"
+  },
+  "check_command": "python3 mutation_check.py",
+  "reference_solution": {
+    "test_ipv4check.sh": "#!/bin/sh\n# Tests for ipv4check.sh: valid quads, boundary octet, too few/too many\n# octets, and a non-numeric octet.\nset -e\n\ncheck() {\n    input=\"$1\"\n    want=\"$2\"\n    got=$(sh ipv4check.sh \"$input\")\n    if [ \"$got\" != \"$want\" ]; then\n        echo \"FAIL: ipv4check.sh '$input' -> got '$got', want '$want'\"\n        exit 1\n    fi\n    echo \"OK: '$input' -> $got\"\n}\n\ncheck \"192.168.1.1\" \"valid\"\ncheck \"255.255.255.255\" \"valid\"\ncheck \"0.0.0.0\" \"valid\"\ncheck \"1.2.3\" \"invalid\"\ncheck \"1.2.3.4.5\" \"invalid\"\ncheck \"1.2.3.256\" \"invalid\"\ncheck \"1.2.3.a\" \"invalid\"\n\necho PASS\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_ipv4check.sh": "#!/bin/sh\nout=$(sh ipv4check.sh \"192.168.1.1\")\nif [ -z \"$out\" ]; then\n    echo \"FAIL: empty output\"\n    exit 1\nfi\necho \"got output: $out\"\necho PASS\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "add_tests_php_title_case_small_words",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "docker_image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "description": "Write PHPUnit tests for a title-case formatter that lowercases small words except at the first/last position; mutation-checked (first-word exception dropped, last-word exception dropped, small-word check inverted)",
+  "difficulty": 2,
+  "task_type": "testing",
+  "tags": [
+    "php",
+    "testing",
+    "mutation-checked"
+  ],
+  "prompts": [
+    "TitleCase::format(string $s): string in src/TitleCase.php (already correct - do not modify it) title-cases a lowercase, space-separated string: every word is capitalized EXCEPT the small words a/an/the/of/in/on/and/or/to, which stay lowercase - UNLESS that small word is the FIRST or LAST word of the string, in which case it is capitalized too. Write PHPUnit tests at exactly tests/TitleCaseTest.php (class TitleCaseTest extends PHPUnit\\Framework\\TestCase, using assertSame with exact expected strings) with at least 4 test methods covering: an all-regular-words input, a small word appearing in the MIDDLE (stays lowercase), a small word as the FIRST word (capitalized), and a small word as the LAST word (capitalized). Begin the file with `require_once __DIR__ . '/../src/TitleCase.php';`."
+  ],
+  "setup_files": {
+    "src/TitleCase.php": "<?php\nnamespace App;\n\nclass TitleCase\n{\n    private const SMALL_WORDS = ['a', 'an', 'the', 'of', 'in', 'on', 'and', 'or', 'to'];\n\n    // Title-cases a lowercase, space-separated $s: every word is capitalized\n    // EXCEPT small words (SMALL_WORDS), which stay lowercase - UNLESS the\n    // small word is the first or last word, in which case it is always\n    // capitalized too.\n    public static function format(string $s): string\n    {\n        $words = explode(' ', $s);\n        $last = count($words) - 1;\n        $out = [];\n        foreach ($words as $i => $word) {\n            if ($word === '') {\n                $out[] = $word;\n                continue;\n            }\n            $isSmall = in_array($word, self::SMALL_WORDS, true);\n            if ($isSmall && $i !== 0 && $i !== $last) {\n                $out[] = $word;\n            } else {\n                $out[] = strtoupper($word[0]) . substr($word, 1);\n            }\n        }\n        return implode(' ', $out);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "**/TitleCaseTest.php",
+      "content_patterns": [
+        "assertsame",
+        "titlecase::format"
+      ],
+      "regex_patterns": [
+        "function test[\\s\\S]*function test[\\s\\S]*function test[\\s\\S]*function test"
+      ],
+      "min_lines": 12
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.php": "<?php\n// PHP mutation harness (the php sandbox image has no python3).\n$impl = __DIR__ . '/src/TitleCase.php';\n$src = file_get_contents($impl);\n\n$anchors = [\n    \"if (\\$isSmall && \\$i !== 0 && \\$i !== \\$last) {\",\n    \"\\$isSmall = in_array(\\$word, self::SMALL_WORDS, true);\",\n];\nforeach ($anchors as $a) {\n    if (substr_count($src, $a) !== 1) {\n        fwrite(STDERR, \"protected impl was modified (anchor missing: $a)\\n\");\n        exit(2);\n    }\n}\n\nfunction run_tests(): int {\n    $code = 0;\n    passthru('phpunit tests/TitleCaseTest.php', $code);\n    return $code;\n}\n\n$rc = run_tests();\nif ($rc !== 0) {\n    fwrite(STDERR, \"model tests FAILED against the correct implementation (exit $rc)\\n\");\n    exit(1);\n}\n\n$mutants = [\n    // small-word exception dropped for the FIRST word too (only last-word\n    // guarded) - \"the lord of the rings\" would wrongly keep \"the\" lowercase\n    [\"if (\\$isSmall && \\$i !== 0 && \\$i !== \\$last) {\", \"if (\\$isSmall && \\$i !== \\$last) {\"],\n    // small-word exception dropped for the LAST word\n    [\"if (\\$isSmall && \\$i !== 0 && \\$i !== \\$last) {\", \"if (\\$isSmall && \\$i !== 0) {\"],\n    // small-word check inverted entirely (small words capitalized, common\n    // words left alone)\n    [\"\\$isSmall = in_array(\\$word, self::SMALL_WORDS, true);\", \"\\$isSmall = !in_array(\\$word, self::SMALL_WORDS, true);\"],\n];\n\n$exit = 0;\nforeach ($mutants as $i => [$old, $new]) {\n    file_put_contents($impl, str_replace($old, $new, $src));\n    $rc = run_tests();\n    if ($rc === 0) {\n        fwrite(STDERR, \"mutation \" . ($i + 1) . \" SURVIVED: tests pass on a broken impl\\n\");\n        $exit = 1;\n    }\n    file_put_contents($impl, $src);\n}\n\nif ($exit === 0) {\n    echo \"PASS (tests pass on correct impl and kill all \" . count($mutants) . \" mutants)\\n\";\n}\nexit($exit);\n"
+  },
+  "check_command": "php mutation_check.php",
+  "reference_solution": {
+    "tests/TitleCaseTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/TitleCase.php';\n\nfinal class TitleCaseTest extends TestCase\n{\n    public function testCapitalizesRegularWords(): void\n    {\n        $this->assertSame('Hello World', \\App\\TitleCase::format('hello world'));\n    }\n\n    public function testSmallWordInMiddleStaysLowercase(): void\n    {\n        $this->assertSame('Lord of the Rings', \\App\\TitleCase::format('lord of the rings'));\n    }\n\n    public function testSmallWordAsFirstWordIsCapitalized(): void\n    {\n        $this->assertSame('The Lord of Rings', \\App\\TitleCase::format('the lord of rings'));\n    }\n\n    public function testSmallWordAsLastWordIsCapitalized(): void\n    {\n        $this->assertSame('King of The', \\App\\TitleCase::format('king of the'));\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "tests/TitleCaseTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/TitleCase.php';\n\nfinal class TitleCaseTest extends TestCase\n{\n    public function testReturnsString(): void\n    {\n        $this->assertIsString(\\App\\TitleCase::format('hello world'));\n    }\n\n    public function testFirstCharUppercase(): void\n    {\n        $result = \\App\\TitleCase::format('hello world');\n        $this->assertSame('H', $result[0]);\n    }\n\n    public function testNotEmpty(): void\n    {\n        $this->assertNotEmpty(\\App\\TitleCase::format('a b'));\n    }\n\n    public function testSameWordCount(): void\n    {\n        $result = \\App\\TitleCase::format('the lord of the rings');\n        $this->assertSame(5, count(explode(' ', $result)));\n    }\n}\n"
+      }
+    }
+  ]
+}

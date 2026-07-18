@@ -1,0 +1,50 @@
+{
+  "name": "add_tests_sql_top_spender_view",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write pytest-free sqlite3 assertions for a top-spender-per-region window-function view; mutation-checked (ranking direction flipped, ties widened, orderless customers leaking in via LEFT JOIN)",
+  "difficulty": 3,
+  "task_type": "testing",
+  "tags": [
+    "sql",
+    "sqlite",
+    "testing",
+    "mutation-checked",
+    "window-functions"
+  ],
+  "prompts": [
+    "schema.sql (already correct - do not modify it) defines customers/orders tables and a VIEW top_spender_per_region using RANK() OVER (PARTITION BY region ...) to surface the single highest-spending customer in each region - a customer with zero orders never appears (INNER JOIN), and a genuine tie at rank 1 would produce multiple rows for that region. Write a Python test file at exactly test_top_spender.py that opens an in-memory sqlite3 database, loads schema.sql, seeds at least three regions of customers/orders data (including one customer with NO orders at all, to prove they're excluded) with a clear highest spender per region, queries the view, and asserts on the EXACT rows returned (region, name, total_spent) - not just a row count. Exit non-zero (e.g. via a failed assert) on any mismatch; print something on success."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE customers (\n  id INTEGER PRIMARY KEY,\n  name TEXT NOT NULL,\n  region TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n  id INTEGER PRIMARY KEY,\n  customer_id INTEGER NOT NULL REFERENCES customers(id),\n  amount REAL NOT NULL\n);\n\n-- The single top-spending customer per region (a customer with zero orders\n-- never appears - INNER JOIN by design). Ties within a region are broken by\n-- RANK(), so a tie at rank 1 means MULTIPLE rows for that region.\nCREATE VIEW top_spender_per_region AS\nSELECT region, name, total_spent FROM (\n  SELECT c.region AS region, c.name AS name, SUM(o.amount) AS total_spent,\n         RANK() OVER (PARTITION BY c.region ORDER BY SUM(o.amount) DESC) AS rnk\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n  GROUP BY c.id\n) ranked\nWHERE rnk = 1\nORDER BY region, name;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_top_spender.py",
+      "content_patterns": [
+        "top_spender_per_region",
+        "assert"
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "\"\"\"Mutation harness: model tests must PASS against the real schema.sql and\nFAIL against each mutant. Uses a Python-level subprocess timeout (not a\nshell `timeout` wrapper).\"\"\"\nimport shutil\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nIMPL = Path(\"schema.sql\")\nTEST = \"test_top_spender.py\"\nMUTANTS = [\n    # ranking direction flipped: the LOWEST spender per region wins instead\n    # of the highest\n    [\"ORDER BY SUM(o.amount) DESC\", \"ORDER BY SUM(o.amount) ASC\"],\n    # ties (and near-ties) now include the runner-up too\n    [\"WHERE rnk = 1\", \"WHERE rnk <= 2\"],\n    # a customer with zero orders can now surface as a \"top spender\" (NULL\n    # total_spent) instead of being excluded entirely\n    [\"  JOIN orders o ON o.customer_id = c.id\", \"  LEFT JOIN orders o ON o.customer_id = c.id\"],\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    try:\n        return subprocess.run([sys.executable, \"-B\", TEST], timeout=30).returncode\n    except subprocess.TimeoutExpired:\n        return 124\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct schema (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken view definition, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python mutation_check.py",
+  "reference_solution": {
+    "test_top_spender.py": "import sqlite3\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(open(\"schema.sql\", encoding=\"utf-8\").read())\n\ncon.executescript(\"\"\"\nINSERT INTO customers (id, name, region) VALUES\n  (1, 'Ada', 'west'),\n  (2, 'Grace', 'west'),\n  (3, 'Linus', 'east'),\n  (4, 'Barbara', 'east'),\n  (5, 'Solo', 'north');\n\nINSERT INTO orders (customer_id, amount) VALUES\n  (1, 100.0), (1, 50.0),   -- Ada: 150\n  (2, 300.0),               -- Grace: 300\n  (3, 500.0),               -- Linus: 500\n  (4, 200.0);                -- Barbara: 200\n  -- Solo (north) has NO orders at all.\n\"\"\")\n\nrows = con.execute(\"SELECT region, name, total_spent FROM top_spender_per_region\").fetchall()\n\nassert rows == [(\"east\", \"Linus\", 500.0), (\"west\", \"Grace\", 300.0)], (\n    f\"unexpected rows: {rows}\"\n)\n\n# a customer with no orders in a region by itself must not appear at all\nregions = [r[0] for r in rows]\nassert \"north\" not in regions, f\"Solo (no orders) leaked into the view: {rows}\"\n\nprint(\"PASS\")\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_top_spender.py": "import sqlite3\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(open(\"schema.sql\", encoding=\"utf-8\").read())\n\ncon.executescript(\"\"\"\nINSERT INTO customers (id, name, region) VALUES (1, 'Ada', 'west');\nINSERT INTO orders (customer_id, amount) VALUES (1, 100.0);\n\"\"\")\n\nrows = con.execute(\"SELECT region, name, total_spent FROM top_spender_per_region\").fetchall()\nassert len(rows) == 1\nassert rows[0][0] == \"west\"\n\nprint(\"PASS\")\n"
+      }
+    }
+  ]
+}

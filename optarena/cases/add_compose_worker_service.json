@@ -1,0 +1,47 @@
+{
+  "name": "add_compose_worker_service",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 150,
+  "description": "Add a background 'worker' service to an existing docker-compose.yml (app + db), reusing the app image with a different command; incomplete-fix broken gives the worker its own separate image, which does not contain the worker.py entrypoint the overridden command tries to run",
+  "difficulty": 2,
+  "task_type": "feature",
+  "tags": [
+    "docker",
+    "compose",
+    "yaml"
+  ],
+  "prompts": [
+    "docker-compose.yml defines 'app' and 'db' services only - there is no way to run background jobs. Add a new 'worker' service that: uses the EXACT SAME image as the app service (it runs the same codebase, just a different entrypoint), overrides the command to run [\"python\", \"worker.py\"], sets the same DATABASE_URL environment variable pointing at the db service that app already uses, and depends_on the db service. Do not modify the existing app or db services."
+  ],
+  "setup_files": {
+    "docker-compose.yml": "services:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"8080:80\"\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n    depends_on:\n      - db\n\n  db:\n    image: postgres:15\n    ports:\n      - \"5432:5432\"\n    environment:\n      POSTGRES_USER: app\n      POSTGRES_PASSWORD: app\n      POSTGRES_DB: appdb\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "worker",
+        "worker.py"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_worker_service.py": "import yaml\n\nwith open('docker-compose.yml') as f:\n    data = yaml.safe_load(f)\n\nassert data, 'docker-compose.yml is empty or invalid YAML'\nservices = data.get('services') or {}\nassert 'app' in services and 'db' in services, f'lost an existing service, got: {list(services)}'\nassert 'worker' in services, f'missing worker service (got: {list(services)})'\n\napp = services['app']\nworker = services['worker']\n\n\ndef env_to_dict(env):\n    if env is None:\n        return {}\n    if isinstance(env, dict):\n        return {str(k): str(v) for k, v in env.items()}\n    out = {}\n    for item in env:\n        item = str(item)\n        if '=' in item:\n            k, v = item.split('=', 1)\n            out[k] = v\n        else:\n            out[item] = ''\n    return out\n\n\n# the worker must reuse the SAME image as app - it runs the same codebase,\n# just with a different entrypoint command\nassert worker.get('image') == app.get('image'), (\n    f\"worker image {worker.get('image')!r} does not match app's image {app.get('image')!r} - \"\n    f\"the worker.py entrypoint only exists inside the app image\")\n\ncommand = worker.get('command')\nassert command, 'worker service has no command override'\ncommand_str = ' '.join(command) if isinstance(command, list) else str(command)\nassert 'worker.py' in command_str, f'worker command does not run worker.py: {command!r}'\n\nworker_env = env_to_dict(worker.get('environment'))\nassert any('db' in v.lower() for v in worker_env.values()), (\n    f'worker environment should reference the db service, got {worker_env}')\n\ndepends_on = worker.get('depends_on') or []\nif isinstance(depends_on, dict):\n    depends_on = list(depends_on.keys())\nassert 'db' in depends_on, f\"worker service should depend_on 'db', got {depends_on}\"\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_worker_service.py",
+  "reference_solution": {
+    "docker-compose.yml": "services:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"8080:80\"\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n    depends_on:\n      - db\n\n  db:\n    image: postgres:15\n    ports:\n      - \"5432:5432\"\n    environment:\n      POSTGRES_USER: app\n      POSTGRES_PASSWORD: app\n      POSTGRES_DB: appdb\n\n  worker:\n    image: myorg/webapp:latest\n    command: [\"python\", \"worker.py\"]\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n    depends_on:\n      - db\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "worker-wrong-image",
+      "files": {
+        "docker-compose.yml": "services:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"8080:80\"\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n    depends_on:\n      - db\n\n  db:\n    image: postgres:15\n    ports:\n      - \"5432:5432\"\n    environment:\n      POSTGRES_USER: app\n      POSTGRES_PASSWORD: app\n      POSTGRES_DB: appdb\n\n  worker:\n    image: myorg/worker-base:latest\n    command: [\"python\", \"worker.py\"]\n    environment:\n      DATABASE_URL: postgres://app:app@db:5432/appdb\n    depends_on:\n      - db\n"
+      }
+    }
+  ]
+}

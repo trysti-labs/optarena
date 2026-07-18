@@ -1,0 +1,52 @@
+{
+  "name": "refactor_ruby_pluralize_methods_to_shared_helper",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Collapses three copy-pasted pluralization methods (pluralize_item/pluralize_order/pluralize_user, identical logic, only the noun differs) into one shared pluralize(count, word) method; behavior-drift broken treats count <= 1 as singular instead of count == 1, so a count of 0 wrongly renders in the singular",
+  "difficulty": 1,
+  "task_type": "refactoring",
+  "tags": [
+    "ruby",
+    "minitest",
+    "refactoring"
+  ],
+  "prompts": [
+    "Labels.pluralize_item, .pluralize_order, and .pluralize_user in labels.rb all build a \"count noun(s)\" string with IDENTICAL pluralization logic (append 's' unless count is exactly 1), differing only in which noun they use. Extract the shared logic into one method `Labels.pluralize(count, word)`, and reimplement the three original methods as one-line calls to it with their own noun. Preserve the exact existing behavior: count 1 is singular, every other count (including 0) is plural."
+  ],
+  "setup_files": {
+    "labels.rb": "class Labels\n  def self.pluralize_item(count)\n    \"#{count} item#{count == 1 ? \"\" : \"s\"}\"\n  end\n\n  def self.pluralize_order(count)\n    \"#{count} order#{count == 1 ? \"\" : \"s\"}\"\n  end\n\n  def self.pluralize_user(count)\n    \"#{count} user#{count == 1 ? \"\" : \"s\"}\"\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "labels.rb",
+      "content_patterns": [
+        "def self.pluralize("
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "labels_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"labels\"\n\nclass LabelsPluralizeTest < Minitest::Test\n  def test_singular_is_not_pluralized\n    assert_equal \"1 item\", Labels.pluralize_item(1)\n    assert_equal \"1 order\", Labels.pluralize_order(1)\n    assert_equal \"1 user\", Labels.pluralize_user(1)\n  end\n\n  def test_zero_is_plural\n    assert_equal \"0 items\", Labels.pluralize_item(0)\n    assert_equal \"0 orders\", Labels.pluralize_order(0)\n  end\n\n  def test_many_is_plural\n    assert_equal \"5 items\", Labels.pluralize_item(5)\n    assert_equal \"2 users\", Labels.pluralize_user(2)\n  end\nend\n"
+  },
+  "check_command": "ruby labels_hidden_test.rb",
+  "reference_solution": {
+    "labels.rb": "class Labels\n  def self.pluralize(count, word)\n    \"#{count} #{word}#{count == 1 ? \"\" : \"s\"}\"\n  end\n\n  def self.pluralize_item(count)\n    pluralize(count, \"item\")\n  end\n\n  def self.pluralize_order(count)\n    pluralize(count, \"order\")\n  end\n\n  def self.pluralize_user(count)\n    pluralize(count, \"user\")\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "labels.rb": "class Labels\n  def self.pluralize_item(count)\n    \"#{count} item#{count == 1 ? \"\" : \"s\"}\"\n  end\n\n  def self.pluralize_order(count)\n    \"#{count} order#{count == 1 ? \"\" : \"s\"}\"\n  end\n\n  def self.pluralize_user(count)\n    \"#{count} user#{count == 1 ? \"\" : \"s\"}\"\n  end\nend\n"
+      }
+    },
+    {
+      "name": "zero-treated-as-singular",
+      "files": {
+        "labels.rb": "class Labels\n  def self.pluralize(count, word)\n    \"#{count} #{word}#{count <= 1 ? \"\" : \"s\"}\"\n  end\n\n  def self.pluralize_item(count)\n    pluralize(count, \"item\")\n  end\n\n  def self.pluralize_order(count)\n    pluralize(count, \"order\")\n  end\n\n  def self.pluralize_user(count)\n    pluralize(count, \"user\")\n  end\nend\n"
+      }
+    }
+  ]
+}

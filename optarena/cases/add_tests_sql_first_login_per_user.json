@@ -1,0 +1,50 @@
+{
+  "name": "add_tests_sql_first_login_per_user",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Write pytest-free sqlite3 assertions for a first-login-per-user window-function view; mutation-checked (ordering direction flipped so the LATEST login wins, rn=1 loosened to rn<=2, PARTITION BY dropped entirely so only one row survives across ALL users)",
+  "difficulty": 3,
+  "task_type": "testing",
+  "tags": [
+    "sql",
+    "sqlite",
+    "testing",
+    "mutation-checked",
+    "window-functions"
+  ],
+  "prompts": [
+    "schema.sql (already correct - do not modify it) defines a logins table and a VIEW first_login_per_user using ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY login_at ASC) to surface each user's EARLIEST login record only - exactly one row per distinct user_id that appears in logins. Write a Python test file at exactly test_first_login.py that opens an in-memory sqlite3 database, loads schema.sql, seeds at least three users (including one user with MULTIPLE login rows, so the earliest-wins logic is actually exercised) with a clear earliest login per user, queries the view, and asserts on the EXACT rows returned (user_id, login_at, ip) - not just a row count. Exit non-zero (e.g. via a failed assert) on any mismatch; print something on success."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE logins (\n  id INTEGER PRIMARY KEY,\n  user_id INTEGER NOT NULL,\n  login_at TEXT NOT NULL,\n  ip TEXT NOT NULL\n);\n\n-- Each user's EARLIEST login record only (ties broken arbitrarily by\n-- sqlite - the fixtures below never have exact ties).\nCREATE VIEW first_login_per_user AS\nSELECT user_id, login_at, ip FROM (\n  SELECT user_id, login_at, ip,\n         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY login_at ASC) AS rn\n  FROM logins\n) ranked\nWHERE rn = 1\nORDER BY user_id;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "test_first_login.py",
+      "content_patterns": [
+        "first_login_per_user",
+        "assert"
+      ],
+      "min_lines": 8
+    }
+  ],
+  "test_setup_files": {
+    "mutation_check.py": "\"\"\"Mutation harness: model tests must PASS against the real schema.sql and\nFAIL against each mutant. Uses a Python-level subprocess timeout (not a\nshell `timeout` wrapper).\"\"\"\nimport shutil\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nIMPL = Path(\"schema.sql\")\nTEST = \"test_first_login.py\"\nMUTANTS = [\n    # keeps the LATEST login per user instead of the earliest\n    [\"ORDER BY login_at ASC\", \"ORDER BY login_at DESC\"],\n    # keeps the two earliest logins per user instead of just one\n    [\"WHERE rn = 1\", \"WHERE rn <= 2\"],\n    # PARTITION BY dropped entirely - row numbers are assigned globally, so\n    # only ONE row survives across ALL users combined, not one per user\n    [\"ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY login_at ASC)\",\n     \"ROW_NUMBER() OVER (ORDER BY login_at ASC)\"],\n]\n\n\ndef run_tests() -> int:\n    for p in Path(\".\").rglob(\"__pycache__\"):\n        shutil.rmtree(p, ignore_errors=True)\n    try:\n        return subprocess.run([sys.executable, \"-B\", TEST], timeout=30).returncode\n    except subprocess.TimeoutExpired:\n        return 124\n\n\nsrc = IMPL.read_text(encoding=\"utf-8\")\nfor old, _new in MUTANTS:\n    assert src.count(old) == 1, (\n        f\"protected implementation file {IMPL} was modified - the task said not to \"\n        f\"change it (anchor not found exactly once: {old!r})\")\n\nrc = run_tests()\nassert rc == 0, f\"model tests FAILED against the correct schema (exit {rc})\"\n\ntry:\n    for i, (old, new) in enumerate(MUTANTS, 1):\n        IMPL.write_text(src.replace(old, new), encoding=\"utf-8\")\n        rc = run_tests()\n        assert rc != 0, (\n            f\"mutation {i} SURVIVED: the tests still pass against a deliberately \"\n            f\"broken view definition, so they do not verify the required behavior\")\nfinally:\n    IMPL.write_text(src, encoding=\"utf-8\")\n\nprint(f\"PASS (killed all {len(MUTANTS)} mutants)\")\n"
+  },
+  "check_command": "python mutation_check.py",
+  "reference_solution": {
+    "test_first_login.py": "import sqlite3\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(open(\"schema.sql\", encoding=\"utf-8\").read())\n\ncon.executescript(\"\"\"\nINSERT INTO logins (user_id, login_at, ip) VALUES\n  (1, '2026-01-01T09:00:00', '10.0.0.1'),\n  (1, '2026-01-03T09:00:00', '10.0.0.2'),\n  (1, '2026-01-02T09:00:00', '10.0.0.3'),\n  (2, '2026-02-05T14:00:00', '10.0.0.9'),\n  (3, '2026-03-01T08:00:00', '10.0.0.5'),\n  (3, '2026-03-02T08:00:00', '10.0.0.6');\n\"\"\")\n\nrows = con.execute(\n    \"SELECT user_id, login_at, ip FROM first_login_per_user\"\n).fetchall()\n\nassert rows == [\n    (1, '2026-01-01T09:00:00', '10.0.0.1'),\n    (2, '2026-02-05T14:00:00', '10.0.0.9'),\n    (3, '2026-03-01T08:00:00', '10.0.0.5'),\n], f\"unexpected rows: {rows}\"\n\n# exactly one row per user - the view must not leak extra rows\nuser_ids = [r[0] for r in rows]\nassert user_ids == sorted(set(user_ids)), f\"expected exactly one row per user: {rows}\"\nassert len(rows) == 3, f\"expected 3 rows (one per user), got {len(rows)}: {rows}\"\n\nprint(\"PASS\")\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "vacuous-tests",
+      "files": {
+        "test_first_login.py": "import sqlite3\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(open(\"schema.sql\", encoding=\"utf-8\").read())\n\ncon.executescript(\"\"\"\nINSERT INTO logins (user_id, login_at, ip) VALUES (1, '2026-01-01T09:00:00', '10.0.0.1');\n\"\"\")\n\nrows = con.execute(\"SELECT user_id, login_at, ip FROM first_login_per_user\").fetchall()\nassert len(rows) == 1\nassert rows[0][0] == 1\n\nprint(\"PASS\")\n"
+      }
+    }
+  ]
+}

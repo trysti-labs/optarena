@@ -1,0 +1,47 @@
+{
+  "name": "fix_ts_csv_formula_injection",
+  "language": "typescript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "CSV export with no formula-injection guard -> neutralize =/+/-/@/tab/CR prefixes with a leading apostrophe; incomplete-fix broken only guards the '=' prefix",
+  "difficulty": 2,
+  "task_type": "security",
+  "tags": [
+    "typescript",
+    "node",
+    "security",
+    "csv-injection"
+  ],
+  "prompts": [
+    "toCsvField(value) in csv.ts quotes/escapes commas, quotes, and newlines for CSV export, but does nothing about CSV/formula injection: a field value starting with =, +, -, or @ (or a leading tab/CR) becomes an executable formula when the exported file is opened in Excel or Google Sheets. Fix it: if the value starts with any of those characters, prefix it with a single leading apostrophe (') BEFORE the existing comma/quote/newline escaping - spreadsheet software treats a leading apostrophe as 'this is literal text', neutralizing the formula trigger while keeping the value's content intact and readable. Guard ALL of =, +, -, @, tab, and CR - not just '='. Existing comma/quote/newline escaping must keep working exactly as before for benign values."
+  ],
+  "setup_files": {
+    "csv.ts": "// BUG: no protection against CSV/formula injection. A field value starting\n// with =, +, -, or @ becomes an executable formula when the exported CSV is\n// opened in Excel/Sheets (e.g. a \"name\" of \"=cmd|' /C calc'!A0\" or a simpler\n// \"=1+1\" that just corrupts data, or worse with DDE payloads).\nexport function toCsvField(value: string): string {\n  if (value.includes(\",\") || value.includes('\"') || value.includes(\"\\n\")) {\n    return `\"${value.replace(/\"/g, '\"\"')}\"`;\n  }\n  return value;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "csv.ts",
+      "content_patterns": [
+        "toCsvField"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_csv.ts": "function assertEqual(actual: unknown, expected: unknown, message: string): void {\n  if (actual !== expected) {\n    throw new Error(`${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);\n  }\n}\n\nimport { toCsvField } from \"./csv\";\n\n// benign values pass through unchanged\nassertEqual(toCsvField(\"Ada Lovelace\"), \"Ada Lovelace\", \"plain value\");\n\n// existing comma/quote escaping still works\nassertEqual(toCsvField(\"a,b\"), '\"a,b\"', \"comma still quoted\");\nassertEqual(toCsvField('say \"hi\"'), '\"say \"\"hi\"\"\"', \"quotes still doubled\");\n\n// every documented dangerous prefix must be neutralized with a leading '\nfor (const hostile of [\"=1+1\", \"+1+1\", \"-1+1\", \"@SUM(A1:A9)\", \"\\tformula\", \"\\rformula\"]) {\n  const got = toCsvField(hostile);\n  if (!got.startsWith(\"'\")) {\n    throw new Error(\n      `toCsvField(${JSON.stringify(hostile)}) = ${JSON.stringify(got)} - ` +\n        `dangerous prefix was not neutralized with a leading apostrophe`,\n    );\n  }\n}\n\n// the neutralized value must still contain the original text (just prefixed,\n// not mangled) so the exported data is still readable\nassertEqual(toCsvField(\"=1+1\"), \"'=1+1\", \"formula-neutralized value\");\n\nconsole.log(\"PASS\");\n"
+  },
+  "check_command": "tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build csv.ts test_csv.ts && node build/test_csv.js",
+  "reference_solution": {
+    "csv.ts": "const DANGEROUS_PREFIXES = [\"=\", \"+\", \"-\", \"@\", \"\\t\", \"\\r\"];\n\nexport function toCsvField(value: string): string {\n  let v = value;\n  if (DANGEROUS_PREFIXES.some((p) => v.startsWith(p))) {\n    // A leading apostrophe tells spreadsheet software to treat the cell as\n    // literal text, neutralizing the formula trigger without altering the\n    // visible value.\n    v = \"'\" + v;\n  }\n  if (v.includes(\",\") || v.includes('\"') || v.includes(\"\\n\")) {\n    v = `\"${v.replace(/\"/g, '\"\"')}\"`;\n  }\n  return v;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "only-guards-equals-prefix",
+      "files": {
+        "csv.ts": "export function toCsvField(value: string): string {\n  let v = value;\n  if (v.startsWith(\"=\")) {\n    v = \"'\" + v;\n  }\n  if (v.includes(\",\") || v.includes('\"') || v.includes(\"\\n\")) {\n    v = `\"${v.replace(/\"/g, '\"\"')}\"`;\n  }\n  return v;\n}\n"
+      }
+    }
+  ]
+}
