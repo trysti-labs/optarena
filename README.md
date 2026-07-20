@@ -101,6 +101,19 @@ Requirements: Python ≥ 3.10. UI drivers additionally need Node ≥ 18 and the
 extension under test installed in `~/.vscode/extensions` (first UI run also
 downloads a pinned VS Code, ~280 MB).
 
+**Source-checkout install only** - `pyproject.toml` only packages the
+`optarena` Python package itself (plus the built-in `cases/*.json`), which is
+all the CLI, baseline drivers, and case-content oracle logic need. But
+`docker/` (sandbox Dockerfiles), `dashboard/` (the results UI), `repos/`
+(L3 `setup_repo` starter projects), and `ui-harness/` (the VS Code UI
+drivers) are separate top-level directories, not bundled into the package -
+a wheel built and installed elsewhere (`pip install` from a copied/published
+wheel rather than a checkout) won't have them, and `optarena docker build`,
+`optarena serve`, `setup_repo` cases, and the `*-ui` drivers will fail with a
+clear "not found" error rather than a working degraded mode. There is no
+supported "everything bundled in one wheel" install today - keep the git
+checkout around next to wherever `optarena` is installed from it.
+
 ## Quick start
 
 ```bash

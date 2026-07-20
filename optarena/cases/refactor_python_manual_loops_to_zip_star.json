@@ -36,7 +36,7 @@
   "test_setup_files": {
     "test_matrixops_hidden.py": "from matrixops import column_sums, row_maxes, transpose\n\n\ndef test_transpose_rectangular():\n    assert transpose([[1, 2, 3], [4, 5, 6]]) == [[1, 4], [2, 5], [3, 6]]\n\n\ndef test_transpose_empty():\n    assert transpose([]) == []\n\n\ndef test_transpose_single_row():\n    assert transpose([[1, 2, 3]]) == [[1], [2], [3]]\n\n\ndef test_column_sums():\n    assert column_sums([[1, 2, 3], [4, 5, 6]]) == [5, 7, 9]\n\n\ndef test_row_maxes_non_square():\n    # 2 rows x 3 cols: row-wise (not column-wise) maxima\n    assert row_maxes([[1, 9, 2], [7, 3, 4]]) == [9, 7]\n\n\ndef test_row_maxes_single_row():\n    assert row_maxes([[5, 1, 5]]) == [5]\n"
   },
-  "check_command": "python -m pytest -q test_matrixops_hidden.py",
+  "check_command": "python3 -m pytest -q test_matrixops_hidden.py",
   "reference_solution": {
     "matrixops.py": "def transpose(matrix):\n    \"\"\"Transpose a rectangular matrix (list of equal-length row lists).\"\"\"\n    return [list(col) for col in zip(*matrix)]\n\n\ndef column_sums(matrix):\n    \"\"\"Sum of each column, left to right.\"\"\"\n    return [sum(col) for col in zip(*matrix)]\n\n\ndef row_maxes(matrix):\n    \"\"\"Maximum value of each row, top to bottom.\"\"\"\n    return [max(row) for row in matrix]\n"
   },

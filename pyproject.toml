@@ -28,3 +28,8 @@ include = ["optarena*"]
 
 [tool.setuptools.package-data]
 optarena = ["cases/*.json"]
+
+# Intentionally NOT bundled: docker/, dashboard/, repos/, ui-harness/ - all
+# top-level siblings of optarena/, not part of this package. This is a
+# source-checkout tool, not a wheel with everything embedded - see the
+# "Source-checkout install only" note in README.md before changing this.

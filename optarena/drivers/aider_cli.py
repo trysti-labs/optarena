@@ -8,7 +8,6 @@ oracle looks. Uses the OpenAI-compatible endpoint of the backend.
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
@@ -16,9 +15,9 @@ import sys
 import time
 from pathlib import Path
 
-from ..cases import changed_files, evaluate_case, prepare_workspace, snapshot
+from ..cases import changed_files, evaluate_case, prepare_workspace, run_capture, snapshot
 from ..scenario import Scenario
-from .base import CaseResult, Driver
+from .base import CaseResult, Driver, subprocess_env
 
 # aider prints one line per message like:
 #   Tokens: 4.5k sent, 431 received. Cost: $0.0042 message, $0.0084 session.
@@ -94,8 +93,12 @@ class AiderDriver(Driver):
         # Existing setup files must be added to aider's context so "modify" cases work.
         setup_names = list((case.get("setup_files") or {}).keys())
 
-        env = {k: v for k, v in os.environ.items()
-               if k != "ELECTRON_RUN_AS_NODE" and not k.startswith("VSCODE_")}
+        # C-03: an explicit allowlist, not a filtered copy of the whole host
+        # environment - aider's job is to execute model-generated edits, so
+        # it must not inherit unrelated host secrets just because they
+        # happened to be set in the parent shell. Its own API key/base URL
+        # are passed as CLI flags below, not via env, so no `extra` is needed.
+        env = subprocess_env()
 
         t0 = time.monotonic()
         try:
@@ -110,14 +113,22 @@ class AiderDriver(Driver):
                     "--message", prompt,
                     *setup_names,
                 ]
-                proc = subprocess.run(
-                    cmd, cwd=workspace, env=env,
-                    capture_output=True, text=True, timeout=timeout,
-                    encoding="utf-8", errors="replace",
+                # run_capture (not subprocess.run): on timeout it kills
+                # aider's whole process tree, not just aider itself, so a
+                # subprocess aider spawned can't outlive the case (H-11).
+                proc = run_capture(
+                    cmd, cwd=workspace, env=env, timeout=timeout,
+                    text=True, encoding="utf-8", errors="replace",
                 )
                 for key, val in parse_aider_metrics(proc.stdout).items():
                     result.extra[key] = result.extra.get(key, 0) + val
                 if proc.returncode != 0:
+                    # execution_ok=False (Phase 2.7): aider itself reported
+                    # failure - previously only logged to extra["stderr"],
+                    # so a non-zero exit couldn't stop an already-passing
+                    # artifact (an earlier prompt, or a lucky partial write)
+                    # from being graded an unqualified PASS.
+                    result.execution_ok = False
                     result.extra.setdefault("stderr", "")
                     result.extra["stderr"] += proc.stderr[-800:]
         except subprocess.TimeoutExpired:
@@ -128,5 +139,5 @@ class AiderDriver(Driver):
 
         result.files = changed_files(before, workspace)
         result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
-        result.passed = result.error is None and not result.failures
+        result.passed = result.execution_ok and result.error is None and not result.failures
         return result

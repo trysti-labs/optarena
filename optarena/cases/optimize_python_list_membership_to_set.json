@@ -32,7 +32,7 @@
   "test_setup_files": {
     "test_membership.py": "import time\n\nfrom membership import common_ids\n\n\ndef test_preserves_active_order_and_duplicates():\n    got = common_ids([\"b\", \"a\", \"b\", \"c\"], [\"a\", \"b\"])\n    assert got == [\"b\", \"a\", \"b\"]\n\n\ndef test_empty_edges():\n    assert common_ids([], [\"a\"]) == []\n    assert common_ids([\"a\"], []) == []\n\n\ndef test_performance_large_lists():\n    n = 30000\n    active = [f\"id{i}\" for i in range(n)]\n    eligible = [f\"id{i}\" for i in range(n // 2, n + n // 2)]\n\n    start = time.perf_counter()\n    got = common_ids(active, eligible)\n    elapsed = time.perf_counter() - start\n\n    assert got == active[n // 2:]\n    # calibrated: `x in eligible` against a LIST is ~2.7s on fast native\n    # hardware at n=30000 and slower in the sandbox; against a set built\n    # once it's ~0.002s\n    assert elapsed < 1.5, (\n        f\"common_ids took {elapsed:.2f}s for {n} ids; expected eligible_ids \"\n        f\"converted to a set ONCE before the loop, not membership-tested \"\n        f\"against the list directly (O(n*m))\"\n    )\n"
   },
-  "check_command": "python -m pytest -q test_membership.py",
+  "check_command": "python3 -m pytest -q test_membership.py",
   "reference_solution": {
     "membership.py": "def common_ids(active_ids, eligible_ids):\n    \"\"\"IDs from active_ids that are also present in eligible_ids, in\n    active_ids order (duplicates in active_ids preserved).\"\"\"\n    eligible = set(eligible_ids)\n    return [x for x in active_ids if x in eligible]\n"
   },

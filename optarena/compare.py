@@ -13,55 +13,105 @@ import re
 import time
 from pathlib import Path
 
+from . import store
 from .metrics import case_deltas
-from .store import RESULTS_DIR
 
 
-def compare_runs(run_a: dict, run_b: dict) -> dict:
+def manifest_compatibility(man_a: dict | None, man_b: dict | None) -> dict:
+    """
+    Whether two runs measured the SAME thing, so an overall faster/more-
+    accurate/cheaper verdict is meaningful (M-02). Comparability requires the
+    same oracle version, the same resolved case set, and the same trial count
+    - NOT the same driver or backend (tool-vs-tool and backend-vs-backend are
+    exactly what a comparison is for). Returns
+    ``{"comparable": bool, "reasons": [...], "verified": bool}``; ``verified``
+    is False when either run predates manifests (nothing to check against, so
+    we warn rather than block).
+    """
+    if not man_a or not man_b:
+        return {"comparable": True, "verified": False,
+                "reasons": ["one or both runs predate run manifests - "
+                            "comparability could not be verified"]}
+    reasons: list[str] = []
+    if man_a.get("oracle_version") != man_b.get("oracle_version"):
+        reasons.append(f"different oracle version "
+                       f"({man_a.get('oracle_version')} vs {man_b.get('oracle_version')})")
+    if man_a.get("case_set_hash") != man_b.get("case_set_hash"):
+        reasons.append(f"different case set "
+                       f"({man_a.get('case_count')} case(s) hash {man_a.get('case_set_hash')} "
+                       f"vs {man_b.get('case_count')} case(s) hash {man_b.get('case_set_hash')})")
+    if man_a.get("trials") != man_b.get("trials"):
+        reasons.append(f"different trial count "
+                       f"({man_a.get('trials')} vs {man_b.get('trials')})")
+    return {"comparable": not reasons, "verified": True, "reasons": reasons}
+
+
+def compare_runs(run_a: dict, run_b: dict, force: bool = False) -> dict:
     a_label = run_a["scenario"]["name"]
     b_label = run_b["scenario"]["name"]
     rows = case_deltas(run_a, run_b)
     sa, sb = run_a["summary"], run_b["summary"]
+    compat = manifest_compatibility(run_a.get("manifest"), run_b.get("manifest"))
+    # M-02: when two runs measured different things, an aggregate "winner" is
+    # misleading (you'd be crowning a tool for scoring higher on an easier or
+    # smaller case set). Suppress the aggregate verdict unless the caller
+    # explicitly forces it; the per-case delta table (aligned by case name) is
+    # still shown, since that IS valid on whatever cases the two share.
+    suppress = compat["comparable"] is False and not force
+    verdict = {
+        "pass_rate_delta": round(sb["pass_rate"] - sa["pass_rate"], 3),
+        "mean_duration_delta_s": round(
+            sb["mean_duration_s"] - sa["mean_duration_s"], 1),
+        "faster": None if suppress else (
+            a_label if sa["mean_duration_s"] <= sb["mean_duration_s"] else b_label),
+        "more_accurate": None if suppress else (
+            a_label if sa["pass_rate"] > sb["pass_rate"]
+            else b_label if sb["pass_rate"] > sa["pass_rate"] else "tie"
+        ),
+        "cheaper": None if suppress else _cheaper(a_label, b_label, sa, sb),
+        "suppressed": suppress,
+    }
     return {
         "compared_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "a": {"run_id": run_a["run_id"], "label": a_label, "summary": sa,
-              "scenario": run_a["scenario"]},
+              "scenario": run_a["scenario"], "manifest": run_a.get("manifest")},
         "b": {"run_id": run_b["run_id"], "label": b_label, "summary": sb,
-              "scenario": run_b["scenario"]},
+              "scenario": run_b["scenario"], "manifest": run_b.get("manifest")},
         "cases": rows,
-        "verdict": {
-            "pass_rate_delta": round(sb["pass_rate"] - sa["pass_rate"], 3),
-            "mean_duration_delta_s": round(
-                sb["mean_duration_s"] - sa["mean_duration_s"], 1),
-            "faster": a_label if sa["mean_duration_s"] <= sb["mean_duration_s"] else b_label,
-            "more_accurate": (
-                a_label if sa["pass_rate"] > sb["pass_rate"]
-                else b_label if sb["pass_rate"] > sa["pass_rate"] else "tie"
-            ),
-            "cheaper": _cheaper(a_label, b_label, sa, sb),
-        },
+        "compatibility": compat,
+        "verdict": verdict,
     }
 
 
 def _cheaper(a_label: str, b_label: str, sa: dict, sb: dict) -> str | None:
-    """Which run cost less USD, or None when neither run had a priced cost."""
+    """Which run cost less USD, or None when either run has no cost data at all.
+
+    H-07: `total_cost_usd` is None when a run has NO cost data whatsoever
+    (e.g. a driver that never reports cost) - that is not the same claim as
+    "this run cost $0.00" (a real, priced, genuinely-free/local run). The
+    previous version only refused a verdict when BOTH sides were falsy,
+    so `ca=None` (no data) got coerced to `0.0` and could beat a real
+    `cb=$0.50`, declaring the run with no cost measurement "cheaper".
+    """
     ca, cb = sa.get("total_cost_usd"), sb.get("total_cost_usd")
-    if not ca and not cb:
+    if ca is None or cb is None:
         return None
-    ca, cb = ca or 0.0, cb or 0.0
     return a_label if ca <= cb else b_label
 
 
 def save_comparison(cmp: dict) -> Path:
-    out_dir = RESULTS_DIR / "comparisons"
+    # store.RESULTS_DIR (not a `from .store import RESULTS_DIR` binding at
+    # module load) so this always reflects the current location even after
+    # store.set_results_dir() (--results-dir) - a plain name import would
+    # keep pointing at whatever RESULTS_DIR was at import time.
+    out_dir = store.RESULTS_DIR / "comparisons"
     out_dir.mkdir(parents=True, exist_ok=True)
     # Labels are scenario names, which can embed model ids with "/" or ":" -
     # sanitize so the comparison file lands where intended on every platform.
     safe = lambda s: re.sub(r"[^\w.\-+]+", "-", s)  # noqa: E731
     name = f"{time.strftime('%Y%m%d-%H%M%S')}_{safe(cmp['a']['label'])}_vs_{safe(cmp['b']['label'])}.json"
     path = out_dir / name
-    from .store import _write_atomic
-    _write_atomic(path, json.dumps(cmp, indent=2))
+    store._write_atomic(path, json.dumps(cmp, indent=2))
     return path
 
 
@@ -156,6 +206,21 @@ def format_table(cmp: dict) -> str:
         f"\n{'='*78}",
         f"  {a['label']}  vs  {b['label']}",
         f"{'='*78}",
+    ]
+    # M-02: warn loudly when the two runs did not measure the same thing, so
+    # nobody reads the per-case table as a like-for-like verdict.
+    compat = cmp.get("compatibility", {})
+    if compat.get("reasons"):
+        header = ("NOT DIRECTLY COMPARABLE" if compat.get("comparable") is False
+                  else "COMPARABILITY UNVERIFIED")
+        lines.append(f"  ** {header} **")
+        for reason in compat["reasons"]:
+            lines.append(f"     - {reason}")
+        if cmp.get("verdict", {}).get("suppressed"):
+            lines.append("     (overall winner suppressed; per-case deltas below are on shared cases only. "
+                         "Re-run `compare --force` to override.)")
+        lines.append("")
+    lines += [
         f"  {'case':30} {'A':>10} {'B':>10} {'A time':>8} {'B time':>8}",
         f"  {'-'*30} {'-'*10} {'-'*10} {'-'*8} {'-'*8}",
     ]
@@ -174,12 +239,13 @@ def format_table(cmp: dict) -> str:
         )
     sa, sb = a["summary"], b["summary"]
     v = cmp["verdict"]
+    _winner = lambda name: name if name else "(suppressed - not comparable)"  # noqa: E731
     lines += [
         f"  {'-'*70}",
         f"  pass rate:     {sa['pass_rate']:.0%}  vs  {sb['pass_rate']:.0%}"
-        f"   -> more accurate: {v['more_accurate']}",
+        f"   -> more accurate: {_winner(v['more_accurate'])}",
         f"  mean duration: {sa['mean_duration_s']:.1f}s vs {sb['mean_duration_s']:.1f}s"
-        f"   -> faster: {v['faster']}",
+        f"   -> faster: {_winner(v['faster'])}",
     ]
     if sa.get("p95_duration_s") is not None and sb.get("p95_duration_s") is not None:
         lines.append(

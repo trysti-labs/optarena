@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import functools
 import http.server
 import sys
 from pathlib import Path
@@ -35,6 +34,7 @@ from .compare import compare_runs, format_regression, format_table, regression_s
 from .drivers import DRIVER_NAMES
 from .runner import run_scenario
 from .scenario import Backend, Scenario
+from . import store
 from .store import list_runs, load_run, save_run
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -63,33 +63,47 @@ def _scenario_from_args(args, driver: str | None = None, model: str | None = Non
 
 
 def cmd_run(args) -> int:
-    scenarios: list[Scenario] = [Scenario.from_file(p) for p in args.scenario or []]
-    if args.cases_dir:
-        for sc in scenarios:
-            sc.cases_dir = sc.cases_dir or args.cases_dir
-    # --language/--framework must narrow file scenarios too, not just inline
-    # ones (previously they were silently ignored alongside --scenario).
-    if getattr(args, "language", None) or getattr(args, "framework", None):
-        for sc in scenarios:
-            loaded = load_cases(sc.cases, cases_dir=sc.cases_dir)
-            sc.cases = [c["name"] for c in filter_cases(
-                loaded, language=args.language, framework=args.framework)]
-    matrix_drivers = (args.matrix_drivers or "").split(",") if args.matrix_drivers else []
-    matrix_models = (args.matrix_models or "").split(",") if args.matrix_models else []
-    if matrix_drivers or matrix_models:
-        for d in [s.strip() for s in matrix_drivers if s.strip()] or [args.driver]:
-            for m in [s.strip() for s in matrix_models if s.strip()] or [args.model]:
-                if d:
-                    scenarios.append(_scenario_from_args(args, driver=d, model=m))
-    elif args.driver:
-        scenarios.append(_scenario_from_args(args))
+    try:
+        scenarios: list[Scenario] = [Scenario.from_file(p) for p in args.scenario or []]
+        if args.cases_dir:
+            for sc in scenarios:
+                sc.cases_dir = sc.cases_dir or args.cases_dir
+        # --language/--framework must narrow file scenarios too, not just
+        # inline ones (previously they were silently ignored alongside
+        # --scenario).
+        if getattr(args, "language", None) or getattr(args, "framework", None):
+            for sc in scenarios:
+                loaded = load_cases(sc.cases, cases_dir=sc.cases_dir)
+                sc.cases = [c["name"] for c in filter_cases(
+                    loaded, language=args.language, framework=args.framework)]
+        matrix_drivers = (args.matrix_drivers or "").split(",") if args.matrix_drivers else []
+        matrix_models = (args.matrix_models or "").split(",") if args.matrix_models else []
+        if matrix_drivers or matrix_models:
+            for d in [s.strip() for s in matrix_drivers if s.strip()] or [args.driver]:
+                for m in [s.strip() for s in matrix_models if s.strip()] or [args.model]:
+                    if d:
+                        scenarios.append(_scenario_from_args(args, driver=d, model=m))
+        elif args.driver:
+            scenarios.append(_scenario_from_args(args))
+    except (ValueError, OSError) as e:
+        # ValueError covers SchemaError (a malformed scenario/case file) and
+        # json.JSONDecodeError; OSError covers a missing --scenario file -
+        # all should read as a clean CLI error, not a raw traceback.
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     if not scenarios:
         print("Nothing to run: pass --scenario file.json or --driver ...", file=sys.stderr)
         return 2
 
     records = []
     for sc in scenarios:
-        rec = run_scenario(sc, trials=args.trials, parallel=args.parallel)
+        try:
+            rec = run_scenario(sc, trials=args.trials, parallel=args.parallel,
+                                allow_empty=args.allow_empty,
+                                keep_workspace=args.keep_workspace)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
         path = save_run(rec)
         s = rec.summary
         print(f"  -> {s['passed']}/{s['cases']} passed "
@@ -114,7 +128,14 @@ def cmd_run(args) -> int:
 
 
 def cmd_compare(args) -> int:
-    cmp = compare_runs(load_run(args.run_a), load_run(args.run_b))
+    try:
+        run_a, run_b = load_run(args.run_a), load_run(args.run_b)
+    except (FileNotFoundError, ValueError) as e:
+        # ValueError: an ambiguous substring match (multiple runs) - see
+        # store.load_run.
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    cmp = compare_runs(run_a, run_b, force=getattr(args, "force", False))
     print(format_table(cmp))
     print(f"  comparison saved: {save_comparison(cmp)}")
     return 0
@@ -126,7 +147,12 @@ def cmd_regression(args) -> int:
     regressed/improved cases. Exit code is 1 if any case regressed, so this
     is usable as a CI gate on a model/tool/prompt upgrade.
     """
-    cmp = compare_runs(load_run(args.run_a), load_run(args.run_b))
+    try:
+        run_a, run_b = load_run(args.run_a), load_run(args.run_b)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    cmp = compare_runs(run_a, run_b)
     summary = regression_summary(cmp)
     print(format_regression(summary))
     print(f"  comparison saved: {save_comparison(cmp)}")
@@ -158,12 +184,66 @@ def cmd_list(args) -> int:
     return 0
 
 
+class _ScopedDashboardHandler(http.server.SimpleHTTPRequestHandler):
+    """Serves ONLY dashboard/ (static assets) and results/ (JSON run data) -
+    never the repository root. C-04: the previous handler used
+    `directory=REPO_ROOT`, which exposed source, scenarios, .git, and every
+    other file in the repo to any local process/user that could reach the
+    port, not just the two directories the dashboard actually needs
+    (dashboard/index.html fetches "../results/index.json" and
+    "../results/<run>.json" - i.e. `/results/*` - relative to `/dashboard/`).
+    """
+
+    #: url prefix -> directory on disk it's allowed to serve from. Set by
+    #: cmd_serve right before the server starts, so a --results-dir override
+    #: (applied earlier in main()) is reflected - REPO_ROOT/"results" here
+    #: would be stale the moment store.set_results_dir() is called.
+    _ROOTS = {"dashboard": REPO_ROOT / "dashboard", "results": REPO_ROOT / "results"}
+
+    def translate_path(self, path: str) -> str:
+        # Strip query/fragment the same way the base implementation does.
+        path = path.split("?", 1)[0].split("#", 1)[0]
+        parts = [p for p in path.split("/") if p not in ("", ".")]
+        if not parts or parts[0] not in self._ROOTS:
+            return ""  # signal "not servable" - do_GET below turns this into a 404
+        base = self._ROOTS[parts[0]].resolve()
+        candidate = (base / "/".join(parts[1:])).resolve()
+        if candidate != base and base not in candidate.parents:
+            return ""  # containment check failed - traversal attempt
+        return str(candidate)
+
+    def do_GET(self) -> None:
+        if self.path in ("/", ""):
+            self.send_response(302)
+            self.send_header("Location", "/dashboard/")
+            self.end_headers()
+            return
+        if not self.translate_path(self.path):
+            self.send_error(404, "Not Found")
+            return
+        super().do_GET()
+
+    def list_directory(self, path):  # noqa: ANN001 - matches base signature
+        self.send_error(403, "Directory listing disabled")
+        return None
+
+    def end_headers(self) -> None:
+        # Belt-and-suspenders against embedding/sniffing from other origins;
+        # this is a local single-user server, but it's trivial to add.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        super().end_headers()
+
+
 def cmd_serve(args) -> int:
-    handler = functools.partial(
-        http.server.SimpleHTTPRequestHandler, directory=str(REPO_ROOT))
+    # Reflect any --results-dir/OPTARENA_RESULTS_DIR override (applied in
+    # main() before this runs) rather than the REPO_ROOT default baked in
+    # at class-definition time.
+    _ScopedDashboardHandler._ROOTS = {"dashboard": REPO_ROOT / "dashboard", "results": store.RESULTS_DIR}
     url = f"http://localhost:{args.port}/dashboard/"
     print(f"OptArena dashboard: {url}  (Ctrl+C to stop)")
-    with http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler) as httpd:
+    print(f"  serving only dashboard/ and {store.RESULTS_DIR} - not the repository root")
+    with http.server.ThreadingHTTPServer(("127.0.0.1", args.port), _ScopedDashboardHandler) as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
@@ -322,7 +402,11 @@ def cmd_verify_corpus(args) -> int:
     from .verify import verify_cases
 
     names = args.cases.split(",") if args.cases else None
-    cases = load_cases(names, cases_dir=args.cases_dir)
+    try:
+        cases = load_cases(names, cases_dir=args.cases_dir)
+    except ValueError as e:   # SchemaError: a malformed/duplicate case file
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     cases = filter_cases(cases, language=getattr(args, "language", None),
                          framework=getattr(args, "framework", None))
     violations, checked, skipped = verify_cases(cases)
@@ -381,6 +465,9 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="optarena", description="OptArena - test & compare AI coding tools")
+    parser.add_argument("--results-dir",
+                        help="where runs/comparisons are stored (default: <repo>/results, "
+                             "or OPTARENA_RESULTS_DIR); applies to run/compare/regression/list/serve")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_run = sub.add_parser("run", help="run one or more scenarios")
@@ -402,11 +489,20 @@ def main(argv: list[str] | None = None) -> int:
                        help="worker threads for parallel-safe drivers (default 1)")
     p_run.add_argument("--matrix-drivers", help="comma-separated drivers to cross with --matrix-models")
     p_run.add_argument("--matrix-models", help="comma-separated models to cross with --matrix-drivers")
+    p_run.add_argument("--allow-empty", action="store_true",
+                        help="permit a run whose --cases/--language/--framework filters resolve to "
+                             "zero cases (otherwise refused, to avoid a silent false all-passed result)")
+    p_run.add_argument("--keep-workspace", action="store_true",
+                        help="do not delete the temp workspace after the run (for debugging); "
+                             "by default it is removed once results are saved")
     p_run.set_defaults(fn=cmd_run)
 
     p_cmp = sub.add_parser("compare", help="compare two saved runs")
     p_cmp.add_argument("run_a")
     p_cmp.add_argument("run_b")
+    p_cmp.add_argument("--force", action="store_true",
+                       help="produce an overall winner even when the two runs are not "
+                            "directly comparable (different case set / oracle / trial count)")
     p_cmp.set_defaults(fn=cmd_compare)
 
     p_reg = sub.add_parser("regression", help="did the upgrade help or hurt? named regressed/improved cases")
@@ -451,6 +547,8 @@ def main(argv: list[str] | None = None) -> int:
     p_docker.set_defaults(fn=cmd_docker)
 
     args = parser.parse_args(argv)
+    if getattr(args, "results_dir", None):
+        store.set_results_dir(args.results_dir)
     return args.fn(args)
 
 

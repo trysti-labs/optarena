@@ -30,6 +30,7 @@ violation, so it works as a CI gate on case edits.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -86,6 +87,9 @@ def verify_cases(cases: list[dict], root: Path | None = None) -> tuple[list[str]
     skipped = sum(1 for _c, v in todo if not v)
     todo = [(c, v) for c, v in todo if v]
 
+    # H-11: only a mkdtemp workspace WE created here is ours to clean up in
+    # the finally below; a caller-supplied root is the caller's to manage.
+    owns_workspace = root is None
     root = root or Path(tempfile.mkdtemp(prefix="optarena_verify_"))
     root.mkdir(parents=True, exist_ok=True)
 
@@ -121,4 +125,9 @@ def verify_cases(cases: list[dict], root: Path | None = None) -> tuple[list[str]
     finally:
         for sandbox in sandboxes:
             sandbox.stop()
+        # H-11: the per-variant workspaces under our mkdtemp root are never
+        # read again once verification reports - remove them so a full
+        # verify-corpus run doesn't leak hundreds of MB of scratch per call.
+        if owns_workspace:
+            shutil.rmtree(root, ignore_errors=True)
     return violations, checked, skipped

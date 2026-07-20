@@ -17,18 +17,22 @@ from unittest import mock
 from optarena.cases import (
     DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, REPOS_DIR, check_expected,
     classify_failure, diff_stats, dockerfile_for, evaluate_case, filter_cases, load_cases,
-    prepare_workspace, run_check_command,
+    prepare_workspace, run_capture, run_check_command,
 )
-from optarena.compare import compare_runs, format_regression, regression_summary
+from optarena.compare import (
+    _cheaper, compare_runs, format_regression, format_table,
+    manifest_compatibility, regression_summary,
+)
 from optarena.drivers import DRIVERS, get_driver
-from optarena.drivers.base import CaseResult
-from optarena.drivers.aider_cli import parse_aider_metrics
-from optarena.drivers.cli_agents import parse_claude_json_metrics
+from optarena.drivers.base import CaseResult, subprocess_env
+from optarena.drivers.aider_cli import AiderDriver, parse_aider_metrics
+from optarena.drivers.cli_agents import CLIAgentDriver, parse_claude_json_metrics
 from optarena.drivers.openai_chat import concrete_target
 from optarena.metrics import aggregate, case_deltas
 from optarena.pricing import estimate_cost, is_local_backend, price_for
-from optarena.runner import _merge_trials, safe_run_name
+from optarena.runner import _merge_trials, run_scenario, safe_run_name
 from optarena.scenario import Backend, Scenario
+from optarena.schema import SchemaError, validate_case, validate_scenario, validate_unique_case_names
 from optarena.verify import variants_for, verify_cases
 
 
@@ -117,6 +121,24 @@ class PrepareWorkspaceTests(unittest.TestCase):
         status = _sp.run(["git", "status", "--porcelain"], cwd=self.ws,
                          capture_output=True, text=True)
         self.assertEqual(status.stdout, "", "git_init must leave a clean tree (all committed)")
+
+    def test_setup_files_traversal_rejected(self):
+        # H-01: a malicious/broken case JSON key must not be able to escape
+        # the sandboxed workspace via "../" and write onto the host.
+        outside_marker = self.ws.parent / "optarena_test_traversal_canary.txt"
+        self.addCleanup(lambda: outside_marker.unlink(missing_ok=True))
+        with self.assertRaises(ValueError):
+            prepare_workspace(self.ws, {"setup_files": {
+                f"../{outside_marker.name}": "pwned\n"}})
+        self.assertFalse(outside_marker.exists())
+
+    def test_setup_files_absolute_path_rejected(self):
+        outside_marker = self.ws.parent / "optarena_test_abs_canary.txt"
+        self.addCleanup(lambda: outside_marker.unlink(missing_ok=True))
+        with self.assertRaises(ValueError):
+            prepare_workspace(self.ws, {"setup_files": {
+                str(outside_marker): "pwned\n"}})
+        self.assertFalse(outside_marker.exists())
 
 
 class TestSetupFilesTests(unittest.TestCase):
@@ -224,11 +246,13 @@ class DockerCheckCommandTests(unittest.TestCase):
     def test_no_docker_env_forces_local_execution(self):
         calls = []
 
-        def fake_run(args, **kwargs):
-            calls.append(args)
+        def fake_capture(cmd, **kwargs):
+            calls.append(cmd)
             return mock.Mock(returncode=0, stdout="", stderr="")
 
-        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
+        # Host exec now goes through run_capture (process-group aware), not
+        # subprocess.run directly - see H-11 / _run_check_command_local.
+        with mock.patch.object(self.cases_mod, "run_capture", side_effect=fake_capture), \
              mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"}):
             failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
 
@@ -237,6 +261,59 @@ class DockerCheckCommandTests(unittest.TestCase):
 
         # shell=True local call (a bare string, not a "docker" argv list)
         self.assertEqual(calls, ["echo hi"])
+
+    def test_refuses_host_execution_when_docker_unavailable_and_not_allowed(self):
+        # C-02: Docker merely being unavailable (no explicit opt-out) must not
+        # silently fall back to running an untrusted check_command on the host.
+        def fake_run(args, **kwargs):
+            if args[:2] == ["docker", "info"]:
+                raise FileNotFoundError("no docker")
+            raise AssertionError(f"unexpected subprocess call: {args}")
+
+        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
+             mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            os.environ.pop("OPTARENA_ALLOW_UNSAFE_HOST_EXEC", None)
+            failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
+
+        self.assertTrue(failures)
+        self.assertIn("refused", failures[0])
+        self.assertEqual(oracle["sandbox"], "refused")
+        self.assertFalse(oracle.get("ran"))
+
+    def test_allow_unsafe_host_exec_permits_host_fallback(self):
+        def fake_run(args, **kwargs):
+            if args[:2] == ["docker", "info"]:
+                raise FileNotFoundError("no docker")
+            raise AssertionError(f"unexpected subprocess call: {args}")
+
+        def fake_capture(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
+             mock.patch.object(self.cases_mod, "run_capture", side_effect=fake_capture), \
+             mock.patch.dict(os.environ, {"OPTARENA_ALLOW_UNSAFE_HOST_EXEC": "1"}, clear=False):
+            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(oracle["sandbox"], "host")
+        self.assertTrue(oracle["ran"])
+
+    def test_no_docker_env_still_sufficient_on_its_own(self):
+        # OPTARENA_NO_DOCKER=1 alone (the pre-existing, already-explicit
+        # opt-out) must keep working unchanged - it must not also require
+        # OPTARENA_ALLOW_UNSAFE_HOST_EXEC.
+        def fake_capture(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(self.cases_mod, "run_capture", side_effect=fake_capture), \
+             mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"}, clear=False):
+            os.environ.pop("OPTARENA_ALLOW_UNSAFE_HOST_EXEC", None)
+            failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(oracle["sandbox"], "host")
 
 
 class SharedSandboxTests(unittest.TestCase):
@@ -335,6 +412,171 @@ class SharedSandboxTests(unittest.TestCase):
         self.assertIn("container", oracle)  # ephemeral path also records its (unique) container name
 
 
+class RunScenarioEmptyCasesTests(unittest.TestCase):
+    """
+    H-06: a resolved case set of zero (typo'd --cases name already raises
+    elsewhere via load_cases; the real gap is a --language/--framework filter
+    that matches nothing) must not silently produce a "0/0 passed" run whose
+    `failed` count is also 0 - indistinguishable from a real all-green run to
+    anything checking just the exit code.
+    """
+
+    def setUp(self):
+        self.empty_dir = Path(tempfile.mkdtemp(prefix="optarena_test_nocases_"))
+
+    def test_empty_case_set_refused_by_default(self):
+        sc = Scenario(name="x", driver="aider", cases=[], cases_dir=str(self.empty_dir))
+        with mock.patch("optarena.runner.get_driver") as get_driver_mock:
+            with self.assertRaises(ValueError) as ctx:
+                run_scenario(sc)
+            get_driver_mock.assert_not_called()
+        self.assertIn("0 cases", str(ctx.exception))
+
+    def test_empty_case_set_allowed_with_flag(self):
+        sc = Scenario(name="x", driver="aider", cases=[], cases_dir=str(self.empty_dir))
+        fake_driver = mock.Mock(parallel_safe=False, caches_results=False)
+        with mock.patch("optarena.runner.get_driver", return_value=fake_driver):
+            rec = run_scenario(sc, allow_empty=True)
+        fake_driver.prepare.assert_called_once()
+        fake_driver.teardown.assert_called_once()
+        self.assertEqual(rec.summary["cases"], 0)
+        self.assertEqual(rec.summary["failed"], 0)
+
+
+class ParallelSandboxSharingTests(unittest.TestCase):
+    """
+    H-02: a shared DockerSandbox container is only safe for serial execution.
+    Concurrent `docker exec` calls into ONE container under --parallel would
+    share a process table/network namespace, and one case's timeout-reap
+    (`kill -9 -1`) would kill every other in-flight case sharing it. Under
+    parallel>1, run_scenario must skip the shared sandbox entirely so
+    run_check_command's per-call ephemeral fallback isolates each case.
+    """
+
+    def setUp(self):
+        self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_parallel_"))
+        (self.cases_dir / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do it"], "check_command": "echo hi",
+        }), encoding="utf-8")
+
+    @staticmethod
+    def _fake_driver():
+        driver = mock.Mock(parallel_safe=True, caches_results=False)
+        driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
+        return driver
+
+    def test_no_sandbox_started_when_parallel(self):
+        sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
+        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
+             mock.patch("optarena.runner.DockerSandbox") as sandbox_cls:
+            run_scenario(sc, parallel=4)
+        sandbox_cls.assert_not_called()
+
+    def test_sandbox_still_started_when_serial(self):
+        sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
+        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
+             mock.patch("optarena.runner.DockerSandbox") as sandbox_cls:
+            run_scenario(sc, parallel=1)
+        sandbox_cls.assert_called_once()
+
+
+class RunCaptureTests(unittest.TestCase):
+    """H-11: run_capture must kill the whole process TREE on timeout, so a
+    timed-out check/agent can't leave orphaned children holding ports/CPU."""
+
+    def test_normal_command_returns_completed_process(self):
+        import subprocess as sp
+        import sys
+        proc = run_capture([sys.executable, "-c", "print('ok')"], timeout=30,
+                           text=True)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("ok", proc.stdout)
+
+    def test_timeout_raises_timeout_expired(self):
+        import subprocess as sp
+        import sys
+        with self.assertRaises(sp.TimeoutExpired):
+            run_capture([sys.executable, "-c", "import time; time.sleep(30)"],
+                        timeout=1)
+
+    def test_child_process_tree_killed_on_timeout(self):
+        import subprocess as sp
+        import sys
+        import time
+        tmp = Path(tempfile.mkdtemp(prefix="optarena_treekill_"))
+        sentinel = tmp / "child_ran.txt"
+        child = tmp / "child.py"
+        child.write_text(
+            "import time\n"
+            "time.sleep(3)\n"
+            f"open(r'{sentinel}', 'w').close()\n",
+            encoding="utf-8")
+        parent = tmp / "parent.py"
+        parent.write_text(
+            "import subprocess, sys, time\n"
+            f"subprocess.Popen([sys.executable, r'{child}'])\n"
+            "time.sleep(30)\n",
+            encoding="utf-8")
+        with self.assertRaises(sp.TimeoutExpired):
+            run_capture([sys.executable, str(parent)], timeout=1)
+        # Wait past the child's own 3s sleep: if the tree was killed the
+        # sentinel never appears; if only the parent was killed it does.
+        time.sleep(5)
+        self.assertFalse(sentinel.exists(),
+                         "child outlived the timed-out parent - process tree not killed")
+
+
+class WorkspaceCleanupTests(unittest.TestCase):
+    """H-11: the mkdtemp workspace a run/verify creates must be removed once
+    it's done (never read again), unless the user asks to keep it."""
+
+    def setUp(self):
+        self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_wscleanup_"))
+        (self.cases_dir / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do it"],
+        }), encoding="utf-8")
+
+    @staticmethod
+    def _fake_driver():
+        driver = mock.Mock(parallel_safe=False, caches_results=False)
+        driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
+        return driver
+
+    def test_run_scenario_removes_its_workspace(self):
+        made = Path(tempfile.mkdtemp(prefix="optarena_test_madews_"))
+        sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
+        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
+             mock.patch("optarena.runner.tempfile.mkdtemp", return_value=str(made)):
+            run_scenario(sc)
+        self.assertFalse(made.exists(), "run workspace was not cleaned up")
+
+    def test_run_scenario_keeps_workspace_when_requested(self):
+        made = Path(tempfile.mkdtemp(prefix="optarena_test_keptws_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(made, ignore_errors=True))
+        sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
+        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
+             mock.patch("optarena.runner.tempfile.mkdtemp", return_value=str(made)):
+            run_scenario(sc, keep_workspace=True)
+        self.assertTrue(made.exists(), "workspace should have been kept for debugging")
+
+    def test_run_scenario_does_not_delete_caller_supplied_workspace(self):
+        supplied = Path(tempfile.mkdtemp(prefix="optarena_test_suppliedws_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(supplied, ignore_errors=True))
+        sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
+        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()):
+            run_scenario(sc, workspace_root=supplied)
+        self.assertTrue(supplied.exists(),
+                        "a caller-supplied workspace must not be deleted by run_scenario")
+
+    def test_verify_cases_removes_its_workspace(self):
+        made = Path(tempfile.mkdtemp(prefix="optarena_test_verifyws_"))
+        # A case with no variants is skipped, so no oracle/Docker work runs -
+        # this isolates the mkdtemp cleanup path.
+        with mock.patch("optarena.verify.tempfile.mkdtemp", return_value=str(made)):
+            verify_cases([{"name": "novariants", "prompts": ["x"]}])
+        self.assertFalse(made.exists(), "verify workspace was not cleaned up")
+
+
 class TrialMergeTests(unittest.TestCase):
     @staticmethod
     def _result(passed, duration=1.0, error=None):
@@ -359,6 +601,34 @@ class TrialMergeTests(unittest.TestCase):
         self.assertFalse(merged.passed)
         self.assertEqual(merged.failures, ["nope"])
 
+    def test_cost_and_tokens_summed_not_last_trial_only(self):
+        # H-05: 3 trials costing $0.01 each must report $0.03 total, not $0.01
+        # (the bug: only the last trial's `extra` survived merging).
+        r1, r2, r3 = self._result(True), self._result(True), self._result(True)
+        r1.extra = {"cost_usd": 0.01, "prompt_tokens": 100, "completion_tokens": 50}
+        r2.extra = {"cost_usd": 0.01, "prompt_tokens": 100, "completion_tokens": 50}
+        r3.extra = {"cost_usd": 0.01, "prompt_tokens": 100, "completion_tokens": 50}
+        merged = _merge_trials("c", [r1, r2, r3])
+        self.assertAlmostEqual(merged.extra["cost_usd"], 0.03)
+        self.assertEqual(merged.extra["prompt_tokens"], 300)
+        self.assertEqual(merged.extra["completion_tokens"], 150)
+
+    def test_stderr_concatenated_across_trials(self):
+        r1, r2 = self._result(False), self._result(True)
+        r1.extra = {"stderr": "first failure"}
+        r2.extra = {"stderr": "second output"}
+        merged = _merge_trials("c", [r1, r2])
+        self.assertEqual(merged.extra["stderr"], "first failuresecond output")
+
+    def test_oracle_not_summed_only_surfaced_via_all_trials(self):
+        r1, r2 = self._result(True), self._result(True)
+        r1.extra = {"oracle": {"exit_code": 0}}
+        r2.extra = {"oracle": {"exit_code": 1}}
+        merged = _merge_trials("c", [r1, r2])
+        self.assertNotIn("oracle", merged.extra)
+        self.assertEqual(merged.extra["oracle_all_trials"],
+                         [{"exit_code": 0}, {"exit_code": 1}])
+
     def test_error_only_when_all_trials_error(self):
         merged = _merge_trials("c", [self._result(False, error="boom"),
                                      self._result(True)])
@@ -366,6 +636,81 @@ class TrialMergeTests(unittest.TestCase):
         merged = _merge_trials("c", [self._result(False, error="boom"),
                                      self._result(False, error="boom")])
         self.assertEqual(merged.error, "boom")
+
+    def test_execution_ok_true_only_when_all_trials_executed_cleanly(self):
+        # Phase 2.7: merged execution_ok answers "did every trial run
+        # cleanly" - one trial's tool reporting failure must show up even
+        # if the majority vote still passed on artifact content.
+        clean1, clean2 = self._result(True), self._result(True)
+        merged = _merge_trials("c", [clean1, clean2])
+        self.assertTrue(merged.execution_ok)
+
+        clean, dirty = self._result(True), self._result(True)
+        dirty.execution_ok = False
+        merged = _merge_trials("c", [clean, dirty])
+        self.assertFalse(merged.execution_ok)
+
+
+class ExecutionOkTests(unittest.TestCase):
+    """
+    Phase 2.7: a CLI tool that exits non-zero must not silently produce an
+    unqualified PASS just because the workspace happens to satisfy the
+    oracle (an earlier prompt succeeded, or the model got lucky). Previously
+    only `extra["stderr"]` recorded the non-zero exit; `passed` depended
+    solely on the oracle.
+    """
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_execok_"))
+
+    @staticmethod
+    def _case():
+        return {"name": "c", "prompts": ["do it"],
+                "expected_files": [{"path_pattern": "add.py"}]}
+
+    def _write_artifact(self, *_a, **_kw):
+        # Simulate the tool writing a passing file DURING its invocation
+        # (e.g. an earlier prompt succeeded) before reporting failure via
+        # its own exit code - exactly the "lucky partial artifact" scenario.
+        (self.ws / "add.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        return mock.Mock(returncode=1, stdout="", stderr="boom: rate limited")
+
+    def test_cli_agent_nonzero_exit_blocks_pass_despite_passing_artifact(self):
+        driver = CLIAgentDriver("codex")
+        driver._binary = "fake-codex"
+        sc = Scenario(name="x", driver="codex", backend=Backend())
+        with mock.patch("optarena.drivers.cli_agents.run_capture", side_effect=self._write_artifact):
+            result = driver.run_case(self._case(), sc, self.ws)
+        # The file WAS written (satisfies expected_files) - only the tool's
+        # own exit code is the reason this must not be a PASS.
+        self.assertEqual(result.failures, [])
+        self.assertFalse(result.execution_ok)
+        self.assertFalse(result.passed)
+        self.assertIn("boom", result.extra.get("stderr", ""))
+
+    def test_cli_agent_zero_exit_with_passing_artifact_passes(self):
+        driver = CLIAgentDriver("codex")
+        driver._binary = "fake-codex"
+        sc = Scenario(name="x", driver="codex", backend=Backend())
+
+        def write_and_succeed(*_a, **_kw):
+            (self.ws / "add.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("optarena.drivers.cli_agents.run_capture", side_effect=write_and_succeed):
+            result = driver.run_case(self._case(), sc, self.ws)
+        self.assertTrue(result.execution_ok)
+        self.assertTrue(result.passed)
+
+    def test_aider_nonzero_exit_blocks_pass_despite_passing_artifact(self):
+        driver = AiderDriver()
+        driver._aider = "fake-aider"
+        sc = Scenario(name="x", driver="aider", backend=Backend())
+        with mock.patch("optarena.drivers.aider_cli.run_capture", side_effect=self._write_artifact):
+            result = driver.run_case(self._case(), sc, self.ws)
+        self.assertEqual(result.failures, [])
+        self.assertFalse(result.execution_ok)
+        self.assertFalse(result.passed)
 
 
 class StabilityMetricsTests(unittest.TestCase):
@@ -569,15 +914,105 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(DRIVERS["aider"]["backend"], "scenario")
 
 
+class SubprocessEnvTests(unittest.TestCase):
+    """C-03: CLI-agent subprocesses get an explicit allowlist, not a filtered
+    copy of the whole host environment - a stray host secret must not reach
+    a subprocess whose entire job is running model-generated commands."""
+
+    def test_unrelated_host_secret_not_forwarded(self):
+        with mock.patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "super-secret",
+                                          "PATH": os.environ.get("PATH", "")}):
+            env = subprocess_env()
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY", env)
+
+    def test_allowlisted_vars_forwarded_when_present(self):
+        with mock.patch.dict(os.environ, {"PATH": "/usr/bin", "HOME": "/home/x"}):
+            env = subprocess_env()
+        self.assertEqual(env.get("PATH"), "/usr/bin")
+        self.assertEqual(env.get("HOME"), "/home/x")
+
+    def test_extra_env_always_included(self):
+        env = subprocess_env(extra={"OPENAI_API_KEY": "sk-test"})
+        self.assertEqual(env["OPENAI_API_KEY"], "sk-test")
+
+    def test_passthrough_only_forwarded_if_actually_set(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            env = subprocess_env(passthrough=("ANTHROPIC_API_KEY",))
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            env = subprocess_env(passthrough=("ANTHROPIC_API_KEY",))
+        self.assertEqual(env["ANTHROPIC_API_KEY"], "sk-ant-test")
+
+    def test_extra_wins_over_passthrough(self):
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "host-value"}):
+            env = subprocess_env(extra={"OPENAI_API_KEY": "scenario-value"},
+                                 passthrough=("OPENAI_API_KEY",))
+        self.assertEqual(env["OPENAI_API_KEY"], "scenario-value")
+
+
 class ScenarioTests(unittest.TestCase):
     def test_cases_dir_roundtrip(self):
         sc = Scenario(name="x", driver="aider", cases_dir="my/cases")
         again = Scenario.from_dict(sc.to_dict())
         self.assertEqual(again.cases_dir, "my/cases")
 
+    def test_relative_cases_dir_resolved_against_scenario_file_not_cwd(self):
+        # Phase 3.3: a relative cases_dir names a directory NEXT TO the
+        # scenario file - the same scenario must resolve to the same case
+        # set no matter what directory `optarena run` happens to be invoked
+        # from.
+        project = Path(tempfile.mkdtemp(prefix="optarena_test_relpath_"))
+        (project / "scenarios").mkdir()
+        (project / "scenarios" / "my-cases").mkdir()
+        (project / "scenarios" / "my-cases" / "c1.json").write_text(
+            json.dumps({"name": "c1", "prompts": ["x"]}), encoding="utf-8")
+        scenario_file = project / "scenarios" / "sc.json"
+        scenario_file.write_text(json.dumps({
+            "name": "x", "driver": "aider", "cases_dir": "my-cases",
+        }), encoding="utf-8")
+
+        elsewhere = Path(tempfile.mkdtemp(prefix="optarena_test_elsewhere_"))
+        cwd = os.getcwd()
+        try:
+            os.chdir(elsewhere)
+            sc = Scenario.from_file(scenario_file)
+        finally:
+            os.chdir(cwd)
+
+        self.assertTrue(Path(sc.cases_dir).is_absolute())
+        loaded = load_cases(cases_dir=sc.cases_dir)
+        self.assertEqual([c["name"] for c in loaded], ["c1"])
+
+    def test_absolute_cases_dir_unchanged(self):
+        abs_dir = Path(tempfile.mkdtemp(prefix="optarena_test_absdir_"))
+        scenario_file = abs_dir / "sc.json"
+        scenario_file.write_text(json.dumps({
+            "name": "x", "driver": "aider", "cases_dir": str(abs_dir),
+        }), encoding="utf-8")
+        sc = Scenario.from_file(scenario_file)
+        self.assertEqual(Path(sc.cases_dir).resolve(), abs_dir.resolve())
+
     def test_openai_base_never_doubles_v1(self):
         self.assertEqual(Backend(base_url="http://h:1/v1").openai_base, "http://h:1/v1")
         self.assertEqual(Backend(base_url="http://h:1").openai_base, "http://h:1/v1")
+
+    def test_to_dict_redact_strips_api_key(self):
+        # C-04: api_key must never land in anything persisted to disk
+        # (saved runs, comparisons). redact=False (the default) preserves
+        # round-tripping a scenario *file*, where the real key is exactly
+        # what's being configured, not evaluation output.
+        sc = Scenario(name="x", driver="aider",
+                      backend=Backend(api_key="sk-canary-secret"))
+        self.assertEqual(sc.to_dict()["backend"]["api_key"], "sk-canary-secret")
+        redacted = sc.to_dict(redact=True)
+        self.assertIsNone(redacted["backend"]["api_key"])
+        self.assertTrue(redacted["backend"]["api_key_set"])
+        self.assertNotIn("sk-canary-secret", json.dumps(redacted))
+
+    def test_to_dict_redact_default_key_not_flagged_set(self):
+        sc = Scenario(name="x", driver="aider")  # default Backend(api_key="optarena")
+        self.assertFalse(sc.to_dict(redact=True)["backend"]["api_key_set"])
 
     def test_load_cases_custom_dir(self):
         d = Path(tempfile.mkdtemp())
@@ -646,6 +1081,99 @@ class ScenarioTests(unittest.TestCase):
             [c["name"] for c in filter_cases(cases, language="python")],
             ["a", "b"],
         )
+
+
+class SchemaValidationTests(unittest.TestCase):
+    """Phase 2.5: malformed/fuzzed scenario or case files must fail fast,
+    with a clear file+key error, before any driver/backend call."""
+
+    def test_valid_case_passes(self):
+        validate_case({"name": "x", "prompts": ["do it"],
+                       "expected_files": [{"path_pattern": "a.py", "content_patterns": ["def"]}]})
+
+    def test_unknown_case_key_rejected(self):
+        with self.assertRaises(SchemaError) as ctx:
+            validate_case({"name": "x", "chekc_command": "echo hi"})
+        self.assertIn("chekc_command", str(ctx.exception))
+
+    def test_missing_name_rejected(self):
+        with self.assertRaises(SchemaError):
+            validate_case({"prompts": ["do it"]})
+
+    def test_check_command_timeout_bounds_enforced(self):
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "check_command_timeout": -1})
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "check_command_timeout": 999999})
+        validate_case({"name": "x", "check_command_timeout": 120})
+
+    def test_difficulty_range_enforced(self):
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "difficulty": 0})
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "difficulty": 6})
+        validate_case({"name": "x", "difficulty": 3})
+
+    def test_setup_files_must_be_string_map(self):
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "setup_files": ["not", "a", "map"]})
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "setup_files": {"a.py": 123}})
+
+    def test_expected_files_unknown_key_rejected(self):
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "expected_files": [{"path_pattren": "a.py"}]})
+
+    def test_broken_solutions_shape_enforced(self):
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "broken_solutions": [{"files": {}}]})  # missing name
+        validate_case({"name": "x", "broken_solutions": [{"name": "v1", "files": {"a.py": "x"}}]})
+
+    def test_valid_scenario_passes(self):
+        validate_scenario({"name": "x", "driver": "aider",
+                           "backend": {"kind": "ollama", "model": "llama3.2"}})
+
+    def test_unknown_scenario_key_rejected(self):
+        with self.assertRaises(SchemaError) as ctx:
+            validate_scenario({"name": "x", "driver": "aider", "modle": "typo"})
+        self.assertIn("modle", str(ctx.exception))
+
+    def test_invalid_backend_kind_rejected(self):
+        with self.assertRaises(SchemaError):
+            validate_scenario({"name": "x", "driver": "aider", "backend": {"kind": "anthropic"}})
+
+    def test_cases_empty_list_vs_none_both_valid(self):
+        validate_scenario({"name": "x", "driver": "aider", "cases": None})
+        validate_scenario({"name": "x", "driver": "aider", "cases": []})
+        with self.assertRaises(SchemaError):
+            validate_scenario({"name": "x", "driver": "aider", "cases": "not-a-list"})
+
+    def test_duplicate_case_names_rejected(self):
+        with self.assertRaises(SchemaError):
+            validate_unique_case_names([{"name": "a"}, {"name": "b"}, {"name": "a"}])
+        validate_unique_case_names([{"name": "a"}, {"name": "b"}])
+
+    def test_load_cases_rejects_malformed_case_file(self):
+        d = Path(tempfile.mkdtemp(prefix="optarena_test_badcase_"))
+        (d / "bad.json").write_text(json.dumps({"name": "x", "chekc_command": "echo hi"}),
+                                    encoding="utf-8")
+        with self.assertRaises(SchemaError):
+            load_cases(cases_dir=str(d))
+
+    def test_load_cases_rejects_duplicate_names_across_files(self):
+        d = Path(tempfile.mkdtemp(prefix="optarena_test_dupcase_"))
+        (d / "a1.json").write_text(json.dumps({"name": "dup", "prompts": ["x"]}), encoding="utf-8")
+        (d / "a2.json").write_text(json.dumps({"name": "dup", "prompts": ["y"]}), encoding="utf-8")
+        with self.assertRaises(SchemaError):
+            load_cases(cases_dir=str(d))
+
+    def test_scenario_from_file_rejects_malformed_scenario(self):
+        d = Path(tempfile.mkdtemp(prefix="optarena_test_badsc_"))
+        f = d / "bad.json"
+        f.write_text(json.dumps({"name": "x", "driver": "aider", "timeout": -5}), encoding="utf-8")
+        with self.assertRaises(SchemaError) as ctx:
+            Scenario.from_file(f)
+        self.assertIn(str(f), str(ctx.exception))
 
 
 class DockerImageRegistryTests(unittest.TestCase):
@@ -745,6 +1273,90 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(list(d.glob("*.tmp")))
 
 
+class RunIdCollisionTests(unittest.TestCase):
+    """Phase 3.4: run_id collisions must fail loudly, not silently overwrite
+    a saved run; an ambiguous substring lookup must not silently pick one."""
+
+    def setUp(self):
+        import optarena.store as store_mod
+        self.store = store_mod
+        results_dir = Path(tempfile.mkdtemp(prefix="optarena_test_results_"))
+        self._orig = (store_mod.RESULTS_DIR, store_mod.RUNS_DIR)
+        store_mod.RESULTS_DIR = results_dir
+        store_mod.RUNS_DIR = results_dir / "runs"
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        self.store.RESULTS_DIR, self.store.RUNS_DIR = self._orig
+
+    @staticmethod
+    def _record(run_id):
+        return mock.Mock(run_id=run_id, to_dict=lambda: {"run_id": run_id, "scenario": {"name": "x"}})
+
+    def test_save_run_refuses_to_overwrite_existing_run_id(self):
+        self.store.save_run(self._record("run-1"))
+        with self.assertRaises(FileExistsError):
+            self.store.save_run(self._record("run-1"))
+
+    def test_load_run_exact_match_wins_even_with_ambiguous_substrings(self):
+        self.store.save_run(self._record("20260101-000000_x_aaaaaaaa"))
+        self.store.save_run(self._record("20260101-000000_x_bbbbbbbb"))
+        rec = self.store.load_run("20260101-000000_x_aaaaaaaa")
+        self.assertEqual(rec["run_id"], "20260101-000000_x_aaaaaaaa")
+
+    def test_load_run_ambiguous_substring_raises_not_silently_picks_newest(self):
+        self.store.save_run(self._record("20260101-000000_x_aaaaaaaa"))
+        self.store.save_run(self._record("20260101-000001_x_bbbbbbbb"))
+        with self.assertRaises(ValueError) as ctx:
+            self.store.load_run("x")
+        self.assertIn("matches 2 runs", str(ctx.exception))
+
+    def test_load_run_unambiguous_substring_still_works(self):
+        self.store.save_run(self._record("20260101-000000_uniquename_aaaaaaaa"))
+        rec = self.store.load_run("uniquename")
+        self.assertEqual(rec["run_id"], "20260101-000000_uniquename_aaaaaaaa")
+
+
+class ConfigurableResultsDirTests(unittest.TestCase):
+    """Phase 3.4: results location must be overridable (--results-dir /
+    OPTARENA_RESULTS_DIR), and every consumer (store, compare) must see the
+    SAME overridden location - not a stale value captured at import time."""
+
+    def setUp(self):
+        import optarena.store as store_mod
+        self.store = store_mod
+        self._orig = (store_mod.RESULTS_DIR, store_mod.RUNS_DIR)
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        self.store.RESULTS_DIR, self.store.RUNS_DIR = self._orig
+
+    def test_set_results_dir_updates_runs_dir_too(self):
+        new_dir = Path(tempfile.mkdtemp(prefix="optarena_test_newresults_"))
+        self.store.set_results_dir(new_dir)
+        self.assertEqual(self.store.RESULTS_DIR, new_dir)
+        self.assertEqual(self.store.RUNS_DIR, new_dir / "runs")
+
+    def test_compare_module_sees_overridden_results_dir(self):
+        # compare.py must reference store.RESULTS_DIR live (via `from . import
+        # store`), not a `from .store import RESULTS_DIR` name binding that
+        # would freeze at whatever RESULTS_DIR was when compare.py was first
+        # imported.
+        from optarena import compare as compare_mod
+        new_dir = Path(tempfile.mkdtemp(prefix="optarena_test_cmpresults_"))
+        self.store.set_results_dir(new_dir)
+        cmp = {"a": {"label": "a"}, "b": {"label": "b"}}
+        path = compare_mod.save_comparison(cmp)
+        self.assertTrue(str(path).startswith(str(new_dir)))
+
+    def test_cli_results_dir_flag_overrides_default(self):
+        from optarena.cli import main
+        new_dir = Path(tempfile.mkdtemp(prefix="optarena_test_cliresults_"))
+        rc = main(["--results-dir", str(new_dir), "list", "runs"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.store.RESULTS_DIR, new_dir)
+
+
 class RichMetricsTests(unittest.TestCase):
     """diff_stats (files/lines changed) and classify_failure (syntax/compile/assertion/timeout bucketing)."""
 
@@ -833,6 +1445,18 @@ class PricingTests(unittest.TestCase):
     def test_unknown_model_is_free(self):
         self.assertEqual(estimate_cost("gemma3:1b", 5000, 5000), 0.0)
 
+    def test_local_hostname_substring_not_falsely_matched(self):
+        # H-07: a lookalike domain must not be treated as the real localhost
+        # just because it contains "localhost" as a substring.
+        self.assertFalse(is_local_backend("http://localhost.attacker.example"))
+        self.assertFalse(is_local_backend("http://evil.example/?x=localhost"))
+        self.assertFalse(is_local_backend("http://notlocalhost:11434"))
+
+    def test_local_hostname_exact_matches_still_recognized(self):
+        self.assertTrue(is_local_backend("http://localhost:11434"))
+        self.assertTrue(is_local_backend("http://127.0.0.1:11434/v1"))
+        self.assertTrue(is_local_backend("localhost:11434"))  # no scheme
+
 
 class CostAggregationTests(unittest.TestCase):
     def test_aggregate_sums_cost_and_files(self):
@@ -850,6 +1474,130 @@ class CostAggregationTests(unittest.TestCase):
     def test_free_run_reports_none_cost(self):
         cases = [{"name": "a", "passed": True, "duration_s": 1.0, "files": ["x"], "extra": {}}]
         self.assertIsNone(aggregate(cases)["total_cost_usd"])
+
+
+class CheaperVerdictTests(unittest.TestCase):
+    """H-07: a run with NO cost data must never be declared 'cheaper' than a
+    run with a real, known cost - None (unknown) is not the same as $0.00."""
+
+    def test_no_verdict_when_one_side_has_no_cost_data(self):
+        sa = {"total_cost_usd": None}
+        sb = {"total_cost_usd": 0.50}
+        self.assertIsNone(_cheaper("a", "b", sa, sb))
+        self.assertIsNone(_cheaper("a", "b", sb, sa))
+
+    def test_no_verdict_when_neither_side_has_cost_data(self):
+        self.assertIsNone(_cheaper("a", "b", {"total_cost_usd": None}, {"total_cost_usd": None}))
+        self.assertIsNone(_cheaper("a", "b", {}, {}))
+
+    def test_verdict_when_both_sides_have_known_cost(self):
+        self.assertEqual(_cheaper("a", "b", {"total_cost_usd": 0.10}, {"total_cost_usd": 0.20}), "a")
+        self.assertEqual(_cheaper("a", "b", {"total_cost_usd": 0.20}, {"total_cost_usd": 0.10}), "b")
+
+    def test_verdict_when_both_sides_are_genuinely_free(self):
+        self.assertEqual(_cheaper("a", "b", {"total_cost_usd": 0.0}, {"total_cost_usd": 0.0}), "a")
+
+
+class ManifestTests(unittest.TestCase):
+    """M-01: every run records an immutable case-set/oracle/trials identity."""
+
+    def _run_with_cases(self, name, cases_dir, extra_case=None):
+        made = Path(tempfile.mkdtemp(prefix="optarena_manifest_ws_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(made, ignore_errors=True))
+        sc = Scenario(name=name, driver="aider", cases_dir=str(cases_dir))
+        driver = mock.Mock(parallel_safe=False, caches_results=False)
+        driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
+        with mock.patch("optarena.runner.get_driver", return_value=driver), \
+             mock.patch("optarena.runner.tempfile.mkdtemp", return_value=str(made)):
+            return run_scenario(sc)
+
+    def setUp(self):
+        self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_manifest_cases_"))
+        (self.cases_dir / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do it"],
+        }), encoding="utf-8")
+
+    def test_manifest_recorded_on_run(self):
+        rec = self._run_with_cases("x", self.cases_dir)
+        man = rec.manifest
+        self.assertEqual(man["oracle_version"], __import__("optarena.runner", fromlist=["ORACLE_VERSION"]).ORACLE_VERSION)
+        self.assertEqual(man["case_names"], ["c1"])
+        self.assertEqual(man["case_count"], 1)
+        self.assertEqual(man["trials"], 1)
+        self.assertTrue(man["case_set_hash"])
+
+    def test_case_edit_changes_case_set_hash(self):
+        rec1 = self._run_with_cases("x", self.cases_dir)
+        # Editing the case's content must change the hash - a comparison
+        # across the edit is no longer like-for-like.
+        (self.cases_dir / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do it DIFFERENTLY"],
+        }), encoding="utf-8")
+        rec2 = self._run_with_cases("x", self.cases_dir)
+        self.assertNotEqual(rec1.manifest["case_set_hash"], rec2.manifest["case_set_hash"])
+
+
+class ComparisonValidityTests(unittest.TestCase):
+    """M-02: a comparison of two runs that measured different things must not
+    silently crown an overall winner."""
+
+    @staticmethod
+    def _man(case_set_hash="abc", oracle_version=1, trials=1):
+        return {"manifest_version": 1, "oracle_version": oracle_version,
+                "case_set_hash": case_set_hash, "case_count": 3, "trials": trials}
+
+    @staticmethod
+    def _run(label, man, pass_rate=1.0, mean=1.0):
+        return {
+            "run_id": label, "scenario": {"name": label},
+            "cases": [], "manifest": man,
+            "summary": {"pass_rate": pass_rate, "mean_duration_s": mean,
+                        "cases": 3, "passed": 3, "failed": 0},
+        }
+
+    def test_same_manifest_is_comparable(self):
+        c = manifest_compatibility(self._man(), self._man())
+        self.assertTrue(c["comparable"])
+        self.assertTrue(c["verified"])
+        self.assertEqual(c["reasons"], [])
+
+    def test_different_case_set_not_comparable(self):
+        c = manifest_compatibility(self._man("abc"), self._man("xyz"))
+        self.assertFalse(c["comparable"])
+        self.assertTrue(any("case set" in r for r in c["reasons"]))
+
+    def test_different_oracle_and_trials_flagged(self):
+        c = manifest_compatibility(self._man(oracle_version=1, trials=1),
+                                   self._man(oracle_version=2, trials=5))
+        self.assertFalse(c["comparable"])
+        self.assertTrue(any("oracle version" in r for r in c["reasons"]))
+        self.assertTrue(any("trial count" in r for r in c["reasons"]))
+
+    def test_missing_manifest_is_unverified_not_blocking(self):
+        c = manifest_compatibility(None, self._man())
+        self.assertTrue(c["comparable"])
+        self.assertFalse(c["verified"])
+
+    def test_verdict_suppressed_when_incompatible(self):
+        cmp = compare_runs(self._run("a", self._man("abc"), pass_rate=1.0),
+                           self._run("b", self._man("xyz"), pass_rate=0.5))
+        self.assertTrue(cmp["verdict"]["suppressed"])
+        self.assertIsNone(cmp["verdict"]["more_accurate"])
+        self.assertIsNone(cmp["verdict"]["faster"])
+        self.assertIn("not comparable", format_table(cmp).lower())
+
+    def test_force_overrides_suppression(self):
+        cmp = compare_runs(self._run("a", self._man("abc"), pass_rate=1.0),
+                           self._run("b", self._man("xyz"), pass_rate=0.5),
+                           force=True)
+        self.assertFalse(cmp["verdict"]["suppressed"])
+        self.assertEqual(cmp["verdict"]["more_accurate"], "a")
+
+    def test_compatible_runs_produce_a_winner(self):
+        cmp = compare_runs(self._run("a", self._man("abc"), pass_rate=1.0),
+                           self._run("b", self._man("abc"), pass_rate=0.5))
+        self.assertFalse(cmp["verdict"]["suppressed"])
+        self.assertEqual(cmp["verdict"]["more_accurate"], "a")
 
 
 class RegressionTests(unittest.TestCase):

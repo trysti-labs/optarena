@@ -29,6 +29,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .schema import validate_scenario
+
 
 @dataclass
 class Backend:
@@ -46,6 +48,17 @@ class Backend:
     def label(self) -> str:
         return f"{self.model}@{re.sub(r'^https?://', '', self.base_url)}"
 
+    def redacted_dict(self) -> dict:
+        """Serializable form with the secret stripped. Used anywhere a
+        Backend gets written to disk (saved runs, comparisons, logs) - never
+        for round-tripping a scenario *file*, where a real key is exactly
+        what the user is configuring. `api_key_set` records whether a
+        non-default key was supplied, without ever writing its value."""
+        d = vars(self).copy()
+        d["api_key_set"] = bool(self.api_key) and self.api_key != "optarena"
+        d["api_key"] = None
+        return d
+
 
 @dataclass
 class Scenario:
@@ -57,7 +70,13 @@ class Scenario:
     cases_dir: str | None = None             # None ⇒ the built-in catalogue
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Scenario":
+    def from_dict(cls, data: dict, source: str = "<scenario>") -> "Scenario":
+        # Structural validation before anything else touches this dict - a
+        # malformed/fuzzed scenario file (unknown key, wrong type, an
+        # out-of-range timeout) fails fast here with a clear file+key error,
+        # not as a confusing KeyError/TypeError after a driver/backend call
+        # may already have run.
+        validate_scenario(data, source=source)
         backend = Backend(**data.get("backend", {}))
         return cls(
             name=data["name"],
@@ -70,13 +89,28 @@ class Scenario:
 
     @classmethod
     def from_file(cls, path: str | Path) -> "Scenario":
-        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+        path = Path(path)
+        sc = cls.from_dict(json.loads(path.read_text(encoding="utf-8")), source=str(path))
+        # A relative `cases_dir` names a directory next to the scenario
+        # FILE, not the process's current working directory - otherwise the
+        # same scenario resolves to a different (or missing) case set
+        # depending on where `optarena run` happens to be invoked from.
+        # Absolute paths and the None/built-in-catalogue default pass through
+        # unchanged.
+        if sc.cases_dir and not Path(sc.cases_dir).is_absolute():
+            sc.cases_dir = str((path.resolve().parent / sc.cases_dir).resolve())
+        return sc
 
-    def to_dict(self) -> dict:
+    def to_dict(self, *, redact: bool = False) -> dict:
+        """`redact=True` for anything written to disk (RunRecord, comparisons,
+        logs) - strips `backend.api_key`. `redact=False` (default) is for
+        round-tripping a scenario definition itself (e.g. re-serializing a
+        loaded scenario file), where the real key is exactly what's being
+        configured, not a secret being persisted as evaluation output."""
         return {
             "name": self.name,
             "driver": self.driver,
-            "backend": vars(self.backend),
+            "backend": self.backend.redacted_dict() if redact else vars(self.backend),
             "cases": self.cases,
             "timeout": self.timeout,
             "cases_dir": self.cases_dir,

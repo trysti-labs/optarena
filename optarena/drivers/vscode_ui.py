@@ -61,6 +61,12 @@ class VSCodeUIDriver(Driver):
             "BACKEND_URL": backend.base_url,
             "API_KIND": backend.kind,             # ollama | openai
             "MODEL_ID": backend.model,
+            # H-08: forward the configured key so the extensions can auth
+            # against a real (non-local) OpenAI-compatible backend. Was never
+            # passed before, so the JS harness hardcoded "optarena" - fine for
+            # Ollama, but any keyed endpoint (OpenRouter, a hosted vLLM behind
+            # auth) silently got the wrong credential and 401'd.
+            "API_KEY": backend.api_key,
             "RESULTS_FILE": str(results_file),
             "CASES_DIR": str(scenario.cases_dir
                               or Path(__file__).resolve().parents[1] / "cases"),

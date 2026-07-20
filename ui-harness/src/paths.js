@@ -23,6 +23,10 @@ export const DESCRIPTOR = getExtension(EXT);
 export const API_MODE = (process.env.API_KIND || process.env.CLINE_API || 'ollama').toLowerCase();
 export const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:11434';
 export const MODEL_ID = process.env.MODEL_ID || 'llama3.2';
+// H-08: forwarded from the Python driver (scenario.backend.api_key). Default
+// 'optarena' keeps Ollama (which ignores the key) working unchanged; a keyed
+// OpenAI-compatible backend now gets its real credential instead of a stub.
+export const API_KEY = process.env.API_KEY || 'optarena';
 
 /** Optional: OptArena writes one JSON line per case here (see test/agent.e2e.js). */
 export const RESULTS_FILE = process.env.RESULTS_FILE || '';

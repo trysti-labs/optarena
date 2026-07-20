@@ -37,7 +37,7 @@
   "test_setup_files": {
     "check_report.py": "import sqlite3\nfrom pathlib import Path\n\nsql = Path(\"report.sql\").read_text(encoding=\"utf-8\")\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(\"\"\"\nCREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT NOT NULL);\nINSERT INTO orders (id, status) VALUES\n  (1, 'shipped'),\n  (2, 'new'),\n  (3, 'paid'),\n  (4, 'refunded'),   -- not in the mapping -> Unknown / 100\n  (5, 'cancelled');\n\"\"\")\n\ncur = con.execute(sql)\ncols = [d[0] for d in cur.description]\nrows = cur.fetchall()\n\nassert cols == [\"id\", \"status\", \"status_label\", \"status_rank\"], f\"columns changed: {cols}\"\n\nexpected = [\n    (2, \"new\", \"New\", 1),\n    (3, \"paid\", \"Paid\", 2),\n    (1, \"shipped\", \"Shipped\", 3),\n    (5, \"cancelled\", \"Cancelled\", 99),\n    (4, \"refunded\", \"Unknown\", 100),\n]\nassert rows == expected, (\n    f\"result drifted.\\nexpected: {expected}\\ngot:      {rows}\\n\"\n    f\"(an order with an unmapped status must still appear as Unknown/100)\")\n\nprint(\"PASS report.sql behavior checks\")\n"
   },
-  "check_command": "python check_report.py",
+  "check_command": "python3 check_report.py",
   "reference_solution": {
     "report.sql": "-- Order report: status metadata lives in one CTE, joined once.\nWITH status_meta(status, label, rank) AS (\n  VALUES\n    ('new', 'New', 1),\n    ('paid', 'Paid', 2),\n    ('shipped', 'Shipped', 3),\n    ('cancelled', 'Cancelled', 99)\n)\nSELECT\n  o.id,\n  o.status,\n  COALESCE(m.label, 'Unknown') AS status_label,\n  COALESCE(m.rank, 100) AS status_rank\nFROM orders o\nLEFT JOIN status_meta m ON m.status = o.status\nORDER BY status_rank, o.id;\n"
   },

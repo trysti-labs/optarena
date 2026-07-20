@@ -32,7 +32,7 @@
   "test_setup_files": {
     "test_loglines.py": "import time\n\nfrom loglines import latest_first\n\n\ndef test_orders_newest_first_and_normalizes():\n    got = latest_first([\"  first ok \", \"second\\n\", \" third \"])\n    assert got == [\"THIRD\", \"SECOND\", \"FIRST OK\"]\n\n\ndef test_empty():\n    assert latest_first([]) == []\n\n\ndef test_single():\n    assert latest_first([\" only \"]) == [\"ONLY\"]\n\n\ndef test_performance_large_input():\n    n = 250000\n    lines = [f\"  event {i} ok  \" for i in range(n)]\n    expected_first = f\"EVENT {n - 1} OK\"\n    expected_last = \"EVENT 0 OK\"\n\n    start = time.perf_counter()\n    got = latest_first(lines)\n    elapsed = time.perf_counter() - start\n\n    assert len(got) == n\n    assert got[0] == expected_first\n    assert got[-1] == expected_last\n    # calibrated: insert(0, ...) per line is ~6s on fast native hardware and\n    # slower still in the sandbox; the linear version is ~0.02s\n    assert elapsed < 2.0, (\n        f\"latest_first took {elapsed:.2f}s for {n} lines; expected a linear \"\n        f\"build (append/comprehension then reverse), not list.insert(0, ...) \"\n        f\"per element, which shifts the whole list every time\"\n    )\n"
   },
-  "check_command": "python -m pytest -q test_loglines.py",
+  "check_command": "python3 -m pytest -q test_loglines.py",
   "reference_solution": {
     "loglines.py": "def latest_first(lines):\n    \"\"\"Normalize raw log lines and return them newest-first.\n\n    Lines arrive oldest-first; each is stripped and upper-cased, and the\n    result lists them in reverse (most recent line first).\n    \"\"\"\n    result = [line.strip().upper() for line in lines]\n    result.reverse()\n    return result\n"
   },
