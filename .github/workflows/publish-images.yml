@@ -51,15 +51,23 @@ jobs:
             image: optarena-tester-ruby
             context: docker/ruby
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push
         run: |
-          TAG=ghcr.io/trysti-labs/optarena/${{ matrix.image }}:latest
-          docker build -t "$TAG" -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }}
-          docker push "$TAG"
+          BASE=ghcr.io/trysti-labs/optarena/${{ matrix.image }}
+          # :latest stays the default the tool's own pull fallback uses
+          # (unchanged behaviour) - the immutable :<git-sha> tag alongside it
+          # is what a CI run or a user's own scenario/CI config can pin to,
+          # so "which exact image did this result come from" is always
+          # answerable instead of resolving to whatever :latest happens to
+          # be at pull time (Phase 2.3 - content-addressed images).
+          docker build -t "$BASE:latest" -t "$BASE:${{ github.sha }}" \
+            -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }}
+          docker push "$BASE:latest"
+          docker push "$BASE:${{ github.sha }}"

@@ -23,15 +23,14 @@ invocation shapes track each tool's documented headless mode.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import time
 from pathlib import Path
 
-from ..cases import changed_files, evaluate_case, prepare_workspace, snapshot
+from ..cases import changed_files, evaluate_case, prepare_workspace, run_capture, snapshot
 from ..scenario import Scenario
-from .base import CaseResult, Driver
+from .base import CaseResult, Driver, subprocess_env
 
 
 def parse_claude_json_metrics(stdout: str) -> dict:
@@ -95,6 +94,11 @@ CLI_AGENTS: dict[str, dict] = {
         # Nested runs from inside an editor terminal must not inherit the
         # parent session's context.
         "scrub_env_prefixes": ("CLAUDE",),
+        # "fixed" backend: Claude Code auths against the user's own Anthropic
+        # account, either via `claude login` (config file, already reachable
+        # through HOME/USERPROFILE) or ANTHROPIC_API_KEY - forward it if set,
+        # since the allowlist otherwise wouldn't hand it through anymore.
+        "auth_env": ("ANTHROPIC_API_KEY",),
         "parse_metrics": parse_claude_json_metrics,
     },
     "codex": {
@@ -174,26 +178,43 @@ class CLIAgentDriver(Driver):
         prepare_workspace(workspace, case)
         before = snapshot(workspace)
 
-        env = {k: v for k, v in os.environ.items()
-               if k != "ELECTRON_RUN_AS_NODE"
-               and not k.startswith("VSCODE_")
-               and not any(k.startswith(p) for p in self.spec["scrub_env_prefixes"])}
-        env.update(self.spec["env"](scenario.backend))
+        # C-03: an explicit allowlist, not a filtered copy of the whole host
+        # environment - this subprocess's entire job is to execute
+        # model-generated commands, so it must not inherit unrelated host
+        # secrets (CI tokens, other cloud credentials) just because they
+        # happened to be set in the parent shell. scrub_env_prefixes still
+        # applies on top, for the nested-editor-session case.
+        env = subprocess_env(self.spec["env"](scenario.backend),
+                             passthrough=self.spec.get("auth_env", ()))
+        env = {k: v for k, v in env.items()
+               if not any(k.startswith(p) for p in self.spec["scrub_env_prefixes"])}
 
         t0 = time.monotonic()
         try:
             for prompt in case.get("prompts", []):
-                proc = subprocess.run(
+                # run_capture (not subprocess.run): on timeout it kills the
+                # agent's whole process tree, not just the agent binary, so
+                # anything it spawned (a language server, a shelled-out tool)
+                # can't outlive the case (H-11).
+                proc = run_capture(
                     [self._binary, *self.spec["argv"](prompt, scenario.backend)],
-                    cwd=workspace, env=env,
-                    capture_output=True, text=True, timeout=timeout,
-                    encoding="utf-8", errors="replace",
+                    cwd=workspace, env=env, timeout=timeout,
+                    text=True, encoding="utf-8", errors="replace",
                 )
                 parse = self.spec.get("parse_metrics")
                 if parse:
                     for key, val in parse(proc.stdout).items():
                         result.extra[key] = result.extra.get(key, 0) + val
                 if proc.returncode != 0:
+                    # execution_ok=False (H-XX / Phase 2.7): the tool itself
+                    # reported failure. Previously this only went into
+                    # `extra["stderr"]` for a human to notice - `passed` below
+                    # depended solely on whatever the oracle found, so a
+                    # non-zero exit on (say) the final prompt couldn't stop an
+                    # already-passing artifact from an earlier prompt (or a
+                    # lucky partial write) from being graded an unqualified
+                    # PASS.
+                    result.execution_ok = False
                     result.extra.setdefault("stderr", "")
                     result.extra["stderr"] += (proc.stderr or "")[-800:]
         except subprocess.TimeoutExpired:
@@ -204,5 +225,5 @@ class CLIAgentDriver(Driver):
 
         result.files = changed_files(before, workspace)
         result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
-        result.passed = result.error is None and not result.failures
+        result.passed = result.execution_ok and result.error is None and not result.failures
         return result

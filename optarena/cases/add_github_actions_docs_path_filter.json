@@ -32,7 +32,7 @@
   "test_setup_files": {
     "check_path_filter.py": "import yaml\n\nwith open(\".github/workflows/ci.yml\") as f:\n    wf = yaml.safe_load(f)\n\ntriggers = wf.get(\"on\") or wf.get(True)\nfor event in (\"push\", \"pull_request\"):\n    cfg = triggers.get(event)\n    assert isinstance(cfg, dict), f\"{event} trigger must stay configured (branches for push)\"\n    ignore = cfg.get(\"paths-ignore\") or []\n    assert any(\"md\" in p for p in ignore), f\"{event}: no **.md entry in paths-ignore\"\n    assert any(\"docs\" in p for p in ignore), f\"{event}: no docs/** entry in paths-ignore\"\n\nassert triggers[\"push\"].get(\"branches\") == [\"main\"], \"push.branches changed\"\n\njob = wf[\"jobs\"][\"test\"]\nruns = [s.get(\"run\", \"\") for s in job[\"steps\"]]\nassert any(\"npm ci\" in r for r in runs), \"npm ci step lost\"\nassert any(\"npm test\" in r for r in runs), \"npm test step lost\"\n\nprint(\"PASS path-filter checks\")\n"
   },
-  "check_command": "python check_path_filter.py",
+  "check_command": "python3 check_path_filter.py",
   "reference_solution": {
     ".github/workflows/ci.yml": "name: ci\n\non:\n  push:\n    branches: [main]\n    paths-ignore:\n      - \"**.md\"\n      - \"docs/**\"\n  pull_request:\n    paths-ignore:\n      - \"**.md\"\n      - \"docs/**\"\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm ci\n      - run: npm test\n"
   },

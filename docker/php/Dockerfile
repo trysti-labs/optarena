@@ -6,7 +6,11 @@
 # Composer is present for cases that ship a composer.json with PSR-4
 # autoloading (its packages must already be vendored - nothing installs at
 # test time).
-FROM php:8.3-cli
+# Base pinned by multi-arch manifest-list digest (H-03: a floating tag can be
+# silently replaced upstream, changing oracle behavior between identical
+# OptArena commits). The tag stays for readability; the digest is what's
+# actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
+FROM php:8.3-cli@sha256:2a3f699b6cb31e5638c5432e4d37d4047853ba6351a692c91e0a073af00a55cc
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \

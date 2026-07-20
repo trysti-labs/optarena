@@ -13,7 +13,6 @@ stack on top of the backend.
 
 from __future__ import annotations
 
-import os
 import re
 import time
 from pathlib import Path
@@ -46,7 +45,11 @@ class CrewAIDriver(Driver):
         expected = case.get("expected_files", [])
         target = concrete_target(expected[0]["path_pattern"] if expected else None)
 
-        os.environ.setdefault("OPENAI_API_KEY", backend.api_key)
+        # The key is passed explicitly to LLM() below - do NOT also write it
+        # into os.environ: that leaked the scenario's key into this process's
+        # environment for every later driver/subprocess of the run, and
+        # conversely a pre-existing host OPENAI_API_KEY silently shadowed the
+        # scenario's key for any crewAI internals reading the env.
         llm = LLM(
             model=f"openai/{backend.model}",
             base_url=backend.openai_base,

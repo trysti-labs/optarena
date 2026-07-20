@@ -7,7 +7,11 @@
 # ONLY source, so `dotnet restore`/`test` on a case's own project (pinned to
 # the same package versions) succeeds fully offline at check_command time
 # (--network none).
-FROM mcr.microsoft.com/dotnet/sdk:8.0
+# Base pinned by multi-arch manifest-list digest (H-03: a floating tag can be
+# silently replaced upstream, changing oracle behavior between identical
+# OptArena commits). The tag stays for readability; the digest is what's
+# actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
+FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:89ce6291bde9acdf59594e79fb8277c6d84c46e4b1f5bf126a4f18766e4bd597
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \

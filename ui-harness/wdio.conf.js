@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs';
 import {
-  STORAGE_PATH, WORKSPACE, STATE_DB, EXT, DESCRIPTOR, API_MODE, BACKEND_URL, MODEL_ID,
+  STORAGE_PATH, WORKSPACE, STATE_DB, EXT, DESCRIPTOR, API_MODE, BACKEND_URL, MODEL_ID, API_KEY,
   findExtensionPath,
 } from './src/paths.js';
 import { seedGlobalStateDb } from './src/seed.js';
@@ -92,11 +92,11 @@ export const config = {
     }
 
     if (DESCRIPTOR.configKind === 'globalState') {
-      const items = DESCRIPTOR.seedGlobalState(API_MODE, BACKEND_URL, MODEL_ID);
+      const items = DESCRIPTOR.seedGlobalState(API_MODE, BACKEND_URL, MODEL_ID, API_KEY);
       const keys = seedGlobalStateDb(STATE_DB, items);
       console.log(`[onPrepare] seeded ${keys.length} globalState keys -> ${STATE_DB}`);
     } else if (DESCRIPTOR.configKind === 'continueYaml') {
-      DESCRIPTOR.seedFiles(STORAGE_PATH, API_MODE, BACKEND_URL, MODEL_ID);
+      DESCRIPTOR.seedFiles(STORAGE_PATH, API_MODE, BACKEND_URL, MODEL_ID, API_KEY);
       console.log(`[onPrepare] wrote Continue config (CONTINUE_GLOBAL_DIR=${launchEnv.CONTINUE_GLOBAL_DIR})`);
     }
     console.log(`[onPrepare] workspace: ${WORKSPACE}\n`);

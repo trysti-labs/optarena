@@ -74,15 +74,65 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
 import uuid
 from pathlib import Path
 
+from .schema import validate_case, validate_unique_case_names
+
 CASES_DIR = Path(__file__).parent / "cases"
 DOCKER_IMAGE_DEFAULT = "optarena-tester:latest"
 DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker"
+
+# Defense-in-depth flags applied to every sandbox container that runs a
+# case-defined `check_command` (both the shared DockerSandbox and the
+# ephemeral per-call fallback) - the command itself, and anything it runs,
+# is untrusted (case-authored, and can execute model-generated code). None
+# of the corpus's 500 check_commands install packages at runtime (all
+# toolchains are baked into the image at build time - verified against the
+# whole corpus), so a read-only rootfs + a writable /tmp scratch is
+# sufficient; --user (non-root) was deliberately left out here since none of
+# the images currently create a matching unprivileged account and it needs
+# per-image verification this session didn't have time for.
+_HARDENING_ARGS = [
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--pids-limit", "256",
+    "--read-only",
+    # exec: several tmpfs mount option sets default new tmpfs mounts to
+    # noexec, which silently broke `go test` here - it compiles a test
+    # binary INTO this tmpfs (via GOCACHE below) and then has to execute it.
+    # 1g (not 256m): the Go linker writes its whole output object into this
+    # tmpfs and ran out of space at 256m; 1g stays well under the 2g
+    # container memory limit (tmpfs usage counts against it) while giving
+    # every toolchain's build/scratch output room.
+    "--tmpfs", "/tmp:rw,exec,size=1g,mode=1777",
+    # go test always compiles before running and writes its build cache to
+    # $HOME/.cache/go-build by default - not "installing a package", just how
+    # `go test` works at all, and the one thing --read-only broke in a full
+    # corpus run (confirmed: every other language's check_command needs only
+    # /workspace + /tmp). Redirect it into the writable tmpfs instead of
+    # adding a second tmpfs mount; harmless no-op on non-Go images.
+    "-e", "GOCACHE=/tmp/go-build",
+]
+
+
+def _sandbox_user_args() -> list[str]:
+    """
+    Optional non-root sandbox execution (M-10): OPTARENA_SANDBOX_USER=uid:gid
+    (e.g. "1000:1000") runs every sandbox container as that user, with HOME
+    pointed at the writable tmpfs so toolchains that write dotfiles/caches
+    still work. Opt-in rather than default because none of the published
+    images create a matching account and each toolchain needs validation
+    under a non-root uid (mvn/dotnet/cargo cache paths) - flip it on, run
+    `optarena cases verify --language <x>`, and report breakage. Mirrored in
+    ui-harness/src/oracle.js.
+    """
+    user = os.environ.get("OPTARENA_SANDBOX_USER")
+    return ["--user", user, "-e", "HOME=/tmp"] if user else []
 
 # Registry of every sandbox image OptArena knows how to build, keyed by the
 # short name used with `optarena docker build --lang <key>`. "base" is the
@@ -112,12 +162,20 @@ def dockerfile_for(lang: str) -> Path:
 
 
 def load_cases(names: list[str] | None = None, cases_dir: "Path | str | None" = None) -> list[dict]:
-    """Load all (or the named) cases from *cases_dir*, sorted by filename."""
+    """Load all (or the named) cases from *cases_dir*, sorted by filename.
+
+    Every case is structurally validated (schema.validate_case) as it's
+    loaded - a malformed/fuzzed case file fails fast here, with a file+key
+    error, rather than surfacing later as an unclear KeyError/TypeError deep
+    inside a driver (after a real backend call may already have run).
+    """
     directory = Path(cases_dir) if cases_dir else CASES_DIR
-    cases = [
-        json.loads(p.read_text(encoding="utf-8"))
-        for p in sorted(directory.glob("*.json"))
-    ]
+    cases = []
+    for p in sorted(directory.glob("*.json")):
+        data = json.loads(p.read_text(encoding="utf-8"))
+        validate_case(data, source=str(p))
+        cases.append(data)
+    validate_unique_case_names(cases, source=str(directory))
     if names is not None:
         # `names == []` (e.g. a --language filter that matched nothing) must
         # mean "run none of them" - not "no filter" (an empty list is falsy
@@ -256,6 +314,13 @@ def docker_image_available(image: str = DOCKER_IMAGE_DEFAULT) -> bool:
 # Published copies of the sandbox images, so first-run users pull in minutes
 # instead of building ~7GB of toolchains locally. Local tags stay the plain
 # `optarena-tester*` names; the pull tags the remote image back to that name.
+#
+# `image` here already carries whatever tag the caller asked for - the
+# default is the mutable `:latest`, but publish-images.yml also pushes an
+# immutable `:<git-sha>` tag for every build (Phase 2.3 - content-addressed
+# images). Pin to a known-good build with e.g.
+# OPTARENA_DOCKER_IMAGE=optarena-tester:<sha> (or a `docker_image` field in a
+# case JSON) - no code change needed, this already pulls whatever tag it's given.
 GHCR_PREFIX = "ghcr.io/trysti-labs/optarena/"
 _pull_attempted: set[str] = set()
 
@@ -351,6 +416,7 @@ class DockerSandbox:
             subprocess.run(
                 ["docker", "run", "-d", "--rm", "--name", self.name,
                  "--network", "none", "--memory", "2g", "--cpus", "2",
+                 *_HARDENING_ARGS, *_sandbox_user_args(),
                  "-v", f"{self.root}:/workspace", "-w", "/workspace",
                  self.image, "sleep", "infinity"],
                 capture_output=True, timeout=20, check=True,
@@ -423,6 +489,26 @@ def _new_oracle_info(cmd: str | None) -> dict:
     }
 
 
+def _unsafe_host_exec_allowed() -> bool:
+    """
+    Two distinct, both explicit, opt-ins to running an untrusted
+    ``check_command`` directly on the host:
+
+    - ``OPTARENA_NO_DOCKER=1`` - "I am deliberately disabling Docker",
+      already an explicit choice (this project's own test suite and CI use
+      it on hosts with no Docker daemon at all).
+    - ``OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`` - covers the C-02 gap: Docker
+      was never explicitly disabled, it's just not installed/running, or an
+      image is missing. Previously that case *silently* fell through to
+      host execution with only a stderr warning - "a warning is not an
+      adequate control for arbitrary code execution" (case-defined
+      check_command and model-generated code are both untrusted input).
+      Fail closed instead unless this is set.
+    """
+    return (os.environ.get("OPTARENA_NO_DOCKER") == "1"
+            or os.environ.get("OPTARENA_ALLOW_UNSAFE_HOST_EXEC") == "1")
+
+
 def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     """
     Run the case's optional ``check_command`` and return
@@ -440,8 +526,10 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     container - it does not start a new one per case/trial. Without a
     matching active sandbox (e.g. ``evaluate_case`` called directly, outside
     the runner), it falls back to one ephemeral ``docker run --rm`` for this
-    call, or to the host (with a one-time warning) when Docker is
-    unavailable or disabled via ``OPTARENA_NO_DOCKER=1``.
+    call. When Docker is unavailable or an image is missing, this now FAILS
+    CLOSED (C-02) unless the caller has explicitly opted into host execution
+    via ``OPTARENA_NO_DOCKER=1`` or ``OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`` -
+    see ``_unsafe_host_exec_allowed``.
     """
     global _docker_warned
     cmd = case.get("check_command")
@@ -450,6 +538,7 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
         return [], info
     timeout = int(case.get("check_command_timeout", 60) or 60)
     docker_disabled = os.environ.get("OPTARENA_NO_DOCKER") == "1"
+    unsafe_ok = _unsafe_host_exec_allowed()
     image = case.get("docker_image") or os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
 
     active = _active_sandboxes.get(image)
@@ -464,9 +553,14 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
         use_docker = False
         if not _docker_warned:
             print(
-                f"[optarena] Docker image '{image}' not found - falling back to "
-                f"running check_command on the host. Run `optarena docker build` "
-                f"to build the sandboxed test image.",
+                f"[optarena] Docker image '{image}' not found - "
+                + ("falling back to running check_command on the host (unsafe "
+                   "host exec explicitly allowed)."
+                   if unsafe_ok else
+                   "refusing to run check_command on the host. Run "
+                   "`optarena docker build` to build the sandboxed test image, "
+                   "or set OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1 to run this "
+                   "untrusted command directly on this machine anyway."),
                 file=sys.stderr,
             )
             _docker_warned = True
@@ -474,12 +568,21 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     if not use_docker:
         if not docker_disabled and not _docker_ok and not _docker_warned:
             print(
-                "[optarena] Docker not available - running check_command directly "
-                "on the host. Install/start Docker Desktop for sandboxed, "
-                "dependency-free test execution (recommended).",
+                "[optarena] Docker not available - "
+                + ("running check_command directly on the host (unsafe host "
+                   "exec explicitly allowed)."
+                   if unsafe_ok else
+                   "refusing to run check_command on the host. Install/start "
+                   "Docker Desktop for sandboxed execution, or set "
+                   "OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1 to run this untrusted "
+                   "command directly on this machine anyway."),
                 file=sys.stderr,
             )
             _docker_warned = True
+        if not unsafe_ok:
+            info["sandbox"] = "refused"
+            return ([f'check_command refused: no Docker sandbox available and host '
+                     f'execution was not explicitly allowed (see stderr): {cmd}'], info)
         return _run_check_command_local(cmd, root, timeout, info)
     return _run_check_command_docker(cmd, root, timeout, image, info)
 
@@ -493,6 +596,7 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
         proc = sandbox.exec(cmd, root, timeout)
     except subprocess.TimeoutExpired:
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["timed_out"] = True
         sandbox.reap()
         return [f'check_command timed out after {timeout}s (docker exec): {cmd}'], info
     except (OSError, ValueError) as exc:
@@ -503,6 +607,7 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
     info["exit_code"] = proc.returncode
     info["output"] = ((proc.stdout or "") + (proc.stderr or ""))[-400:].strip()
     if proc.returncode == 124:
+        info["timed_out"] = True
         sandbox.reap()
         return [f'check_command timed out after {timeout}s (docker exec): {cmd}'], info
     if proc.returncode != 0:
@@ -511,17 +616,67 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
     return [], info
 
 
+def _kill_process_tree(pid: int) -> None:
+    """
+    Kill an entire process tree started by ``run_capture`` (H-11). A check
+    or agent that spawned children (a test that starts a server, an agent
+    that shells out) leaves those children ORPHANED when only its direct
+    child is killed - they keep holding ports/CPU and cascade failures into
+    every later case on this host. On POSIX the child is its own session
+    leader (``start_new_session``), so signalling the negative pgid hits the
+    whole group; on Windows ``taskkill /T`` walks and kills the tree.
+    """
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+    else:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                       capture_output=True)
+
+
+def run_capture(cmd, *, timeout: int, **kwargs) -> subprocess.CompletedProcess:
+    """
+    Like ``subprocess.run(..., capture_output=True, timeout=timeout)`` but on
+    timeout kills the whole process TREE, not just the direct child
+    (``subprocess.run`` kills only the immediate process even with a new
+    session). Raises ``subprocess.TimeoutExpired`` after the tree is reaped,
+    so existing call sites that catch it are unchanged. Used for every
+    HOST-mode subprocess (check_command on the host, and the CLI-agent
+    drivers) - Docker paths don't need it, the container boundary already is
+    the process-group boundary (see ``DockerSandbox.reap``).
+    """
+    kwargs.setdefault("stdout", subprocess.PIPE)
+    kwargs.setdefault("stderr", subprocess.PIPE)
+    if os.name == "posix":
+        kwargs["start_new_session"] = True
+    else:
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NEW_PROCESS_GROUP
+    proc = subprocess.Popen(cmd, **kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = None, None
+        raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
 def _run_check_command_local(cmd: str, root: Path, timeout: int, info: dict) -> tuple[list[str], dict]:
     info["sandbox"] = "host"
     t0 = time.monotonic()
     try:
-        proc = subprocess.run(
-            cmd, shell=True, cwd=root,
-            capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace",
+        proc = run_capture(
+            cmd, shell=True, cwd=root, timeout=timeout,
+            text=True, encoding="utf-8", errors="replace",
         )
     except subprocess.TimeoutExpired:
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["timed_out"] = True
         return [f'check_command timed out after {timeout}s: {cmd}'], info
     except OSError as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
@@ -547,6 +702,7 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
         # Same resources as the shared DockerSandbox - a Spring Boot app under
         # 512m would OOM here but pass in the shared container, and vice versa.
         "--memory", "2g", "--cpus", "2",
+        *_HARDENING_ARGS, *_sandbox_user_args(),
         "-v", f"{root.resolve()}:/workspace",
         "-w", "/workspace",
         image,
@@ -561,6 +717,7 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
     except subprocess.TimeoutExpired:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["timed_out"] = True
         return [f'check_command timed out after {timeout}s (docker): {cmd}'], info
     except OSError as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
@@ -583,6 +740,13 @@ def classify_failure(oracle_info: dict) -> str | None:
     the oracle's own pass/fail verdict - just a richer metric surfaced in
     ``extra["oracle"]["failure_class"]`` for the CLI/dashboard/compare table.
     """
+    # Timeouts first: the runners record an explicit `timed_out` marker (a
+    # host timeout never even sets ran/exit_code, and docker's `timeout`
+    # exits 124) - the command's own captured output almost never contains
+    # the words "timed out", so text-sniffing alone made this class
+    # effectively unreachable.
+    if oracle_info.get("timed_out") or oracle_info.get("exit_code") == 124:
+        return "timeout"
     if not oracle_info.get("ran") or oracle_info.get("exit_code") in (None, 0):
         return None
     if "timed out" in (oracle_info.get("output") or "").lower():
@@ -614,9 +778,9 @@ def diff_stats(case: dict, created: list[str], root: Path) -> dict:
     """
     Approximate size of the change for this case: files touched and lines
     changed. For "modify" cases the delta is against the known original
-    content in ``setup_files`` (the pre-run snapshot only stores a
-    size:mtime signature, not content, so this is the best available
-    reference); new files count their full line length.
+    content in ``setup_files`` (the pre-run snapshot stores only a content
+    *hash* per file, not the content itself, so the case's own setup text is
+    the best available reference); new files count their full line length.
     """
     setup_files = case.get("setup_files") or {}
 
@@ -662,8 +826,17 @@ def evaluate_case(case: dict, created: list[str], root: Path) -> tuple[list[str]
 
 
 def write_setup_files(root: Path, setup_files: dict[str, str] | None) -> None:
+    # H-01: `rel` comes straight from case JSON (`setup_files`/`test_setup_files`
+    # keys) - an absolute path or a "../" traversal there would write outside
+    # the sandboxed workspace, onto the host. `root / rel` alone doesn't catch
+    # this: pathlib silently discards `root` entirely when `rel` is absolute,
+    # and ".." components resolve upward without error. Resolve and confirm
+    # containment before ever touching disk.
+    root = root.resolve()
     for rel, content in (setup_files or {}).items():
-        dest = root / rel
+        dest = (root / rel).resolve()
+        if not dest.is_relative_to(root):
+            raise ValueError(f"setup file path escapes workspace root: {rel!r}")
         dest.parent.mkdir(parents=True, exist_ok=True)
         # newline="" disables universal-newline translation - on Windows hosts,
         # write_text() would otherwise turn every "\n" in case JSON content
@@ -685,10 +858,18 @@ def copy_setup_repo(root: Path, repo_name: str) -> None:
     src = REPOS_DIR / repo_name
     if not src.is_dir():
         raise FileNotFoundError(f'setup_repo "{repo_name}" not found under {REPOS_DIR}')
+    root = root.resolve()
     for p in src.rglob("*"):
-        if not p.is_file():
+        # Symlinks are skipped outright (defense in depth): `p.is_file()`
+        # follows a symlink, so a starter repo containing one could copy
+        # arbitrary host file content into the workspace. `repo_name` itself
+        # is trusted (a project-controlled directory name, not case JSON),
+        # but starter repos shouldn't need symlinks regardless.
+        if p.is_symlink() or not p.is_file():
             continue
-        dest = root / p.relative_to(src)
+        dest = (root / p.relative_to(src)).resolve()
+        if not dest.is_relative_to(root):
+            raise ValueError(f"setup_repo file path escapes workspace root: {p!r}")
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(p.read_bytes())
 

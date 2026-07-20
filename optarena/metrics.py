@@ -15,7 +15,10 @@ def aggregate(case_dicts: list[dict]) -> dict:
     total = len(case_dicts)
     passed = sum(1 for c in case_dicts if c.get("passed"))
     errors = sum(1 for c in case_dicts if c.get("error"))
-    durations = [c["duration_s"] for c in case_dicts if c.get("duration_s")]
+    # `is not None`, not truthiness: an explicit 0.0s duration (an instant
+    # failure, a cached result) is a real sample and excluding it silently
+    # inflates the mean/median/percentiles (audit L-01).
+    durations = [c["duration_s"] for c in case_dicts if c.get("duration_s") is not None]
     tokens = sum(c.get("extra", {}).get("total_tokens")
                  or (c.get("extra", {}).get("prompt_tokens", 0)
                      + c.get("extra", {}).get("completion_tokens", 0))

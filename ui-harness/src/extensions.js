@@ -24,14 +24,34 @@ import path from 'node:path';
 const AGENT_APPROVE_RE = /^(save|approve|run|proceed|accept|allow|yes|keep|apply|continue|resume|retry)\b/i;
 const AGENT_REJECT_RE = /^(reject|deny|cancel|no\b|discard|revert|start new)/i;
 
-/** Cline's permissive auto-approval object (nested), verified from its bundle. */
+/**
+ * OpenAI-compatible base URL ending in exactly one `/v1` - mirror of Python's
+ * `Backend.openai_base` (H-08). The old code appended `/v1` unconditionally,
+ * so a base_url already ending in `/v1` (some hosted gateways) became
+ * `/v1/v1` and every request 404'd.
+ */
+function openaiBase(url) {
+  const b = (url || '').replace(/\/+$/, '');
+  return b.endsWith('/v1') ? b : `${b}/v1`;
+}
+
+/**
+ * Cline's auto-approval object (nested), verified from its bundle.
+ *
+ * Deliberately workspace-scoped (C-03/C-05): reads/edits OUTSIDE the
+ * workspace, the browser, and MCP are NOT auto-approved - an agent under
+ * evaluation gets exactly the surface a case needs (its own workspace and
+ * command execution there), not a pass to wander the host. A case that
+ * genuinely needs more should say so explicitly rather than every run
+ * granting it silently.
+ */
 function clineAutoApproval() {
   return {
     version: 1, enabled: true, favorites: [], maxRequests: 1000,
     actions: {
-      readFiles: true, readFilesExternally: true, editFiles: true,
-      editFilesExternally: true, executeSafeCommands: true,
-      executeAllCommands: true, useBrowser: false, useMcp: true,
+      readFiles: true, readFilesExternally: false, editFiles: true,
+      editFilesExternally: false, executeSafeCommands: true,
+      executeAllCommands: true, useBrowser: false, useMcp: false,
     },
     enableNotifications: false,
   };
@@ -47,7 +67,7 @@ export const EXTENSIONS = {
     approveRe: AGENT_APPROVE_RE,
     rejectRe: AGENT_REJECT_RE,
     configKind: 'globalState',
-    seedGlobalState(apiMode, url, model = 'llama3.2') {
+    seedGlobalState(apiMode, url, model = 'llama3.2', apiKey = 'optarena') {
       const id = 'saoudrizwan.claude-dev';
       const p = `${id}/`;
       const items = {
@@ -61,8 +81,8 @@ export const EXTENSIONS = {
       if (apiMode === 'openai') {
         Object.assign(items, {
           [`${p}apiProvider`]: 'openai',
-          [`${p}openAiBaseUrl`]: `${url}/v1`,
-          [`${p}openAiApiKey`]: 'optarena',
+          [`${p}openAiBaseUrl`]: openaiBase(url),
+          [`${p}openAiApiKey`]: apiKey,
           [`${p}openAiModelId`]: model,
         });
       } else {
@@ -86,13 +106,13 @@ export const EXTENSIONS = {
     approveRe: AGENT_APPROVE_RE,
     rejectRe: AGENT_REJECT_RE,
     configKind: 'globalState',
-    seedGlobalState(apiMode, url, model = 'llama3.2') {
+    seedGlobalState(apiMode, url, model = 'llama3.2', apiKey = 'optarena') {
       // Roo stores provider config in `providerProfiles` and uses FLAT auto-approve
       // keys. Its globalState row layout is confirmed by a discovery run; we seed
       // both the provider profile and the flat permissive flags.
       const id = 'rooveterinaryinc.roo-cline';
       const cfg = apiMode === 'openai'
-        ? { apiProvider: 'openai', openAiBaseUrl: `${url}/v1`, openAiApiKey: 'optarena', openAiModelId: model, id: 'default' }
+        ? { apiProvider: 'openai', openAiBaseUrl: openaiBase(url), openAiApiKey: apiKey, openAiModelId: model, id: 'default' }
         : { apiProvider: 'ollama', ollamaBaseUrl: url, ollamaModelId: model, id: 'default' };
       const providerProfiles = {
         currentApiConfigName: 'default',
@@ -104,8 +124,11 @@ export const EXTENSIONS = {
         alwaysAllowWrite: true,
         alwaysAllowReadOnly: true,
         alwaysAllowExecute: true,
-        alwaysAllowBrowser: true,
-        alwaysAllowMcp: true,
+        // Browser and MCP stay manual (C-03): neither is needed to complete
+        // a case, and auto-approving them hands an evaluated agent a
+        // network/tool surface no case declares.
+        alwaysAllowBrowser: false,
+        alwaysAllowMcp: false,
         telemetrySetting: 'disabled',
       };
       // Seed BOTH the standard Memento blob (single row under the ext id) AND
@@ -127,10 +150,10 @@ export const EXTENSIONS = {
     approveRe: AGENT_APPROVE_RE,
     rejectRe: AGENT_REJECT_RE,
     configKind: 'globalState',
-    seedGlobalState(apiMode, url, model = 'llama3.2') {
+    seedGlobalState(apiMode, url, model = 'llama3.2', apiKey = 'optarena') {
       const id = 'kilocode.kilo-code';
       const cfg = apiMode === 'openai'
-        ? { apiProvider: 'openai', openAiBaseUrl: `${url}/v1`, openAiApiKey: 'optarena', openAiModelId: model, id: 'default' }
+        ? { apiProvider: 'openai', openAiBaseUrl: openaiBase(url), openAiApiKey: apiKey, openAiModelId: model, id: 'default' }
         : { apiProvider: 'ollama', ollamaBaseUrl: url, ollamaModelId: model, id: 'default' };
       const providerProfiles = {
         currentApiConfigName: 'default',
@@ -142,8 +165,9 @@ export const EXTENSIONS = {
         alwaysAllowWrite: true,
         alwaysAllowReadOnly: true,
         alwaysAllowExecute: true,
-        alwaysAllowBrowser: true,
-        alwaysAllowMcp: true,
+        // Browser/MCP manual - same reasoning as the Roo descriptor above.
+        alwaysAllowBrowser: false,
+        alwaysAllowMcp: false,
         telemetrySetting: 'disabled',
       };
       const items = { [id]: flags };
@@ -168,7 +192,7 @@ export const EXTENSIONS = {
     launchEnv(storagePath) {
       return { CONTINUE_GLOBAL_DIR: path.join(storagePath, 'continue') };
     },
-    seedFiles(storagePath, apiMode, url, model = 'llama3.2') {
+    seedFiles(storagePath, apiMode, url, model = 'llama3.2', apiKey = 'optarena') {
       const dir = path.join(storagePath, 'continue');
       fs.mkdirSync(dir, { recursive: true });
       const modelLines = apiMode === 'openai'
@@ -176,8 +200,8 @@ export const EXTENSIONS = {
             '  - name: OptArena Backend',
             '    provider: openai',
             `    model: ${model}`,
-            `    apiBase: ${url}/v1`,
-            '    apiKey: optarena',
+            `    apiBase: ${openaiBase(url)}`,
+            `    apiKey: ${apiKey}`,
             '    roles: [chat, edit, apply]',
           ]
         : [

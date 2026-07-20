@@ -4,7 +4,11 @@
 # NODE_PATH points at the global install dir so plain `require("express")`
 # resolves at check_command time without a per-case node_modules and without
 # network (check_command runs with --network none).
-FROM node:20-bookworm-slim
+# Base pinned by multi-arch manifest-list digest (H-03: a floating tag can be
+# silently replaced upstream, changing oracle behavior between identical
+# OptArena commits). The tag stays for readability; the digest is what's
+# actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
+FROM node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \

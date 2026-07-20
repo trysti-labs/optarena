@@ -17,6 +17,10 @@ from __future__ import annotations
 
 from .base import Driver, CaseResult
 
+# Re-exported as the package's public surface for driver authors
+# ("one file in optarena/drivers/ implementing Driver -> CaseResult").
+__all__ = ["Driver", "CaseResult", "DRIVERS", "DRIVER_NAMES", "get_driver"]
+
 # name -> {kind, backend, status, summary}
 DRIVERS: dict[str, dict] = {
     "openai-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable",

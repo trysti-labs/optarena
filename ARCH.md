@@ -152,9 +152,9 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   first-class filter as `language`: `cases.filter_cases(cases, language=,
   framework=)` ANDs both together, used by both `optarena run
   --language/--framework` and `optarena list cases --language/--framework`.
-  The corpus is 120 cases spanning 11 language/framework tracks (Python,
-  JavaScript/TypeScript, Java, Go, Rust, C#, C/C++, SQL, Shell, Docker
-  Compose, Terraform) at the exact per-track allocation the spec's own
+  The corpus is 500 cases spanning 18 languages/frameworks (Python,
+  JavaScript/TypeScript, Java, Kotlin, Go, Rust, C#, C/C++, PHP, Ruby, SQL,
+  Shell, YAML, Terraform, Dockerfile, Makefile) at the per-track allocation the spec's own
   Phase 1 table asks for - see §10.1 for the full breakdown and what's
   explicitly deferred beyond it.
 - `setup_files` are written into the workspace before the run ("modify" cases).
@@ -167,12 +167,17 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
 - Optional per-case `check_command` (+ `check_command_timeout`, default 60 s):
   a shell command run in the workspace after the file checks pass; non-zero
   exit fails the case. Content patterns assert shape, the command asserts
-  behavior (compile it, run the real tests). Implemented identically in the
-  Python oracle (`cases.py`) and the JS mirror (`ui-harness/src/oracle.js`).
-- Optional per-case `test_setup_files`: `{relpath: content}`, written into the
-  workspace by `evaluate_case`/`evaluateCase` *after* the driver's run (so the
-  model never sees the tests it's graded against, unlike `setup_files`), just
-  before `check_command` runs. This is how a case ships real test code
+  behavior (compile it, run the real tests). Implemented in both the Python
+  oracle (`cases.py`) and the JS mirror (`ui-harness/src/oracle.js`), kept in
+  sync by hand - same SHA-1 content snapshots, sandbox hardening flags, diff
+  stats, and failure classes; any semantic change must land in both files.
+- Optional per-case `test_setup_files`: `{relpath: content}`, written by
+  `evaluate_case`/`evaluateCase` *after* the driver's run (so the model never
+  sees the tests it's graded against, unlike `setup_files`), just before
+  `check_command` runs. The UI harness additionally grades a private *copy*
+  of the workspace (its own directory, mounted separately in Docker), so
+  hidden tests are never written anywhere the still-open editor session
+  could observe. This is how a case ships real test code
   (pytest-style asserts, a Node `assert` script, a Python harness that
   compiles-and-runs a C binary and checks its stdout) instead of relying on
   substring matching for correctness.
@@ -399,8 +404,9 @@ and not part of the pass/fail verdict itself).
 
 `diff_stats()` (`cases.py`) approximates change size: new files count their
 full line length; "modify" cases (with `setup_files`) diff against the known
-original content (the pre-run snapshot only stores a `size:mtime` signature,
-not content, so this is the best available reference) - an edit that
+original content (the pre-run snapshot stores a per-file content hash, not
+the bytes themselves, so the case's setup text is the best available
+reference) - an edit that
 happens to produce the same line count still counts as >= 1 changed line
 (`abs(delta) or 1`), so a real edit is never reported as zero.
 
@@ -551,13 +557,17 @@ onboarding-wizard flag, optional agent-mode hint. The driving spec
 
 Flat JSON files; `index.json` (newest-first digest of every run) is rebuilt on
 each save so consumers never parse all runs. Run references in the CLI accept
-an id, filename, path, or unique substring (most recent match wins).
+an id, filename, path, or a substring that matches exactly one run (an
+ambiguous substring is refused with the candidate list - silently picking
+the newest was how the wrong baseline got compared).
 
 ### 7.2 Dashboard (`dashboard/index.html`)
 
-One static file, vanilla JS, no build step. Served by `optarena serve` (stdlib
-`http.server` rooted at the repo root, so `/dashboard/` and `/results/` share
-an origin) - or any static server.
+One static file, vanilla JS, no build step, no external requests. Served by
+`optarena serve` - a scoped stdlib `http.server` bound to `127.0.0.1` that
+serves **only** `dashboard/` and the results directory (never the repository
+root), with directory listings disabled, so `/dashboard/` and `/results/`
+share an origin - or any static server you point at those two directories.
 
 - Fetches `../results/index.json`, lazily fetches run files on selection,
   computes comparisons client-side (same alignment rules as `compare.py`).
@@ -668,13 +678,15 @@ Structural:
 
 ### 10.1 Benchmark corpus status (vs `OptArena_Benchmark_Corpus_Specification.md`)
 
-The corpus stands at **120 cases** - the exact sum of the spec's own Phase 1
-per-track allocation (Python 20, JavaScript/TypeScript 20, Java 15, Go 10,
-Rust 10, C# 10, C/C++ 10, SQL 10, Shell 5, Docker Compose 5, Terraform 5),
-sitting at the low end of the spec's stated 100-150 target range. Every case
-was hand-verified end-to-end before being counted: a correct reference
+The corpus stands at **500 cases** across 18 languages/frameworks - the full
+target from `CORPUS_EXPANSION_PLAN.md` (the original 120-case Phase 1
+allocation has since been expanded through the plan's Phase 2 band). Every
+case was hand-verified end-to-end before being counted: a correct reference
 solution passes, a broken/unfixed/unchanged one fails, run through the real
-oracle (`evaluate_case`/`DockerSandbox`), not just claimed.
+oracle (`evaluate_case`/`DockerSandbox`), not just claimed. (Self-verification
+coverage is still being backfilled: 396 of the 500 ship an explicit
+`reference_solution`; `optarena cases verify` skips the rest until authored -
+see H-10 in `AUDIT_VERIFICATION_2026-07-20.md`.)
 
 **Built:**
 - Case schema extended with `framework`/`domain`/`difficulty`/`task_type`/
@@ -691,9 +703,9 @@ oracle (`evaluate_case`/`DockerSandbox`), not just claimed.
   (`CHECKPOINT_DISABLE=1`, no network phone-home) and pyyaml/sqlite3 for the
   SQL/Shell/Docker-Compose/Terraform tracks, none of which need a
   per-language toolchain image.
-- 120 cases across all 11 tracks, each tagged with the spec's task
+- 500 cases across all 18 language tracks, each tagged with the spec's task
   categories (feature/bug_fix/refactoring/testing/security/performance/
-  devops) and difficulty 1-2 (the easiest two tiers).
+  devops/data_engineering/documentation/dependency_upgrade) and difficulty 1-3.
 - **A corpus-wide oracle bug found and fixed during verification**: 6 of the
   corpus's 11 initial "refactoring" cases (spanning Python, Java, C#, Rust, C,
   and Shell - not concentrated in one track or one authoring pass) would

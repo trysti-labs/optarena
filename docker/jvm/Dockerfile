@@ -5,7 +5,11 @@
 # plugin a case's own pom.xml needs (same spring-boot-starter-parent 3.3.4)
 # is then already local, so `mvn -o package`/`mvn -o test` works with
 # --network none at check_command time.
-FROM maven:3.9-eclipse-temurin-17
+# Base pinned by multi-arch manifest-list digest (H-03: a floating tag can be
+# silently replaced upstream, changing oracle behavior between identical
+# OptArena commits). The tag stays for readability; the digest is what's
+# actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
+FROM maven:3.9-eclipse-temurin-17@sha256:1ed5d1f54416b706707b4f3238f63a20bb06aab27c6d240090a2bb9ad895ed45
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \

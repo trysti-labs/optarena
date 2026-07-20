@@ -32,7 +32,7 @@
   "test_setup_files": {
     "test_leaderboard.py": "import random\nimport time\n\nfrom leaderboard import ranking\n\n\ndef test_basic_ranking():\n    assert ranking([10, 50, 20, 40], 3) == [50, 40, 20]\n\n\ndef test_full_ranking_with_duplicates():\n    assert ranking([5, 1, 5, 3], 4) == [5, 5, 3, 1]\n\n\ndef test_k_larger_than_input_and_empty():\n    assert ranking([7, 2], 10) == [7, 2]\n    assert ranking([], 3) == []\n\n\ndef test_input_not_mutated():\n    scores = [3, 1, 2]\n    ranking(scores, 2)\n    assert scores == [3, 1, 2]\n\n\ndef test_performance_full_ranking():\n    random.seed(3)\n    n = 50000\n    scores = [random.randrange(0, 10**6) for _ in range(n)]\n    expected_head = sorted(scores, reverse=True)[:3]\n\n    start = time.perf_counter()\n    got = ranking(scores, n)\n    elapsed = time.perf_counter() - start\n\n    assert len(got) == n\n    assert got[:3] == expected_head\n    assert got[-1] == min(scores)\n    # calibrated: max()+remove() per extraction is ~6.5s on fast native\n    # hardware and slower in the sandbox; a single sort is ~0.005s\n    assert elapsed < 2.0, (\n        f\"ranking took {elapsed:.2f}s for {n} scores; expected one sort \"\n        f\"(sorted(..., reverse=True)[:k]), not max()+list.remove() per \"\n        f\"extraction, which is O(n^2)\"\n    )\n"
   },
-  "check_command": "python -m pytest -q test_leaderboard.py",
+  "check_command": "python3 -m pytest -q test_leaderboard.py",
   "reference_solution": {
     "leaderboard.py": "def ranking(scores, k):\n    \"\"\"The k highest scores in descending order (k may equal len(scores)).\"\"\"\n    return sorted(scores, reverse=True)[:k]\n"
   },

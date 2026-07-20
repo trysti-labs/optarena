@@ -22,6 +22,7 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 # $ per 1M tokens: (prompt, completion). Keys are matched as substrings of the
 # lowercased model id, longest key first, so "claude-opus-4.8" hits "claude-opus".
@@ -58,8 +59,20 @@ def _table() -> dict[str, tuple[float, float]]:
 
 
 def is_local_backend(base_url: str | None) -> bool:
-    """True for localhost-style backends, whose inference we treat as free."""
-    return any(h in (base_url or "") for h in _LOCAL_HOSTS)
+    """True for localhost-style backends, whose inference we treat as free.
+
+    H-07: this used to be plain substring containment (`h in base_url`), so
+    `http://localhost.attacker.example` matched "localhost" and was wrongly
+    treated as free/local. Parse the actual hostname and compare it exactly.
+    """
+    if not base_url:
+        return False
+    hostname = urlparse(base_url).hostname
+    if hostname is None:
+        # No scheme (e.g. "localhost:11434") - urlparse can't find a netloc
+        # to pull a hostname from; reparse as if it were one.
+        hostname = urlparse(f"//{base_url}").hostname
+    return (hostname or "").lower() in _LOCAL_HOSTS
 
 
 def price_for(model: str | None) -> tuple[float, float] | None:

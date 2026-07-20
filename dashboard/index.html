@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OptArena Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- No external font/CDN requests: the dashboard's privacy claim is "local
+     only", so it must not phone out to fonts.googleapis.com on every view.
+     Inter/JetBrains Mono are used when installed locally; the system stacks
+     below cover every platform otherwise. -->
 <style>
 /* OptArena dashboard - shared OptArena design language.
    Accent #7C5CFC uniform across themes. Chart series colors validated
@@ -238,8 +239,8 @@ function tilesHTML(run) {
       <div class="value" style="font-size:1.1rem">${esc(run.scenario.driver)}</div>
       <div class="delta">${esc(b.model || "")} @ ${esc((b.base_url || "").replace(/^https?:\/\//, ""))}</div></div>
     <div class="tile"><div class="label">Cost</div>
-      <div class="value">${s.total_cost_usd ? "$" + s.total_cost_usd.toFixed(2) : "free"}</div>
-      <div class="delta">${s.total_tokens ? s.total_tokens.toLocaleString() + " tokens" : "local backend"}</div></div>
+      <div class="value">${s.total_cost_usd != null ? "$" + s.total_cost_usd.toFixed(2) : "—"}</div>
+      <div class="delta">${s.total_tokens ? s.total_tokens.toLocaleString() + " tokens" : "no cost/token telemetry reported"}</div></div>
     <div class="tile"><div class="label">Files changed</div>
       <div class="value">${s.mean_files_changed != null ? s.mean_files_changed : "-"}</div>
       <div class="delta">mean per case</div></div>
@@ -259,6 +260,30 @@ function passRateChartHTML() {
     </div>`;
   }).join("");
   return `<div class="hbar-chart">${rows}</div>`;
+}
+
+/**
+ * Mirror of compare.manifest_compatibility (M-03): two runs only support an
+ * overall faster/more-accurate/cheaper verdict when they measured the SAME
+ * thing - same oracle version, same resolved case set, same trial count.
+ * Returns {comparable, verified, reasons}.
+ */
+function manifestCompatibility(manA, manB) {
+  if (!manA || !manB) {
+    return { comparable: true, verified: false,
+      reasons: ["one or both runs predate run manifests - comparability could not be verified"] };
+  }
+  const reasons = [];
+  if (manA.oracle_version !== manB.oracle_version) {
+    reasons.push(`different oracle version (${manA.oracle_version} vs ${manB.oracle_version})`);
+  }
+  if (manA.case_set_hash !== manB.case_set_hash) {
+    reasons.push(`different case set (${manA.case_count} case(s) hash ${manA.case_set_hash} vs ${manB.case_count} case(s) hash ${manB.case_set_hash})`);
+  }
+  if (manA.trials !== manB.trials) {
+    reasons.push(`different trial count (${manA.trials} vs ${manB.trials})`);
+  }
+  return { comparable: reasons.length === 0, verified: true, reasons };
 }
 
 function compareHTML(runA, runB) {
@@ -300,19 +325,42 @@ function compareHTML(runA, runB) {
 
   const sa = runA.summary, sb = runB.summary;
   const accA = sa.pass_rate, accB = sb.pass_rate;
-  const verdict = `<div class="tiles" style="margin-bottom:14px">
+
+  // M-03: suppress the aggregate winner tiles when the two runs did not
+  // measure the same thing (different case set / oracle / trial count) -
+  // the per-case table below stays, since it aligns by shared case name.
+  const compat = manifestCompatibility(runA.manifest, runB.manifest);
+  const suppressed = compat.comparable === false;
+  const compatBanner = compat.reasons.length
+    ? `<div class="empty" style="text-align:left;padding:10px 0;color:var(--red)">
+        <b>${suppressed ? "Not directly comparable" : "Comparability unverified"}</b> -
+        ${compat.reasons.map(esc).join("; ")}${suppressed ? ". Overall winner tiles suppressed; per-case rows below cover shared cases only." : ""}
+      </div>` : "";
+
+  // H-07: a missing total_cost_usd means "no cost data reported", which must
+  // never be coerced to $0.00 and win. A verdict needs BOTH sides known.
+  const fmtCost = (v) => v == null ? "—" : "$" + v.toFixed(2);
+  const bothCosts = sa.total_cost_usd != null && sb.total_cost_usd != null;
+  const cheaperVal = suppressed ? "(suppressed)"
+    : !bothCosts ? "unknown"
+    : esc(sa.total_cost_usd <= sb.total_cost_usd ? labelA : labelB);
+  const cheaperNote = !bothCosts && !suppressed
+    ? "no cost data for one or both runs"
+    : `${fmtCost(sa.total_cost_usd)} vs ${fmtCost(sb.total_cost_usd)}`;
+
+  const verdict = `${compatBanner}<div class="tiles" style="margin-bottom:14px">
     <div class="tile"><div class="label">More accurate</div>
-      <div class="value" style="font-size:1.05rem">${accA === accB ? "tie" : esc(accA > accB ? labelA : labelB)}</div>
+      <div class="value" style="font-size:1.05rem">${suppressed ? "(suppressed)" : (accA === accB ? "tie" : esc(accA > accB ? labelA : labelB))}</div>
       <div class="delta">${fmtPct(accA)} vs ${fmtPct(accB)}</div></div>
     <div class="tile"><div class="label">Faster (mean case)</div>
-      <div class="value" style="font-size:1.05rem">${esc(sa.mean_duration_s <= sb.mean_duration_s ? labelA : labelB)}</div>
+      <div class="value" style="font-size:1.05rem">${suppressed ? "(suppressed)" : esc(sa.mean_duration_s <= sb.mean_duration_s ? labelA : labelB)}</div>
       <div class="delta">${fmtS(sa.mean_duration_s)} vs ${fmtS(sb.mean_duration_s)}</div></div>
     <div class="tile"><div class="label">Pass-rate delta (B - A)</div>
       <div class="value" style="font-size:1.05rem">${(accB - accA >= 0 ? "+" : "") + Math.round((accB - accA) * 100)}pp</div>
       <div class="delta">&nbsp;</div></div>
     <div class="tile"><div class="label">Cheaper</div>
-      <div class="value" style="font-size:1.05rem">${(!sa.total_cost_usd && !sb.total_cost_usd) ? "free" : esc((sa.total_cost_usd || 0) <= (sb.total_cost_usd || 0) ? labelA : labelB)}</div>
-      <div class="delta">${"$" + (sa.total_cost_usd || 0).toFixed(2)} vs ${"$" + (sb.total_cost_usd || 0).toFixed(2)}</div></div>
+      <div class="value" style="font-size:1.05rem">${cheaperVal}</div>
+      <div class="delta">${cheaperNote}</div></div>
     <div class="tile"><div class="label">Tokens (A vs B)</div>
       <div class="value" style="font-size:1.05rem">${sa.total_tokens ? sa.total_tokens.toLocaleString() : "-"} vs ${sb.total_tokens ? sb.total_tokens.toLocaleString() : "-"}</div>
       <div class="delta">${sa.total_tokens && sb.total_tokens ? ((sb.total_tokens - sa.total_tokens >= 0 ? "+" : "") + (sb.total_tokens - sa.total_tokens).toLocaleString() + " B - A") : "where the backend reports usage"}</div></div>
