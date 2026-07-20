@@ -78,8 +78,10 @@ optarena serve   # http://localhost:8300/dashboard/
    remote API.
 6. **Zero infrastructure** - stdlib-only Python core, JSON results, a
    static-HTML dashboard. No database server, no build step, no accounts.
-   Docker is recommended for sandboxed verification, not required - there's
-   a host fallback.
+   Docker is expected for verification: without it OptArena **fails closed**
+   rather than running untrusted test commands on your machine (host
+   execution is an explicit opt-in - `OPTARENA_NO_DOCKER=1` or
+   `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
 7. **Cheap extensibility** - a new tool is one driver file. A new task is one
    JSON file (`optarena init` scaffolds one). A new backend is a URL.
 8. **Private by default** - prompts and generated code go only to the
@@ -117,8 +119,8 @@ checkout around next to wherever `optarena` is installed from it.
 ## Quick start
 
 ```bash
-optarena list drivers                 # what tools can be driven
-optarena list cases                   # task catalogue
+optarena drivers list                 # what tools can be driven
+optarena cases list                   # task catalogue (also: cases show <name>)
 
 # One scenario, inline (raw-model baseline against local Ollama)
 optarena run --driver ollama-chat --name baseline --model llama3.2
@@ -128,7 +130,7 @@ optarena run --scenario scenarios/cline-proxy.json \
              --scenario scenarios/cline-ollama-direct.json
 
 # Compare any two saved runs later
-optarena list runs
+optarena runs list
 optarena compare cline-proxy cline-ollama-direct
 
 # Dashboard at http://localhost:8300/dashboard/
@@ -136,15 +138,15 @@ optarena serve
 
 # Sandbox images - check_command runs inside them. Pull the published images
 # (ghcr.io/trysti-labs/optarena/*, minutes) or build locally (~30 min):
-optarena docker pull --all       # every registered image, from GHCR
-optarena docker build            # base image (gcc + python3 + node), locally
-optarena docker build --lang go  # one per-language track
-optarena docker build --all      # everything, locally
+optarena sandbox pull --all      # every registered image, from GHCR
+optarena sandbox build           # base image (gcc + python3 + node), locally
+optarena sandbox build --lang go # one per-language track
+optarena sandbox build --all     # everything, locally
 # (a run also auto-pulls a missing image on first use; OPTARENA_NO_PULL=1 disables)
 
 # Corpus self-verification (CI gate): reference solutions must PASS the real
 # oracle, broken/unmodified variants must FAIL it
-optarena verify-corpus
+optarena cases verify            # (legacy alias: verify-corpus)
 
 # Preflight: which drivers/extensions/backends are ready on this machine
 optarena doctor
@@ -248,6 +250,19 @@ Next.js/Svelte/Deno-Bun, moat hardening, and further repository-scale
 Level 3+ starter repos beyond the two already live - `fastapi-tasktracker`
 and `express-ts-shortlink`).
 
+**Trust model - what these public cases are (and are not).** The corpus ships
+in the open, *including* every case's hidden tests, `reference_solution`, and
+`broken_solutions` - that openness is what lets `verify-corpus` prove each
+oracle can both pass and fail, and lets you audit exactly what a PASS means.
+The flip side: a benchmark-aware agent (or one you prompt to cheat) could in
+principle look the answers up. So treat OptArena results as **acceptance and
+regression evidence for tools you're honestly evaluating** - the A/B and
+before/after workflows above - not as a tamper-resistant public leaderboard.
+Adversarial-grade benchmarking needs private case packs, which the built-in
+`--cases-dir` already supports: point it at a directory of your own unpublished
+cases and nothing about them ever leaves your machine. See
+[SECURITY.md](./SECURITY.md) for the full trust-boundary write-up.
+
 `check_command` runs inside a Docker sandbox whenever Docker is available -
 the shared `optarena-tester` base image (gcc + python3 + node,
 `docker/Dockerfile`) for the original cases, or a per-language image
@@ -256,8 +271,12 @@ cases that need a real framework toolchain pre-installed (FastAPI, Express,
 Spring Boot, Gin, Axum, ASP.NET Core). Build what you need with `optarena
 docker build` (base), `--lang <name>` (one track), or `--all` (everything) so
 case authors and CI need no language toolchains on the host, and generated
-code never executes directly there. Falls back to the host (with a warning)
-when Docker is unavailable, or with `OPTARENA_NO_DOCKER=1`.
+code never executes directly there. When Docker is unavailable, OptArena
+**refuses to run `check_command` on the host** (a clear non-zero error) -
+host execution is an explicit opt-in via `OPTARENA_NO_DOCKER=1` (Docker
+deliberately disabled, e.g. this repo's own unit-test CI) or
+`OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1` (Docker wanted but missing/broken and
+you accept running untrusted commands directly on this machine).
 
 **One container per image needed, not one per check_command call.**
 `optarena run` starts one Docker container per distinct image its loaded
@@ -318,7 +337,7 @@ workspace fails ("the model changed nothing" must never score a pass).
 
 Cases can also declare `"language"`/`"framework"` tags, plus free-form
 benchmark-corpus metadata (`domain`, `difficulty`, `task_type`, `tags` - see
-the built-in catalogue for examples). `optarena list cases --language
+the built-in catalogue for examples). `optarena cases list --language
 python --framework fastapi` and `optarena run --language go --framework gin`
 filter by either or both (ANDed) - useful once you have cases spanning
 several languages and frameworks.
@@ -371,5 +390,5 @@ kept for reference only.
 
 Apache License 2.0 - see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
 Copyright © 2026 Trysti Labs and contributors. An open-source project by
-[Trysti Labs](https://labs.trysti.com); contributions welcome under the same
+[Trysti Labs](https://trysti.com/labs); contributions welcome under the same
 license.

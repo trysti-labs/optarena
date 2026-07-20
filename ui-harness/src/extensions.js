@@ -35,14 +35,23 @@ function openaiBase(url) {
   return b.endsWith('/v1') ? b : `${b}/v1`;
 }
 
-/** Cline's permissive auto-approval object (nested), verified from its bundle. */
+/**
+ * Cline's auto-approval object (nested), verified from its bundle.
+ *
+ * Deliberately workspace-scoped (C-03/C-05): reads/edits OUTSIDE the
+ * workspace, the browser, and MCP are NOT auto-approved - an agent under
+ * evaluation gets exactly the surface a case needs (its own workspace and
+ * command execution there), not a pass to wander the host. A case that
+ * genuinely needs more should say so explicitly rather than every run
+ * granting it silently.
+ */
 function clineAutoApproval() {
   return {
     version: 1, enabled: true, favorites: [], maxRequests: 1000,
     actions: {
-      readFiles: true, readFilesExternally: true, editFiles: true,
-      editFilesExternally: true, executeSafeCommands: true,
-      executeAllCommands: true, useBrowser: false, useMcp: true,
+      readFiles: true, readFilesExternally: false, editFiles: true,
+      editFilesExternally: false, executeSafeCommands: true,
+      executeAllCommands: true, useBrowser: false, useMcp: false,
     },
     enableNotifications: false,
   };
@@ -115,8 +124,11 @@ export const EXTENSIONS = {
         alwaysAllowWrite: true,
         alwaysAllowReadOnly: true,
         alwaysAllowExecute: true,
-        alwaysAllowBrowser: true,
-        alwaysAllowMcp: true,
+        // Browser and MCP stay manual (C-03): neither is needed to complete
+        // a case, and auto-approving them hands an evaluated agent a
+        // network/tool surface no case declares.
+        alwaysAllowBrowser: false,
+        alwaysAllowMcp: false,
         telemetrySetting: 'disabled',
       };
       // Seed BOTH the standard Memento blob (single row under the ext id) AND
@@ -153,8 +165,9 @@ export const EXTENSIONS = {
         alwaysAllowWrite: true,
         alwaysAllowReadOnly: true,
         alwaysAllowExecute: true,
-        alwaysAllowBrowser: true,
-        alwaysAllowMcp: true,
+        // Browser/MCP manual - same reasoning as the Roo descriptor above.
+        alwaysAllowBrowser: false,
+        alwaysAllowMcp: false,
         telemetrySetting: 'disabled',
       };
       const items = { [id]: flags };

@@ -24,6 +24,9 @@ import {
 } from '../src/oracle.js';
 
 const CASE_TIMEOUT = Number(process.env.CASE_TIMEOUT || 150) * 1000;
+// M-09: repeat each case N times (fresh workspace per trial) for a majority
+// verdict + stability signal, mirroring the CLI drivers' --trials.
+const TRIALS = Math.max(1, Number(process.env.TRIALS || 1));
 const POLL_MS = 3000;
 // Max time to let an intermediate (non-final) prompt settle before the next one.
 const INTER_PROMPT_WAIT = Number(process.env.INTER_PROMPT_WAIT || 150) * 1000;
@@ -322,35 +325,35 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
     try { fs.appendFileSync(RESULTS_FILE, JSON.stringify(rec) + '\n'); } catch { /* best-effort */ }
   }
 
-  for (const testCase of cases) {
-    it(testCase.name, async function () {
-      const prompts = testCase.prompts || [];
-      this.timeout((prompts.length - 1) * INTER_PROMPT_WAIT + CASE_TIMEOUT + 180000);
-      console.log(`\n  === ${testCase.name}: ${testCase.description || ''} ===`);
+  /**
+   * Run ONE trial of a case: clear the workspace, drive the agent through its
+   * prompts, grade on a private copy, and emit one JSONL result line.
+   * Returns { passed, failures }. `duration_s` reports **agent work only** -
+   * time from the first prompt to the last filesystem activity (B-9), not the
+   * trailing idle-poll wait or the oracle grading, so UI durations mean the
+   * same thing CLI-driver durations do.
+   */
+  async function runTrial(testCase, before, expected, trial, nTrials) {
+    let created = [];
+    let failures = ['(no poll yet)'];
+    let oracle = null;
+    const caseStart = Date.now();
+    let lastActivity = caseStart;
 
-      await clearWorkspace();
-      if (DESCRIPTOR.newTaskCommand) await runCommand(DESCRIPTOR.newTaskCommand).catch(() => {});
-      await sleep(1000);
+    const emit = (error) => emitResult({
+      name: testCase.name,
+      passed: !error && failures.length === 0,
+      // agent work only: last observed file activity, not the grade wait
+      duration_s: Math.max(0, (lastActivity - caseStart) / 1000),
+      files: created,
+      failures,
+      error: error ? String(error.message || error) : null,
+      // trial/nTrials let the Python driver group + majority-merge lines
+      extra: { ...(oracle ? { oracle } : {}), trial: trial + 1, n_trials: nTrials },
+    });
 
-      writeSetupFiles(WORKSPACE, testCase.setup_files);
-      const before = snapshot(WORKSPACE);
-      const expected = testCase.expected_files || [];
-
-      let created = [];
-      let failures = ['(no poll yet)'];
-      let oracle = null;
-      const caseStart = Date.now();
-      const emit = (error) => emitResult({
-        name: testCase.name,
-        passed: !error && failures.length === 0,
-        duration_s: (Date.now() - caseStart) / 1000,
-        files: created,
-        failures,
-        error: error ? String(error.message || error) : null,
-        extra: oracle ? { oracle } : {},
-      });
-
-      try {
+    const prompts = testCase.prompts || [];
+    try {
       for (let i = 0; i < prompts.length; i++) {
         const isFinal = i === prompts.length - 1;
         console.log(`  [inject ${i + 1}/${prompts.length}] ${prompts[i].slice(0, 70)}...`);
@@ -358,7 +361,6 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
 
         const budget = isFinal ? CASE_TIMEOUT : INTER_PROMPT_WAIT;
         const deadline = Date.now() + budget;
-        let lastActivity = Date.now();
         let prevSig = '';
         let ticks = 0;
         while (Date.now() < deadline) {
@@ -385,16 +387,44 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
           await sleep(POLL_MS);
         }
       }
+    } catch (err) {
+      emit(err);
+      return { passed: false, failures: [String(err.message || err)] };
+    }
 
-      } catch (err) {
-        emit(err);
-        throw err;
+    console.log(`  [result] created/changed: ${created.join(', ') || 'none'}`);
+    emit(null);
+    return { passed: failures.length === 0, failures };
+  }
+
+  for (const testCase of cases) {
+    it(testCase.name, async function () {
+      const prompts = testCase.prompts || [];
+      const perTrial = (prompts.length - 1) * INTER_PROMPT_WAIT + CASE_TIMEOUT + 180000;
+      this.timeout(perTrial * TRIALS);
+      console.log(`\n  === ${testCase.name}: ${testCase.description || ''}`
+        + (TRIALS > 1 ? ` (${TRIALS} trials)` : '') + ' ===');
+
+      const outcomes = [];
+      for (let trial = 0; trial < TRIALS; trial++) {
+        if (TRIALS > 1) console.log(`  --- trial ${trial + 1}/${TRIALS} ---`);
+        // Fresh workspace + task per trial, so trials are independent.
+        await clearWorkspace();
+        if (DESCRIPTOR.newTaskCommand) await runCommand(DESCRIPTOR.newTaskCommand).catch(() => {});
+        await sleep(1000);
+        writeSetupFiles(WORKSPACE, testCase.setup_files);
+        const before = snapshot(WORKSPACE);
+        outcomes.push(await runTrial(testCase, before, testCase.expected_files || [], trial, TRIALS));
       }
 
-      console.log(`  [result] created/changed: ${created.join(', ') || 'none'}`);
-      emit(null);
-      if (failures.length > 0) {
-        throw new Error(`Case "${testCase.name}" failed:\n   - ${failures.join('\n   - ')}`);
+      // Standalone (non-arena) reporting: pass the spec on a majority of
+      // trial passes. The arena driver ignores this and majority-merges the
+      // emitted JSONL lines itself.
+      const passes = outcomes.filter((o) => o.passed).length;
+      if (passes * 2 <= outcomes.length) {
+        const lastFail = [...outcomes].reverse().find((o) => !o.passed);
+        throw new Error(`Case "${testCase.name}" failed (${passes}/${TRIALS} trials passed):\n`
+          + `   - ${(lastFail ? lastFail.failures : ['unknown']).join('\n   - ')}`);
       }
     });
   }

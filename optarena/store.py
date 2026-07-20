@@ -101,6 +101,11 @@ def rebuild_index() -> Path:
             rec = json.loads(f.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             continue
+        # A foreign/hand-edited JSON file in runs/ (parses, but isn't a
+        # RunRecord) must not take down the whole index rebuild - and with it
+        # the dashboard - with a KeyError. Skip it like a corrupt file.
+        if not isinstance(rec, dict) or "run_id" not in rec:
+            continue
         entries.append({
             "run_id": rec["run_id"],
             "file": f"runs/{f.name}",

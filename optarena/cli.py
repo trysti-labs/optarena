@@ -1,30 +1,36 @@
 """
 optarena/cli.py
 ────────────
-Command-line interface.
+Command-line interface. Commands are grouped by noun:
 
     optarena  (or: python -m optarena) run --scenario s1.json [--scenario s2.json]
     optarena  (or: python -m optarena) run --driver aider --model llama3.2 \
            --base-url http://localhost:11434 --name aider-run [--cases a,b]
-    optarena  (or: python -m optarena) compare <run_ref_a> <run_ref_b>
-    optarena  (or: python -m optarena) regression <run_ref_a> <run_ref_b>
-    optarena  (or: python -m optarena) list [runs|cases|drivers]
+    optarena  (or: python -m optarena) compare <run_ref_a> <run_ref_b> [--force]
+    optarena  (or: python -m optarena) regression <before> <after>
+    optarena  (or: python -m optarena) cases list|show|init|validate|verify
+    optarena  (or: python -m optarena) runs list|show
+    optarena  (or: python -m optarena) drivers list
+    optarena  (or: python -m optarena) sandbox build|pull|status [--lang X|--all]
     optarena  (or: python -m optarena) serve [--port 8300]
     optarena  (or: python -m optarena) doctor [--base-url URL]
-    optarena  (or: python -m optarena) init [dir]
-    optarena  (or: python -m optarena) docker build|pull [--lang X|--all]
-    optarena  (or: python -m optarena) verify-corpus [--cases a,b]
 
 Passing two --scenario files to `run` executes both and prints + saves the
 comparison automatically.
+
+Legacy spellings (`list [runs|cases|drivers]`, `init`, `verify-corpus`,
+`docker build|pull`) still work as aliases of the grouped commands above, so
+existing scripts and CI keep running unchanged.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import http.server
 import sys
+import tempfile
 from pathlib import Path
 
 from .cases import (
@@ -104,7 +110,17 @@ def cmd_run(args) -> int:
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
-        path = save_run(rec)
+        try:
+            path = save_run(rec)
+        except FileExistsError as e:
+            # run_id collision (clock rollback / copied results dir) - a paid
+            # run just completed, so keep its record recoverable rather than
+            # dying with a traceback after the work is done.
+            print(f"error: {e}", file=sys.stderr)
+            fallback = Path(tempfile.mkstemp(prefix=f"{rec.run_id}_", suffix=".json")[1])
+            fallback.write_text(json.dumps(rec.to_dict(), indent=2), encoding="utf-8")
+            print(f"  run record preserved at {fallback}", file=sys.stderr)
+            return 2
         s = rec.summary
         print(f"  -> {s['passed']}/{s['cases']} passed "
               f"(mean {s['mean_duration_s']}s) - saved {path.name}")
@@ -309,7 +325,6 @@ def cmd_doctor(args) -> int:
     import shutil as _shutil
     import subprocess as _sp
     import urllib.request as _rq
-    from .drivers import DRIVERS
     from .drivers.cli_agents import CLI_AGENTS
 
     ok = True
@@ -324,8 +339,10 @@ def cmd_doctor(args) -> int:
 
     def _check_info(label: str, good: bool, detail: str = "") -> None:
         # Like _check but advisory only - doesn't flip the overall exit code.
-        # Used for docker: recommended sandboxing, not a hard requirement
-        # (check_command falls back to running on the host without it).
+        # Used for docker: strongly recommended (without it, check_command
+        # REFUSES to run unless host execution is explicitly opted into via
+        # OPTARENA_NO_DOCKER=1 or OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1), but a
+        # doctor run on a docker-less machine shouldn't read as broken.
         mark = "ok " if good else "MISS"
         print(f"  [{mark}] {label}" + (f" - {detail}" if detail and not good else ""))
 
@@ -454,6 +471,161 @@ def cmd_init(args) -> int:
     return 0
 
 
+def cmd_case_show(args) -> int:
+    """Print one case in full: prompts, oracle, metadata - so nobody has to
+    hunt down and read the raw JSON to see what a PASS actually requires."""
+    try:
+        cases = load_cases([args.name], cases_dir=args.cases_dir)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    c = cases[0]
+    print(f"\n  {c['name']}  ({c.get('language', '-')}/{c.get('framework', '-')}, "
+          f"task_type={c.get('task_type', '-')}, difficulty={c.get('difficulty', '-')})")
+    print(f"  {c.get('description', '')}\n")
+    for i, prompt in enumerate(c.get("prompts", []), 1):
+        print(f"  prompt {i}: {prompt}")
+    if c.get("setup_repo"):
+        print(f"\n  setup_repo: {c['setup_repo']}" + (" (+ git_init)" if c.get("git_init") else ""))
+    if c.get("setup_files"):
+        print(f"  setup_files: {', '.join(c['setup_files'])}")
+    print(f"\n  expected_files: {json.dumps(c.get('expected_files', []), indent=2)}")
+    if c.get("test_setup_files"):
+        print(f"  hidden test files: {', '.join(c['test_setup_files'])}")
+    if c.get("check_command"):
+        print(f"  check_command: {c['check_command']}"
+              + (f"  (timeout {c['check_command_timeout']}s)" if c.get("check_command_timeout") else ""))
+        print(f"  docker_image: {c.get('docker_image') or 'default'}")
+    n_broken = len(c.get("broken_solutions") or [])
+    print(f"  self-verification: reference_solution {'yes' if c.get('reference_solution') else 'NO'}, "
+          f"{n_broken} broken variant(s)")
+    return 0
+
+
+def cmd_validate(args) -> int:
+    """Schema-validate case files (a directory or the built-in catalogue)
+    without running anything - the fail-fast check `run`/`verify` do
+    implicitly, exposed standalone for case authors and CI."""
+    try:
+        cases = load_cases(cases_dir=args.cases_dir)
+    except ValueError as e:            # SchemaError carries file + key context
+        print(f"invalid: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    where = args.cases_dir or "built-in catalogue"
+    print(f"  ok: {len(cases)} case(s) in {where} are structurally valid")
+    return 0
+
+
+def cmd_run_show(args) -> int:
+    """Summary + per-case table for one saved run."""
+    try:
+        run = load_run(args.run_ref)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    s = run.get("summary", {})
+    sc = run.get("scenario", {})
+    b = sc.get("backend", {})
+    print(f"\n  {run['run_id']}")
+    print(f"  driver={sc.get('driver')}  backend={b.get('model')}@{b.get('base_url')}"
+          f"  started={run.get('started_at')}")
+    man = run.get("manifest") or {}
+    if man:
+        print(f"  manifest: {man.get('case_count')} case(s) hash {man.get('case_set_hash')}, "
+              f"oracle v{man.get('oracle_version')}, trials={man.get('trials')}")
+    print(f"  {s.get('passed', '?')}/{s.get('cases', '?')} passed "
+          f"(mean {s.get('mean_duration_s', '?')}s"
+          + (f", ${s['total_cost_usd']:.2f}" if s.get("total_cost_usd") is not None else "")
+          + ")\n")
+    for c in run.get("cases", []):
+        status = "PASS" if c.get("passed") else ("ERROR" if c.get("error") else "FAIL")
+        detail = "" if c.get("passed") else \
+            f"  - {c.get('error') or '; '.join((c.get('failures') or [])[:1])}"
+        print(f"  {status:5} {c['name']:40} {c.get('duration_s', 0):6.1f}s{detail}")
+    return 0
+
+
+def cmd_sandbox_status(args) -> int:
+    """Scriptable view of what `doctor`'s docker section reports: daemon
+    reachability and which sandbox images are built locally."""
+    import subprocess as _sp
+
+    try:
+        running = _sp.run(["docker", "info"], capture_output=True, timeout=10).returncode == 0
+    except (OSError, _sp.TimeoutExpired):
+        running = False
+    print(f"  docker daemon: {'reachable' if running else 'NOT reachable'}")
+    if not running:
+        print("  (install/start Docker - without it check_command refuses to run; "
+              "see OPTARENA_ALLOW_UNSAFE_HOST_EXEC in the docs)")
+        return 1
+    missing = 0
+    for lang, image in DOCKER_IMAGES.items():
+        built = docker_image_available(image)
+        if not built:
+            missing += 1
+        hint = "" if built else \
+            f"  <- optarena sandbox build --lang {lang}" if lang != "base" else "  <- optarena sandbox build"
+        print(f"  [{'ok ' if built else 'MISS'}] {image}{hint}")
+    return 0 if missing == 0 else 1
+
+
+def _rewrite_legacy_argv(argv: list[str] | None) -> list[str] | None:
+    """
+    Translate the pre-grouping command spellings to the grouped ones so both
+    keep working with a single code path and a clean `--help`:
+
+        list [runs|cases|drivers]  ->  <that-noun> list
+        init [dir]                 ->  cases init [dir]
+        verify-corpus ...          ->  cases verify ...
+        docker build|pull ...      ->  sandbox build|pull ...
+
+    Only the command token is rewritten; all flags pass through untouched.
+    The single global option that takes a value (`--results-dir X`) is skipped
+    over when locating the command token.
+    """
+    import sys as _sys
+    if argv is None:
+        argv = _sys.argv[1:]
+    argv = list(argv)
+
+    # Find the command token: first arg that isn't the global option or its value.
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok in ("--results-dir",):
+            i += 2
+            continue
+        if tok.startswith("--results-dir="):
+            i += 1
+            continue
+        if tok in ("-h", "--help"):
+            return argv
+        break
+    if i >= len(argv):
+        return argv
+
+    cmd = argv[i]
+    rest = argv[i + 1:]
+    head = argv[:i]
+
+    if cmd == "list":
+        noun = "runs"
+        if rest and rest[0] in ("runs", "cases", "drivers"):
+            noun, rest = rest[0], rest[1:]
+        return head + [noun, "list", *rest]
+    if cmd == "init":
+        return head + ["cases", "init", *rest]
+    if cmd == "verify-corpus":
+        return head + ["cases", "verify", *rest]
+    if cmd == "docker":
+        return head + ["sandbox", *rest]
+    return argv
+
+
 def main(argv: list[str] | None = None) -> int:
     # Captured tool output is echoed into our own prints (oracle tails, verify
     # details) and may contain characters a non-UTF-8 console can't encode
@@ -477,7 +649,9 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--kind", default="ollama", choices=["ollama", "openai"])
     p_run.add_argument("--base-url", default=os.environ.get("OPTARENA_BASE_URL", "http://localhost:11434"))
     p_run.add_argument("--model", default=os.environ.get("OPTARENA_MODEL", "llama3.2"))
-    p_run.add_argument("--api-key", default="optarena")
+    # OPTARENA_API_KEY env fallback: argv is visible in `ps`/shell history,
+    # so a real key should come from the environment, not the command line.
+    p_run.add_argument("--api-key", default=os.environ.get("OPTARENA_API_KEY", "optarena"))
     p_run.add_argument("--cases", help="comma-separated case names (default all)")
     p_run.add_argument("--cases-dir", help="load cases from this directory instead of the built-in catalogue")
     p_run.add_argument("--language", help="only run cases tagged with this language (see `optarena list cases`)")
@@ -510,12 +684,59 @@ def main(argv: list[str] | None = None) -> int:
     p_reg.add_argument("run_b", help="candidate (\"after\") run")
     p_reg.set_defaults(fn=cmd_regression)
 
-    p_list = sub.add_parser("list", help="list runs / cases / drivers")
-    p_list.add_argument("what", nargs="?", default="runs",
-                        choices=["runs", "cases", "drivers"])
-    p_list.add_argument("--language", help="(with `cases`) only show cases tagged with this language")
-    p_list.add_argument("--framework", help="(with `cases`) only show cases tagged with this framework")
-    p_list.set_defaults(fn=cmd_list)
+    # ── Noun-grouped commands ──────────────────────────────────────────────
+    # `cases`/`runs`/`drivers`/`sandbox` group what used to be spread over
+    # `list`, `init`, `verify-corpus`, and `docker`. The legacy spellings are
+    # registered further down as aliases so existing scripts keep working.
+
+    p_cases = sub.add_parser("cases", help="the task catalogue: list/show/init/validate/verify")
+    cases_sub = p_cases.add_subparsers(dest="cases_command", required=True)
+    pc_list = cases_sub.add_parser("list", help="list cases (optionally filtered)")
+    pc_list.add_argument("--language", help="only cases tagged with this language")
+    pc_list.add_argument("--framework", help="only cases tagged with this framework")
+    pc_list.set_defaults(fn=cmd_list, what="cases")
+    pc_show = cases_sub.add_parser("show", help="print one case in full (prompts, oracle, metadata)")
+    pc_show.add_argument("name")
+    pc_show.add_argument("--cases-dir", help="load from this directory instead of the built-in catalogue")
+    pc_show.set_defaults(fn=cmd_case_show)
+    pc_init = cases_sub.add_parser("init", help="scaffold a project-local cases/ directory")
+    pc_init.add_argument("dir", nargs="?", default="cases", help="target directory (default ./cases)")
+    pc_init.set_defaults(fn=cmd_init)
+    pc_val = cases_sub.add_parser("validate", help="schema-validate case files without running anything")
+    pc_val.add_argument("--cases-dir", help="directory to validate (default: the built-in catalogue)")
+    pc_val.set_defaults(fn=cmd_validate)
+    pc_ver = cases_sub.add_parser(
+        "verify", help="CI gate: reference solutions must pass the oracle, broken variants must fail")
+    pc_ver.add_argument("--cases", help="comma-separated case names (default all)")
+    pc_ver.add_argument("--cases-dir", help="load cases from this directory")
+    pc_ver.add_argument("--language", help="only verify cases tagged with this language")
+    pc_ver.add_argument("--framework", help="only verify cases tagged with this framework")
+    pc_ver.set_defaults(fn=cmd_verify_corpus)
+
+    p_runs = sub.add_parser("runs", help="saved runs: list/show")
+    runs_sub = p_runs.add_subparsers(dest="runs_command", required=True)
+    runs_sub.add_parser("list", help="saved runs, newest first").set_defaults(fn=cmd_list, what="runs")
+    pr_show = runs_sub.add_parser("show", help="summary + per-case table for one run")
+    pr_show.add_argument("run_ref", help="run id, filename, path, or unique substring")
+    pr_show.set_defaults(fn=cmd_run_show)
+
+    p_drivers = sub.add_parser("drivers", help="driver registry")
+    drivers_sub = p_drivers.add_subparsers(dest="drivers_command", required=True)
+    drivers_sub.add_parser("list", help="every driver with kind/backend/status").set_defaults(
+        fn=cmd_list, what="drivers")
+
+    p_sandbox = sub.add_parser("sandbox", help="the optarena-tester Docker sandbox images")
+    sandbox_sub = p_sandbox.add_subparsers(dest="sandbox_command", required=True)
+    for action in ("build", "pull"):
+        p_act = sandbox_sub.add_parser(
+            action, help=f"{action} sandbox image(s) "
+                         f"({'locally from docker/' if action == 'build' else 'from ghcr.io'})")
+        p_act.add_argument("--lang", choices=list(DOCKER_IMAGES),
+                           help="only this track's image (default: base)")
+        p_act.add_argument("--all", action="store_true", help="every registered image")
+        p_act.set_defaults(fn=cmd_docker, action=action)
+    sandbox_sub.add_parser("status", help="daemon reachability + which images are built").set_defaults(
+        fn=cmd_sandbox_status)
 
     p_serve = sub.add_parser("serve", help="serve the results dashboard")
     p_serve.add_argument("--port", type=int, default=8300)
@@ -526,27 +747,10 @@ def main(argv: list[str] | None = None) -> int:
     p_doc.add_argument("--kind", default="ollama", choices=["ollama", "openai"])
     p_doc.set_defaults(fn=cmd_doctor)
 
-    p_init = sub.add_parser("init", help="scaffold a project-local cases/ directory")
-    p_init.add_argument("dir", nargs="?", default="cases", help="target directory (default ./cases)")
-    p_init.set_defaults(fn=cmd_init)
-
-    p_ver = sub.add_parser("verify-corpus",
-                           help="CI gate: reference solutions must pass the oracle, broken variants must fail")
-    p_ver.add_argument("--cases", help="comma-separated case names (default all)")
-    p_ver.add_argument("--cases-dir", help="load cases from this directory")
-    p_ver.add_argument("--language", help="only verify cases tagged with this language")
-    p_ver.add_argument("--framework", help="only verify cases tagged with this framework")
-    p_ver.set_defaults(fn=cmd_verify_corpus)
-
-    p_docker = sub.add_parser("docker", help="manage the optarena-tester sandbox image(s)")
-    p_docker.add_argument("action", choices=["build", "pull"],
-                          help="build locally, or pull the published ghcr.io images")
-    p_docker.add_argument("--lang", choices=list(DOCKER_IMAGES),
-                          help="only this track's image (default: base)")
-    p_docker.add_argument("--all", action="store_true", help="every registered image")
-    p_docker.set_defaults(fn=cmd_docker)
-
-    args = parser.parse_args(argv)
+    # Legacy spellings are rewritten to the grouped commands BEFORE parsing
+    # (see _rewrite_legacy_argv), so scripts/CI using the old names keep
+    # working while `--help` shows only the clean, canonical command set.
+    args = parser.parse_args(_rewrite_legacy_argv(argv))
     if getattr(args, "results_dir", None):
         store.set_results_dir(args.results_dir)
     return args.fn(args)

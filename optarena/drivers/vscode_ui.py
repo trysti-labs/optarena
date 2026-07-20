@@ -1,8 +1,8 @@
 """
 optarena/drivers/vscode_ui.py
 ──────────────────────────
-Drives real VS Code extension UIs (Cline / Roo Code / Continue) via the
-`ui-harness` WebdriverIO harness in ../../ui-harness. That harness launches an
+Drives real VS Code extension UIs (Cline / Roo Code / Continue / Kilo Code)
+via the `ui-harness` WebdriverIO harness in ../../ui-harness. That harness launches an
 isolated VS Code, seeds the extension's config for the scenario backend,
 types prompts into the actual webview chat, auto-approves, and verifies the
 workspace diff - the OptArena driver just orchestrates it and collects results.
@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 
 from ..scenario import Scenario
-from .base import CaseResult, Driver
+from .base import CaseResult, Driver, subprocess_env
 
 HARNESS_DIR = Path(__file__).resolve().parents[2] / "ui-harness"
 
@@ -36,6 +36,9 @@ class VSCodeUIDriver(Driver):
         self.ext = ext
         self.name = f"{ext}-ui"
         self._results: dict[str, CaseResult] = {}
+        # Set by the runner (M-09): repeat each case this many times inside the
+        # harness for a majority verdict + stability signal. 1 = historical.
+        self.trials = 1
 
     def prepare(self, scenario: Scenario, workspace: Path) -> None:
         if not (HARNESS_DIR / "package.json").exists():
@@ -54,8 +57,26 @@ class VSCodeUIDriver(Driver):
         results_file = Path(tmp_name)
         backend = scenario.backend
 
-        env = {k: v for k, v in os.environ.items()
-               if k != "ELECTRON_RUN_AS_NODE" and not k.startswith("VSCODE_")}
+        # C-03: an explicit allowlist, like the CLI drivers - NOT a filtered
+        # copy of the whole host environment. This env reaches npm -> wdio ->
+        # VS Code -> the evaluated extension, so a stray host secret here is a
+        # stray host secret inside the agent under test. Beyond the shared
+        # base list, VS Code/Chromium need the display/session vars to launch
+        # at all; wdio needs its own proxy/cache knobs when the user sets them.
+        env = subprocess_env(passthrough=(
+            # GUI/session (Linux X11/Wayland, macOS launchd, general)
+            "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+            "XDG_SESSION_TYPE", "DBUS_SESSION_BUS_ADDRESS", "SHELL",
+            "USER", "LOGNAME",
+            # harness knobs (only forwarded when actually set)
+            "EXT_PATH", "VSCODE_VERSION", "ONLY_CASE", "INTER_PROMPT_WAIT",
+            "IDLE_MS", "OPTARENA_UI_DIR", "OPTARENA_NO_DOCKER",
+            "OPTARENA_ALLOW_UNSAFE_HOST_EXEC", "OPTARENA_DOCKER_IMAGE",
+            "OPTARENA_NO_PULL",
+            # proxy settings npm/VS Code downloads may require
+            "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+            "http_proxy", "https_proxy", "no_proxy",
+        ))
         env.update({
             "EXT": self.ext,
             "BACKEND_URL": backend.base_url,
@@ -75,13 +96,17 @@ class VSCodeUIDriver(Driver):
             env["CASES"] = ",".join(scenario.cases)
         if scenario.timeout:
             env["CASE_TIMEOUT"] = str(scenario.timeout)
+        if self.trials > 1:
+            env["TRIALS"] = str(self.trials)
 
         npm = "npm.cmd" if os.name == "nt" else "npm"
-        # Bound the whole harness run: per-case budget + launch slack, never
-        # less than 30 min (a cold first run also downloads VS Code, ~280 MB).
+        # Bound the whole harness run: per-case budget x trials + launch slack,
+        # never less than 30 min (a cold first run also downloads VS Code,
+        # ~280 MB).
         from ..cases import load_cases
         n_cases = len(load_cases(scenario.cases, cases_dir=scenario.cases_dir))
-        run_timeout = max(60 * 30, n_cases * ((scenario.timeout or 150) + 120) + 600)
+        run_timeout = max(60 * 30,
+                          n_cases * self.trials * ((scenario.timeout or 150) + 120) + 600)
         print(f"  [{self.name}] launching VS Code UI run (this takes minutes)...")
         proc = subprocess.run(
             [npm, "test"], cwd=HARNESS_DIR, env=env,
@@ -90,11 +115,18 @@ class VSCodeUIDriver(Driver):
             timeout=run_timeout,
         )
         if results_file.exists():
+            # The harness emits one JSONL line per (case, trial). Group by case
+            # name and, when a case ran more than once, merge into the same
+            # majority-verdict + per-trial CaseResult the CLI drivers produce
+            # (M-09) - reusing the runner's _merge_trials keeps UI and CLI
+            # stability metrics identical.
+            from ..runner import _merge_trials
+            per_case: dict[str, list[CaseResult]] = {}
             for line in results_file.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
                     continue
                 rec = json.loads(line)
-                self._results[rec["name"]] = CaseResult(
+                per_case.setdefault(rec["name"], []).append(CaseResult(
                     name=rec["name"],
                     passed=rec.get("passed", False),
                     duration_s=rec.get("duration_s", 0.0),
@@ -102,7 +134,9 @@ class VSCodeUIDriver(Driver):
                     failures=rec.get("failures", []),
                     error=rec.get("error"),
                     extra=rec.get("extra", {}),
-                )
+                ))
+            for name, trials in per_case.items():
+                self._results[name] = _merge_trials(name, trials)
             try:
                 results_file.unlink(missing_ok=True)
             except OSError:

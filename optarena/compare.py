@@ -141,6 +141,11 @@ def regression_summary(cmp: dict) -> dict:
     cost_delta = round(cb - ca, 4) if (ca is not None and cb is not None) else None
     cost_delta_pct = round(cost_delta / ca * 100, 1) if cost_delta is not None and ca else None
     return {
+        # M-03: carry the manifest-compatibility verdict through, so
+        # format_regression can warn as loudly as format_table does - a
+        # regression gate comparing two runs that measured different things
+        # must say so, not print clean-looking deltas.
+        "compatibility": cmp.get("compatibility", {}),
         "a_label": cmp["a"]["label"], "b_label": cmp["b"]["label"],
         "pass_rate_a": sa["pass_rate"], "pass_rate_b": sb["pass_rate"],
         "pass_rate_delta_pp": round((sb["pass_rate"] - sa["pass_rate"]) * 100, 1),
@@ -160,6 +165,17 @@ def format_regression(summary: dict) -> str:
     s = summary
     lines = [
         f"\n  {s['a_label']}  ->  {s['b_label']}",
+    ]
+    # M-03: same warning format_table shows - deltas between runs that did
+    # not measure the same thing are not a like-for-like regression verdict.
+    compat = s.get("compatibility") or {}
+    if compat.get("reasons"):
+        header = ("NOT DIRECTLY COMPARABLE" if compat.get("comparable") is False
+                  else "COMPARABILITY UNVERIFIED")
+        lines.append(f"  ** {header} **")
+        for reason in compat["reasons"]:
+            lines.append(f"     - {reason}")
+    lines += [
         "",
         f"  accuracy    {s['pass_rate_a']:.0%} -> {s['pass_rate_b']:.0%}  "
         f"({'+' if s['pass_rate_delta_pp'] >= 0 else ''}{s['pass_rate_delta_pp']}pp)",

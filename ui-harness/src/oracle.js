@@ -1,9 +1,13 @@
 /**
  * src/oracle.js
  * ─────────────
- * File-system oracle (ported from the Python harness's workspace.py) plus the
- * test-case loader.  The workspace diff is the primary correctness signal: the
- * test passes when Cline creates files matching each case's expected_files spec.
+ * File-system oracle - the JS mirror of `optarena/cases.py` (snapshot,
+ * expected-file checks, Docker-sandboxed check_command, diff stats, failure
+ * classification) - plus the test-case loader. Behavioral verification is
+ * the primary signal: `test_setup_files` + `check_command` compile/run/assert
+ * the generated code for real (graded on a private copy the agent never
+ * sees); `expected_files` content patterns are only a cheap shape check.
+ * Any semantic change here must be made in cases.py too, and vice versa.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -130,7 +134,7 @@ const DOCKER_IMAGE_DEFAULT = 'optarena-tester:latest';
 // Defense-in-depth flags for every sandbox container that runs a case's
 // check_command (JS mirror of cases._HARDENING_ARGS - keep in sync). Both
 // the shared sandbox and the ephemeral per-call fallback use these; --user
-// (non-root) is deliberately left out, same reasoning as the Python side.
+// (non-root) is opt-in via OPTARENA_SANDBOX_USER (sandboxUserArgs below).
 const HARDENING_ARGS = [
   '--cap-drop', 'ALL',
   '--security-opt', 'no-new-privileges',
@@ -147,6 +151,16 @@ const HARDENING_ARGS = [
   // non-Go images. Keep in sync with cases._HARDENING_ARGS.
   '-e', 'GOCACHE=/tmp/go-build',
 ];
+
+/**
+ * Optional non-root sandbox execution (M-10, mirror of cases._sandbox_user_args):
+ * OPTARENA_SANDBOX_USER=uid:gid runs sandbox containers as that user with
+ * HOME on the writable tmpfs. Opt-in - see the Python side's rationale.
+ */
+function sandboxUserArgs() {
+  const user = process.env.OPTARENA_SANDBOX_USER;
+  return user ? ['--user', user, '-e', 'HOME=/tmp'] : [];
+}
 
 let dockerChecked = false;
 let dockerOk = false;
@@ -176,6 +190,57 @@ function dockerImageAvailable(image) {
 function newOracleInfo(cmd) {
   return { check_command: cmd || null, ran: false, sandbox: null, image: null,
            exit_code: null, duration_s: null, output: '' };
+}
+
+/**
+ * Approximate change size (JS mirror of cases.diff_stats): files touched and
+ * lines changed. Modify-cases diff against the case's own setup_files text;
+ * new files count their full line length.
+ */
+function diffStats(testCase, created, root) {
+  const setupFiles = testCase.setup_files || {};
+  const lineCount = (text) => {
+    if (!text) return 0;
+    const n = (text.match(/\n/g) || []).length;
+    return n + (text.endsWith('\n') ? 0 : 1);
+  };
+  let linesChanged = 0;
+  for (const rel of created) {
+    let content;
+    try {
+      content = fs.readFileSync(path.join(root, rel), 'utf-8');
+    } catch { continue; }
+    const newLines = lineCount(content);
+    const original = setupFiles[rel];
+    linesChanged += original != null
+      ? (Math.abs(newLines - lineCount(original)) || 1)
+      : newLines;
+  }
+  return { files_changed: created.length, lines_changed_approx: linesChanged };
+}
+
+/**
+ * Best-effort failure bucket (JS mirror of cases.classify_failure):
+ * timeout / syntax_error / compile_error / assertion_failure / runtime_error.
+ * Not authoritative and never part of the pass/fail verdict - a richer
+ * metric for the CLI/dashboard/compare table, kept in sync with Python so
+ * UI-driver and CLI-driver runs report the same classes.
+ */
+function classifyFailure(info) {
+  if (info.timed_out || info.exit_code === 124) return 'timeout';
+  if (!info.ran || info.exit_code == null || info.exit_code === 0) return null;
+  const out = (info.output || '').toLowerCase();
+  const cmd = (info.check_command || '').toLowerCase();
+  if (out.includes('timed out')) return 'timeout';
+  if (['syntaxerror', 'indentationerror', 'unterminated', 'unexpected token']
+    .some((s) => out.includes(s))) return 'syntax_error';
+  if (['undefined reference', 'collect2:', 'compilation error',
+    'cannot find symbol', 'error cs', 'error[e', 'undefined:', 'could not compile']
+    .some((s) => out.includes(s))) return 'compile_error';
+  if (['gcc', 'g++', 'cc '].some((t) => cmd.includes(t))
+    && ['error:', 'calledprocesserror'].some((s) => out.includes(s))) return 'compile_error';
+  if (out.includes('assertionerror') || out.includes('assert ')) return 'assertion_failure';
+  return 'runtime_error';
 }
 
 // One shared container PER DISTINCT IMAGE for the WHOLE harness run - mirrors
@@ -214,7 +279,7 @@ export function startDockerSandbox(root, image) {
     execFileSync('docker', [
       'run', '-d', '--rm', '--name', name,
       '--network', 'none', '--memory', '2g', '--cpus', '2',
-      ...HARDENING_ARGS,
+      ...HARDENING_ARGS, ...sandboxUserArgs(),
       '-v', `${resolvedRoot}:/workspace`,
       '-v', `${verifyRoot}:/verify`,
       '-w', '/workspace',
@@ -300,10 +365,17 @@ function runInSandbox(cmd, root, timeoutMs, sandbox, info) {
     return { failures: [], oracle: info };
   } catch (e) {
     info.duration_s = (Date.now() - t0) / 1000;
+    // A spawn-level failure (docker binary gone mid-run: ENOENT) means the
+    // command never executed - `ran` must stay false, not report a phantom
+    // execution with a null exit code.
+    if (e.code === 'ENOENT' && e.status == null && !e.signal) {
+      return { failures: [`check_command could not run (docker exec): ${e.message}`], oracle: info };
+    }
     info.ran = true;
     info.exit_code = e.status ?? null;
     info.output = `${e.stdout || ''}${e.stderr || ''}`.slice(-400).trim();
     if (e.status === 124 || e.status == null) {   // in-container timeout, or outer kill
+      info.timed_out = true;                       // both are timeout-class events
       reapSandbox(sandbox);
     }
     if (e.status === 124) {
@@ -421,6 +493,7 @@ export function runCheckCommand(testCase, root) {
     }
     info.exit_code = res.status ?? null;
     info.output = `${res.stdout || ''}${res.stderr || ''}`.slice(-400).trim();
+    if (timedOut) info.timed_out = true;
     const code = timedOut ? `timed out after ${timeout / 1000}s`
       : (res.status != null ? `exit ${res.status}` : (res.signal || 'error'));
     return { failures: [`check_command failed (${code}): ${cmd}${info.output ? ' :: ' + info.output : ''}`], oracle: info };
@@ -432,7 +505,7 @@ export function runCheckCommand(testCase, root) {
   const dockerArgs = [
     'run', '--rm', '--name', name,
     '--network', 'none', '--memory', '2g', '--cpus', '2',
-    ...HARDENING_ARGS,
+    ...HARDENING_ARGS, ...sandboxUserArgs(),
     '-v', `${path.resolve(root)}:/workspace`, '-w', '/workspace',
     image, 'sh', '-c', cmd,
   ];
@@ -447,9 +520,13 @@ export function runCheckCommand(testCase, root) {
   } catch (e) {
     try { execFileSync('docker', ['rm', '-f', name], { stdio: 'pipe' }); } catch { /* already gone */ }
     info.duration_s = (Date.now() - t0) / 1000;
+    if (e.code === 'ENOENT' && e.status == null && !e.signal) {
+      return { failures: [`check_command could not run (docker): ${e.message}`], oracle: info };
+    }
     info.ran = true;
     info.exit_code = e.status ?? null;
     info.output = `${e.stdout || ''}${e.stderr || ''}`.slice(-400).trim();
+    if (e.status == null) info.timed_out = true;   // outer-timeout kill, not a real exit
     const code = e.status != null ? `exit ${e.status}` : (e.signal || 'error');
     return { failures: [`check_command failed in docker (${code}): ${cmd}${info.output ? ' :: ' + info.output : ''}`], oracle: info };
   }
@@ -515,10 +592,18 @@ export function evaluateCase(testCase, created, root) {
     if (failures.length > 0) {
       const info = newOracleInfo(testCase.check_command);
       info.test_setup_files = testFiles;
+      info.diff = diffStats(testCase, created, root);
       return { failures, oracle: info };
     }
     const result = runCheckCommand(testCase, verifyRoot);
     result.oracle.test_setup_files = testFiles;
+    // Same enrichment as the Python evaluate_case: change-size estimate
+    // always, failure classification only when the check actually failed -
+    // so UI-driver results carry the same metric fields as CLI-driver ones.
+    result.oracle.diff = diffStats(testCase, created, root);
+    if (result.failures.length > 0) {
+      result.oracle.failure_class = classifyFailure(result.oracle);
+    }
     return result;
   } finally {
     fs.rmSync(verifyRoot, { recursive: true, force: true });
@@ -543,6 +628,16 @@ export function writeSetupFiles(root, setupFiles) {
       throw new Error(`setup file path escapes workspace root: ${JSON.stringify(rel)}`);
     }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
+    // The lexical check above can be defeated by a symlinked directory INSIDE
+    // the workspace pointing outside it (path.resolve, unlike Python's
+    // Path.resolve, never touches the filesystem). Now that the parent chain
+    // exists, realpath both sides and re-check physical containment - this is
+    // what keeps the two oracles' H-01 guarantees actually equivalent.
+    const realRoot = fs.realpathSync(resolvedRoot);
+    const realParent = fs.realpathSync(path.dirname(dest));
+    if (realParent !== realRoot && !realParent.startsWith(realRoot + path.sep)) {
+      throw new Error(`setup file path escapes workspace root via symlink: ${JSON.stringify(rel)}`);
+    }
     fs.writeFileSync(dest, content, 'utf-8');
   }
 }

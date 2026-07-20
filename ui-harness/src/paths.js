@@ -34,9 +34,18 @@ export const RESULTS_FILE = process.env.RESULTS_FILE || '';
 /**
  * Per-extension dirs (suffixed so different EXT runs don't collide and don't
  * re-trigger setup). onPrepare wipes + recreates them each run.
+ *
+ * These live OUTSIDE the repo checkout (system temp dir, stable per-extension
+ * name so re-runs reuse the downloaded VS Code/profile), not under
+ * PROJECT_DIR: the agent driven in this workspace gets auto-approved file
+ * reads, and a workspace inside the checkout put the whole repo - including
+ * `.env` secrets and every case's reference_solution - one `../` away from
+ * the code under test. Override with OPTARENA_UI_DIR to pin a location.
  */
-export const STORAGE_PATH = path.join(PROJECT_DIR, `.vscode-storage-${EXT}`);
-export const WORKSPACE = path.join(PROJECT_DIR, `.workspace-${EXT}`);
+const UI_BASE = process.env.OPTARENA_UI_DIR
+  || path.join(os.tmpdir(), 'optarena-ui-harness');
+export const STORAGE_PATH = path.join(UI_BASE, `.vscode-storage-${EXT}`);
+export const WORKSPACE = path.join(UI_BASE, `.workspace-${EXT}`);
 
 /** Where wdio-vscode-service places the VS Code user-data-dir (see service.js). */
 export const USER_DATA_DIR = path.join(STORAGE_PATH, 'settings');

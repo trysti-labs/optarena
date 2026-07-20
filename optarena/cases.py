@@ -91,7 +91,7 @@ DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker"
 # case-defined `check_command` (both the shared DockerSandbox and the
 # ephemeral per-call fallback) - the command itself, and anything it runs,
 # is untrusted (case-authored, and can execute model-generated code). None
-# of the corpus's 396 check_commands install packages at runtime (all
+# of the corpus's 500 check_commands install packages at runtime (all
 # toolchains are baked into the image at build time - verified against the
 # whole corpus), so a read-only rootfs + a writable /tmp scratch is
 # sufficient; --user (non-root) was deliberately left out here since none of
@@ -118,6 +118,21 @@ _HARDENING_ARGS = [
     # adding a second tmpfs mount; harmless no-op on non-Go images.
     "-e", "GOCACHE=/tmp/go-build",
 ]
+
+
+def _sandbox_user_args() -> list[str]:
+    """
+    Optional non-root sandbox execution (M-10): OPTARENA_SANDBOX_USER=uid:gid
+    (e.g. "1000:1000") runs every sandbox container as that user, with HOME
+    pointed at the writable tmpfs so toolchains that write dotfiles/caches
+    still work. Opt-in rather than default because none of the published
+    images create a matching account and each toolchain needs validation
+    under a non-root uid (mvn/dotnet/cargo cache paths) - flip it on, run
+    `optarena cases verify --language <x>`, and report breakage. Mirrored in
+    ui-harness/src/oracle.js.
+    """
+    user = os.environ.get("OPTARENA_SANDBOX_USER")
+    return ["--user", user, "-e", "HOME=/tmp"] if user else []
 
 # Registry of every sandbox image OptArena knows how to build, keyed by the
 # short name used with `optarena docker build --lang <key>`. "base" is the
@@ -401,7 +416,7 @@ class DockerSandbox:
             subprocess.run(
                 ["docker", "run", "-d", "--rm", "--name", self.name,
                  "--network", "none", "--memory", "2g", "--cpus", "2",
-                 *_HARDENING_ARGS,
+                 *_HARDENING_ARGS, *_sandbox_user_args(),
                  "-v", f"{self.root}:/workspace", "-w", "/workspace",
                  self.image, "sleep", "infinity"],
                 capture_output=True, timeout=20, check=True,
@@ -581,6 +596,7 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
         proc = sandbox.exec(cmd, root, timeout)
     except subprocess.TimeoutExpired:
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["timed_out"] = True
         sandbox.reap()
         return [f'check_command timed out after {timeout}s (docker exec): {cmd}'], info
     except (OSError, ValueError) as exc:
@@ -591,6 +607,7 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
     info["exit_code"] = proc.returncode
     info["output"] = ((proc.stdout or "") + (proc.stderr or ""))[-400:].strip()
     if proc.returncode == 124:
+        info["timed_out"] = True
         sandbox.reap()
         return [f'check_command timed out after {timeout}s (docker exec): {cmd}'], info
     if proc.returncode != 0:
@@ -659,6 +676,7 @@ def _run_check_command_local(cmd: str, root: Path, timeout: int, info: dict) -> 
         )
     except subprocess.TimeoutExpired:
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["timed_out"] = True
         return [f'check_command timed out after {timeout}s: {cmd}'], info
     except OSError as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
@@ -684,7 +702,7 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
         # Same resources as the shared DockerSandbox - a Spring Boot app under
         # 512m would OOM here but pass in the shared container, and vice versa.
         "--memory", "2g", "--cpus", "2",
-        *_HARDENING_ARGS,
+        *_HARDENING_ARGS, *_sandbox_user_args(),
         "-v", f"{root.resolve()}:/workspace",
         "-w", "/workspace",
         image,
@@ -699,6 +717,7 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
     except subprocess.TimeoutExpired:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["timed_out"] = True
         return [f'check_command timed out after {timeout}s (docker): {cmd}'], info
     except OSError as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
@@ -721,6 +740,13 @@ def classify_failure(oracle_info: dict) -> str | None:
     the oracle's own pass/fail verdict - just a richer metric surfaced in
     ``extra["oracle"]["failure_class"]`` for the CLI/dashboard/compare table.
     """
+    # Timeouts first: the runners record an explicit `timed_out` marker (a
+    # host timeout never even sets ran/exit_code, and docker's `timeout`
+    # exits 124) - the command's own captured output almost never contains
+    # the words "timed out", so text-sniffing alone made this class
+    # effectively unreachable.
+    if oracle_info.get("timed_out") or oracle_info.get("exit_code") == 124:
+        return "timeout"
     if not oracle_info.get("ran") or oracle_info.get("exit_code") in (None, 0):
         return None
     if "timed out" in (oracle_info.get("output") or "").lower():
@@ -752,9 +778,9 @@ def diff_stats(case: dict, created: list[str], root: Path) -> dict:
     """
     Approximate size of the change for this case: files touched and lines
     changed. For "modify" cases the delta is against the known original
-    content in ``setup_files`` (the pre-run snapshot only stores a
-    size:mtime signature, not content, so this is the best available
-    reference); new files count their full line length.
+    content in ``setup_files`` (the pre-run snapshot stores only a content
+    *hash* per file, not the content itself, so the case's own setup text is
+    the best available reference); new files count their full line length.
     """
     setup_files = case.get("setup_files") or {}
 

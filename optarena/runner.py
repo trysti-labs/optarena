@@ -42,6 +42,34 @@ from .scenario import Scenario
 ORACLE_VERSION = 1
 
 
+def _image_digests(images: list[str]) -> dict[str, str]:
+    """
+    Best-effort map of image tag -> repo digest (H-03): tags like `:latest`
+    are mutable, so a manifest recording only the tag can't prove WHICH image
+    bits actually graded a run. Digests are recorded for evidence/reproduction
+    but deliberately NOT part of `manifest_compatibility` - two machines with
+    byte-different local builds of the same image should warn a human, not
+    hard-block a comparison. Empty entries (image not present locally, Docker
+    down) record as "unknown".
+    """
+    import subprocess
+    out: dict[str, str] = {}
+    for image in images:
+        if image == "host":
+            continue
+        try:
+            proc = subprocess.run(
+                ["docker", "image", "inspect", "--format",
+                 "{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}", image],
+                capture_output=True, text=True, timeout=10,
+            )
+            digest = proc.stdout.strip() if proc.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            digest = ""
+        out[image] = digest or "unknown"
+    return out
+
+
 def build_manifest(scenario: Scenario, cases: list[dict], trials: int) -> dict:
     """
     Immutable identity of WHAT a run measured (M-01): the exact resolved case
@@ -75,6 +103,7 @@ def build_manifest(scenario: Scenario, cases: list[dict], trials: int) -> dict:
         "backend_model": scenario.backend.model,
         "backend_base_url": scenario.backend.base_url,
         "images": images or ["host"],
+        "image_digests": _image_digests(images),
     }
 
 
@@ -121,7 +150,10 @@ def _merge_trials(case_name: str, results: list[CaseResult]) -> CaseResult:
         name=case_name,
         passed=passed,
         duration_s=statistics.mean(r.duration_s for r in results),
-        files=results[-1].files,
+        # Union across trials (first-seen order): showing only the last
+        # trial's files could display a failing trial's file list under a
+        # majority-pass verdict.
+        files=sorted({f for r in results for f in r.files}),
         failures=[] if passed else (last_failed.failures if last_failed else []),
         error=errors[-1] if len(errors) == len(results) else None,
         # True only if EVERY trial's tool invocation reported clean execution
@@ -254,8 +286,15 @@ def run_scenario(
 
     trials = max(1, int(trials))
     if trials > 1 and driver.caches_results:
-        print(f"  [runner] NOTE: {scenario.driver} runs all cases in one session; "
-              f"--trials ignored for this driver")
+        # M-09: a caching driver (the VS Code UI harness) runs the whole case
+        # set once in prepare(), so the runner's own per-case trial loop can't
+        # repeat it. Instead of dropping trials to 1 (which hid stability for
+        # the most stochastic, flakiest driver), hand the trial count TO the
+        # driver so the harness itself repeats each case N times with a fresh
+        # workspace and reports the merged majority verdict + per-trial detail.
+        driver.trials = trials
+        print(f"  [runner] {scenario.driver} runs the case set in one session; "
+              f"repeating each case {trials}x inside the harness")
         trials = 1
     parallel = max(1, int(parallel))
     if parallel > 1 and not driver.parallel_safe:
@@ -309,7 +348,15 @@ def run_scenario(
     # shared sandbox entirely in that case; run_check_command's existing
     # per-call ephemeral `docker run --rm` fallback gives each concurrent
     # case its own isolated container instead (slower, but correct).
-    if parallel > 1:
+    #
+    # C-05: the same skip applies to CUSTOM case packs (`cases_dir` set). The
+    # shared container bind-mounts the WHOLE run root, so one case's
+    # check_command can read or tamper with every other case's workspace -
+    # acceptable for the built-in corpus (repo-controlled, self-verified),
+    # not for a downloaded pack. The ephemeral fallback mounts only that one
+    # case's own workspace directory, so a malicious case is confined to the
+    # case it came from.
+    if parallel > 1 or scenario.cases_dir:
         images_needed = set()
     else:
         images_needed = {

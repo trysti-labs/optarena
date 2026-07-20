@@ -8,7 +8,11 @@
 # build`, then every check_command runs inside a container of this image
 # with the case workspace bind-mounted read-write at /workspace and no
 # network access.
-FROM debian:bookworm-slim
+# Base pinned by multi-arch manifest-list digest (H-03: a floating tag can be
+# silently replaced upstream, changing oracle behavior between identical
+# OptArena commits). The tag stays for readability; the digest is what's
+# actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \

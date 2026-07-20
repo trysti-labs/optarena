@@ -6,14 +6,42 @@ on:
   pull_request:
 
 jobs:
-  unit-tests:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff (lint gate)
+        run: ruff check optarena tests
+
+  # OS/Python matrix, and deliberately NO `python`-is-python3 shim: this is the
+  # exact environment class the audit's original 5/75 failure lived in (a host
+  # with python3 but no bare `python`). Catches that regression class plus
+  # macOS/Windows host-fallback portability. Tests run without Docker.
+  unit-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Node present so the cross-oracle conformance suite (tests/test_conformance.py)
+      # runs instead of skipping - it's the H-09 guarantee that the Python and
+      # JS oracles agree byte-for-byte.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
       - name: Unit tests (no Docker)
+        shell: bash
         run: OPTARENA_NO_DOCKER=1 python -m unittest discover tests -v
 
   # Corpus self-verification: every case's reference_solution must PASS the
@@ -42,4 +70,4 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify corpus (pulls sandbox images from GHCR on demand)
-        run: python -m optarena verify-corpus
+        run: python -m optarena cases verify

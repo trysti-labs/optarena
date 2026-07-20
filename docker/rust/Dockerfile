@@ -14,7 +14,11 @@
 # check_command_timeout. Case test scripts locate their binary via
 # $CARGO_TARGET_DIR/debug/<bin>. Concurrent case builds are safe: cargo
 # file-locks the target dir and serializes.
-FROM rust:1-bookworm
+# Base pinned by multi-arch manifest-list digest (H-03: a floating tag can be
+# silently replaced upstream, changing oracle behavior between identical
+# OptArena commits). The tag stays for readability; the digest is what's
+# actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
+FROM rust:1-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \

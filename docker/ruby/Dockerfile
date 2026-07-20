@@ -6,7 +6,11 @@
 # stable across base-image updates. Cases run their tests with
 # `ruby -Itest -Ilib test/<name>_test.rb`; a test file requires the code under
 # test via a relative require. No gems install at check_command time.
-FROM ruby:3.3-slim
+# Base pinned by multi-arch manifest-list digest (H-03: a floating tag can be
+# silently replaced upstream, changing oracle behavior between identical
+# OptArena commits). The tag stays for readability; the digest is what's
+# actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
+FROM ruby:3.3-slim@sha256:fb6613e39db7b37efb7976390f0fcd4da2ea018a74770ae4a01d21a4c441f637
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \

@@ -9,6 +9,7 @@ atomic results store.
 import argparse
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -63,7 +64,7 @@ class OracleTests(unittest.TestCase):
         self.assertTrue(failures and "line(s)" in failures[0])
 
     def test_check_command_pass_and_fail(self):
-        ok = {"check_command": 'python -c "import out; assert out.add(1,2)==3"'}
+        ok = {"check_command": f'"{sys.executable}" -c "import out; assert out.add(1,2)==3"'}
         failures, oracle = run_check_command(ok, self.ws)
         self.assertEqual(failures, [])
         self.assertTrue(oracle["ran"])
@@ -71,14 +72,14 @@ class OracleTests(unittest.TestCase):
         self.assertIn(oracle["sandbox"], ("host", "docker"))
         self.assertIsInstance(oracle["duration_s"], float)
 
-        bad = {"check_command": 'python -c "raise SystemExit(2)"'}
+        bad = {"check_command": f'"{sys.executable}" -c "raise SystemExit(2)"'}
         failures, oracle = run_check_command(bad, self.ws)
         self.assertTrue(failures and "exit 2" in failures[0])
         self.assertEqual(oracle["exit_code"], 2)
 
     def test_evaluate_case_skips_command_when_files_fail(self):
         case = {"expected_files": [{"path_pattern": "missing.py"}],
-                "check_command": 'python -c "raise SystemExit(9)"'}
+                "check_command": f'"{sys.executable}" -c "raise SystemExit(9)"'}
         failures, oracle = evaluate_case(case, [], self.ws)
         self.assertEqual(len(failures), 1)          # only the file failure
         self.assertIn("missing.py", failures[0])
@@ -157,7 +158,7 @@ class TestSetupFilesTests(unittest.TestCase):
             "test_setup_files": {
                 "test_add.py": "import add\nassert add.add(2, 3) == 5\n",
             },
-            "check_command": "python test_add.py",
+            "check_command": f'"{sys.executable}" test_add.py',
         }
         failures, oracle = evaluate_case(case, ["add.py"], self.ws)
         self.assertEqual(failures, [])
@@ -173,7 +174,7 @@ class TestSetupFilesTests(unittest.TestCase):
         case = {
             "expected_files": [{"path_pattern": "add.py"}],
             "test_setup_files": {"test_add.py": "import add\nassert add.add(2, 3) == 5\n"},
-            "check_command": "python test_add.py",
+            "check_command": f'"{sys.executable}" test_add.py',
         }
         failures, oracle = evaluate_case(case, ["add.py"], self.ws)  # test_add.py deliberately absent from `created`
         self.assertTrue(failures and "exit" in failures[0])  # real bug (subtraction) caught
@@ -445,12 +446,14 @@ class RunScenarioEmptyCasesTests(unittest.TestCase):
 
 class ParallelSandboxSharingTests(unittest.TestCase):
     """
-    H-02: a shared DockerSandbox container is only safe for serial execution.
-    Concurrent `docker exec` calls into ONE container under --parallel would
-    share a process table/network namespace, and one case's timeout-reap
-    (`kill -9 -1`) would kill every other in-flight case sharing it. Under
-    parallel>1, run_scenario must skip the shared sandbox entirely so
-    run_check_command's per-call ephemeral fallback isolates each case.
+    H-02/C-05: the shared DockerSandbox container (whole-run-root mount) is
+    only used when it's safe on BOTH axes - serial execution (concurrent
+    `docker exec`s would share a process table and the timeout-reap
+    `kill -9 -1` would kill sibling cases) AND the trusted built-in corpus
+    (a custom `cases_dir` pack could ship a check_command that reads/tampers
+    with other cases' workspaces via the shared mount). Everything else gets
+    run_check_command's per-call ephemeral container, which mounts only that
+    case's own workspace.
     """
 
     def setUp(self):
@@ -460,9 +463,9 @@ class ParallelSandboxSharingTests(unittest.TestCase):
         }), encoding="utf-8")
 
     @staticmethod
-    def _fake_driver():
+    def _fake_driver(name="c1"):
         driver = mock.Mock(parallel_safe=True, caches_results=False)
-        driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
+        driver.run_case.return_value = CaseResult(name=name, passed=True, duration_s=0.1)
         return driver
 
     def test_no_sandbox_started_when_parallel(self):
@@ -472,12 +475,85 @@ class ParallelSandboxSharingTests(unittest.TestCase):
             run_scenario(sc, parallel=4)
         sandbox_cls.assert_not_called()
 
-    def test_sandbox_still_started_when_serial(self):
+    def test_no_shared_sandbox_for_custom_case_pack(self):
+        # C-05: a custom cases_dir is untrusted input - it must never share
+        # one whole-run-root mount across its cases, even serially.
         sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
         with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
              mock.patch("optarena.runner.DockerSandbox") as sandbox_cls:
             run_scenario(sc, parallel=1)
+        sandbox_cls.assert_not_called()
+
+    def test_sandbox_still_started_for_builtin_corpus_serial(self):
+        # The built-in catalogue (repo-controlled, self-verified) keeps the
+        # fast shared-container path for serial runs.
+        sc = Scenario(name="x", driver="aider", cases=["create_factorial"])
+        with mock.patch("optarena.runner.get_driver",
+                        return_value=self._fake_driver("create_factorial")), \
+             mock.patch("optarena.runner.DockerSandbox") as sandbox_cls:
+            run_scenario(sc, parallel=1)
         sandbox_cls.assert_called_once()
+
+
+class LegacyArgvRewriteTests(unittest.TestCase):
+    """The pre-grouping command spellings must rewrite to the grouped ones so
+    existing scripts/CI keep working while `--help` stays clean."""
+
+    def _rw(self, argv):
+        from optarena.cli import _rewrite_legacy_argv
+        return _rewrite_legacy_argv(argv)
+
+    def test_list_forms(self):
+        self.assertEqual(self._rw(["list"]), ["runs", "list"])
+        self.assertEqual(self._rw(["list", "runs"]), ["runs", "list"])
+        self.assertEqual(self._rw(["list", "cases", "--language", "go"]),
+                         ["cases", "list", "--language", "go"])
+        self.assertEqual(self._rw(["list", "drivers"]), ["drivers", "list"])
+
+    def test_init_verify_docker(self):
+        self.assertEqual(self._rw(["init", "mydir"]), ["cases", "init", "mydir"])
+        self.assertEqual(self._rw(["verify-corpus", "--cases", "a"]),
+                         ["cases", "verify", "--cases", "a"])
+        self.assertEqual(self._rw(["docker", "build", "--lang", "go"]),
+                         ["sandbox", "build", "--lang", "go"])
+
+    def test_global_option_skipped_when_finding_command(self):
+        self.assertEqual(self._rw(["--results-dir", "/tmp/x", "list", "runs"]),
+                         ["--results-dir", "/tmp/x", "runs", "list"])
+        self.assertEqual(self._rw(["--results-dir=/tmp/x", "init"]),
+                         ["--results-dir=/tmp/x", "cases", "init"])
+
+    def test_grouped_and_core_commands_pass_through(self):
+        for argv in (["cases", "list"], ["run", "--driver", "aider"],
+                     ["compare", "a", "b"], ["sandbox", "status"], ["--help"]):
+            self.assertEqual(self._rw(list(argv)), list(argv))
+
+
+class UITrialsPlumbingTests(unittest.TestCase):
+    """
+    M-09: a caching driver (VS Code UI) can't be repeated by the runner's own
+    per-case loop, so instead of silently dropping --trials to 1, the runner
+    hands the trial count to the driver (which repeats each case inside the
+    harness). Verify the count is plumbed through and the runner doesn't also
+    double-run.
+    """
+
+    def setUp(self):
+        self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_uitrials_"))
+        (self.cases_dir / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do it"],
+        }), encoding="utf-8")
+
+    def test_trials_handed_to_caching_driver_not_dropped(self):
+        driver = mock.Mock(parallel_safe=False, caches_results=True, trials=1)
+        driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
+        sc = Scenario(name="x", driver="cline-ui", cases_dir=str(self.cases_dir))
+        with mock.patch("optarena.runner.get_driver", return_value=driver):
+            run_scenario(sc, trials=3)
+        # the trial count reached the driver...
+        self.assertEqual(driver.trials, 3)
+        # ...and the runner did NOT also loop 3x (the harness owns repetition).
+        self.assertEqual(driver.run_case.call_count, 1)
 
 
 class RunCaptureTests(unittest.TestCase):
@@ -485,7 +561,6 @@ class RunCaptureTests(unittest.TestCase):
     timed-out check/agent can't leave orphaned children holding ports/CPU."""
 
     def test_normal_command_returns_completed_process(self):
-        import subprocess as sp
         import sys
         proc = run_capture([sys.executable, "-c", "print('ok')"], timeout=30,
                            text=True)
@@ -815,7 +890,7 @@ class VerifyCorpusTests(unittest.TestCase):
         "setup_files": {"add.py": "def add(a, b):\n    return a - b\n"},
         "expected_files": [{"path_pattern": "add.py", "content_patterns": ["def add"]}],
         "test_setup_files": {"test_add.py": "import add\nassert add.add(2, 3) == 5\nprint('PASS')\n"},
-        "check_command": "python test_add.py",
+        "check_command": f'"{sys.executable}" test_add.py',
         "reference_solution": {"add.py": "def add(a, b):\n    return a + b\n"},
         "broken_solutions": [
             {"name": "still-subtracts", "files": {"add.py": "def add(a, b):\n    return a - b - 0\n"}},
@@ -1414,7 +1489,7 @@ class RichMetricsTests(unittest.TestCase):
         case = {
             "expected_files": [{"path_pattern": "add.py"}],
             "test_setup_files": {"test_add.py": "import add\nassert add.add(2, 3) == 5\n"},
-            "check_command": "python test_add.py",
+            "check_command": f'"{sys.executable}" test_add.py',
         }
         with mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"}):
             failures, oracle = evaluate_case(case, ["add.py"], self.ws)
