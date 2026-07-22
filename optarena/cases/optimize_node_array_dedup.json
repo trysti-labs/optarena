@@ -35,5 +35,8 @@
   },
   "check_command": "node test_perf.js",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "dedupe.js": "function dedupe(arr) {\n  const seen = new Set();\n  const result = [];\n  for (const item of arr) {\n    if (!seen.has(item)) {\n      seen.add(item);\n      result.push(item);\n    }\n  }\n  return result;\n}\n\nmodule.exports = { dedupe };\n"
+  }
 }

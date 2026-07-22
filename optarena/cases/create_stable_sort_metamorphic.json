@@ -1,0 +1,51 @@
+{
+  "name": "create_stable_sort_metamorphic",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 120,
+  "description": "Implement an ascending sort, graded by metamorphic relations (length/multiset/order/idempotence/permutation) over random inputs",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "metamorphic",
+  "tags": [
+    "python",
+    "sorting",
+    "metamorphic",
+    "property-based"
+  ],
+  "prompts": [
+    "Create sortlib.py defining a function stable_sort(items) that returns a new list containing all of `items` sorted in ascending order. It must preserve every element (including duplicates) - the result is a permutation of the input, in non-decreasing order."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "sortlib.py",
+      "content_patterns": [
+        "def stable_sort"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_props.py": "import random\nfrom collections import Counter\nfrom sortlib import stable_sort\n\n\ndef check(x):\n    r = stable_sort(list(x))\n    assert len(r) == len(x), f\"length changed: {len(r)} vs {len(x)} for {x!r}\"\n    assert Counter(r) == Counter(x), f\"multiset changed for {x!r}: {r!r}\"\n    assert all(r[i] <= r[i + 1] for i in range(len(r) - 1)), f\"not sorted: {r!r}\"\n    assert stable_sort(list(r)) == r, f\"not idempotent for {x!r}\"\n    s = list(x)\n    random.shuffle(s)\n    assert stable_sort(s) == r, f\"not permutation-invariant for {x!r}\"\n\n\nrandom.seed(1234)\nfor x in ([], [1], [2, 2, 2], [3, 1, 2], [5, -1, 5, 0, 5]):\n    check(x)\nfor _ in range(300):\n    n = random.randint(0, 40)\n    check([random.randint(-5, 5) for _ in range(n)])\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_props.py",
+  "reference_solution": {
+    "sortlib.py": "def stable_sort(items):\n    return sorted(items)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedups-via-set",
+      "files": {
+        "sortlib.py": "def stable_sort(items):\n    return sorted(set(items))\n"
+      }
+    },
+    {
+      "name": "reverse-order",
+      "files": {
+        "sortlib.py": "def stable_sort(items):\n    return sorted(items, reverse=True)\n"
+      }
+    }
+  ]
+}

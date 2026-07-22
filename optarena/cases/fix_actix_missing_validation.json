@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_validation.py",
   "check_command_timeout": 180,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "src/main.rs": "use actix_web::{post, web, App, HttpResponse, HttpServer, Responder};\nuse serde_json::Value;\n\n#[post(\"/users\")]\nasync fn create_user(body: web::Json<Value>) -> impl Responder {\n    match body[\"username\"].as_str() {\n        Some(username) => {\n            HttpResponse::Created().json(serde_json::json!({\"username\": username}))\n        }\n        None => HttpResponse::BadRequest()\n            .json(serde_json::json!({\"error\": \"username is required and must be a string\"})),\n    }\n}\n\n#[actix_web::main]\nasync fn main() -> std::io::Result<()> {\n    HttpServer::new(|| App::new().service(create_user))\n        .bind((\"0.0.0.0\", 8043))?\n        .run()\n        .await\n}\n"
+  }
 }

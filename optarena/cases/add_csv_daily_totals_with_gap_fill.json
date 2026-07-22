@@ -2,7 +2,7 @@
   "name": "add_csv_daily_totals_with_gap_fill",
   "language": "python",
   "framework": "pytest",
-  "domain": "data_engineering",
+  "domain": "data-engineering",
   "docker_image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,

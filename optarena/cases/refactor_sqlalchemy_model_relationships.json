@@ -6,7 +6,11 @@
   "domain": "backend",
   "difficulty": 2,
   "task_type": "refactoring",
-  "tags": ["sqlalchemy", "orm", "refactor"],
+  "tags": [
+    "sqlalchemy",
+    "orm",
+    "refactor"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "The SQLAlchemy models in models.py define `Author` and `Book` tables linked by a foreign key, but the helper functions `get_books_for_author` and `get_author_name_for_book` manually query and join across the two tables by hand instead of using SQLAlchemy relationships. Refactor models.py to add a proper `relationship()` (with a backref/back_populates) between `Author` and `Book`, and rewrite `get_books_for_author` and `get_author_name_for_book` to use that relationship instead of manual filtering across both tables. Both functions must keep the exact same signature and return the exact same results as before for the same inputs."
@@ -17,8 +21,13 @@
   "expected_files": [
     {
       "path_pattern": "models.py",
-      "content_patterns": ["author", "book"],
-      "regex_patterns": ["relationship\\s*\\("]
+      "content_patterns": [
+        "author",
+        "book"
+      ],
+      "regex_patterns": [
+        "relationship\\s*\\("
+      ]
     }
   ],
   "test_setup_files": {
@@ -26,5 +35,8 @@
   },
   "check_command": "python3 test_relationships.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "models.py": "from sqlalchemy import create_engine, Column, Integer, String, ForeignKey\nfrom sqlalchemy.orm import declarative_base, sessionmaker, relationship\n\nBase = declarative_base()\n\n\nclass Author(Base):\n    __tablename__ = 'authors'\n    id = Column(Integer, primary_key=True)\n    name = Column(String)\n    books = relationship('Book', back_populates='author')\n\n\nclass Book(Base):\n    __tablename__ = 'books'\n    id = Column(Integer, primary_key=True)\n    title = Column(String)\n    author_id = Column(Integer, ForeignKey('authors.id'))\n    author = relationship('Author', back_populates='books')\n\n\ndef get_books_for_author(session, author_id):\n    author = session.query(Author).filter(Author.id == author_id).first()\n    if author is None:\n        return []\n    return [b.title for b in author.books]\n\n\ndef get_author_name_for_book(session, book_id):\n    book = session.query(Book).filter(Book.id == book_id).first()\n    if book is None:\n        return None\n    return book.author.name if book.author else None\n"
+  }
 }

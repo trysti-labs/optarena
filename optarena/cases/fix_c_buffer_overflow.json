@@ -31,5 +31,8 @@
   },
   "check_command": "python3 test_overflow.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "greet.c": "#include <stdio.h>\n#include <string.h>\n\nvoid greet(const char *name) {\n    char buffer[16];\n    strncpy(buffer, name, sizeof(buffer) - 1);\n    buffer[sizeof(buffer) - 1] = '\\0';\n    printf(\"Hello, %s!\\n\", buffer);\n}\n\nint main(void) {\n    char input[4096];\n    if (fgets(input, sizeof(input), stdin) == NULL) {\n        return 1;\n    }\n    size_t len = strlen(input);\n    if (len > 0 && input[len - 1] == '\\n') {\n        input[len - 1] = '\\0';\n    }\n    greet(input);\n    return 0;\n}\n"
+  }
 }

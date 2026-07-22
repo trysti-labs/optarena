@@ -189,22 +189,34 @@ class CLIAgentDriver(Driver):
         env = {k: v for k, v in env.items()
                if not any(k.startswith(p) for p in self.spec["scrub_env_prefixes"])}
 
+        steps: list[dict] = []
         t0 = time.monotonic()
         try:
-            for prompt in case.get("prompts", []):
+            for i, prompt in enumerate(case.get("prompts", []), 1):
                 # run_capture (not subprocess.run): on timeout it kills the
                 # agent's whole process tree, not just the agent binary, so
                 # anything it spawned (a language server, a shelled-out tool)
                 # can't outlive the case (H-11).
+                s0 = time.monotonic()
                 proc = run_capture(
                     [self._binary, *self.spec["argv"](prompt, scenario.backend)],
                     cwd=workspace, env=env, timeout=timeout,
                     text=True, encoding="utf-8", errors="replace",
                 )
+                # Per-step trajectory record ("judge the path"): one entry per
+                # prompt/turn, so a run's step-by-step timing/tokens/exit is
+                # inspectable, not just the case total.
+                step: dict = {"i": i, "duration_s": round(time.monotonic() - s0, 2),
+                              "ok": proc.returncode == 0, "exit_code": proc.returncode}
                 parse = self.spec.get("parse_metrics")
                 if parse:
-                    for key, val in parse(proc.stdout).items():
+                    metrics = parse(proc.stdout)
+                    for key, val in metrics.items():
                         result.extra[key] = result.extra.get(key, 0) + val
+                    for key in ("prompt_tokens", "completion_tokens", "turns"):
+                        if key in metrics:
+                            step[key] = metrics[key]
+                steps.append(step)
                 if proc.returncode != 0:
                     # execution_ok=False (H-XX / Phase 2.7): the tool itself
                     # reported failure. Previously this only went into
@@ -222,6 +234,9 @@ class CLIAgentDriver(Driver):
         except Exception as exc:  # noqa: BLE001 - report, don't crash the run
             result.error = f"{type(exc).__name__}: {exc}"
         result.duration_s = time.monotonic() - t0
+        if steps:
+            result.extra["steps"] = steps
+            result.extra["n_steps"] = len(steps)
 
         result.files = changed_files(before, workspace)
         result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)

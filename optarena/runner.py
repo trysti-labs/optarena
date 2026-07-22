@@ -175,6 +175,10 @@ def _merge_trials(case_name: str, results: list[CaseResult]) -> CaseResult:
                 continue
             elif key == "stderr":
                 merged.extra["stderr"] = merged.extra.get("stderr", "") + val
+            elif key in ("steps", "n_steps"):
+                # Per-step trajectory is per-trial; keep the representative
+                # (last) trial's rather than summing step counts across trials.
+                merged.extra[key] = val
             elif isinstance(val, (int, float)) and not isinstance(val, bool):
                 merged.extra[key] = merged.extra.get(key, 0) + val
             else:
@@ -189,7 +193,8 @@ def _merge_trials(case_name: str, results: list[CaseResult]) -> CaseResult:
     return merged
 
 
-def _run_case(driver, case: dict, scenario: Scenario, root: Path, trials: int) -> CaseResult:
+def _run_case(driver, case: dict, scenario: Scenario, root: Path, trials: int,
+              security_scan: bool = False) -> CaseResult:
     """Run one case (possibly multiple trials), each in a fresh workspace."""
     results: list[CaseResult] = []
     for trial in range(trials):
@@ -197,7 +202,13 @@ def _run_case(driver, case: dict, scenario: Scenario, root: Path, trials: int) -
         if ws.exists():
             shutil.rmtree(ws, ignore_errors=True)
         ws.mkdir(parents=True, exist_ok=True)
-        results.append(driver.run_case(case, scenario, ws))
+        r = driver.run_case(case, scenario, ws)
+        if security_scan:
+            # Static-scan the files the agent actually changed, before the
+            # workspace is cleaned up - "did it introduce a secret/injection?"
+            from .security import scan_workspace
+            r.extra["security"] = scan_workspace(r.files, ws)
+        results.append(r)
     return _merge_trials(case["name"], results)
 
 
@@ -240,6 +251,31 @@ def _print_result(result: CaseResult) -> None:
         print(f"         diff: {diff['files_changed']} file(s), "
               f"~{diff['lines_changed_approx']} line(s) changed")
 
+    # Trajectory: flag off-target edits (files the task never asked for) - a
+    # "did it stay on task" signal even when the case passes. Read from the
+    # single-run oracle or, for --trials, the last trial's.
+    oracle = result.extra.get("oracle") or {}
+    traj = oracle.get("trajectory") or next(
+        (o.get("trajectory") for o in reversed(result.extra.get("oracle_all_trials") or [])
+         if o and o.get("trajectory")), None) or {}
+    if traj.get("off_target_count"):
+        shown = ", ".join(traj.get("off_target_files", [])[:5])
+        more = "" if traj["off_target_count"] <= 5 else f" (+{traj['off_target_count'] - 5} more)"
+        note = " despite PASS" if result.passed else ""
+        print(f"         off-target edits{note}: {traj['off_target_count']} file(s){' - ' + shown if shown else ''}{more}")
+    if result.extra.get("n_steps", 0) and result.extra["n_steps"] > 1:
+        print(f"         steps: {result.extra['n_steps']} (per-step timing/tokens in saved run)")
+
+    # Security scan (opt-in --security-scan): flag secrets/injection/unsafe calls
+    # the agent introduced, even when the case passes its correctness oracle.
+    sec = result.extra.get("security")
+    if sec and sec.get("total"):
+        c = sec.get("counts", {})
+        print(f"         security: {sec['total']} finding(s) "
+              f"({c.get('error', 0)} error, {c.get('warning', 0)} warning, {c.get('note', 0)} note)")
+        for f in sec["findings"][:3]:
+            print(f"           - [{f['level']}] {f['title']} ({f['file']}:{f['line']})")
+
     oracle_trials = result.extra.get("oracle_all_trials")
     if oracle_trials is not None:
         for i, oracle in enumerate(oracle_trials, 1):
@@ -267,6 +303,7 @@ def run_scenario(
     parallel: int = 1,
     allow_empty: bool = False,
     keep_workspace: bool = False,
+    security_scan: bool = False,
 ) -> RunRecord:
     cases = load_cases(scenario.cases, cases_dir=scenario.cases_dir)
     if not cases and not allow_empty:
@@ -371,7 +408,7 @@ def run_scenario(
             sandbox.start()
         if parallel > 1:
             with ThreadPoolExecutor(max_workers=parallel) as pool:
-                futures = [pool.submit(_run_case, driver, case, scenario, root, trials)
+                futures = [pool.submit(_run_case, driver, case, scenario, root, trials, security_scan)
                            for case in cases]
                 results = [f.result() for f in futures]
             for result in results:
@@ -381,7 +418,7 @@ def run_scenario(
             results = []
             for case in cases:
                 print(f"  [case] {case['name']} ...", end="", flush=True)
-                result = _run_case(driver, case, scenario, root, trials)
+                result = _run_case(driver, case, scenario, root, trials, security_scan)
                 _print_result(result)
                 results.append(result)
 

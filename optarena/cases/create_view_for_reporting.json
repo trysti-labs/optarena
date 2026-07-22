@@ -35,5 +35,8 @@
   },
   "check_command": "python3 test_view.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    amount REAL NOT NULL\n);\n\nCREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       COUNT(o.id) AS total_orders,\n       COALESCE(SUM(o.amount), 0) AS total_amount\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nGROUP BY c.id;\n"
+  }
 }

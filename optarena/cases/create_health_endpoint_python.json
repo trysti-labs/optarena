@@ -6,7 +6,13 @@
   "domain": "backend",
   "difficulty": 1,
   "task_type": "feature",
-  "tags": ["rest", "http", "health-check", "fastapi", "pydantic"],
+  "tags": [
+    "rest",
+    "http",
+    "health-check",
+    "fastapi",
+    "pydantic"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "Create a FastAPI app in app.py with a Pydantic model `HealthStatus` that has a single field `status: str`. Add a GET /health endpoint that returns a `HealthStatus` with status set to \"ok\". The app object must be named `app`."
@@ -15,8 +21,14 @@
   "expected_files": [
     {
       "path_pattern": "app.py",
-      "content_patterns": ["fastapi", "pydantic", "/health"],
-      "regex_patterns": ["class\\s+HealthStatus"]
+      "content_patterns": [
+        "fastapi",
+        "pydantic",
+        "/health"
+      ],
+      "regex_patterns": [
+        "class\\s+HealthStatus"
+      ]
     }
   ],
   "test_setup_files": {
@@ -24,5 +36,8 @@
   },
   "check_command": "python3 test_health.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "app.py": "from fastapi import FastAPI\nfrom pydantic import BaseModel\n\napp = FastAPI()\n\n\nclass HealthStatus(BaseModel):\n    status: str\n\n\n@app.get('/health', response_model=HealthStatus)\ndef health():\n    return HealthStatus(status='ok')\n"
+  }
 }

@@ -120,6 +120,23 @@ _HARDENING_ARGS = [
 ]
 
 
+def _writable_cache_args(image: str) -> list[str]:
+    """
+    Images whose pre-warmed build cache lives on the (now read-only) rootfs and
+    which the toolchain must still WRITE to at check_command time. The
+    ``--read-only`` hardening otherwise hard-fails these: `cargo` aborts when it
+    cannot write ``$CARGO_TARGET_DIR/debug/.cargo-build-lock`` (the rust image
+    pre-warms deps at ``/opt/cargo-target``, on the rootfs). An anonymous volume
+    at that path is initialized from the image - so the pre-warmed dependency
+    artifacts are preserved (a bare tmpfs would hide them and force a full,
+    timeout-prone recompile) - yet is writable; ``docker run --rm`` removes the
+    anonymous volume when the container goes away. Maven (writes a cosmetic log
+    to ``/root/.m2`` but "carries on") and dotnet (writes bin/obj into the
+    writable ``/workspace``) do NOT need this - only rust does.
+    """
+    return ["-v", "/opt/cargo-target"] if "rust" in image.lower() else []
+
+
 def _sandbox_user_args() -> list[str]:
     """
     Optional non-root sandbox execution (M-10): OPTARENA_SANDBOX_USER=uid:gid
@@ -416,7 +433,7 @@ class DockerSandbox:
             subprocess.run(
                 ["docker", "run", "-d", "--rm", "--name", self.name,
                  "--network", "none", "--memory", "2g", "--cpus", "2",
-                 *_HARDENING_ARGS, *_sandbox_user_args(),
+                 *_HARDENING_ARGS, *_sandbox_user_args(), *_writable_cache_args(self.image),
                  "-v", f"{self.root}:/workspace", "-w", "/workspace",
                  self.image, "sleep", "infinity"],
                 capture_output=True, timeout=20, check=True,
@@ -702,7 +719,7 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
         # Same resources as the shared DockerSandbox - a Spring Boot app under
         # 512m would OOM here but pass in the shared container, and vice versa.
         "--memory", "2g", "--cpus", "2",
-        *_HARDENING_ARGS, *_sandbox_user_args(),
+        *_HARDENING_ARGS, *_sandbox_user_args(), *_writable_cache_args(image),
         "-v", f"{root.resolve()}:/workspace",
         "-w", "/workspace",
         image,
@@ -799,6 +816,48 @@ def diff_stats(case: dict, created: list[str], root: Path) -> dict:
     return {"files_changed": len(created), "lines_changed_approx": lines_changed}
 
 
+def trajectory_stats(case: dict, created: list[str], root: Path) -> dict:
+    """
+    Driver-agnostic *trajectory* signals - "judge the path, not just the answer".
+    The oracle's pass/fail verdict says whether the agent reached the right end
+    state; these say something about HOW it got there, from the one artifact
+    every driver produces: the set of files it actually changed (``created``).
+
+    - ``off_target_files``: files the agent created/modified that match NO
+      expected-file pattern and aren't one of the case's own ``setup_files`` -
+      i.e. edits the task never asked for. A disciplined agent (and every
+      raw-model baseline) touches only expected paths, so this is 0; a value > 0
+      means the agent also modified unrelated files (thrash, scratch files, or
+      collateral edits) even if it still passed. Reported, never used to gate
+      pass/fail - it's a quality signal, not a verdict. Paired with
+      ``execution_ok`` (tool exited cleanly) it powers the ``clean_pass`` rollup
+      in metrics.aggregate: passed AND no off-target edits AND clean exit - the
+      "right answer via a clean path" the trace-eval literature calls for.
+    """
+    expected = case.get("expected_files", []) or []
+    setup = set((case.get("setup_files") or {}).keys())
+
+    def _matches_expected(rel: str) -> bool:
+        name = Path(rel).name.lower()
+        for spec in expected:
+            pat = str(spec.get("path_pattern", "")).lower()
+            if not pat:
+                continue
+            if fnmatch.fnmatch(name, pat) or fnmatch.fnmatch(rel.lower(), pat):
+                return True
+        return False
+
+    off_target = [rel for rel in created if rel not in setup and not _matches_expected(rel)]
+    return {
+        "files_touched": len(created),
+        "expected_file_count": len(expected),
+        "off_target_count": len(off_target),
+        # Cap the stored list so a pathological run can't bloat the JSON; the
+        # count above is always exact.
+        "off_target_files": sorted(off_target)[:25],
+    }
+
+
 def evaluate_case(case: dict, created: list[str], root: Path) -> tuple[list[str], dict]:
     """
     Full oracle for one case: write test_setup_files (real test code the
@@ -816,10 +875,12 @@ def evaluate_case(case: dict, created: list[str], root: Path) -> tuple[list[str]
         info = _new_oracle_info(case.get("check_command"))
         info["test_setup_files"] = test_files
         info["diff"] = diff_stats(case, created, root)
+        info["trajectory"] = trajectory_stats(case, created, root)
         return failures, info
     failures, info = run_check_command(case, root)
     info["test_setup_files"] = test_files
     info["diff"] = diff_stats(case, created, root)
+    info["trajectory"] = trajectory_stats(case, created, root)
     if failures:
         info["failure_class"] = classify_failure(info)
     return failures, info

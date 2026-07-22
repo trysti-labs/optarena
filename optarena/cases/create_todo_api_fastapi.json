@@ -6,7 +6,13 @@
   "domain": "backend",
   "difficulty": 2,
   "task_type": "feature",
-  "tags": ["rest", "http", "crud", "fastapi", "todo"],
+  "tags": [
+    "rest",
+    "http",
+    "crud",
+    "fastapi",
+    "todo"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "Create a FastAPI app in app.py named `app` that manages an in-memory list of todos. Each todo has an integer `id` and a string `title`. Implement: GET /todos returning a JSON array of all todos; POST /todos accepting JSON body {\"title\": str} that creates a new todo with an auto-incrementing id (starting at 1) and returns the created todo with a 201 status code; DELETE /todos/{todo_id} that removes the todo with that id and returns a 204 status code, or 404 if no todo with that id exists. Run the server with uvicorn on port 8010 when executed directly."
@@ -15,8 +21,13 @@
   "expected_files": [
     {
       "path_pattern": "app.py",
-      "content_patterns": ["fastapi", "/todos"],
-      "regex_patterns": ["def\\s+\\w+\\s*\\(.*\\)\\s*:"]
+      "content_patterns": [
+        "fastapi",
+        "/todos"
+      ],
+      "regex_patterns": [
+        "def\\s+\\w+\\s*\\(.*\\)\\s*:"
+      ]
     }
   ],
   "test_setup_files": {
@@ -24,5 +35,8 @@
   },
   "check_command": "python3 test_todo.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "app.py": "from fastapi import FastAPI, HTTPException, Response\nfrom pydantic import BaseModel\n\napp = FastAPI()\n\ntodos = []\n_next_id = 1\n\n\nclass TodoIn(BaseModel):\n    title: str\n\n\n@app.get('/todos')\ndef list_todos():\n    return todos\n\n\n@app.post('/todos', status_code=201)\ndef create_todo(item: TodoIn):\n    global _next_id\n    todo = {'id': _next_id, 'title': item.title}\n    _next_id += 1\n    todos.append(todo)\n    return todo\n\n\n@app.delete('/todos/{todo_id}')\ndef delete_todo(todo_id: int):\n    for i, t in enumerate(todos):\n        if t['id'] == todo_id:\n            todos.pop(i)\n            return Response(status_code=204)\n    raise HTTPException(status_code=404, detail='not found')\n\n\nif __name__ == '__main__':\n    import uvicorn\n    uvicorn.run(app, port=8010)\n"
+  }
 }

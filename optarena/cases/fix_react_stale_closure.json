@@ -37,5 +37,8 @@
   },
   "check_command": "node test_stale_closure.js",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "counter.js": "function createCounter(initialCount) {\n  let state = { count: initialCount || 0 };\n\n  function getState() {\n    return state;\n  }\n\n  function setState(newState) {\n    state = newState;\n  }\n\n  function makeIncrementHandler() {\n    return function increment() {\n      setState({ count: getState().count + 1 });\n    };\n  }\n\n  return { getState, setState, makeIncrementHandler };\n}\n\nmodule.exports = { createCounter };\n"
+  }
 }

@@ -5,7 +5,12 @@
   "domain": "devops",
   "difficulty": 1,
   "task_type": "bug_fix",
-  "tags": ["shell", "bug", "quoting", "filesystem"],
+  "tags": [
+    "shell",
+    "bug",
+    "quoting",
+    "filesystem"
+  ],
   "prompts": [
     "The script count_lines.sh in this repo takes a single directory argument and is meant to print one line per file directly inside that directory, in the form '<filename>: <line count>'. It works fine for ordinary filenames, but when the directory contains a file whose name has a space in it, the script produces wrong output - it either reports the wrong line counts, prints errors about files that don't exist, or splits a single filename into multiple bogus entries. Fix count_lines.sh so it correctly reports the filename and line count for every regular file in the given directory, including files whose names contain spaces, while keeping the output format and behavior for ordinary (no-space) filenames unchanged."
   ],
@@ -23,5 +28,8 @@
   },
   "check_command": "python3 test_count_lines.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "count_lines.sh": "#!/bin/sh\ndir=$1\nfor f in \"$dir\"/*; do\n    if [ -f \"$f\" ]; then\n        count=$(wc -l < \"$f\" | tr -d ' ')\n        echo \"$(basename \"$f\"): $count\"\n    fi\ndone\n"
+  }
 }

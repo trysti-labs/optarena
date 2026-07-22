@@ -34,5 +34,8 @@
   },
   "check_command": "python3 test_leak.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "buffer.h": "#pragma once\n\nclass Buffer {\npublic:\n    static inline int instance_count = 0;\n\n    explicit Buffer(int size) {\n        data_ = new int[size];\n        instance_count++;\n    }\n\n    ~Buffer() {\n        delete[] data_;\n        instance_count--;\n    }\n\nprivate:\n    int* data_;\n};\n"
+  }
 }

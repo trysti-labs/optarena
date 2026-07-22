@@ -35,5 +35,8 @@
   },
   "check_command": "python3 test_xss.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "server.js": "const express = require('express');\nconst app = express();\n\nfunction escapeHtml(s) {\n  return String(s)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\napp.get('/greet', (req, res) => {\n  const name = req.query.name || 'stranger';\n  res.send(`<h1>Hello, ${escapeHtml(name)}!</h1>`);\n});\n\napp.listen(8027);\n"
+  }
 }

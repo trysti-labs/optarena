@@ -1,9 +1,10 @@
 {
   "name": "refactor_makefile_pattern_rule",
+  "language": "makefile",
+  "framework": "make",
   "domain": "devops",
   "task_type": "refactoring",
   "docker_image": "optarena-tester:latest",
-  "framework": "make",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Consolidates three near-identical .o rules into one pattern rule",

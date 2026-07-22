@@ -32,5 +32,8 @@
   },
   "check_command": "python3 test_max.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "max_utils.c": "#define MAX_IMPL(x, y) ((x) > (y) ? (x) : (y))\n\nint max_int(int a, int b) {\n    return MAX_IMPL(a, b);\n}\n\nfloat max_float(float a, float b) {\n    return MAX_IMPL(a, b);\n}\n"
+  }
 }

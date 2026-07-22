@@ -100,6 +100,10 @@ _CASE_KNOWN_KEYS = {
     "docker_image", "timeout",
     "reference_solution", "broken_solutions",
     "language", "framework", "domain", "difficulty", "task_type", "tags",
+    # Oracle style, for discovery/reporting: "unit" (default), "property"
+    # (randomized property-based), "metamorphic" (relations across inputs),
+    # "mutation" (test-strength). Free-form string; not enforced against an enum.
+    "test_kind",
 }
 _EXPECTED_FILE_KNOWN_KEYS = {
     "path_pattern", "content_patterns", "not_content_patterns", "regex_patterns", "min_lines",
@@ -148,7 +152,7 @@ def validate_case(data: dict, source: str = "<case>") -> None:
         d = data["difficulty"]
         if not isinstance(d, int) or isinstance(d, bool) or not (1 <= d <= 5):
             raise _err(source, "'difficulty' must be an integer 1-5")
-    for key in ("language", "framework", "domain", "task_type"):
+    for key in ("language", "framework", "domain", "task_type", "test_kind"):
         if key in data and data[key] is not None and not isinstance(data[key], str):
             raise _err(source, f"'{key}' must be a string")
     if "tags" in data:

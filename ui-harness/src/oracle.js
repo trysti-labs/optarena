@@ -162,6 +162,19 @@ function sandboxUserArgs() {
   return user ? ['--user', user, '-e', 'HOME=/tmp'] : [];
 }
 
+/**
+ * Images whose pre-warmed build cache lives on the (read-only) rootfs and which
+ * the toolchain must still WRITE to at check_command time (mirror of
+ * cases._writable_cache_args - keep in sync). --read-only otherwise hard-fails
+ * rust: cargo aborts when it cannot write $CARGO_TARGET_DIR/.cargo-build-lock
+ * (the rust image pre-warms deps at /opt/cargo-target). An anonymous volume at
+ * that path is initialized from the image (pre-warmed artifacts preserved) yet
+ * writable; --rm removes it. Maven/dotnet don't need this - only rust does.
+ */
+function writableCacheArgs(image) {
+  return /rust/i.test(image) ? ['-v', '/opt/cargo-target'] : [];
+}
+
 let dockerChecked = false;
 let dockerOk = false;
 let dockerWarned = false;
@@ -279,7 +292,7 @@ export function startDockerSandbox(root, image) {
     execFileSync('docker', [
       'run', '-d', '--rm', '--name', name,
       '--network', 'none', '--memory', '2g', '--cpus', '2',
-      ...HARDENING_ARGS, ...sandboxUserArgs(),
+      ...HARDENING_ARGS, ...sandboxUserArgs(), ...writableCacheArgs(image),
       '-v', `${resolvedRoot}:/workspace`,
       '-v', `${verifyRoot}:/verify`,
       '-w', '/workspace',
@@ -505,7 +518,7 @@ export function runCheckCommand(testCase, root) {
   const dockerArgs = [
     'run', '--rm', '--name', name,
     '--network', 'none', '--memory', '2g', '--cpus', '2',
-    ...HARDENING_ARGS, ...sandboxUserArgs(),
+    ...HARDENING_ARGS, ...sandboxUserArgs(), ...writableCacheArgs(image),
     '-v', `${path.resolve(root)}:/workspace`, '-w', '/workspace',
     image, 'sh', '-c', cmd,
   ];

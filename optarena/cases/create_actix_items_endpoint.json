@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_items.py",
   "check_command_timeout": 180,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "src/main.rs": "use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};\nuse serde::{Deserialize, Serialize};\nuse std::sync::Mutex;\n\n#[derive(Clone, Serialize, Deserialize)]\nstruct Item {\n    name: String,\n}\n\nstruct AppState {\n    items: Mutex<Vec<Item>>,\n}\n\n#[get(\"/items\")]\nasync fn list_items(data: web::Data<AppState>) -> impl Responder {\n    let items = data.items.lock().unwrap();\n    HttpResponse::Ok().json(items.clone())\n}\n\n#[post(\"/items\")]\nasync fn create_item(data: web::Data<AppState>, item: web::Json<Item>) -> impl Responder {\n    let new_item = item.into_inner();\n    let mut items = data.items.lock().unwrap();\n    items.push(new_item.clone());\n    HttpResponse::Created().json(new_item)\n}\n\n#[actix_web::main]\nasync fn main() -> std::io::Result<()> {\n    let state = web::Data::new(AppState {\n        items: Mutex::new(Vec::new()),\n    });\n    HttpServer::new(move || {\n        App::new()\n            .app_data(state.clone())\n            .service(list_items)\n            .service(create_item)\n    })\n    .bind((\"0.0.0.0\", 8040))?\n    .run()\n    .await\n}\n"
+  }
 }

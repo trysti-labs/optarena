@@ -6,7 +6,11 @@
   "domain": "backend",
   "difficulty": 2,
   "task_type": "performance",
-  "tags": ["sqlalchemy", "performance", "n-plus-one"],
+  "tags": [
+    "sqlalchemy",
+    "performance",
+    "n-plus-one"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "The function `load_authors_with_books(session)` in models.py loads all `Author` rows, then for each author separately queries its `Book` rows in a Python loop, causing an N+1 query problem (one query for the authors, plus one additional query per author). Rewrite `load_authors_with_books` so it fetches all authors and their books using a single query with eager loading (e.g. SQLAlchemy's `joinedload` or `selectinload`), instead of querying books separately per author in a loop. The function must keep returning the exact same result shape: a list of (author_name, sorted_list_of_book_titles) tuples, in the same order as before."
@@ -17,8 +21,12 @@
   "expected_files": [
     {
       "path_pattern": "models.py",
-      "content_patterns": ["load_authors_with_books"],
-      "regex_patterns": ["(joinedload|selectinload|subqueryload|contains_eager)"]
+      "content_patterns": [
+        "load_authors_with_books"
+      ],
+      "regex_patterns": [
+        "(joinedload|selectinload|subqueryload|contains_eager)"
+      ]
     }
   ],
   "test_setup_files": {
@@ -26,5 +34,8 @@
   },
   "check_command": "python3 test_n_plus_one.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "models.py": "from sqlalchemy import create_engine, Column, Integer, String, ForeignKey\nfrom sqlalchemy.orm import declarative_base, sessionmaker, relationship, selectinload\n\nBase = declarative_base()\n\n\nclass Author(Base):\n    __tablename__ = 'authors'\n    id = Column(Integer, primary_key=True)\n    name = Column(String)\n    books = relationship('Book', backref='author')\n\n\nclass Book(Base):\n    __tablename__ = 'books'\n    id = Column(Integer, primary_key=True)\n    title = Column(String)\n    author_id = Column(Integer, ForeignKey('authors.id'))\n\n\ndef load_authors_with_books(session):\n    authors = (\n        session.query(Author)\n        .options(selectinload(Author.books))\n        .order_by(Author.id)\n        .all()\n    )\n    result = []\n    for author in authors:\n        result.append((author.name, sorted(b.title for b in author.books)))\n    return result\n"
+  }
 }

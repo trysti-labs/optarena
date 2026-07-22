@@ -35,5 +35,8 @@
   },
   "check_command": "python3 test_todos.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "main.go": "package main\n\nimport (\n\t\"net/http\"\n\t\"strconv\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\ntype Todo struct {\n\tID    int    `json:\"id\"`\n\tTitle string `json:\"title\"`\n\tDone  bool   `json:\"done\"`\n}\n\nfunc main() {\n\ttodos := []Todo{}\n\tnextID := 1\n\n\tr := gin.Default()\n\n\tr.GET(\"/todos\", func(c *gin.Context) {\n\t\tc.JSON(http.StatusOK, todos)\n\t})\n\n\tr.POST(\"/todos\", func(c *gin.Context) {\n\t\tvar input struct {\n\t\t\tTitle string `json:\"title\"`\n\t\t}\n\t\tif err := c.ShouldBindJSON(&input); err != nil {\n\t\t\tc.JSON(http.StatusBadRequest, gin.H{\"error\": \"invalid body\"})\n\t\t\treturn\n\t\t}\n\t\ttodo := Todo{ID: nextID, Title: input.Title, Done: false}\n\t\tnextID++\n\t\ttodos = append(todos, todo)\n\t\tc.JSON(http.StatusCreated, todo)\n\t})\n\n\tr.DELETE(\"/todos/:id\", func(c *gin.Context) {\n\t\tid, _ := strconv.Atoi(c.Param(\"id\"))\n\t\tfor i, t := range todos {\n\t\t\tif t.ID == id {\n\t\t\t\ttodos = append(todos[:i], todos[i+1:]...)\n\t\t\t\tc.Status(http.StatusNoContent)\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t\tc.JSON(http.StatusNotFound, gin.H{\"error\": \"not found\"})\n\t})\n\n\tr.Run(\":8031\")\n}\n"
+  }
 }

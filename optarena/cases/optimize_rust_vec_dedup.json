@@ -34,5 +34,8 @@
   },
   "check_command": "cargo test --offline",
   "check_command_timeout": 180,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "src/lib.rs": "use std::collections::HashSet;\n\npub fn dedup_preserve_order(items: &[i32]) -> Vec<i32> {\n    let mut seen: HashSet<i32> = HashSet::new();\n    let mut result: Vec<i32> = Vec::new();\n    for &item in items {\n        if seen.insert(item) {\n            result.push(item);\n        }\n    }\n    result\n}\n"
+  }
 }

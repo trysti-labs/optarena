@@ -34,5 +34,8 @@
   },
   "check_command": "python3 test_refactor.py",
   "check_command_timeout": 180,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "src/main.rs": "use axum::{http::StatusCode, routing::post, Json, Router};\nuse serde::{Deserialize, Serialize};\n\n#[derive(Debug, Deserialize)]\nstruct Numbers {\n    a: i32,\n    b: i32,\n}\n\n#[derive(Debug, Serialize)]\nstruct ResultBody {\n    result: i32,\n}\n\n#[derive(Debug, Serialize)]\nstruct ErrorBody {\n    error: String,\n}\n\nfn validate(payload: &Numbers) -> Result<(), (StatusCode, Json<ErrorBody>)> {\n    if payload.a < 0 || payload.b < 0 {\n        return Err((\n            StatusCode::BAD_REQUEST,\n            Json(ErrorBody {\n                error: \"inputs must be non-negative\".to_string(),\n            }),\n        ));\n    }\n    Ok(())\n}\n\nasync fn sum(Json(payload): Json<Numbers>) -> Result<Json<ResultBody>, (StatusCode, Json<ErrorBody>)> {\n    validate(&payload)?;\n    Ok(Json(ResultBody { result: payload.a + payload.b }))\n}\n\nasync fn product(\n    Json(payload): Json<Numbers>,\n) -> Result<Json<ResultBody>, (StatusCode, Json<ErrorBody>)> {\n    validate(&payload)?;\n    Ok(Json(ResultBody { result: payload.a * payload.b }))\n}\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new()\n        .route(\"/sum\", post(sum))\n        .route(\"/product\", post(product));\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8044\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  }
 }

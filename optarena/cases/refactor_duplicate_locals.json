@@ -6,7 +6,12 @@
   "domain": "infrastructure",
   "difficulty": 2,
   "task_type": "refactoring",
-  "tags": ["terraform", "iac", "locals", "refactor"],
+  "tags": [
+    "terraform",
+    "iac",
+    "locals",
+    "refactor"
+  ],
   "prompts": [
     "The literal string \"us-west-2\" is hardcoded three separate times in main.tf, once in each of the `log_group_name`, `backup_bucket_name`, and `region_summary` outputs. Refactor main.tf so that \"us-west-2\" is defined exactly once inside a `locals` block (e.g. `local.region`), and have all three outputs reference that local value instead of repeating the literal, while producing the exact same output strings as before."
   ],
@@ -16,7 +21,10 @@
   "expected_files": [
     {
       "path_pattern": "main.tf",
-      "content_patterns": ["locals", "local."],
+      "content_patterns": [
+        "locals",
+        "local."
+      ],
       "regex_patterns": [
         "locals\\s*\\{"
       ]
@@ -27,5 +35,8 @@
   },
   "check_command": "python3 check_locals.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "main.tf": "variable \"service_name\" {\n  type        = string\n  description = \"Name of the service\"\n  default     = \"orders-api\"\n}\n\nlocals {\n  region = \"us-west-2\"\n}\n\noutput \"log_group_name\" {\n  description = \"CloudWatch log group name\"\n  value       = \"${local.region}-orders-api-logs\"\n}\n\noutput \"backup_bucket_name\" {\n  description = \"S3 bucket name for backups\"\n  value       = \"${local.region}-orders-api-backups\"\n}\n\noutput \"region_summary\" {\n  description = \"Summary of the deployed region\"\n  value       = \"Active region: ${local.region}\"\n}\n"
+  }
 }

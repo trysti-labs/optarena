@@ -6,7 +6,12 @@
   "domain": "infrastructure",
   "difficulty": 2,
   "task_type": "security",
-  "tags": ["terraform", "iac", "validation", "security"],
+  "tags": [
+    "terraform",
+    "iac",
+    "validation",
+    "security"
+  ],
   "prompts": [
     "The `environment` variable in main.tf currently accepts any string value, which means a typo could deploy resources with an unexpected environment name. Add a `validation` block to the `environment` variable in main.tf so that only the values \"dev\", \"staging\", or \"prod\" are accepted, with a clear `error_message` describing the allowed values. Keep the rest of the file unchanged."
   ],
@@ -16,7 +21,14 @@
   "expected_files": [
     {
       "path_pattern": "main.tf",
-      "content_patterns": ["validation", "condition", "error_message", "dev", "staging", "prod"],
+      "content_patterns": [
+        "validation",
+        "condition",
+        "error_message",
+        "dev",
+        "staging",
+        "prod"
+      ],
       "regex_patterns": [
         "validation\\s*\\{",
         "condition\\s*=",
@@ -29,5 +41,8 @@
   },
   "check_command": "python3 check_validation.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "main.tf": "variable \"environment\" {\n  type        = string\n  description = \"Deployment environment name\"\n  default     = \"dev\"\n\n  validation {\n    condition     = contains([\"dev\", \"staging\", \"prod\"], var.environment)\n    error_message = \"environment must be one of: dev, staging, or prod.\"\n  }\n}\n\noutput \"environment_label\" {\n  description = \"The active environment\"\n  value       = \"env:${var.environment}\"\n}\n"
+  }
 }

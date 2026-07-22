@@ -9,12 +9,35 @@ printed as a terminal table.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from pathlib import Path
 
 from . import store
 from .metrics import case_deltas
+
+
+def mcnemar_exact_p(regressed: int, improved: int) -> float:
+    """
+    Two-sided exact McNemar p-value for a paired A/B accuracy delta.
+
+    A/B runs share the case set, so pass/fail is PAIRED per case: the only cases
+    that carry signal about "did accuracy really change" are the *discordant*
+    ones - passed in A but failed in B (``regressed``), or vice versa
+    (``improved``). Under the null "the change flips cases at random", the
+    discordant splits follow Binomial(n, 0.5); the exact two-sided p-value is
+    ``2 * P(X <= min(regressed, improved))`` capped at 1. This is the correct
+    test for paired binary outcomes on small n (no normal approximation), so a
+    "+2pp, more accurate" verdict on a handful of cases can be labelled as noise
+    rather than a result. Returns 1.0 when there are no discordant pairs.
+    """
+    n = regressed + improved
+    if n == 0:
+        return 1.0
+    k = min(regressed, improved)
+    tail = sum(math.comb(n, i) for i in range(k + 1)) * (0.5 ** n)
+    return min(1.0, 2 * tail)
 
 
 def manifest_compatibility(man_a: dict | None, man_b: dict | None) -> dict:
@@ -58,6 +81,14 @@ def compare_runs(run_a: dict, run_b: dict, force: bool = False) -> dict:
     # explicitly forces it; the per-case delta table (aligned by case name) is
     # still shown, since that IS valid on whatever cases the two share.
     suppress = compat["comparable"] is False and not force
+    # Paired significance on the accuracy delta (M-XX): count discordant cases
+    # (passed in exactly one of A/B) and run the exact McNemar test, so the
+    # accuracy verdict can carry a p-value instead of pretending a small-sample
+    # flip is a result. Only paired cases (present with a verdict in both runs)
+    # contribute.
+    regressed_n = sum(1 for r in rows if r["a_passed"] and r["b_passed"] is False)
+    improved_n = sum(1 for r in rows if r["a_passed"] is False and r["b_passed"])
+    p_value = mcnemar_exact_p(regressed_n, improved_n)
     verdict = {
         "pass_rate_delta": round(sb["pass_rate"] - sa["pass_rate"], 3),
         "mean_duration_delta_s": round(
@@ -70,6 +101,10 @@ def compare_runs(run_a: dict, run_b: dict, force: bool = False) -> dict:
         ),
         "cheaper": None if suppress else _cheaper(a_label, b_label, sa, sb),
         "suppressed": suppress,
+        # Statistical significance of the accuracy delta (paired, exact McNemar).
+        "accuracy_p_value": round(p_value, 4),
+        "accuracy_significant": p_value < 0.05,
+        "n_discordant": regressed_n + improved_n,
     }
     return {
         "compared_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -133,6 +168,7 @@ def regression_summary(cmp: dict) -> dict:
 
     flaky = [r["case"] for r in cmp["cases"]
              if _is_flaky(r.get("a_trials")) or _is_flaky(r.get("b_trials"))]
+    p_value = mcnemar_exact_p(len(regressed), len(improved))
     sa, sb = cmp["a"]["summary"], cmp["b"]["summary"]
     ta, tb = sa.get("total_tokens"), sb.get("total_tokens")
     token_delta = (tb - ta) if (ta is not None and tb is not None) else None
@@ -148,7 +184,11 @@ def regression_summary(cmp: dict) -> dict:
         "compatibility": cmp.get("compatibility", {}),
         "a_label": cmp["a"]["label"], "b_label": cmp["b"]["label"],
         "pass_rate_a": sa["pass_rate"], "pass_rate_b": sb["pass_rate"],
+        "pass_rate_ci_a": sa.get("pass_rate_ci"), "pass_rate_ci_b": sb.get("pass_rate_ci"),
         "pass_rate_delta_pp": round((sb["pass_rate"] - sa["pass_rate"]) * 100, 1),
+        "accuracy_p_value": round(p_value, 4),
+        "accuracy_significant": p_value < 0.05,
+        "n_discordant": len(regressed) + len(improved),
         "mean_duration_a": sa["mean_duration_s"], "mean_duration_b": sb["mean_duration_s"],
         "mean_duration_delta_s": round(sb["mean_duration_s"] - sa["mean_duration_s"], 2),
         "tokens_a": ta, "tokens_b": tb,
@@ -175,10 +215,20 @@ def format_regression(summary: dict) -> str:
         lines.append(f"  ** {header} **")
         for reason in compat["reasons"]:
             lines.append(f"     - {reason}")
+    cia, cib = s.get("pass_rate_ci_a"), s.get("pass_rate_ci_b")
+    acc_a = f"{s['pass_rate_a']:.0%}" + (f" [{cia[0]:.0%}-{cia[1]:.0%}]" if cia else "")
+    acc_b = f"{s['pass_rate_b']:.0%}" + (f" [{cib[0]:.0%}-{cib[1]:.0%}]" if cib else "")
     lines += [
         "",
-        f"  accuracy    {s['pass_rate_a']:.0%} -> {s['pass_rate_b']:.0%}  "
+        f"  accuracy    {acc_a} -> {acc_b}  "
         f"({'+' if s['pass_rate_delta_pp'] >= 0 else ''}{s['pass_rate_delta_pp']}pp)",
+    ]
+    # Is the accuracy change real or small-sample noise? (paired exact McNemar)
+    if s.get("accuracy_p_value") is not None and s.get("n_discordant"):
+        verdict_word = "SIGNIFICANT" if s.get("accuracy_significant") else "not significant (likely noise)"
+        lines.append(f"              -> {verdict_word} "
+                     f"(p={s['accuracy_p_value']:.3f}, {s['n_discordant']} case(s) flipped)")
+    lines += [
         f"  mean time   {s['mean_duration_a']:.1f}s -> {s['mean_duration_b']:.1f}s  "
         f"({'+' if s['mean_duration_delta_s'] >= 0 else ''}{s['mean_duration_delta_s']}s)",
     ]
@@ -256,13 +306,32 @@ def format_table(cmp: dict) -> str:
     sa, sb = a["summary"], b["summary"]
     v = cmp["verdict"]
     _winner = lambda name: name if name else "(suppressed - not comparable)"  # noqa: E731
+
+    def _rate(s):  # "50% [35-65%]" - point estimate with its 95% Wilson CI
+        ci = s.get("pass_rate_ci")
+        base = f"{s['pass_rate']:.0%}"
+        return f"{base} [{ci[0]:.0%}-{ci[1]:.0%}]" if ci else base
+
     lines += [
         f"  {'-'*70}",
-        f"  pass rate:     {sa['pass_rate']:.0%}  vs  {sb['pass_rate']:.0%}"
+        f"  pass rate:     {_rate(sa)}  vs  {_rate(sb)}"
         f"   -> more accurate: {_winner(v['more_accurate'])}",
+    ]
+    # Significance of the accuracy delta (paired exact McNemar). Only meaningful
+    # when a winner wasn't suppressed and there's a real accuracy gap.
+    if not v.get("suppressed") and v.get("accuracy_p_value") is not None and v["more_accurate"] != "tie":
+        p, n = v["accuracy_p_value"], v.get("n_discordant", 0)
+        verdict_word = "SIGNIFICANT" if v.get("accuracy_significant") else "NOT significant (likely noise)"
+        lines.append(f"                 accuracy delta: {verdict_word} "
+                     f"(p={p:.3f}, {n} case(s) flipped)")
+    lines += [
         f"  mean duration: {sa['mean_duration_s']:.1f}s vs {sb['mean_duration_s']:.1f}s"
         f"   -> faster: {_winner(v['faster'])}",
     ]
+    if sa.get("clean_passes") is not None and sb.get("clean_passes") is not None:
+        lines.append(
+            f"  clean passes:  {sa['clean_passes']}/{sa['cases']} vs {sb['clean_passes']}/{sb['cases']}"
+            f"   (passed with no off-target edits / clean exit)")
     if sa.get("p95_duration_s") is not None and sb.get("p95_duration_s") is not None:
         lines.append(
             f"  p95 duration:  {sa['p95_duration_s']:.1f}s vs {sb['p95_duration_s']:.1f}s")

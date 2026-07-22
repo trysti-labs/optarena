@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_divide.py",
   "check_command_timeout": 120,
-  "timeout": 210
+  "timeout": 210,
+  "reference_solution": {
+    "src/main/java/com/optarena/calc/DivideController.java": "package com.optarena.calc;\n\nimport java.util.Map;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.*;\n\n@RestController\npublic class DivideController {\n\n    @PostMapping(\"/divide\")\n    public Map<String, Double> divide(@RequestBody Map<String, Double> body) {\n        double a = body.get(\"a\");\n        double b = body.get(\"b\");\n        if (b == 0) {\n            throw new ArithmeticException(\"division by zero\");\n        }\n        return Map.of(\"result\", a / b);\n    }\n\n    @ExceptionHandler(ArithmeticException.class)\n    public ResponseEntity<Map<String, String>> handleArithmetic(ArithmeticException ex) {\n        return ResponseEntity.badRequest().body(Map.of(\"error\", \"cannot divide by zero\"));\n    }\n}\n"
+  }
 }

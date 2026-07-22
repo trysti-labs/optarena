@@ -6,7 +6,11 @@
   "domain": "backend",
   "difficulty": 1,
   "task_type": "performance",
-  "tags": ["performance", "algorithms", "python"],
+  "tags": [
+    "performance",
+    "algorithms",
+    "python"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "The function `dedup_preserve_order(items)` in dedup.py removes duplicate elements from a list while preserving the order of first occurrence, but it does this by checking membership in a plain Python list it's building up (`if x not in result`), which is O(n) per check and O(n^2) overall for large inputs. Optimize dedup.py so `dedup_preserve_order` runs in O(n) time on average (e.g. by tracking seen elements in a set), while still returning the elements in their original first-occurrence order and still working correctly for lists containing unhashable-safe types like ints and strings."
@@ -17,7 +21,9 @@
   "expected_files": [
     {
       "path_pattern": "dedup.py",
-      "content_patterns": ["def dedup_preserve_order"]
+      "content_patterns": [
+        "def dedup_preserve_order"
+      ]
     }
   ],
   "test_setup_files": {
@@ -25,5 +31,8 @@
   },
   "check_command": "python3 test_perf.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "dedup.py": "def dedup_preserve_order(items):\n    seen = set()\n    result = []\n    for x in items:\n        if x not in seen:\n            seen.add(x)\n            result.append(x)\n    return result\n"
+  }
 }

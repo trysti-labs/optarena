@@ -36,5 +36,8 @@
   },
   "check_command": "mvn -o -q test -Dtest=UserDtoHiddenTest",
   "check_command_timeout": 60,
-  "timeout": 90
+  "timeout": 90,
+  "reference_solution": {
+    "src/main/java/com/optarena/user/UserDto.java": "package com.optarena.user;\n\nimport java.util.ArrayList;\nimport java.util.List;\n\npublic class UserDto {\n    private final String name;\n    private final String email;\n\n    public UserDto(String name, String email) {\n        this.name = name;\n        this.email = email;\n    }\n\n    public String getName() { return name; }\n    public String getEmail() { return email; }\n\n    public List<String> validate() {\n        List<String> errors = new ArrayList<>();\n        if (name == null || name.trim().isEmpty()) {\n            errors.add(\"name must not be blank\");\n        }\n        if (email == null || email.trim().isEmpty()) {\n            errors.add(\"email must not be blank\");\n        } else {\n            int at = email.indexOf('@');\n            int dot = at >= 0 ? email.indexOf('.', at + 1) : -1;\n            if (at < 0 || dot < 0) {\n                errors.add(\"email must be a valid email address\");\n            }\n        }\n        return errors;\n    }\n}\n"
+  }
 }

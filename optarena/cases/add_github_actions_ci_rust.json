@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_ci_yaml.py",
   "check_command_timeout": 180,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  build-test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: cargo build\n      - run: cargo test\n"
+  }
 }

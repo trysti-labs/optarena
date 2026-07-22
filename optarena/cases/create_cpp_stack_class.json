@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_stack.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "stack.h": "#pragma once\n\nclass Stack {\npublic:\n    Stack() : top_(0) {}\n\n    void push(int value) {\n        if (!isFull()) data_[top_++] = value;\n    }\n\n    int pop() {\n        return data_[--top_];\n    }\n\n    int peek() const {\n        return data_[top_ - 1];\n    }\n\n    bool isEmpty() const {\n        return top_ == 0;\n    }\n\n    bool isFull() const {\n        return top_ == 100;\n    }\n\nprivate:\n    int data_[100];\n    int top_;\n};\n"
+  }
 }

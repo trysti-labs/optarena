@@ -683,10 +683,9 @@ target from `CORPUS_EXPANSION_PLAN.md` (the original 120-case Phase 1
 allocation has since been expanded through the plan's Phase 2 band). Every
 case was hand-verified end-to-end before being counted: a correct reference
 solution passes, a broken/unfixed/unchanged one fails, run through the real
-oracle (`evaluate_case`/`DockerSandbox`), not just claimed. (Self-verification
-coverage is still being backfilled: 396 of the 500 ship an explicit
-`reference_solution`; `optarena cases verify` skips the rest until authored -
-see H-10 in `AUDIT_VERIFICATION_2026-07-20.md`.)
+oracle (`evaluate_case`/`DockerSandbox`), not just claimed. All 500 cases ship
+an explicit `reference_solution` (proven to PASS the real oracle); most also
+ship `broken_solutions` (proven to FAIL). `optarena cases verify` skips no case.
 
 **Built:**
 - Case schema extended with `framework`/`domain`/`difficulty`/`task_type`/

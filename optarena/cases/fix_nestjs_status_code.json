@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_status.py",
   "check_command_timeout": 90,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "main.ts": "import \"reflect-metadata\";\nimport { Body, Controller, Get, Module, Post } from \"@nestjs/common\";\nimport { NestFactory } from \"@nestjs/core\";\n\n@Controller(\"items\")\nclass ItemsController {\n  private items: { id: number; name: string }[] = [];\n  private nextId = 1;\n\n  @Get()\n  findAll() {\n    return this.items;\n  }\n\n  @Post()\n  create(@Body() body: { name: string }) {\n    const item = { id: this.nextId++, name: body.name };\n    this.items.push(item);\n    return item;\n  }\n}\n\n@Module({ controllers: [ItemsController] })\nclass AppModule {}\n\nasync function bootstrap() {\n  const app = await NestFactory.create(AppModule, { logger: false });\n  await app.listen(8023);\n}\nbootstrap();\n"
+  }
 }

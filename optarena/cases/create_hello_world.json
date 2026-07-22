@@ -18,7 +18,17 @@
     "test_hello.py": "import subprocess, sys\nout = subprocess.check_output([sys.executable, 'hello.py'], text=True)\nassert 'Hello, World!' in out, f'expected \"Hello, World!\" in stdout, got {out!r}'\nprint('PASS')\n"
   },
   "check_command": "python3 test_hello.py",
+  "check_command_timeout": 60,
   "timeout": 90,
   "difficulty": 1,
-  "task_type": "feature"
+  "task_type": "feature",
+  "reference_solution": {
+    "hello.py": "print('Hello, World!')\n"
+  },
+  "domain": "backend",
+  "tags": [
+    "python",
+    "basics",
+    "stdout"
+  ]
 }

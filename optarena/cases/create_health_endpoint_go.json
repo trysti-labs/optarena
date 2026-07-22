@@ -6,7 +6,12 @@
   "domain": "backend",
   "difficulty": 1,
   "task_type": "feature",
-  "tags": ["rest", "http", "health-check", "gin"],
+  "tags": [
+    "rest",
+    "http",
+    "health-check",
+    "gin"
+  ],
   "docker_image": "optarena-tester-go:latest",
   "prompts": [
     "This Go module (go.mod/go.sum already list github.com/gin-gonic/gin v1.10.0 as a dependency) needs a main.go. Using Gin, create a GET /health endpoint that responds with JSON {\"status\": \"ok\"}, and have the server listen on port 8003."
@@ -18,7 +23,11 @@
   "expected_files": [
     {
       "path_pattern": "main.go",
-      "content_patterns": ["gin", "/health", "8003"]
+      "content_patterns": [
+        "gin",
+        "/health",
+        "8003"
+      ]
     }
   ],
   "test_setup_files": {
@@ -26,5 +35,8 @@
   },
   "check_command": "python3 test_health.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "main.go": "package main\n\nimport (\n\t\"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/health\", func(c *gin.Context) {\n\t\tc.JSON(http.StatusOK, gin.H{\"status\": \"ok\"})\n\t})\n\tr.Run(\":8003\")\n}\n"
+  }
 }

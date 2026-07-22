@@ -108,6 +108,17 @@ select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .hbar{height:16px;margin-top:2px;background:var(--series-a);border-radius:0 4px 4px 0;min-width:2px;position:relative}
 .hbar.b{background:var(--series-b)}
 .hbar-val{position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);color:var(--text);font-size:0.75rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* Per-step trajectory timeline: one case bar split into segments sized by each
+   step's (prompt/turn) duration. inset shadow draws a hairline divider without
+   affecting layout; a failed step segment is red. */
+.hbar-steps{display:flex;height:16px;margin-top:2px;min-width:2px;position:relative}
+.hbar-seg{height:100%;background:var(--series-a);box-shadow:inset -1px 0 0 var(--bg-card)}
+.hbar-seg.b{background:var(--series-b)}
+.hbar-seg:last-child{border-radius:0 4px 4px 0;box-shadow:none}
+.hbar-seg.step-fail{background:var(--red)}
+.badge-off{color:var(--red);font-size:0.72rem;font-family:var(--mono);white-space:nowrap}
+.sig-yes{color:var(--green)}
+.sig-no{color:var(--text-muted)}
 
 .group{margin-bottom:14px}
 .group .gname{color:var(--text-muted);font-size:0.82rem;margin-bottom:4px}
@@ -197,6 +208,38 @@ const fmtS = (v) => v == null ? "-" : (v >= 100 ? v.toFixed(0) : v.toFixed(1)) +
 const fmtPct = (v) => v == null ? "-" : Math.round(v * 100) + "%";
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+// 95% Wilson CI on a run's pass rate, e.g. " [24%-76%]"; "" when absent.
+const ciStr = (s) => (s && s.pass_rate_ci)
+  ? ` [${fmtPct(s.pass_rate_ci[0])}–${fmtPct(s.pass_rate_ci[1])}]` : "";
+
+// Mirror of compare.mcnemar_exact_p: two-sided exact paired significance of an
+// A/B accuracy delta from the discordant (flipped) case counts.
+function comb(n, k) {
+  if (k < 0 || k > n) return 0;
+  k = Math.min(k, n - k);
+  let r = 1;
+  for (let i = 0; i < k; i++) r = r * (n - i) / (i + 1);
+  return r;
+}
+function mcnemarExactP(regressed, improved) {
+  const n = regressed + improved;
+  if (n === 0) return 1.0;
+  const k = Math.min(regressed, improved);
+  let tail = 0;
+  for (let i = 0; i <= k; i++) tail += comb(n, i);
+  return Math.min(1.0, 2 * tail * Math.pow(0.5, n));
+}
+
+// Mirror of metrics.case_trajectory: a case's trajectory dict, single-run or
+// (--trials) last-trial. {} when absent.
+function trajOf(c) {
+  const ex = c.extra || {};
+  if (ex.oracle && ex.oracle.trajectory) return ex.oracle.trajectory;
+  const all = ex.oracle_all_trials || [];
+  for (let i = all.length - 1; i >= 0; i--) if (all[i] && all[i].trajectory) return all[i].trajectory;
+  return {};
+}
+
 let INDEX = [];               // results/index.json entries (newest first)
 const RUN_CACHE = {};         // file -> full run record
 
@@ -231,7 +274,13 @@ function tilesHTML(run) {
   return `<div class="tiles">
     <div class="tile"><div class="label">Pass rate</div>
       <div class="value">${fmtPct(s.pass_rate)}</div>
-      <div class="delta">${s.passed}/${s.cases} cases</div></div>
+      <div class="delta">${s.passed}/${s.cases} cases${s.pass_rate_ci ? " · 95% CI" + ciStr(s) : ""}</div></div>
+    <div class="tile"><div class="label">Clean passes</div>
+      <div class="value">${s.clean_passes != null ? s.clean_passes + "/" + s.cases : "—"}</div>
+      <div class="delta">${s.clean_passes != null
+          ? (s.off_target_edits ? s.off_target_edits + " off-target edit(s)" : "no off-target edits")
+            + (s.mean_steps != null ? " · " + s.mean_steps + " steps/case" : "")
+          : "passed with no off-target edits / clean exit"}</div></div>
     <div class="tile"><div class="label">Mean case time</div>
       <div class="value">${fmtS(s.mean_duration_s)}</div>
       <div class="delta">total ${fmtS(s.total_duration_s)}</div></div>
@@ -297,11 +346,32 @@ function compareHTML(runA, runB) {
   const labelA = runA.scenario.name, labelB = runB.scenario.name;
   const bar = (c, cls, label) => {
     if (!c) return `<div class="hbar-track"></div>`;
+    const traj = trajOf(c);
+    const steps = (c.extra && c.extra.steps) || [];
+    const offNote = traj.off_target_count ? ` &middot; off-target: ${traj.off_target_count}` : "";
+    const stepLine = steps.length
+      ? `<div class="t-line">${steps.length} step(s): ${steps.map((st) =>
+          `#${st.i} ${fmtS(st.duration_s)}${st.ok === false ? " &#10007;" : ""}` +
+          (st.completion_tokens != null ? " " + st.completion_tokens + "t" : "")).join(" &middot; ")}</div>`
+      : "";
     const t = `<div class="t-title">${esc(c.name)} - ${esc(label)}</div>
       <div class="t-line">${c.passed ? "&#10003; passed" : "&#10007; " + esc((c.failures[0] || c.error || "failed"))}</div>
-      <div class="t-line">${fmtS(c.duration_s)} &middot; files: ${esc(c.files.join(", ") || "none")}</div>`;
-    return `<div class="hbar-track"><div class="hbar ${cls}" data-tip='${t.replace(/'/g, "&#39;")}'
-      style="width:${Math.max(1, (c.duration_s || 0) / maxDur * 88)}%">
+      <div class="t-line">${fmtS(c.duration_s)}${offNote} &middot; files: ${esc(c.files.join(", ") || "none")}</div>${stepLine}`;
+    const tipAttr = t.replace(/'/g, "&#39;");
+    const wPct = Math.max(1, (c.duration_s || 0) / maxDur * 88);
+    // Per-step timeline: split the bar into segments sized by each step's share
+    // of the total step time (only when >1 step is recorded, i.e. CLI/baseline
+    // drivers on a multi-prompt case; UI drivers cache results and record none).
+    if (steps.length > 1) {
+      const tot = steps.reduce((a, st) => a + (st.duration_s || 0), 0) || 1;
+      const segs = steps.map((st) =>
+        `<div class="hbar-seg ${cls} ${st.ok === false ? "step-fail" : ""}"
+          style="width:${Math.max(2, (st.duration_s || 0) / tot * 100)}%"></div>`).join("");
+      return `<div class="hbar-track"><div class="hbar-steps" data-tip='${tipAttr}' style="width:${wPct}%">
+        ${segs}<span class="hbar-val">${fmtS(c.duration_s)}${c.passed ? "" : " &#10007;"}</span></div></div>`;
+    }
+    return `<div class="hbar-track"><div class="hbar ${cls}" data-tip='${tipAttr}'
+      style="width:${wPct}%">
       <span class="hbar-val">${fmtS(c.duration_s)}${c.passed ? "" : " &#10007;"}</span></div></div>`;
   };
 
@@ -314,17 +384,40 @@ function compareHTML(runA, runB) {
     : `<td class="res ${c.passed ? "pass" : "fail"}">${c.passed ? "&#10003; pass" : "&#10007; fail"}</td>`;
   const failNote = (c) => c && !c.passed
     ? `<div class="fail-detail">${esc((c.failures[0] || c.error || ""))}</div>` : "";
+  // Off-target-edit badge: files the agent changed that the task never asked for
+  // (a "did it stay on task" signal, flagged even when the case passed).
+  const offBadge = (c, side) => {
+    const n = c ? (trajOf(c).off_target_count || 0) : 0;
+    return n ? ` <span class="badge-off" title="${esc(side)}: ${esc((trajOf(c).off_target_files || []).join(", "))}">&#9888; ${n} off-target</span>` : "";
+  };
   const tableRows = names.map((n) => {
     const a = cases[n].a, b2 = cases[n].b;
     const delta = a && b2 && a.duration_s != null && b2.duration_s != null
       ? (b2.duration_s - a.duration_s) : null;
-    return `<tr><td>${esc(n)}${failNote(a)}${failNote(b2)}</td>${res(a)}${res(b2)}
+    return `<tr><td>${esc(n)}${offBadge(a, "A")}${offBadge(b2, "B")}${failNote(a)}${failNote(b2)}</td>${res(a)}${res(b2)}
       <td>${fmtS(a && a.duration_s)}</td><td>${fmtS(b2 && b2.duration_s)}</td>
       <td>${delta == null ? "-" : (delta > 0 ? "+" : "") + delta.toFixed(1) + "s"}</td></tr>`;
   }).join("");
 
   const sa = runA.summary, sb = runB.summary;
   const accA = sa.pass_rate, accB = sb.pass_rate;
+
+  // Paired significance of the accuracy delta (exact McNemar on flipped cases).
+  let reg = 0, imp = 0;
+  for (const n of names) {
+    const a = cases[n].a, b = cases[n].b;
+    if (a && b) {
+      if (a.passed && !b.passed) reg++;
+      else if (!a.passed && b.passed) imp++;
+    }
+  }
+  const nDisc = reg + imp;
+  const pVal = mcnemarExactP(reg, imp);
+  const sigHTML = (nDisc > 0 && accA !== accB)
+    ? (pVal < 0.05
+        ? `<span class="sig-yes">significant</span> (p=${pVal.toFixed(3)}, ${nDisc} flipped)`
+        : `<span class="sig-no">likely noise</span> (p=${pVal.toFixed(3)}, ${nDisc} flipped)`)
+    : `${nDisc} case(s) flipped`;
 
   // M-03: suppress the aggregate winner tiles when the two runs did not
   // measure the same thing (different case set / oracle / trial count) -
@@ -351,13 +444,16 @@ function compareHTML(runA, runB) {
   const verdict = `${compatBanner}<div class="tiles" style="margin-bottom:14px">
     <div class="tile"><div class="label">More accurate</div>
       <div class="value" style="font-size:1.05rem">${suppressed ? "(suppressed)" : (accA === accB ? "tie" : esc(accA > accB ? labelA : labelB))}</div>
-      <div class="delta">${fmtPct(accA)} vs ${fmtPct(accB)}</div></div>
+      <div class="delta">${fmtPct(accA)}${ciStr(sa)} vs ${fmtPct(accB)}${ciStr(sb)}</div></div>
+    <div class="tile"><div class="label">Pass-rate delta (B - A)</div>
+      <div class="value" style="font-size:1.05rem">${(accB - accA >= 0 ? "+" : "") + Math.round((accB - accA) * 100)}pp</div>
+      <div class="delta">${suppressed ? "&nbsp;" : sigHTML}</div></div>
+    <div class="tile"><div class="label">Clean passes (A vs B)</div>
+      <div class="value" style="font-size:1.05rem">${sa.clean_passes != null ? sa.clean_passes : "-"} vs ${sb.clean_passes != null ? sb.clean_passes : "-"}</div>
+      <div class="delta">${(sa.off_target_edits || 0) + (sb.off_target_edits || 0)} off-target edit(s) total</div></div>
     <div class="tile"><div class="label">Faster (mean case)</div>
       <div class="value" style="font-size:1.05rem">${suppressed ? "(suppressed)" : esc(sa.mean_duration_s <= sb.mean_duration_s ? labelA : labelB)}</div>
       <div class="delta">${fmtS(sa.mean_duration_s)} vs ${fmtS(sb.mean_duration_s)}</div></div>
-    <div class="tile"><div class="label">Pass-rate delta (B - A)</div>
-      <div class="value" style="font-size:1.05rem">${(accB - accA >= 0 ? "+" : "") + Math.round((accB - accA) * 100)}pp</div>
-      <div class="delta">&nbsp;</div></div>
     <div class="tile"><div class="label">Cheaper</div>
       <div class="value" style="font-size:1.05rem">${cheaperVal}</div>
       <div class="delta">${cheaperNote}</div></div>
@@ -370,6 +466,7 @@ function compareHTML(runA, runB) {
     <div class="legend">
       <span class="key"><span class="swatch" style="background:var(--series-a)"></span>${esc(labelA)}</span>
       <span class="key"><span class="swatch" style="background:var(--series-b)"></span>${esc(labelB)}</span>
+      <span class="key" style="color:var(--text-dim)">bars split into per-step (per-turn) segments where the driver records them; hover for timing/tokens</span>
     </div>
     ${groups}
     <h2 style="margin-top:18px">Per-case results</h2>

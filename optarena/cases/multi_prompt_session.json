@@ -21,7 +21,17 @@
     "test_greet.py": "import importlib.util\nspec = importlib.util.spec_from_file_location('greet_mod', 'greet.py')\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nassert mod.greet('Ann') == 'Hello, Ann!', f\"greet('Ann') = {mod.greet('Ann')!r}\"\nassert mod.farewell('Ann') == 'Goodbye, Ann!', f\"farewell('Ann') = {mod.farewell('Ann')!r}\"\nprint('PASS')\n"
   },
   "check_command": "python3 test_greet.py",
+  "check_command_timeout": 60,
   "timeout": 200,
   "difficulty": 1,
-  "task_type": "feature"
+  "task_type": "feature",
+  "reference_solution": {
+    "greet.py": "def greet(name):\n    return 'Hello, ' + name + '!'\n\n\ndef farewell(name):\n    return 'Goodbye, ' + name + '!'\n"
+  },
+  "domain": "backend",
+  "tags": [
+    "python",
+    "multi-prompt",
+    "functions"
+  ]
 }

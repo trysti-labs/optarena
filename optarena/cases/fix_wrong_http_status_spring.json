@@ -38,5 +38,8 @@
   },
   "check_command": "python3 test_notes.py",
   "check_command_timeout": 120,
-  "timeout": 210
+  "timeout": 210,
+  "reference_solution": {
+    "src/main/java/com/optarena/notes/NoteController.java": "package com.optarena.notes;\n\nimport java.util.List;\nimport java.util.Map;\nimport java.util.concurrent.CopyOnWriteArrayList;\nimport java.util.concurrent.atomic.AtomicLong;\nimport org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.*;\n\n@RestController\n@RequestMapping(\"/notes\")\npublic class NoteController {\n\n    private final List<Note> notes = new CopyOnWriteArrayList<>();\n    private final AtomicLong idSeq = new AtomicLong(1);\n\n    @GetMapping\n    public List<Note> list() {\n        return notes;\n    }\n\n    @PostMapping\n    public ResponseEntity<Note> create(@RequestBody Map<String, String> body) {\n        Note note = new Note(idSeq.getAndIncrement(), body.get(\"text\"));\n        notes.add(note);\n        return ResponseEntity.status(HttpStatus.CREATED).body(note);\n    }\n}\n"
+  }
 }

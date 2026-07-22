@@ -39,5 +39,8 @@
   },
   "check_command": "python3 test_todos.py",
   "check_command_timeout": 100,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\nvar todos = new List<Todo>();\nvar nextId = 1;\n\napp.MapGet(\"/todos\", () => Results.Json(todos));\n\napp.MapPost(\"/todos\", (TodoRequest req) =>\n{\n    var todo = new Todo(nextId++, req.Title);\n    todos.Add(todo);\n    return Results.Created($\"/todos/{todo.Id}\", todo);\n});\n\napp.MapDelete(\"/todos/{id:int}\", (int id) =>\n{\n    var todo = todos.FirstOrDefault(t => t.Id == id);\n    if (todo is null) return Results.NotFound();\n    todos.Remove(todo);\n    return Results.NoContent();\n});\n\napp.Run(\"http://0.0.0.0:8050\");\n\npublic record Todo(int Id, string Title);\npublic record TodoRequest(string Title);\n"
+  }
 }

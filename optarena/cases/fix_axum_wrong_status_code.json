@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_status.py",
   "check_command_timeout": 180,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "src/main.rs": "use axum::{\n    extract::State,\n    http::StatusCode,\n    routing::{get, post},\n    Json, Router,\n};\nuse serde::{Deserialize, Serialize};\nuse std::sync::{Arc, Mutex};\n\n#[derive(Debug, Clone, Serialize, Deserialize)]\nstruct Item {\n    name: String,\n}\n\ntype SharedItems = Arc<Mutex<Vec<Item>>>;\n\nasync fn list_items(State(items): State<SharedItems>) -> Json<Vec<Item>> {\n    let items = items.lock().unwrap();\n    Json(items.clone())\n}\n\nasync fn create_item(\n    State(items): State<SharedItems>,\n    Json(payload): Json<Item>,\n) -> (StatusCode, Json<Item>) {\n    let mut items = items.lock().unwrap();\n    items.push(payload.clone());\n    (StatusCode::CREATED, Json(payload))\n}\n\n#[tokio::main]\nasync fn main() {\n    let items: SharedItems = Arc::new(Mutex::new(Vec::new()));\n    let app = Router::new()\n        .route(\"/items\", get(list_items).post(create_item))\n        .with_state(items);\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8042\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  }
 }

@@ -1742,5 +1742,289 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("(none)", text)
 
 
+class TrajectoryStatsTests(unittest.TestCase):
+    """Off-target-edit detection: files the task never asked for."""
+
+    def _case(self):
+        return {
+            "setup_files": {"app.py": "x = 1\n"},
+            "expected_files": [{"path_pattern": "app.py", "content_patterns": ["x"]}],
+        }
+
+    def test_only_expected_file_touched_is_clean(self):
+        from optarena.cases import trajectory_stats
+        traj = trajectory_stats(self._case(), ["app.py"], Path("/tmp"))
+        self.assertEqual(traj["off_target_count"], 0)
+        self.assertEqual(traj["off_target_files"], [])
+
+    def test_extra_file_is_off_target(self):
+        from optarena.cases import trajectory_stats
+        traj = trajectory_stats(self._case(), ["app.py", "scratch.txt", "notes.md"], Path("/tmp"))
+        self.assertEqual(traj["off_target_count"], 2)
+        self.assertIn("scratch.txt", traj["off_target_files"])
+
+    def test_setup_file_is_not_off_target(self):
+        # A fix case whose expected file IS a setup file that got modified:
+        # still counts as expected (matches the pattern), never off-target.
+        from optarena.cases import trajectory_stats
+        traj = trajectory_stats(self._case(), ["app.py"], Path("/tmp"))
+        self.assertEqual(traj["off_target_count"], 0)
+
+    def test_glob_path_pattern_matches(self):
+        from optarena.cases import trajectory_stats
+        case = {"expected_files": [{"path_pattern": "**/Foo.java"}]}
+        traj = trajectory_stats(case, ["src/main/java/Foo.java", "junk.txt"], Path("/tmp"))
+        self.assertEqual(traj["off_target_count"], 1)
+        self.assertEqual(traj["off_target_files"], ["junk.txt"])
+
+
+class WilsonCiTests(unittest.TestCase):
+    def test_bounds_and_zero(self):
+        from optarena.metrics import wilson_ci
+        self.assertEqual(wilson_ci(0, 0), (0.0, 0.0))
+        lo, hi = wilson_ci(5, 10)
+        self.assertTrue(0.0 <= lo < 0.5 < hi <= 1.0)
+
+    def test_small_sample_wide_large_sample_narrow(self):
+        from optarena.metrics import wilson_ci
+        lo_s, hi_s = wilson_ci(1, 2)      # 50% on n=2
+        lo_l, hi_l = wilson_ci(300, 600)  # 50% on n=600
+        self.assertGreater(hi_s - lo_s, hi_l - lo_l)  # small sample is wider
+
+    def test_all_pass_upper_is_one_lower_below_one(self):
+        from optarena.metrics import wilson_ci
+        lo, hi = wilson_ci(10, 10)
+        self.assertEqual(hi, 1.0)
+        self.assertLess(lo, 1.0)
+
+
+class McNemarTests(unittest.TestCase):
+    def test_no_discordant_is_one(self):
+        from optarena.compare import mcnemar_exact_p
+        self.assertEqual(mcnemar_exact_p(0, 0), 1.0)
+
+    def test_symmetric_not_significant(self):
+        from optarena.compare import mcnemar_exact_p
+        self.assertGreater(mcnemar_exact_p(3, 3), 0.05)
+
+    def test_strong_asymmetry_significant(self):
+        from optarena.compare import mcnemar_exact_p
+        # 10 improved, 0 regressed -> p = 2 * 0.5^10 ~= 0.002
+        self.assertLess(mcnemar_exact_p(0, 10), 0.05)
+
+    def test_p_never_exceeds_one(self):
+        from optarena.compare import mcnemar_exact_p
+        self.assertLessEqual(mcnemar_exact_p(1, 1), 1.0)
+
+
+class AggregateTrajectoryTests(unittest.TestCase):
+    def _case(self, name, passed, off_target=0, execution_ok=True, n_steps=None):
+        oracle = {"trajectory": {"off_target_count": off_target, "off_target_files": []}}
+        extra = {"oracle": oracle}
+        if n_steps is not None:
+            extra["n_steps"] = n_steps
+        return {"name": name, "passed": passed, "duration_s": 1.0,
+                "execution_ok": execution_ok, "files": [], "extra": extra}
+
+    def test_clean_pass_counting(self):
+        cases = [
+            self._case("a", True, off_target=0),                 # clean pass
+            self._case("b", True, off_target=2),                 # pass but off-target
+            self._case("c", True, off_target=0, execution_ok=False),  # pass but dirty exit
+            self._case("d", False, off_target=0),                # fail
+        ]
+        s = aggregate(cases)
+        self.assertEqual(s["clean_passes"], 1)
+        self.assertEqual(s["off_target_edits"], 2)
+        self.assertEqual(s["passed"], 3)
+
+    def test_pass_rate_ci_present(self):
+        s = aggregate([self._case("a", True), self._case("b", False)])
+        self.assertIn("pass_rate_ci", s)
+        self.assertEqual(len(s["pass_rate_ci"]), 2)
+
+    def test_mean_steps(self):
+        cases = [self._case("a", True, n_steps=2), self._case("b", True, n_steps=4)]
+        self.assertEqual(aggregate(cases)["mean_steps"], 3.0)
+
+    def test_trajectory_via_trials(self):
+        # trajectory carried in oracle_all_trials (a --trials merge)
+        from optarena.metrics import case_trajectory, is_clean_pass
+        c = {"passed": True, "execution_ok": True, "extra": {
+            "oracle_all_trials": [
+                {"trajectory": {"off_target_count": 0}},
+                {"trajectory": {"off_target_count": 3}},
+            ]}}
+        self.assertEqual(case_trajectory(c)["off_target_count"], 3)
+        self.assertFalse(is_clean_pass(c))
+
+
+class CompareSignificanceTests(unittest.TestCase):
+    def _run(self, name, results):
+        cases = [{"name": n, "passed": p, "duration_s": 1.0,
+                  "execution_ok": True, "files": [], "extra": {}} for n, p in results]
+        return {"run_id": name, "scenario": {"name": name}, "summary": aggregate(cases),
+                "cases": cases, "manifest": {"oracle_version": 1, "case_set_hash": "h",
+                                             "trials": 1}}
+
+    def test_significant_flip(self):
+        a = self._run("a", [(f"c{i}", False) for i in range(10)])
+        b = self._run("b", [(f"c{i}", True) for i in range(10)])
+        cmp = compare_runs(a, b)
+        self.assertTrue(cmp["verdict"]["accuracy_significant"])
+        self.assertEqual(cmp["verdict"]["n_discordant"], 10)
+        self.assertIn("SIGNIFICANT", format_table(cmp))
+
+    def test_small_delta_not_significant(self):
+        # one case flips out of ten -> not significant
+        a = self._run("a", [(f"c{i}", i < 5) for i in range(10)])
+        b = self._run("b", [(f"c{i}", i < 6) for i in range(10)])
+        cmp = compare_runs(a, b)
+        self.assertFalse(cmp["verdict"]["accuracy_significant"])
+
+
+class ReportArtifactTests(unittest.TestCase):
+    def _run(self):
+        return {
+            "run_id": "r1", "started_at": "2026-07-22T10:00:00",
+            "scenario": {"name": "s", "driver": "aider", "backend": {"model": "m"}},
+            "summary": {"cases": 3, "passed": 1, "pass_rate": 0.333,
+                        "pass_rate_ci": [0.06, 0.79], "clean_passes": 1, "mean_duration_s": 2.0},
+            "cases": [
+                {"name": "ok", "passed": True, "duration_s": 1.0, "failures": [], "error": None,
+                 "extra": {"oracle": {"output": "PASS", "trajectory": {"off_target_count": 0}}}},
+                {"name": "bad", "passed": False, "duration_s": 2.0, "failures": ["assert x"], "error": None,
+                 "extra": {"oracle": {"trajectory": {"off_target_count": 1}},
+                           "security": {"findings": [{"rule": "py-os-system", "level": "warning",
+                                        "title": "os.system()", "message": "os.system()",
+                                        "file": "a.py", "line": 3}]}}},
+                {"name": "err", "passed": False, "duration_s": 3.0, "failures": [], "error": "timeout"},
+            ],
+        }
+
+    def test_junit_wellformed_and_counts(self):
+        import xml.etree.ElementTree as ET
+        from optarena.report import to_junit_xml
+        root = ET.fromstring(to_junit_xml(self._run()))
+        self.assertEqual(root.get("tests"), "3")
+        self.assertEqual(root.get("failures"), "1")
+        self.assertEqual(root.get("errors"), "1")
+
+    def test_html_self_contained(self):
+        from optarena.report import to_html
+        html = to_html(self._run())
+        self.assertIn("<!doctype html>", html)
+        self.assertIn("95% CI", html)
+        self.assertNotIn("http://", html.replace("https://github.com", ""))  # no network assets
+
+    def test_sarif_valid(self):
+        from optarena.report import to_sarif
+        s = json.loads(to_sarif(self._run()))
+        self.assertEqual(s["version"], "2.1.0")
+        self.assertEqual(len(s["runs"][0]["results"]), 1)
+        self.assertEqual(s["runs"][0]["results"][0]["ruleId"], "py-os-system")
+
+
+class SecurityScanTests(unittest.TestCase):
+    def test_detects_secret_and_injection(self):
+        from optarena.security import scan_text
+        py = 'API_KEY = "sk-abcdef0123456789abcdef"\nimport os\nos.system("x " + a)\n'
+        rules = {f["rule"] for f in scan_text(py, "app.py")}
+        self.assertIn("provider-api-key", rules)
+        self.assertIn("py-os-system", rules)
+
+    def test_ignores_placeholder_secret(self):
+        from optarena.security import scan_text
+        finds = scan_text('password = "changeme"\n', "app.py")
+        self.assertEqual([f for f in finds if f["rule"] == "hardcoded-secret"], [])
+
+    def test_sql_fstring_and_shell_true(self):
+        from optarena.security import scan_text
+        rules = {f["rule"] for f in scan_text(
+            'cur.execute(f"SELECT * FROM t WHERE n=\'{n}\'")\nsubprocess.run("x", shell=True)\n', "d.py")}
+        self.assertIn("py-sql-fstring", rules)
+        self.assertIn("py-shell-true", rules)
+
+    def test_js_rules_by_extension(self):
+        from optarena.security import scan_text
+        js = "exec(`echo ${x}`);\n"
+        self.assertTrue(any(f["rule"] == "js-child-exec" for f in scan_text(js, "s.js")))
+        # python rules must not fire on a .js file
+        self.assertFalse(any(f["rule"].startswith("py-") for f in scan_text(js, "s.js")))
+
+    def test_clean_file_no_findings(self):
+        from optarena.security import scan_text
+        self.assertEqual(scan_text("def add(a, b):\n    return a + b\n", "c.py"), [])
+
+    def test_scan_workspace_rollup(self):
+        from optarena.security import scan_workspace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "a.py").write_text('import os\nos.system("x " + a)\n')
+            (root / "clean.py").write_text("x = 1\n")
+            res = scan_workspace(["a.py", "clean.py"], root)
+            self.assertEqual(res["counts"]["warning"], 1)
+            self.assertEqual(res["total"], 1)
+
+
+class PackTests(unittest.TestCase):
+    def _cases_dir(self, d):
+        p = Path(d) / "cases"
+        p.mkdir()
+        (p / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do x"],
+            "expected_files": [{"path_pattern": "x.py", "content_patterns": ["x"]}]}))
+        return p
+
+    def test_hash_stable_and_pack_roundtrip(self):
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            self.assertEqual(pack["case_count"], 1)
+            self.assertEqual(pack["hash"], packs.content_hash(pack["cases"]))
+            out = packs.write_pack(pack, Path(d) / "p.optpack.json")
+            loaded = packs.load_pack(str(out))
+            self.assertEqual(loaded["hash"], pack["hash"])
+
+    def test_tamper_refused(self):
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            out = Path(d) / "p.json"
+            bad = dict(pack)
+            bad["cases"] = {"c1.json": {**pack["cases"]["c1.json"], "prompts": ["HACKED"]}}
+            out.write_text(json.dumps(bad))
+            with self.assertRaises(ValueError):
+                packs.load_pack(str(out))
+
+    def test_install_idempotent_and_resolve(self):
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            reg = Path(d) / "reg"
+            pack = packs.build_pack(src, "mypack", "2.0.0")
+            dest1 = packs.install_pack(pack, packs_dir=reg)
+            dest2 = packs.install_pack(pack, packs_dir=reg)      # idempotent
+            self.assertEqual(dest1, dest2)
+            self.assertEqual(packs.resolve_pack("mypack", reg), dest1)
+            self.assertEqual(packs.resolve_pack("mypack@2.0.0", reg), dest1)
+            self.assertEqual(len(packs.list_installed(reg)), 1)
+
+    def test_install_conflict_refused(self):
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            reg = Path(d) / "reg"
+            packs.install_pack(packs.build_pack(src, "p", "1.0.0"), packs_dir=reg)
+            # different content, same name@version -> refused without force
+            (src / "c2.json").write_text(json.dumps({
+                "name": "c2", "prompts": ["y"],
+                "expected_files": [{"path_pattern": "y.py", "content_patterns": ["y"]}]}))
+            with self.assertRaises(FileExistsError):
+                packs.install_pack(packs.build_pack(src, "p", "1.0.0"), packs_dir=reg)
+
+
 if __name__ == "__main__":
     unittest.main()

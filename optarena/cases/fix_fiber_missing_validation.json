@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_validation.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "main.go": "package main\n\nimport (\n\t\"github.com/gofiber/fiber/v2\"\n\t\"github.com/gofiber/fiber/v2/middleware/recover\"\n)\n\ntype RegisterInput struct {\n\tUsername string `json:\"username\"`\n\tPassword string `json:\"password\"`\n}\n\nfunc main() {\n\tapp := fiber.New()\n\tapp.Use(recover.New())\n\tapp.Post(\"/register\", func(c *fiber.Ctx) error {\n\t\tvar input RegisterInput\n\t\tif err := c.BodyParser(&input); err != nil {\n\t\t\treturn c.Status(fiber.StatusBadRequest).JSON(fiber.Map{\"error\": \"invalid body\"})\n\t\t}\n\t\tif input.Username == \"\" || input.Password == \"\" {\n\t\t\treturn c.Status(fiber.StatusBadRequest).JSON(fiber.Map{\"error\": \"username and password are required\"})\n\t\t}\n\t\tinitial := input.Username[0]\n\t\treturn c.JSON(fiber.Map{\"status\": \"registered\", \"initial\": string(initial)})\n\t})\n\tapp.Listen(\":8033\")\n}\n"
+  }
 }

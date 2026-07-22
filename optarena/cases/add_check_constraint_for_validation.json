@@ -36,5 +36,8 @@
   },
   "check_command": "python3 test_check.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price REAL NOT NULL CHECK (price >= 0)\n);\n"
+  }
 }

@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_divide.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "server.js": "const express = require('express');\nconst app = express();\napp.use(express.json());\n\napp.post('/divide', (req, res) => {\n  const { a, b } = req.body || {};\n  if (typeof a !== 'number' || typeof b !== 'number' || Number.isNaN(a) || Number.isNaN(b)) {\n    return res.status(400).json({ error: 'a and b must both be numbers' });\n  }\n  res.json({ result: a / b });\n});\n\napp.listen(8022);\n"
+  }
 }

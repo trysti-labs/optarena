@@ -7,7 +7,52 @@ two runs. Kept dependency-free (stdlib only).
 
 from __future__ import annotations
 
+import math
 import statistics
+
+
+def wilson_ci(passed: int, total: int, z: float = 1.96) -> tuple[float, float]:
+    """
+    Wilson score confidence interval for a pass rate (default 95%, z=1.96).
+
+    A point pass rate ("50%") on a handful of cases is nearly meaningless
+    without a spread - 3/6 and 300/600 are both "50%" but only one is a claim.
+    Wilson (not the normal approximation) stays inside [0, 1] and is well-behaved
+    for small n and for rates near 0 or 1, which is exactly the regime a
+    per-tool eval runs in. Returns (low, high), each rounded to 3 dp.
+    """
+    if total <= 0:
+        return (0.0, 0.0)
+    phat = passed / total
+    denom = 1 + z * z / total
+    center = (phat + z * z / (2 * total)) / denom
+    margin = (z / denom) * math.sqrt(phat * (1 - phat) / total + z * z / (4 * total * total))
+    return (round(max(0.0, center - margin), 3), round(min(1.0, center + margin), 3))
+
+
+def case_trajectory(c: dict) -> dict:
+    """Extract a case's trajectory dict, whether it's a single run
+    (``extra.oracle.trajectory``) or a ``--trials`` merge (last trial's
+    ``extra.oracle_all_trials[*].trajectory``). Empty dict when absent."""
+    ex = c.get("extra", {}) or {}
+    oracle = ex.get("oracle") or {}
+    if oracle.get("trajectory"):
+        return oracle["trajectory"]
+    for o in reversed(ex.get("oracle_all_trials") or []):
+        if o and o.get("trajectory"):
+            return o["trajectory"]
+    return {}
+
+
+def is_clean_pass(c: dict) -> bool:
+    """Passed AND the tool exited cleanly AND it touched no off-target files -
+    the 'right answer via a clean path' the trajectory-eval literature asks for,
+    as opposed to a pass that also thrashed unrelated files or exited non-zero."""
+    if not c.get("passed"):
+        return False
+    if c.get("execution_ok") is False:
+        return False
+    return case_trajectory(c).get("off_target_count", 0) == 0
 
 
 def aggregate(case_dicts: list[dict]) -> dict:
@@ -32,12 +77,31 @@ def aggregate(case_dicts: list[dict]) -> dict:
         if c.get("extra", {}).get("trials")
         and 0 < c["extra"].get("passes", 0) < c["extra"]["trials"]
     )
+    # Trajectory rollups ("judge the path"): how many passes were CLEAN (no
+    # off-target edits, clean exit), and how many files were touched beyond
+    # what the tasks asked for across the whole run.
+    clean_passes = sum(1 for c in case_dicts if is_clean_pass(c))
+    off_target = sum(case_trajectory(c).get("off_target_count", 0) for c in case_dicts)
+    # Security-scan rollup (only when --security-scan ran; None otherwise so a
+    # non-scanned run doesn't read as "0 findings = clean").
+    scanned = [c for c in case_dicts if isinstance(c.get("extra", {}).get("security"), dict)]
+    if scanned:
+        sec_total = sum(c["extra"]["security"].get("total", 0) for c in scanned)
+        sec_high = sum(c["extra"]["security"].get("counts", {}).get("error", 0) for c in scanned)
+    else:
+        sec_total = sec_high = None
+    step_counts = [c["extra"]["n_steps"] for c in case_dicts
+                   if isinstance(c.get("extra", {}).get("n_steps"), int)]
+    ci_low, ci_high = wilson_ci(passed, total)
     return {
         "cases": total,
         "passed": passed,
         "failed": total - passed,
         "errors": errors,
         "pass_rate": round(passed / total, 3) if total else 0.0,
+        # 95% Wilson interval on the pass rate - the spread that says whether a
+        # pass-rate difference is a real signal or small-sample noise.
+        "pass_rate_ci": [ci_low, ci_high],
         "total_duration_s": round(sum(durations), 1),
         "mean_duration_s": round(statistics.mean(durations), 1) if durations else 0.0,
         "median_duration_s": round(statistics.median(durations), 1) if durations else 0.0,
@@ -46,6 +110,13 @@ def aggregate(case_dicts: list[dict]) -> dict:
         "total_cost_usd": round(cost, 4) if cost else None,
         "mean_files_changed": round(statistics.mean(files_changed), 1) if files_changed else 0.0,
         "flaky_cases": flaky,
+        # Trajectory: clean passes and total off-target (unrequested) edits.
+        "clean_passes": clean_passes,
+        "off_target_edits": off_target,
+        "mean_steps": round(statistics.mean(step_counts), 1) if step_counts else None,
+        # Security scan (None unless --security-scan ran).
+        "security_findings": sec_total,
+        "security_high": sec_high,
     }
 
 

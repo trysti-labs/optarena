@@ -36,5 +36,8 @@
   },
   "check_command": "python3 test_index.py",
   "check_command_timeout": 120,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    email TEXT NOT NULL,\n    name TEXT NOT NULL\n);\n\nCREATE INDEX idx_users_email ON users(email);\n"
+  }
 }

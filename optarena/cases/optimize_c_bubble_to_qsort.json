@@ -34,5 +34,8 @@
   },
   "check_command": "python3 test_perf.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "sort_dedup.c": "#include <stdio.h>\n#include <stdlib.h>\n\nint cmp_int(const void *a, const void *b) {\n    int x = *(const int *)a, y = *(const int *)b;\n    return (x > y) - (x < y);\n}\n\nint main(void) {\n    int n;\n    if (scanf(\"%d\", &n) != 1) return 1;\n    int *arr = malloc(sizeof(int) * (size_t)n);\n    for (int i = 0; i < n; i++) {\n        if (scanf(\"%d\", &arr[i]) != 1) return 1;\n    }\n\n    qsort(arr, (size_t)n, sizeof(int), cmp_int);\n\n    int ucount = 0;\n    for (int i = 0; i < n; i++) {\n        if (i == 0 || arr[i] != arr[i - 1]) {\n            arr[ucount++] = arr[i];\n        }\n    }\n\n    for (int i = 0; i < ucount; i++) {\n        printf(\"%d\", arr[i]);\n        if (i != ucount - 1) printf(\" \");\n    }\n    printf(\"\\n\");\n\n    free(arr);\n    return 0;\n}\n"
+  }
 }

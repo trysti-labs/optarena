@@ -39,5 +39,8 @@
   },
   "check_command": "python3 test_traversal.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "main.go": "package main\n\nimport (\n\t\"net/http\"\n\t\"os\"\n\t\"path/filepath\"\n\t\"strings\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nvar baseDir = \"files\"\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/download/*filename\", func(c *gin.Context) {\n\t\tname := c.Param(\"filename\")\n\t\tif len(name) > 0 && name[0] == '/' {\n\t\t\tname = name[1:]\n\t\t}\n\t\tabsBase, err := filepath.Abs(baseDir)\n\t\tif err != nil {\n\t\t\tc.String(http.StatusInternalServerError, \"error\")\n\t\t\treturn\n\t\t}\n\t\tpath := filepath.Join(absBase, name)\n\t\tif path != absBase && !strings.HasPrefix(path, absBase+string(os.PathSeparator)) {\n\t\t\tc.String(http.StatusBadRequest, \"invalid path\")\n\t\t\treturn\n\t\t}\n\t\tdata, err := os.ReadFile(path)\n\t\tif err != nil {\n\t\t\tc.String(http.StatusNotFound, \"not found\")\n\t\t\treturn\n\t\t}\n\t\tc.String(http.StatusOK, string(data))\n\t})\n\tr.Run(\":8036\")\n}\n"
+  }
 }

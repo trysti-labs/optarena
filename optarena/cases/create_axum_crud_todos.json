@@ -38,5 +38,8 @@
   },
   "check_command": "python3 test_todos.py",
   "check_command_timeout": 180,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "src/main.rs": "use axum::{\n    extract::{Path, State},\n    http::StatusCode,\n    routing::{delete, get},\n    Json, Router,\n};\nuse serde::{Deserialize, Serialize};\nuse std::sync::{Arc, Mutex};\n\n#[derive(Clone, Serialize)]\nstruct Todo {\n    id: i32,\n    title: String,\n}\n\n#[derive(Deserialize)]\nstruct CreateTodo {\n    title: String,\n}\n\nstruct AppState {\n    todos: Vec<Todo>,\n    next_id: i32,\n}\n\ntype Shared = Arc<Mutex<AppState>>;\n\nasync fn list_todos(State(state): State<Shared>) -> Json<Vec<Todo>> {\n    let state = state.lock().unwrap();\n    Json(state.todos.clone())\n}\n\nasync fn create_todo(\n    State(state): State<Shared>,\n    Json(payload): Json<CreateTodo>,\n) -> (StatusCode, Json<Todo>) {\n    let mut state = state.lock().unwrap();\n    let id = state.next_id;\n    state.next_id += 1;\n    let todo = Todo { id, title: payload.title };\n    state.todos.push(todo.clone());\n    (StatusCode::CREATED, Json(todo))\n}\n\nasync fn delete_todo(State(state): State<Shared>, Path(id): Path<i32>) -> StatusCode {\n    let mut state = state.lock().unwrap();\n    let before = state.todos.len();\n    state.todos.retain(|t| t.id != id);\n    if state.todos.len() < before {\n        StatusCode::NO_CONTENT\n    } else {\n        StatusCode::NOT_FOUND\n    }\n}\n\n#[tokio::main]\nasync fn main() {\n    let state: Shared = Arc::new(Mutex::new(AppState {\n        todos: Vec::new(),\n        next_id: 1,\n    }));\n    let app = Router::new()\n        .route(\"/todos\", get(list_todos).post(create_todo))\n        .route(\"/todos/:id\", delete(delete_todo))\n        .with_state(state);\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8041\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  }
 }
