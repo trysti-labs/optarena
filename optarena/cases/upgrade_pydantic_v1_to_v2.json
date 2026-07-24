@@ -1,0 +1,60 @@
+{
+  "name": "upgrade_pydantic_v1_to_v2",
+  "language": "python",
+  "framework": "pydantic",
+  "domain": "backend",
+  "docker_image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "description": "Migrate a model from the deprecated Pydantic v1 API (@validator, .dict()) to Pydantic v2 (@field_validator, model_dump()) without changing behavior",
+  "difficulty": 3,
+  "task_type": "dependency_upgrade",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "pydantic",
+    "version-upgrade",
+    "migration",
+    "long-horizon"
+  ],
+  "prompts": [
+    "models.py uses the deprecated Pydantic v1 API. Migrate it to Pydantic v2: replace the `@validator` decorator with `@field_validator` (imported from pydantic; keep the same field and validation logic, and note v2 field validators are class methods), and replace the `.dict()` call in serialize() with `.model_dump()`. The observable behavior must stay identical: valid users serialize to the same dict, and an email without '@' is still rejected."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "models.py",
+      "content_patterns": [
+        "field_validator",
+        "model_dump"
+      ],
+      "not_content_patterns": [
+        "@validator",
+        ".dict("
+      ]
+    }
+  ],
+  "setup_files": {
+    "models.py": "from pydantic import BaseModel, validator\n\n\nclass User(BaseModel):\n    name: str\n    email: str\n\n    @validator(\"email\")\n    def email_must_have_at(cls, v):\n        if \"@\" not in v:\n            raise ValueError(\"invalid email\")\n        return v\n\n\ndef serialize(user):\n    return user.dict()\n"
+  },
+  "test_setup_files": {
+    "test_migration.py": "import pydantic\nimport models\n\nsrc = open(\"models.py\", encoding=\"utf-8\").read()\nassert \"field_validator\" in src, \"must migrate to @field_validator\"\nassert \"@validator\" not in src, \"the deprecated v1 @validator must be gone\"\nassert \".model_dump(\" in src, \"must use model_dump()\"\nassert \".dict(\" not in src, \"the deprecated v1 .dict() must be gone\"\n\nu = models.User(name=\"Ann\", email=\"a@b.com\")\nassert models.serialize(u) == {\"name\": \"Ann\", \"email\": \"a@b.com\"}, \"serialize() output changed\"\ntry:\n    models.User(name=\"x\", email=\"no-at-sign\")\n    raise AssertionError(\"invalid email must still be rejected\")\nexcept pydantic.ValidationError:\n    pass\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_migration.py",
+  "reference_solution": {
+    "models.py": "from pydantic import BaseModel, field_validator\n\n\nclass User(BaseModel):\n    name: str\n    email: str\n\n    @field_validator(\"email\")\n    @classmethod\n    def email_must_have_at(cls, v):\n        if \"@\" not in v:\n            raise ValueError(\"invalid email\")\n        return v\n\n\ndef serialize(user):\n    return user.model_dump()\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "kept-v1-dict",
+      "files": {
+        "models.py": "from pydantic import BaseModel, field_validator\n\n\nclass User(BaseModel):\n    name: str\n    email: str\n\n    @field_validator(\"email\")\n    @classmethod\n    def email_must_have_at(cls, v):\n        if \"@\" not in v:\n            raise ValueError(\"invalid email\")\n        return v\n\n\ndef serialize(user):\n    return user.dict()\n"
+      }
+    },
+    {
+      "name": "dropped-validation",
+      "files": {
+        "models.py": "from pydantic import BaseModel, field_validator\n\n\nclass User(BaseModel):\n    name: str\n    email: str\n\n    @field_validator(\"email\")\n    @classmethod\n    def email_must_have_at(cls, v):\n        return v\n\n\ndef serialize(user):\n    return user.model_dump()\n"
+      }
+    }
+  ]
+}

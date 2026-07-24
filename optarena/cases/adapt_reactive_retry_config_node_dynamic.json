@@ -1,0 +1,57 @@
+{
+  "name": "adapt_reactive_retry_config_node_dynamic",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "docker_image": "optarena-tester-node:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first prompt boundary AFTER client.js exists (not a fixed prompt count), then MAX_RETRIES changes under it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["javascript", "node", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "Create client.js that exports getMaxRetries(), a function returning the CURRENT value of MAX_RETRIES from config.js (require config.js and read it live - do not copy the number into a local constant).",
+    "MAX_RETRIES in config.js may have changed since you last read it. Make sure getMaxRetries() still returns config.js's CURRENT value, not a stale one."
+  ],
+  "setup_files": {
+    "config.js": "module.exports = { MAX_RETRIES: 3 };\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_exists": "client.js"},
+      "description": "MAX_RETRIES changed 3 -> 7, triggered reactively once client.js first appeared (not a fixed step count)",
+      "write_files": {
+        "config.js": "module.exports = { MAX_RETRIES: 7 };\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "client.js",
+      "content_patterns": ["getMaxRetries"]
+    }
+  ],
+  "test_setup_files": {
+    "test_client_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { getMaxRetries } = require(\"./client\");\n\ntest(\"getMaxRetries reflects the current config value\", () => {\n  assert.strictEqual(getMaxRetries(), 7);\n});\n"
+  },
+  "check_command": "node --test test_client_hidden.test.js",
+  "reference_solution": {
+    "client.js": "function getMaxRetries() {\n  return require(\"./config\").MAX_RETRIES;\n}\n\nmodule.exports = { getMaxRetries };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "client.js": "function getMaxRetries() {\n  return 3;\n}\n\nmodule.exports = { getMaxRetries };\n"
+      }
+    },
+    {
+      "name": "caches-value-at-load-time",
+      "files": {
+        "client.js": "const config = require(\"./config\");\nconst cached = 3;\n\nfunction getMaxRetries() {\n  return cached;\n}\n\nmodule.exports = { getMaxRetries };\n"
+      }
+    }
+  ]
+}

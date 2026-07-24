@@ -19,7 +19,10 @@ import time
 import urllib.request
 from pathlib import Path
 
-from ..cases import changed_files, evaluate_case, prepare_workspace, snapshot
+from ..cases import (
+    apply_disruptions, changed_files, check_expected, evaluate_case,
+    evaluate_case_isolated, prepare_workspace, snapshot,
+)
 from ..pricing import estimate_cost
 from ..scenario import Scenario
 from .base import CaseResult, Driver
@@ -94,15 +97,20 @@ class OpenAIChatDriver(Driver):
         # The baseline writes files itself: target the first expected path per prompt.
         target = concrete_target(expected[0]["path_pattern"] if expected else None)
 
+        steps: list[dict] = []
+        n_prompts = len(case.get("prompts", []))
+        fired_indices: set[int] = set()
+        has_disruptions = bool(case.get("disruptions"))
         t0 = time.monotonic()
         try:
-            for prompt in case.get("prompts", []):
+            for i, prompt in enumerate(case.get("prompts", []), 1):
                 context = ""
                 if (workspace / target).exists():
                     context = (
                         f"\n\nCurrent content of {target.name}:\n```\n"
                         f"{(workspace / target).read_text(encoding='utf-8', errors='replace')}\n```"
                     )
+                s0 = time.monotonic()
                 text, usage = self._chat(prompt + context, scenario, timeout)
                 blocks = _CODE_BLOCK.findall(text)
                 content = blocks[0].strip() + "\n" if blocks else text.strip() + "\n"
@@ -112,9 +120,39 @@ class OpenAIChatDriver(Driver):
                 for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                     if key in usage:
                         result.extra[key] = result.extra.get(key, 0) + usage[key]
+                # Per-step trajectory record: duration + tokens + whether the
+                # model actually returned a fenced code block for this prompt
+                # (no block => the driver fell back to writing raw text, a
+                # weaker step even when the case still passes).
+                step = {
+                    "i": i, "duration_s": round(time.monotonic() - s0, 2),
+                    "ok": bool(blocks),
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                }
+                # Tier 3: per-step expected-file status (before any disruption).
+                step_files = changed_files(before, workspace)
+                step["expected_ok"] = not check_expected(
+                    step_files, case.get("expected_files", []), workspace)
+                # Precise attribution: real oracle (expected files + check_command)
+                # for every non-final prompt of a disruption case - see cli_agents.py
+                # for why this is gated on has_disruptions, skips the final prompt,
+                # and grades an isolated copy rather than the live workspace (C-01).
+                if has_disruptions and i < n_prompts:
+                    step_failures, _step_oracle = evaluate_case_isolated(case, step_files, workspace)
+                    step["oracle_ok"] = not step_failures
+                # Tier 1: fire disruptions whose trigger is satisfied at this
+                # prompt boundary (fixed after_prompt or reactive `when`).
+                fired = apply_disruptions(case, workspace, i, fired_indices)
+                if fired:
+                    step["disrupted"] = fired
+                steps.append(step)
         except Exception as exc:  # noqa: BLE001 - report, don't crash the run
             result.error = f"{type(exc).__name__}: {exc}"
         result.duration_s = time.monotonic() - t0
+        if steps:
+            result.extra["steps"] = steps
+            result.extra["n_steps"] = len(steps)
 
         # USD cost from token usage (0 for local backends / unpriced models).
         result.extra["cost_usd"] = estimate_cost(
@@ -127,6 +165,8 @@ class OpenAIChatDriver(Driver):
         result.files = changed_files(before, workspace)
         result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
         result.passed = result.error is None and not result.failures
+        if has_disruptions and steps:
+            steps[-1]["oracle_ok"] = result.passed
         return result
 
 

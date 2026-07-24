@@ -6,7 +6,13 @@
   "domain": "backend",
   "difficulty": 1,
   "task_type": "feature",
-  "tags": ["rest", "http", "health-check", "aspnet-core", "minimal-api"],
+  "tags": [
+    "rest",
+    "http",
+    "health-check",
+    "aspnet-core",
+    "minimal-api"
+  ],
   "docker_image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Write Program.cs to add a GET /health endpoint that returns JSON {\"status\": \"ok\"}. Have it listen on http://0.0.0.0:8005."
@@ -17,7 +23,10 @@
   "expected_files": [
     {
       "path_pattern": "Program.cs",
-      "content_patterns": ["/health", "8005"]
+      "content_patterns": [
+        "/health",
+        "8005"
+      ]
     }
   ],
   "test_setup_files": {
@@ -25,5 +34,8 @@
   },
   "check_command": "python3 test_health.py",
   "check_command_timeout": 90,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\napp.MapGet(\"/health\", () => Results.Json(new { status = \"ok\" }));\n\napp.Run(\"http://0.0.0.0:8005\");\n"
+  }
 }

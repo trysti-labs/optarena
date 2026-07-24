@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_items.py",
   "check_command_timeout": 100,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\nvar items = new List<object>();\nvar nextId = 1;\n\napp.MapPost(\"/items\", (ItemRequest? req) =>\n{\n    if (req is null || string.IsNullOrWhiteSpace(req.Name))\n    {\n        return Results.BadRequest(new { error = \"name is required\" });\n    }\n    var item = new { id = nextId++, name = req.Name.Trim() };\n    items.Add(item);\n    return Results.Created($\"/items/{item.id}\", item);\n});\n\napp.Run(\"http://0.0.0.0:8051\");\n\npublic record ItemRequest(string? Name);\n"
+  }
 }

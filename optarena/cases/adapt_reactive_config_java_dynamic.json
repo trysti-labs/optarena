@@ -1,0 +1,58 @@
+{
+  "name": "adapt_reactive_config_java_dynamic",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "docker_image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time Greeter.java's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then Config.NAME changes under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["java", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "Create Greeter.java with a public static method greet() that returns \"Hello, \" + Config.NAME + \"!\", reading Config.NAME at runtime (do not copy or hardcode its value).",
+    "Config.NAME may have changed since you last checked it. Make sure Greeter.greet() still returns a string built from the CURRENT value of Config.NAME, not a stale or hardcoded one."
+  ],
+  "setup_files": {
+    "Config.java": "public final class Config {\n    public static final String NAME = \"World\";\n}\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_contains": {"path": "Greeter.java", "pattern": "Hello"}},
+      "description": "Config.NAME changed World -> Universe, triggered reactively once Greeter.java's first draft appeared (not a fixed step count)",
+      "write_files": {
+        "Config.java": "public final class Config {\n    public static final String NAME = \"Universe\";\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Greeter.java",
+      "content_patterns": ["greet"]
+    }
+  ],
+  "test_setup_files": {
+    "GreeterTest.java": "public final class GreeterTest {\n    public static void main(String[] args) {\n        String got = Greeter.greet();\n        String want = \"Hello, \" + Config.NAME + \"!\";\n        if (!got.equals(want)) {\n            throw new AssertionError(\"Greeter.greet() = \\\"\" + got + \"\\\", want \\\"\" + want\n                    + \"\\\" (the CURRENT Config.NAME, not a stale value)\");\n        }\n        System.out.println(\"all tests passed\");\n    }\n}\n",
+    "CheckGreeter.java": "import java.io.IOException;\n\npublic final class CheckGreeter {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Config.java\", \"Greeter.java\", \"GreeterTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"GreeterTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckGreeter.java",
+  "reference_solution": {
+    "Greeter.java": "public final class Greeter {\n    public static String greet() {\n        return \"Hello, \" + Config.NAME + \"!\";\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "Greeter.java": "public final class Greeter {\n    public static String greet() {\n        return \"Hello, World!\";\n    }\n}\n"
+      }
+    },
+    {
+      "name": "copies-value-instead-of-reading-live",
+      "files": {
+        "Greeter.java": "public final class Greeter {\n    private static final String NAME = \"World\";\n\n    public static String greet() {\n        return \"Hello, \" + NAME + \"!\";\n    }\n}\n"
+      }
+    }
+  ]
+}

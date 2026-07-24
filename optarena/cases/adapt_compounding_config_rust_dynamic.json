@@ -1,0 +1,63 @@
+{
+  "name": "adapt_compounding_config_rust_dynamic",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 400,
+  "description": "Dynamic eval, COMPOUNDING disruptions: a 3-prompt case where the config changes TWICE (after prompt 1 and after prompt 2), so the agent must keep re-adapting, not just survive one shift",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["rust", "dynamic", "disruption", "adaptation", "compounding"],
+  "prompts": [
+    "discount_rate() in src/lib.rs already reads RATE from src/config.rs. Add a function apply_discount(price: f64) -> f64 that returns price minus (price * discount_rate()) - call discount_rate() to get the rate at call time, do not cache or hardcode its value.",
+    "RATE in src/config.rs has changed. Make sure apply_discount still uses the CURRENT rate.",
+    "RATE in src/config.rs has changed again. Make sure apply_discount still uses the CURRENT rate."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"dyncase\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/config.rs": "pub const RATE: f64 = 0.10;\n",
+    "src/lib.rs": "mod config;\n\npub fn discount_rate() -> f64 {\n    config::RATE\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "discount rate changed 10% -> 20%",
+      "write_files": {"src/config.rs": "pub const RATE: f64 = 0.20;\n"}
+    },
+    {
+      "after_prompt": 2,
+      "description": "discount rate changed 20% -> 30%",
+      "write_files": {"src/config.rs": "pub const RATE: f64 = 0.30;\n"}
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": ["apply_discount"]
+    }
+  ],
+  "test_setup_files": {
+    "tests/discount_test.rs": "use dyncase::apply_discount;\n\n#[test]\nfn current_rate_applied() {\n    let got = apply_discount(100.0);\n    let want = 70.0;\n    assert!(\n        (got - want).abs() < 1e-9,\n        \"apply_discount(100.0) = {}, want {} (must use the CURRENT config::RATE = 0.30, after two compounding changes)\",\n        got, want\n    );\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "mod config;\n\npub fn discount_rate() -> f64 {\n    config::RATE\n}\n\npub fn apply_discount(price: f64) -> f64 {\n    price - (price * discount_rate())\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-original-rate",
+      "files": {
+        "src/lib.rs": "mod config;\n\npub fn discount_rate() -> f64 {\n    config::RATE\n}\n\npub fn apply_discount(price: f64) -> f64 {\n    price - (price * 0.10)\n}\n"
+      }
+    },
+    {
+      "name": "returns-discount-amount-not-price",
+      "files": {
+        "src/lib.rs": "mod config;\n\npub fn discount_rate() -> f64 {\n    config::RATE\n}\n\npub fn apply_discount(price: f64) -> f64 {\n    price * discount_rate()\n}\n"
+      }
+    }
+  ]
+}

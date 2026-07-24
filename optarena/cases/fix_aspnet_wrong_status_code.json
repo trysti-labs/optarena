@@ -36,5 +36,8 @@
   },
   "check_command": "python3 test_status_code.py",
   "check_command_timeout": 100,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\nvar products = new List<Product>();\nvar nextId = 1;\n\napp.MapPost(\"/products\", (ProductCreateRequest req) =>\n{\n    var product = new Product(nextId++, req.Name);\n    products.Add(product);\n    return Results.Created($\"/products/{product.Id}\", product);\n});\n\napp.Run(\"http://0.0.0.0:8052\");\n\npublic record Product(int Id, string Name);\npublic record ProductCreateRequest(string Name);\n"
+  }
 }

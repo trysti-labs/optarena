@@ -39,10 +39,15 @@ boundary:
    do within those env/approval limits. Don't run agents you don't trust with
    prompts you don't control.
 
-3. **Hidden tests vs. the agent.** Grading happens on a private copy of the
-   workspace (a separate directory and, in Docker, a separate bind mount) -
-   `test_setup_files` are never written into a directory the agent can read
-   or watch, for CLI and UI drivers alike.
+3. **Hidden tests vs. the agent.** `test_setup_files` are never visible to the
+   agent while it works, by one of two mechanisms depending on the driver.
+   *UI drivers* (VS Code harness): **spatial** isolation - grading runs on a
+   private copy of the workspace in a separate directory, mounted into the
+   sandbox at a separate bind mount (`/verify`), which the agent's workspace
+   never sees. *CLI and baseline drivers*: **temporal** isolation - the hidden
+   tests are written into the workspace only *after* the tool process has
+   exited, so the agent never runs concurrently with them. In both cases the
+   model is graded against tests it could not read or watch during its run.
 
 ## Credentials
 

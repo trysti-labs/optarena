@@ -5,7 +5,11 @@
   "domain": "devops",
   "difficulty": 2,
   "task_type": "security",
-  "tags": ["shell", "security", "command-injection"],
+  "tags": [
+    "shell",
+    "security",
+    "command-injection"
+  ],
   "prompts": [
     "The script greet.sh in this repo takes a single argument, a name, and is meant to print 'Hello, <name>!' to stdout. It currently builds and runs the greeting using eval, which means a name value containing shell metacharacters (for example a semicolon followed by another command, or a command substitution) gets executed as additional shell commands instead of being treated as plain text - a command injection vulnerability. Fix greet.sh so it no longer uses eval or otherwise executes any part of the input as shell code, while still correctly printing 'Hello, <name>!' for normal names, including names containing spaces or punctuation."
   ],
@@ -15,8 +19,12 @@
   "expected_files": [
     {
       "path_pattern": "greet.sh",
-      "not_content_patterns": ["eval"],
-      "regex_patterns": ["printf|echo"]
+      "not_content_patterns": [
+        "eval"
+      ],
+      "regex_patterns": [
+        "printf|echo"
+      ]
     }
   ],
   "test_setup_files": {
@@ -24,5 +32,8 @@
   },
   "check_command": "python3 test_injection.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "greet.sh": "#!/bin/sh\nname=\"$1\"\nprintf 'Hello, %s!\\n' \"$name\"\n"
+  }
 }

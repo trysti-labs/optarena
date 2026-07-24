@@ -251,9 +251,11 @@ Level 3+ starter repos beyond the two already live - `fastapi-tasktracker`
 and `express-ts-shortlink`).
 
 **Trust model - what these public cases are (and are not).** The corpus ships
-in the open, *including* every case's hidden tests, `reference_solution`, and
-`broken_solutions` - that openness is what lets `verify-corpus` prove each
-oracle can both pass and fail, and lets you audit exactly what a PASS means.
+in the open, *including* every case's hidden tests and `reference_solution`
+(all 500 cases carry one), plus `broken_solutions` on most cases - that
+openness is what lets `verify-corpus` prove each oracle can pass (the reference
+solution, for every case) and fail (a broken/unmodified variant), and lets you
+audit exactly what a PASS means.
 The flip side: a benchmark-aware agent (or one you prompt to cheat) could in
 principle look the answers up. So treat OptArena results as **acceptance and
 regression evidence for tools you're honestly evaluating** - the A/B and

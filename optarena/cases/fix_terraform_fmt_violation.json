@@ -6,7 +6,11 @@
   "domain": "infrastructure",
   "difficulty": 1,
   "task_type": "bug_fix",
-  "tags": ["terraform", "iac", "formatting"],
+  "tags": [
+    "terraform",
+    "iac",
+    "formatting"
+  ],
   "prompts": [
     "The file main.tf in this repository fails `terraform fmt -check` because of inconsistent indentation and spacing around the `=` signs. Reformat main.tf so that `terraform fmt -check` passes cleanly, without changing any variable names, output names, or values."
   ],
@@ -16,7 +20,12 @@
   "expected_files": [
     {
       "path_pattern": "main.tf",
-      "content_patterns": ["variable", "region", "output", "region_output"]
+      "content_patterns": [
+        "variable",
+        "region",
+        "output",
+        "region_output"
+      ]
     }
   ],
   "test_setup_files": {
@@ -24,5 +33,8 @@
   },
   "check_command": "python3 check_fmt.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "main.tf": "variable \"region\" {\n  type        = string\n  default     = \"us-east-1\"\n  description = \"AWS region name\"\n}\n\noutput \"region_output\" {\n  value       = var.region\n  description = \"The configured region\"\n}\n"
+  }
 }

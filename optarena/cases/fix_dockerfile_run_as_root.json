@@ -1,9 +1,10 @@
 {
   "name": "fix_dockerfile_run_as_root",
+  "language": "dockerfile",
+  "framework": "docker",
   "domain": "devops",
   "task_type": "security",
   "docker_image": "optarena-tester:latest",
-  "framework": "dockerfile",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Adds a non-root user so the container does not run as root",

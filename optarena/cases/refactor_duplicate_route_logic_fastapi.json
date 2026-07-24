@@ -6,7 +6,11 @@
   "domain": "backend",
   "difficulty": 2,
   "task_type": "refactoring",
-  "tags": ["fastapi", "refactor", "duplication"],
+  "tags": [
+    "fastapi",
+    "refactor",
+    "duplication"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "The FastAPI app in app.py has two endpoints, POST /register and POST /invite, that each contain their own copy of the same inline logic: trimming whitespace from a `name` field, rejecting it with a 400 error if it is empty after trimming, and lower-casing an `email` field before storing it. This duplication has caused the two endpoints to drift slightly out of sync and is hard to maintain. Refactor app.py to extract this shared validation/normalization logic into a single reusable helper function (or Pydantic validator) used by both endpoints, without changing the observable behavior of either endpoint. Run with uvicorn on port 8014."
@@ -17,8 +21,14 @@
   "expected_files": [
     {
       "path_pattern": "app.py",
-      "content_patterns": ["fastapi", "/register", "/invite"],
-      "regex_patterns": ["def\\s+\\w+\\s*\\("]
+      "content_patterns": [
+        "fastapi",
+        "/register",
+        "/invite"
+      ],
+      "regex_patterns": [
+        "def\\s+\\w+\\s*\\("
+      ]
     }
   ],
   "test_setup_files": {
@@ -26,5 +36,8 @@
   },
   "check_command": "python3 test_refactor.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "app.py": "from fastapi import FastAPI, HTTPException\nfrom pydantic import BaseModel\n\napp = FastAPI()\n\n\nclass Person(BaseModel):\n    name: str\n    email: str\n\n\nregistered = []\ninvited = []\n\n\ndef normalize(p: Person):\n    name = p.name.strip()\n    if not name:\n        raise HTTPException(status_code=400, detail='name is required')\n    return {'name': name, 'email': p.email.lower()}\n\n\n@app.post('/register')\ndef register(p: Person):\n    record = normalize(p)\n    registered.append(record)\n    return record\n\n\n@app.post('/invite')\ndef invite(p: Person):\n    record = normalize(p)\n    invited.append(record)\n    return record\n\n\nif __name__ == '__main__':\n    import uvicorn\n    uvicorn.run(app, port=8014)\n"
+  }
 }

@@ -6,7 +6,12 @@
   "domain": "devops",
   "difficulty": 1,
   "task_type": "devops",
-  "tags": ["ci", "github-actions", "devops", "yaml"],
+  "tags": [
+    "ci",
+    "github-actions",
+    "devops",
+    "yaml"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "Create a GitHub Actions workflow at .github/workflows/ci.yml for a Python project. It must trigger on both `push` and `pull_request`. Define at least two jobs: one named (or job-id) `lint` that sets up Python and runs a linter (e.g. flake8 or ruff), and one named (or job-id) `test` that sets up Python and runs the test suite with `pytest`. Use `actions/checkout` and `actions/setup-python` steps as needed."
@@ -15,8 +20,15 @@
   "expected_files": [
     {
       "path_pattern": "ci.yml",
-      "content_patterns": ["pytest", "actions/checkout", "actions/setup-python"],
-      "regex_patterns": ["(^|\\n)on\\s*:", "(^|\\n)jobs\\s*:"]
+      "content_patterns": [
+        "pytest",
+        "actions/checkout",
+        "actions/setup-python"
+      ],
+      "regex_patterns": [
+        "(^|\\n)on\\s*:",
+        "(^|\\n)jobs\\s*:"
+      ]
     }
   ],
   "test_setup_files": {
@@ -24,5 +36,8 @@
   },
   "check_command": "python3 test_ci_yaml.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: \"3.11\"\n      - run: pip install ruff\n      - run: ruff check .\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: \"3.11\"\n      - run: pip install pytest\n      - run: pytest\n"
+  }
 }

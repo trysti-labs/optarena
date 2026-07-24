@@ -34,5 +34,8 @@
   },
   "check_command": "mvn -o -q test -Dtest=OrderServiceHiddenTest",
   "check_command_timeout": 60,
-  "timeout": 90
+  "timeout": 90,
+  "reference_solution": {
+    "src/main/java/com/optarena/orders/OrderService.java": "package com.optarena.orders;\n\npublic class OrderService {\n    public String describeGift(Order order) {\n        String message = order.getGiftMessage();\n        if (message == null) {\n            return \"Gift note: (none)\";\n        }\n        return \"Gift note: \" + message.trim();\n    }\n}\n"
+  }
 }

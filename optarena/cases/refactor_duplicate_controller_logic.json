@@ -34,5 +34,8 @@
   },
   "check_command": "python3 test_register.py",
   "check_command_timeout": 120,
-  "timeout": 210
+  "timeout": 210,
+  "reference_solution": {
+    "src/main/java/com/optarena/registration/RegistrationController.java": "package com.optarena.registration;\n\nimport java.util.Map;\nimport org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.*;\n\n@RestController\n@RequestMapping(\"/register\")\npublic class RegistrationController {\n\n    private ResponseEntity<Map<String, String>> validate(String username, String password) {\n        if (username == null || username.isBlank()) {\n            return ResponseEntity.badRequest().body(Map.of(\"error\", \"username must not be blank\"));\n        }\n        if (password == null || password.length() < 8) {\n            return ResponseEntity.badRequest().body(Map.of(\"error\", \"password must be at least 8 characters\"));\n        }\n        return null;\n    }\n\n    @PostMapping\n    public ResponseEntity<Map<String, String>> registerUser(@RequestBody Map<String, String> body) {\n        String username = body.get(\"username\");\n        ResponseEntity<Map<String, String>> error = validate(username, body.get(\"password\"));\n        if (error != null) {\n            return error;\n        }\n        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(\"username\", username, \"role\", \"USER\"));\n    }\n\n    @PostMapping(\"/admin\")\n    public ResponseEntity<Map<String, String>> registerAdmin(@RequestBody Map<String, String> body) {\n        String username = body.get(\"username\");\n        ResponseEntity<Map<String, String>> error = validate(username, body.get(\"password\"));\n        if (error != null) {\n            return error;\n        }\n        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(\"username\", username, \"role\", \"ADMIN\"));\n    }\n}\n"
+  }
 }

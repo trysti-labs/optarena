@@ -19,7 +19,17 @@
     "test_reverse.js": "const { reverseString } = require('./reverse.js');\nconst assert = require('assert');\nassert.strictEqual(reverseString('hello'), 'olleh');\nassert.strictEqual(reverseString(''), '');\nassert.strictEqual(reverseString('a'), 'a');\nassert.strictEqual(reverseString('race car'), 'rac ecar');\nconsole.log('PASS');\n"
   },
   "check_command": "node test_reverse.js",
+  "check_command_timeout": 60,
   "timeout": 90,
   "difficulty": 1,
-  "task_type": "feature"
+  "task_type": "feature",
+  "reference_solution": {
+    "reverse.js": "function reverseString(str) {\n  return str.split('').reverse().join('');\n}\n\nmodule.exports = { reverseString };\n"
+  },
+  "domain": "backend",
+  "tags": [
+    "javascript",
+    "string",
+    "node"
+  ]
 }

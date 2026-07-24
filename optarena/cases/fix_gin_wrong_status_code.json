@@ -37,5 +37,8 @@
   },
   "check_command": "python3 test_status.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "main.go": "package main\n\nimport (\n\t\"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\ntype Widget struct {\n\tID   int    `json:\"id\"`\n\tName string `json:\"name\"`\n}\n\nvar widgets []Widget\nvar nextID = 1\n\nfunc main() {\n\tr := gin.Default()\n\tr.POST(\"/widgets\", func(c *gin.Context) {\n\t\tvar input struct {\n\t\t\tName string `json:\"name\"`\n\t\t}\n\t\tif err := c.ShouldBindJSON(&input); err != nil {\n\t\t\tc.JSON(http.StatusBadRequest, gin.H{\"error\": err.Error()})\n\t\t\treturn\n\t\t}\n\t\tw := Widget{ID: nextID, Name: input.Name}\n\t\tnextID++\n\t\twidgets = append(widgets, w)\n\t\tc.JSON(http.StatusCreated, w)\n\t})\n\tr.Run(\":8032\")\n}\n"
+  }
 }

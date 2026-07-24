@@ -100,7 +100,17 @@ _CASE_KNOWN_KEYS = {
     "docker_image", "timeout",
     "reference_solution", "broken_solutions",
     "language", "framework", "domain", "difficulty", "task_type", "tags",
+    # Oracle style, for discovery/reporting: "unit" (default), "property"
+    # (randomized property-based), "metamorphic" (relations across inputs),
+    # "mutation" (test-strength). Free-form string; not enforced against an enum.
+    "test_kind",
+    # Dynamic evaluation: mid-session environment changes that fire BETWEEN the
+    # agent's prompts (the agent must adapt on its next turn). See validation below.
+    "disruptions",
 }
+_DISRUPTION_KNOWN_KEYS = {"after_prompt", "when", "description", "write_files", "delete_files"}
+_DISRUPTION_WHEN_KNOWN_KEYS = {"file_exists", "file_contains"}
+_DISRUPTION_FILE_CONTAINS_KEYS = {"path", "pattern"}
 _EXPECTED_FILE_KNOWN_KEYS = {
     "path_pattern", "content_patterns", "not_content_patterns", "regex_patterns", "min_lines",
 }
@@ -148,7 +158,7 @@ def validate_case(data: dict, source: str = "<case>") -> None:
         d = data["difficulty"]
         if not isinstance(d, int) or isinstance(d, bool) or not (1 <= d <= 5):
             raise _err(source, "'difficulty' must be an integer 1-5")
-    for key in ("language", "framework", "domain", "task_type"):
+    for key in ("language", "framework", "domain", "task_type", "test_kind"):
         if key in data and data[key] is not None and not isinstance(data[key], str):
             raise _err(source, f"'{key}' must be a string")
     if "tags" in data:
@@ -192,6 +202,65 @@ def validate_case(data: dict, source: str = "<case>") -> None:
             if not isinstance(variant.get("name"), str) or not variant["name"]:
                 raise _err(where, "'name' must be a non-empty string")
             _validate_string_map(variant.get("files", {}), f"{where}.files")
+
+    if "disruptions" in data:
+        disruptions = data["disruptions"]
+        if not isinstance(disruptions, list):
+            raise _err(source, "'disruptions' must be a list")
+        for i, dis in enumerate(disruptions):
+            where = f"{source}.disruptions[{i}]"
+            if not isinstance(dis, dict):
+                raise _err(where, "must be an object")
+            unknown_d = set(dis) - _DISRUPTION_KNOWN_KEYS
+            if unknown_d:
+                raise _err(where, f"unknown key(s): {', '.join(sorted(unknown_d))}")
+            # A disruption fires on exactly one of two trigger styles:
+            #  - 'after_prompt': fixed, fires once the Nth prompt has run (the
+            #    original, deterministic style).
+            #  - 'when': REACTIVE/state-conditioned - fires the first time the
+            #    workspace satisfies a condition, checked at each prompt boundary
+            #    (a file the agent was expected to touch now exists / now
+            #    contains something) rather than at a hardcoded step. This is
+            #    what lets a disruption respond to what the agent actually did,
+            #    not just how many turns have elapsed.
+            has_after = "after_prompt" in dis
+            has_when = "when" in dis
+            if has_after == has_when:
+                raise _err(where, "exactly one of 'after_prompt' or 'when' is required")
+            if has_after:
+                ap = dis.get("after_prompt")
+                if not isinstance(ap, int) or isinstance(ap, bool) or ap < 1:
+                    raise _err(where, "'after_prompt' must be a 1-based prompt index (int >= 1)")
+            else:
+                when = dis.get("when")
+                if not isinstance(when, dict):
+                    raise _err(f"{where}.when", "must be an object")
+                unknown_w = set(when) - _DISRUPTION_WHEN_KNOWN_KEYS
+                if unknown_w:
+                    raise _err(f"{where}.when", f"unknown key(s): {', '.join(sorted(unknown_w))}")
+                has_exists = "file_exists" in when
+                has_contains = "file_contains" in when
+                if has_exists == has_contains:
+                    raise _err(f"{where}.when", "exactly one of 'file_exists' or 'file_contains' is required")
+                if has_exists and (not isinstance(when["file_exists"], str) or not when["file_exists"]):
+                    raise _err(f"{where}.when.file_exists", "must be a non-empty string (relative path)")
+                if has_contains:
+                    fc = when["file_contains"]
+                    if not isinstance(fc, dict):
+                        raise _err(f"{where}.when.file_contains", "must be an object")
+                    unknown_fc = set(fc) - _DISRUPTION_FILE_CONTAINS_KEYS
+                    if unknown_fc:
+                        raise _err(f"{where}.when.file_contains", f"unknown key(s): {', '.join(sorted(unknown_fc))}")
+                    if not isinstance(fc.get("path"), str) or not fc["path"]:
+                        raise _err(f"{where}.when.file_contains.path", "must be a non-empty string")
+                    if not isinstance(fc.get("pattern"), str) or not fc["pattern"]:
+                        raise _err(f"{where}.when.file_contains.pattern", "must be a non-empty string")
+            if "write_files" in dis and dis["write_files"] is not None:
+                _validate_string_map(dis["write_files"], f"{where}.write_files")
+            if "delete_files" in dis:
+                _validate_string_list(dis["delete_files"], f"{where}.delete_files")
+            if "description" in dis and dis["description"] is not None and not isinstance(dis["description"], str):
+                raise _err(where, "'description' must be a string")
 
 
 def validate_unique_case_names(cases: list[dict], source: str = "<cases>") -> None:

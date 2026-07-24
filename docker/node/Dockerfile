@@ -15,6 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
+# typescript is pinned to 5.x: unpinned it now resolves to TypeScript 7.x (the
+# native `tsgo` compiler), whose API surface breaks ts-node 10.9.2 at bootstrap
+# ("Cannot read properties of undefined (reading 'fileExists')"), which makes
+# every `ts-node main.ts` case (NestJS) unrunnable. ts-node 10.x supports TS 5.x.
 RUN npm install -g \
         express \
         react \
@@ -26,7 +30,7 @@ RUN npm install -g \
         @babel/preset-env \
         @babel/preset-react \
         jest \
-        typescript \
+        typescript@5.6.3 \
         ts-node \
         reflect-metadata \
         rxjs \

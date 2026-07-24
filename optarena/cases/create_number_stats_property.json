@@ -1,0 +1,50 @@
+{
+  "name": "create_number_stats_property",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 120,
+  "description": "Implement a numeric summary, graded by property-based checks (count/min/max/mean invariants) over random inputs",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "property",
+  "tags": [
+    "python",
+    "statistics",
+    "property-based"
+  ],
+  "prompts": [
+    "Create stats.py defining a function stats(nums) that takes a non-empty list of numbers and returns a dict with keys 'count' (number of elements), 'min', 'max', 'total' (sum), and 'mean' (arithmetic mean = total / count)."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "stats.py",
+      "content_patterns": [
+        "def stats"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_props.py": "import random\nfrom stats import stats\n\n\ndef check(nums):\n    r = stats(nums)\n    assert r[\"count\"] == len(nums), f\"count wrong for {nums!r}: {r!r}\"\n    assert r[\"min\"] == min(nums), f\"min wrong: {r!r}\"\n    assert r[\"max\"] == max(nums), f\"max wrong: {r!r}\"\n    assert abs(r[\"total\"] - sum(nums)) < 1e-6, f\"total wrong: {r!r}\"\n    assert abs(r[\"mean\"] - sum(nums) / len(nums)) < 1e-6, f\"mean wrong for {nums!r}: {r!r}\"\n    assert r[\"min\"] <= r[\"mean\"] <= r[\"max\"], f\"mean out of [min,max]: {r!r}\"\n    r2 = stats(nums + [r[\"max\"]])\n    assert r2[\"max\"] == r[\"max\"] and r2[\"count\"] == r[\"count\"] + 1, f\"metamorphic append failed: {r2!r}\"\n\n\nrandom.seed(99)\nfor x in ([1], [1, 2, 3], [5, 5, 5], [-2, 4]):\n    check(x)\nfor _ in range(300):\n    n = random.randint(1, 30)\n    check([random.randint(-100, 100) for _ in range(n)])\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_props.py",
+  "reference_solution": {
+    "stats.py": "def stats(nums):\n    total = sum(nums)\n    return {\n        \"count\": len(nums),\n        \"min\": min(nums),\n        \"max\": max(nums),\n        \"total\": total,\n        \"mean\": total / len(nums),\n    }\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "median-as-mean",
+      "files": {
+        "stats.py": "def stats(nums):\n    s = sorted(nums)\n    return {\n        \"count\": len(nums),\n        \"min\": min(nums),\n        \"max\": max(nums),\n        \"total\": sum(nums),\n        \"mean\": s[len(s) // 2],\n    }\n"
+      }
+    },
+    {
+      "name": "off-by-one-count",
+      "files": {
+        "stats.py": "def stats(nums):\n    total = sum(nums)\n    return {\n        \"count\": len(nums) - 1,\n        \"min\": min(nums),\n        \"max\": max(nums),\n        \"total\": total,\n        \"mean\": total / len(nums),\n    }\n"
+      }
+    }
+  ]
+}

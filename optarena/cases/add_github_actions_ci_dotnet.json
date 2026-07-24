@@ -44,5 +44,8 @@
   },
   "check_command": "python3 verify_ci.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  build-test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-dotnet@v4\n        with:\n          dotnet-version: 8.0.x\n      - run: dotnet build\n      - run: dotnet test tests/tests.csproj\n"
+  }
 }

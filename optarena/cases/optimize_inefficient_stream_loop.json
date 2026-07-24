@@ -32,5 +32,8 @@
   },
   "check_command": "mvn -o -q test -Dtest=DuplicateFinderHiddenTest",
   "check_command_timeout": 60,
-  "timeout": 90
+  "timeout": 90,
+  "reference_solution": {
+    "src/main/java/com/optarena/perf/DuplicateFinder.java": "package com.optarena.perf;\n\nimport java.util.ArrayList;\nimport java.util.HashSet;\nimport java.util.List;\nimport java.util.Set;\n\npublic class DuplicateFinder {\n    public List<Integer> findDuplicates(List<Integer> nums) {\n        Set<Integer> seen = new HashSet<>();\n        Set<Integer> duplicates = new HashSet<>();\n        for (Integer n : nums) {\n            if (!seen.add(n)) {\n                duplicates.add(n);\n            }\n        }\n        return new ArrayList<>(duplicates);\n    }\n}\n"
+  }
 }

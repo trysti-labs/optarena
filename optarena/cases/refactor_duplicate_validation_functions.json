@@ -5,7 +5,11 @@
   "domain": "devops",
   "difficulty": 2,
   "task_type": "refactoring",
-  "tags": ["shell", "refactor", "duplication"],
+  "tags": [
+    "shell",
+    "refactor",
+    "duplication"
+  ],
   "prompts": [
     "The script validate.sh in this repo has two near-identical shell functions, validate_username and validate_slug, each of which checks that a value is non-empty, at least 3 characters long, and made up only of alphanumeric characters plus one extra allowed character (underscore for usernames, hyphen for slugs), printing 'valid' or 'invalid' and returning 0 or 1 accordingly. This duplication has caused the two checks to drift and is hard to maintain. Refactor validate.sh to extract the shared validation logic into a single reusable, parameterized function (taking the extra allowed character as a parameter) used by both validate_username and validate_slug, without changing the script's command-line interface or the observable behavior for either call path (invoked as 'validate.sh username <value>' or 'validate.sh slug <value>')."
   ],
@@ -15,8 +19,13 @@
   "expected_files": [
     {
       "path_pattern": "validate.sh",
-      "content_patterns": ["username", "slug"],
-      "regex_patterns": ["\\w+\\s*\\(\\)\\s*\\{"]
+      "content_patterns": [
+        "username",
+        "slug"
+      ],
+      "regex_patterns": [
+        "\\w+\\s*\\(\\)\\s*\\{"
+      ]
     }
   ],
   "test_setup_files": {
@@ -24,5 +33,8 @@
   },
   "check_command": "python3 test_refactor.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "validate.sh": "#!/bin/sh\n# validate.sh - validates usernames and slugs\n\nvalidate_value() {\n  extra=\"$1\"\n  value=\"$2\"\n  if [ -z \"$value\" ]; then\n    echo \"invalid\"\n    return 1\n  fi\n  case \"$value\" in\n    *[!a-zA-Z0-9$extra]*) echo \"invalid\"; return 1 ;;\n  esac\n  if [ \"${#value}\" -lt 3 ]; then\n    echo \"invalid\"\n    return 1\n  fi\n  echo \"valid\"\n  return 0\n}\n\nvalidate_username() {\n  validate_value \"_\" \"$1\"\n}\n\nvalidate_slug() {\n  validate_value \"-\" \"$1\"\n}\n\ncase \"$1\" in\n  username) validate_username \"$2\" ;;\n  slug) validate_slug \"$2\" ;;\n  *) echo \"usage: validate.sh {username|slug} <value>\" >&2; exit 2 ;;\nesac\n"
+  }
 }

@@ -1,0 +1,57 @@
+{
+  "name": "build_calculator_longhorizon",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 240,
+  "description": "Long-horizon: build a Calculator class over three sequential prompts (arithmetic, then guarded division, then a memory), graded on the full final behavior",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "long-horizon",
+    "multi-step",
+    "stateful"
+  ],
+  "prompts": [
+    "Create calc.py with a class Calculator. Add two methods: add(a, b) returning a + b, and sub(a, b) returning a - b.",
+    "In calc.py, add two more methods to Calculator: mul(a, b) returning a * b, and div(a, b) returning a / b, but raising ValueError when b is 0.",
+    "In calc.py, give Calculator a running memory: store(x) saves a value, recall() returns the last stored value (or 0 if nothing has been stored yet), and clear() resets the memory to 0."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "calc.py",
+      "content_patterns": [
+        "class Calculator",
+        "def add",
+        "def div",
+        "def store",
+        "def recall"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_calc.py": "from calc import Calculator\n\nc = Calculator()\nassert c.add(2, 3) == 5\nassert c.sub(5, 2) == 3\nassert c.mul(4, 3) == 12\nassert c.div(10, 2) == 5\ntry:\n    c.div(1, 0)\n    raise AssertionError(\"div by zero must raise ValueError\")\nexcept ValueError:\n    pass\nassert c.recall() == 0, \"empty memory should recall 0\"\nc.store(42)\nassert c.recall() == 42\nc.clear()\nassert c.recall() == 0\nprint(\"PASS\")\n"
+  },
+  "check_command": "python3 test_calc.py",
+  "reference_solution": {
+    "calc.py": "class Calculator:\n    def __init__(self):\n        self._mem = 0\n\n    def add(self, a, b):\n        return a + b\n\n    def sub(self, a, b):\n        return a - b\n\n    def mul(self, a, b):\n        return a * b\n\n    def div(self, a, b):\n        if b == 0:\n            raise ValueError(\"division by zero\")\n        return a / b\n\n    def store(self, x):\n        self._mem = x\n\n    def recall(self):\n        return self._mem\n\n    def clear(self):\n        self._mem = 0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "missing-memory",
+      "files": {
+        "calc.py": "class Calculator:\n    def __init__(self):\n        self._mem = 0\n\n    def add(self, a, b):\n        return a + b\n\n    def sub(self, a, b):\n        return a - b\n\n    def mul(self, a, b):\n        return a * b\n\n    def div(self, a, b):\n        if b == 0:\n            raise ValueError(\"division by zero\")\n        return a / b\n"
+      }
+    },
+    {
+      "name": "div-no-guard",
+      "files": {
+        "calc.py": "class Calculator:\n    def __init__(self):\n        self._mem = 0\n\n    def add(self, a, b):\n        return a + b\n\n    def sub(self, a, b):\n        return a - b\n\n    def mul(self, a, b):\n        return a * b\n\n    def div(self, a, b):\n        return a / b\n\n    def store(self, x):\n        self._mem = x\n\n    def recall(self):\n        return self._mem\n\n    def clear(self):\n        self._mem = 0\n"
+      }
+    }
+  ]
+}

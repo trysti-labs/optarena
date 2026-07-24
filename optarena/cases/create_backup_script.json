@@ -5,7 +5,12 @@
   "domain": "devops",
   "difficulty": 2,
   "task_type": "feature",
-  "tags": ["shell", "backup", "tar", "filesystem"],
+  "tags": [
+    "shell",
+    "backup",
+    "tar",
+    "filesystem"
+  ],
   "prompts": [
     "Write a POSIX shell script called backup.sh that takes three positional arguments, in order: a source directory, a glob pattern (for example '*.txt'), and a destination directory. The script should find all files directly inside the source directory whose names match the pattern, and create a single gzip-compressed tar archive containing just those matching files, written into the destination directory (creating the destination directory first if it does not already exist). Name the archive file so it clearly is a backup and ends in .tar.gz (for example backup_<timestamp>.tar.gz - the exact timestamp format does not matter). If no files in the source directory match the pattern, print an error message to stderr and exit with a non-zero status without creating any archive file."
   ],
@@ -13,8 +18,12 @@
   "expected_files": [
     {
       "path_pattern": "backup.sh",
-      "content_patterns": ["tar"],
-      "regex_patterns": ["\\.tar\\.gz"]
+      "content_patterns": [
+        "tar"
+      ],
+      "regex_patterns": [
+        "\\.tar\\.gz"
+      ]
     }
   ],
   "test_setup_files": {
@@ -22,5 +31,8 @@
   },
   "check_command": "python3 test_backup.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "backup.sh": "#!/bin/sh\nsrc=\"$1\"\npattern=\"$2\"\ndest=\"$3\"\n\nmkdir -p \"$dest\"\n\nset --\nfor f in \"$src\"/$pattern; do\n    [ -f \"$f\" ] && set -- \"$@\" \"$(basename \"$f\")\"\ndone\n\nif [ \"$#\" -eq 0 ]; then\n    echo \"error: no files matching '$pattern' in '$src'\" >&2\n    exit 1\nfi\n\narchive=\"$dest/backup_$(date +%Y%m%d%H%M%S).tar.gz\"\ntar -czf \"$archive\" -C \"$src\" \"$@\"\n"
+  }
 }

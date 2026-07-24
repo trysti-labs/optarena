@@ -40,5 +40,9 @@
   },
   "check_command": "python3 test_price.py",
   "check_command_timeout": 120,
-  "timeout": 210
+  "timeout": 210,
+  "reference_solution": {
+    "src/main/java/com/optarena/pricing/PricingService.java": "package com.optarena.pricing;\n\nimport java.math.BigDecimal;\nimport java.math.RoundingMode;\nimport org.springframework.stereotype.Service;\n\n@Service\npublic class PricingService {\n    public double calculateTotal(double amount, double taxRate) {\n        double total = amount * (1 + taxRate);\n        return BigDecimal.valueOf(total).setScale(2, RoundingMode.HALF_UP).doubleValue();\n    }\n}\n",
+    "src/main/java/com/optarena/pricing/PricingController.java": "package com.optarena.pricing;\n\nimport java.util.Map;\nimport org.springframework.web.bind.annotation.*;\n\n@RestController\npublic class PricingController {\n\n    private final PricingService pricingService;\n\n    public PricingController(PricingService pricingService) {\n        this.pricingService = pricingService;\n    }\n\n    @GetMapping(\"/price\")\n    public Map<String, Double> price(@RequestParam double amount, @RequestParam double taxRate) {\n        return Map.of(\"total\", pricingService.calculateTotal(amount, taxRate));\n    }\n}\n"
+  }
 }

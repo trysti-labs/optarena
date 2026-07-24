@@ -1,0 +1,64 @@
+{
+  "name": "adapt_config_change_dynamic",
+  "language": "python",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 240,
+  "description": "Dynamic eval: a config value changes BETWEEN prompts; the agent must read the current value, not a stale/hardcoded one (disruption fires after prompt 1)",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "dynamic",
+    "disruption",
+    "adaptation"
+  ],
+  "prompts": [
+    "Create app.py that imports TIMEOUT from config.py and prints exactly 'timeout=<value>' (for the current config that is timeout=10). Read the value from config.py at runtime; do not hardcode it.",
+    "config.py has changed since your last edit. Make sure app.py still prints the CURRENT value of TIMEOUT read from config.py (do not hardcode the number)."
+  ],
+  "setup_files": {
+    "config.py": "TIMEOUT = 10\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "config.py TIMEOUT changed 10 -> 30 (a dependency/config shifted under the agent)",
+      "write_files": {
+        "config.py": "TIMEOUT = 30\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "app.py",
+      "content_patterns": [
+        "timeout"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_app.py": "import subprocess, sys\nout = subprocess.run([sys.executable, 'app.py'], capture_output=True, text=True).stdout\nassert 'timeout=30' in out, f\"expected the CURRENT config value (timeout=30), got {out!r} \"\\\n    \"- the agent did not adapt to the mid-session config change\"\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_app.py",
+  "reference_solution": {
+    "app.py": "from config import TIMEOUT\n\nprint(f\"timeout={TIMEOUT}\")\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "app.py": "print(\"timeout=10\")\n"
+      }
+    },
+    {
+      "name": "reads-then-overrides",
+      "files": {
+        "app.py": "from config import TIMEOUT\n\nTIMEOUT = 10\nprint(f\"timeout={TIMEOUT}\")\n"
+      }
+    }
+  ]
+}

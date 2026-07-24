@@ -6,7 +6,11 @@
   "domain": "backend",
   "difficulty": 2,
   "task_type": "security",
-  "tags": ["security", "path-traversal", "axum"],
+  "tags": [
+    "security",
+    "path-traversal",
+    "axum"
+  ],
   "docker_image": "optarena-tester-rust:latest",
   "prompts": [
     "The Axum app in src/main.rs has a GET /download/*filename endpoint that reads a file from the `files/` directory and returns its contents as plain text, but it joins the filename directly onto the base directory with no sanitization, so a request whose filename contains \"..\" segments can escape the `files/` directory and read arbitrary files on disk. Fix src/main.rs so any attempt to escape the `files/` directory returns an error status (400/403/404) instead of file contents, while legitimate requests for files that actually exist directly inside `files/` (e.g. /download/hello.txt) keep working exactly as before. The server keeps listening on 0.0.0.0:8046."
@@ -20,8 +24,13 @@
   "expected_files": [
     {
       "path_pattern": "src/main.rs",
-      "content_patterns": ["download", "files"],
-      "regex_patterns": ["(canonicalize|starts_with|contains\\s*\\(\\s*\"\\.\\.\"|\\.\\.)"]
+      "content_patterns": [
+        "download",
+        "files"
+      ],
+      "regex_patterns": [
+        "(canonicalize|starts_with|contains\\s*\\(\\s*\"\\.\\.\"|\\.\\.)"
+      ]
     }
   ],
   "test_setup_files": {
@@ -29,5 +38,8 @@
   },
   "check_command": "python3 test_traversal.py",
   "check_command_timeout": 180,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "src/main.rs": "use axum::{extract::Path, http::StatusCode, routing::get, Router};\nuse std::fs;\nuse std::path::PathBuf;\n\nasync fn download(Path(filename): Path<String>) -> Result<String, (StatusCode, String)> {\n    let base = PathBuf::from(\"files\");\n    let base_canon = match base.canonicalize() {\n        Ok(p) => p,\n        Err(_) => return Err((StatusCode::INTERNAL_SERVER_ERROR, \"error\".to_string())),\n    };\n    let requested = base.join(&filename);\n    let canon = match requested.canonicalize() {\n        Ok(p) => p,\n        Err(_) => return Err((StatusCode::NOT_FOUND, \"not found\".to_string())),\n    };\n    if !canon.starts_with(&base_canon) {\n        return Err((StatusCode::BAD_REQUEST, \"invalid path\".to_string()));\n    }\n    match fs::read_to_string(&canon) {\n        Ok(contents) => Ok(contents),\n        Err(_) => Err((StatusCode::NOT_FOUND, \"not found\".to_string())),\n    }\n}\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new().route(\"/download/*filename\", get(download));\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8046\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+  }
 }

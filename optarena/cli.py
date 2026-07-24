@@ -69,6 +69,14 @@ def _scenario_from_args(args, driver: str | None = None, model: str | None = Non
 
 
 def cmd_run(args) -> int:
+    # --pack is shorthand for --cases-dir pointing at an installed pack.
+    if getattr(args, "pack", None):
+        from .packs import resolve_pack
+        try:
+            args.cases_dir = str(resolve_pack(args.pack))
+        except FileNotFoundError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
     try:
         scenarios: list[Scenario] = [Scenario.from_file(p) for p in args.scenario or []]
         if args.cases_dir:
@@ -106,7 +114,8 @@ def cmd_run(args) -> int:
         try:
             rec = run_scenario(sc, trials=args.trials, parallel=args.parallel,
                                 allow_empty=args.allow_empty,
-                                keep_workspace=args.keep_workspace)
+                                keep_workspace=args.keep_workspace,
+                                security_scan=getattr(args, "security_scan", False))
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
@@ -122,8 +131,20 @@ def cmd_run(args) -> int:
             print(f"  run record preserved at {fallback}", file=sys.stderr)
             return 2
         s = rec.summary
-        print(f"  -> {s['passed']}/{s['cases']} passed "
-              f"(mean {s['mean_duration_s']}s) - saved {path.name}")
+        ci = s.get("pass_rate_ci")
+        ci_str = f" [{ci[0]:.0%}-{ci[1]:.0%}]" if ci else ""
+        clean = f", {s['clean_passes']} clean" if s.get("clean_passes") is not None else ""
+        print(f"  -> {s['passed']}/{s['cases']} passed ({s['pass_rate']:.0%}{ci_str}{clean}, "
+              f"mean {s['mean_duration_s']}s) - saved {path.name}")
+        eff = []
+        if s.get("tokens_per_pass"):
+            eff.append(f"{s['tokens_per_pass']} tokens/pass")
+        if s.get("steps_per_pass"):
+            eff.append(f"{s['steps_per_pass']} steps/pass")
+        if s.get("security_findings"):
+            eff.append(f"{s['security_findings']} security finding(s)")
+        if eff:
+            print(f"     efficiency: {', '.join(eff)}")
         records.append(rec)
 
     if len(records) == 2:
@@ -471,6 +492,50 @@ def cmd_init(args) -> int:
     return 0
 
 
+def cmd_cases_pack(args) -> int:
+    """Bundle a cases directory into a single shareable, versioned pack file."""
+    from .packs import build_pack, write_pack
+    try:
+        pack = build_pack(args.dir, args.name, args.version)
+    except (ValueError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    out = write_pack(pack, args.out)
+    print(f"  packed {pack['case_count']} case(s) -> {out}")
+    print(f"  name={pack['name']} version={pack['version']} hash={pack['hash']}")
+    return 0
+
+
+def cmd_cases_install(args) -> int:
+    """Install a pack (local file or URL) into the local registry (~/.optarena/packs)."""
+    from .packs import load_pack, install_pack
+    try:
+        pack = load_pack(args.source)
+        dest = install_pack(pack, force=args.force)
+    except (ValueError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(f"  installed {pack['name']}@{pack['version']} ({pack['case_count']} case(s)) -> {dest}")
+    print(f"  run it: optarena run --pack {pack['name']} --driver ollama-chat --name r1")
+    return 0
+
+
+def cmd_cases_packs(args) -> int:
+    """List installed case packs (discovery)."""
+    from .packs import list_installed, PACKS_DIR
+    packs = list_installed()
+    if not packs:
+        print(f"  no packs installed (registry: {PACKS_DIR})")
+        print("  install one: optarena cases install <file-or-url.optpack.json>")
+        return 0
+    print(f"  {'name@version':32} {'cases':>6}  hash")
+    print(f"  {'-'*32} {'-'*6}  {'-'*20}")
+    for m in packs:
+        print(f"  {m.get('name','?')+'@'+str(m.get('version','?')):32} "
+              f"{m.get('case_count','?'):>6}  {str(m.get('hash',''))[:23]}")
+    return 0
+
+
 def cmd_case_show(args) -> int:
     """Print one case in full: prompts, oracle, metadata - so nobody has to
     hunt down and read the raw JSON to see what a PASS actually requires."""
@@ -545,6 +610,65 @@ def cmd_run_show(args) -> int:
         detail = "" if c.get("passed") else \
             f"  - {c.get('error') or '; '.join((c.get('failures') or [])[:1])}"
         print(f"  {status:5} {c['name']:40} {c.get('duration_s', 0):6.1f}s{detail}")
+    return 0
+
+
+def cmd_scan(args) -> int:
+    """Standalone static security scan of a directory (the same rules the
+    --security-scan run flag applies to an agent's changed files)."""
+    from .security import scan_workspace
+
+    root = Path(args.dir)
+    if not root.is_dir():
+        print(f"error: not a directory: {root}", file=sys.stderr)
+        return 2
+    files = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
+    res = scan_workspace(files, root)
+    if not res["total"]:
+        print(f"  no findings in {root} ({len(files)} file(s) scanned)")
+        return 0
+    c = res["counts"]
+    print(f"  {res['total']} finding(s) in {root}: "
+          f"{c.get('error', 0)} error, {c.get('warning', 0)} warning, {c.get('note', 0)} note")
+    for f in res["findings"]:
+        print(f"    [{f['level']:7}] {f['title']}")
+        print(f"              {f['file']}:{f['line']}  {f['snippet']}")
+    # Exit non-zero when there's an error-level finding, so it's usable as a gate.
+    return 1 if c.get("error", 0) else 0
+
+
+def cmd_report(args) -> int:
+    """Emit CI-native report artifacts (JUnit XML / self-contained HTML / SARIF)
+    from a saved run, so an OptArena run drops into GitHub Actions/GitLab CI the
+    same way a normal test suite does."""
+    from . import report as _report
+
+    try:
+        run = load_run(args.run_ref)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    formats = ["junit", "html", "sarif"] if args.format == "all" else [args.format]
+    renderers = {"junit": (_report.to_junit_xml, "junit.xml"),
+                 "html": (_report.to_html, "report.html"),
+                 "sarif": (_report.to_sarif, "results.sarif")}
+
+    # --out: a file path when one format is requested, else a directory.
+    out = Path(args.out) if args.out else (store.RESULTS_DIR / "reports" / run["run_id"])
+    single = len(formats) == 1 and args.out and not str(args.out).endswith("/") and not Path(args.out).is_dir()
+    if not single:
+        out.mkdir(parents=True, exist_ok=True)
+
+    written = []
+    for fmt in formats:
+        fn, default_name = renderers[fmt]
+        content = fn(run)
+        dest = out if single else (out / default_name)
+        dest.write_text(content, encoding="utf-8")
+        written.append(dest)
+    for p in written:
+        print(f"  wrote {p}")
     return 0
 
 
@@ -654,6 +778,8 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--api-key", default=os.environ.get("OPTARENA_API_KEY", "optarena"))
     p_run.add_argument("--cases", help="comma-separated case names (default all)")
     p_run.add_argument("--cases-dir", help="load cases from this directory instead of the built-in catalogue")
+    p_run.add_argument("--pack", help="run an installed case pack by name or name@version "
+                                      "(see `optarena cases packs`); shorthand for --cases-dir")
     p_run.add_argument("--language", help="only run cases tagged with this language (see `optarena list cases`)")
     p_run.add_argument("--framework", help="only run cases tagged with this framework (see `optarena list cases`)")
     p_run.add_argument("--timeout", type=int, help="per-case timeout override (s)")
@@ -669,6 +795,10 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--keep-workspace", action="store_true",
                         help="do not delete the temp workspace after the run (for debugging); "
                              "by default it is removed once results are saved")
+    p_run.add_argument("--security-scan", action="store_true",
+                        help="statically scan each agent's changed files for secrets / "
+                             "injection / unsafe calls (results in extra.security; SARIF via "
+                             "`optarena report --format sarif`)")
     p_run.set_defaults(fn=cmd_run)
 
     p_cmp = sub.add_parser("compare", help="compare two saved runs")
@@ -712,6 +842,17 @@ def main(argv: list[str] | None = None) -> int:
     pc_ver.add_argument("--language", help="only verify cases tagged with this language")
     pc_ver.add_argument("--framework", help="only verify cases tagged with this framework")
     pc_ver.set_defaults(fn=cmd_verify_corpus)
+    pc_pack = cases_sub.add_parser("pack", help="bundle a cases dir into a shareable, versioned pack file")
+    pc_pack.add_argument("dir", help="directory of case JSONs to pack")
+    pc_pack.add_argument("--name", required=True, help="pack name (letters/digits/. _ -)")
+    pc_pack.add_argument("--version", default="0.1.0", help="pack version (default 0.1.0)")
+    pc_pack.add_argument("--out", help="output file (default <name>-<version>.optpack.json)")
+    pc_pack.set_defaults(fn=cmd_cases_pack)
+    pc_inst = cases_sub.add_parser("install", help="install a pack (local file or URL) into the registry")
+    pc_inst.add_argument("source", help="path or http(s) URL to a .optpack.json")
+    pc_inst.add_argument("--force", action="store_true", help="overwrite an installed pack of the same name@version")
+    pc_inst.set_defaults(fn=cmd_cases_install)
+    cases_sub.add_parser("packs", help="list installed case packs").set_defaults(fn=cmd_cases_packs)
 
     p_runs = sub.add_parser("runs", help="saved runs: list/show")
     runs_sub = p_runs.add_subparsers(dest="runs_command", required=True)
@@ -737,6 +878,20 @@ def main(argv: list[str] | None = None) -> int:
         p_act.set_defaults(fn=cmd_docker, action=action)
     sandbox_sub.add_parser("status", help="daemon reachability + which images are built").set_defaults(
         fn=cmd_sandbox_status)
+
+    p_scan = sub.add_parser(
+        "scan", help="static security scan a directory (secrets / injection / unsafe calls)")
+    p_scan.add_argument("dir", help="directory to scan")
+    p_scan.set_defaults(fn=cmd_scan)
+
+    p_report = sub.add_parser(
+        "report", help="emit CI report artifacts (JUnit XML / HTML / SARIF) from a saved run")
+    p_report.add_argument("run_ref", help="run id, filename, path, or unique substring")
+    p_report.add_argument("--format", choices=["junit", "html", "sarif", "all"], default="all",
+                          help="artifact format (default: all)")
+    p_report.add_argument("--out", help="output file (single format) or directory "
+                                        "(default: <results>/reports/<run_id>/)")
+    p_report.set_defaults(fn=cmd_report)
 
     p_serve = sub.add_parser("serve", help="serve the results dashboard")
     p_serve.add_argument("--port", type=int, default=8300)

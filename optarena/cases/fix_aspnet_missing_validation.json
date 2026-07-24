@@ -39,5 +39,8 @@
   },
   "check_command": "python3 test_register.py",
   "check_command_timeout": 100,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\napp.MapPost(\"/register\", (RegisterRequest? req) =>\n{\n    if (req is null || string.IsNullOrWhiteSpace(req.Email))\n    {\n        return Results.BadRequest(new { error = \"email is required\" });\n    }\n    var normalized = req.Email.Trim().ToLowerInvariant();\n    return Results.Ok(new { email = normalized });\n});\n\napp.Run(\"http://0.0.0.0:8053\");\n\npublic record RegisterRequest(string? Email);\n"
+  }
 }

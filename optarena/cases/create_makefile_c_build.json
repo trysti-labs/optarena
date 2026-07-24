@@ -1,9 +1,10 @@
 {
   "name": "create_makefile_c_build",
+  "language": "makefile",
+  "framework": "make",
   "domain": "devops",
   "task_type": "devops",
   "docker_image": "optarena-tester:latest",
-  "framework": "make",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Writes a Makefile that compiles, cleans, and tests a C program",

@@ -6,7 +6,12 @@
   "domain": "infrastructure",
   "difficulty": 1,
   "task_type": "feature",
-  "tags": ["terraform", "iac", "variables", "outputs"],
+  "tags": [
+    "terraform",
+    "iac",
+    "variables",
+    "outputs"
+  ],
   "prompts": [
     "Create a Terraform file called variables.tf that declares a variable named `app_name` of type string, with a description and a default value of \"myapp\". Also add an output named `greeting` whose value interpolates var.app_name into the string \"Hello, <app_name>!\" (e.g. using \"Hello, ${var.app_name}!\"). Do not include any provider or resource blocks - just the variable and output declarations."
   ],
@@ -14,7 +19,12 @@
   "expected_files": [
     {
       "path_pattern": "*.tf",
-      "content_patterns": ["variable", "app_name", "output", "greeting"],
+      "content_patterns": [
+        "variable",
+        "app_name",
+        "output",
+        "greeting"
+      ],
       "regex_patterns": [
         "variable\\s+\"app_name\"\\s*\\{",
         "output\\s+\"greeting\"\\s*\\{",
@@ -27,5 +37,8 @@
   },
   "check_command": "python3 check_variables_outputs.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "variables.tf": "variable \"app_name\" {\n  type        = string\n  description = \"Name of the application\"\n  default     = \"myapp\"\n}\n\noutput \"greeting\" {\n  value = \"Hello, ${var.app_name}!\"\n}\n"
+  }
 }

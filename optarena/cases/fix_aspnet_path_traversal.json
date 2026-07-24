@@ -39,5 +39,8 @@
   },
   "check_command": "python3 test_traversal.py",
   "check_command_timeout": 100,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\nvar baseDir = Path.Combine(Directory.GetCurrentDirectory(), \"data\");\n\napp.MapGet(\"/files\", (string name) =>\n{\n    var fullBase = Path.GetFullPath(baseDir);\n    var path = Path.GetFullPath(Path.Combine(fullBase, name));\n    if (!path.StartsWith(fullBase + Path.DirectorySeparatorChar, StringComparison.Ordinal))\n    {\n        return Results.BadRequest(\"invalid path\");\n    }\n    if (!File.Exists(path)) return Results.NotFound();\n    return Results.Text(File.ReadAllText(path));\n});\n\napp.Run(\"http://0.0.0.0:8056\");\n"
+  }
 }

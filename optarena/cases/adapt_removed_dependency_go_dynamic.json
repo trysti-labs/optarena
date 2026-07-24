@@ -1,0 +1,56 @@
+{
+  "name": "adapt_removed_dependency_go_dynamic",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-go:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it, not just fail to compile",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["go", "dynamic", "disruption", "adaptation", "deleted-dependency"],
+  "prompts": [
+    "Create message.go (package greet) with a function Message() string that returns the value of the Greeting constant declared in greeting.go.",
+    "greeting.go has just been removed from the project. Update message.go so the package still compiles with NO reference to greeting.go or a Greeting identifier, and Message() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "greeting.go": "package greet\n\nconst Greeting = \"hola\"\n",
+    "go.mod": "module greet\n\ngo 1.22\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "greeting.go deleted (a file/dependency the agent's first solution relied on vanished)",
+      "delete_files": ["greeting.go"]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "message.go",
+      "content_patterns": ["Message"]
+    }
+  ],
+  "test_setup_files": {
+    "message_test.go": "package greet\n\nimport \"testing\"\n\nfunc TestMessage(t *testing.T) {\n\tif got := Message(); got != \"hola\" {\n\t\tt.Fatalf(\"Message() = %q, want %q\", got, \"hola\")\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "message.go": "package greet\n\nfunc Message() string {\n\treturn \"hola\"\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-references-deleted-file",
+      "files": {
+        "message.go": "package greet\n\nfunc Message() string {\n\treturn Greeting\n}\n"
+      }
+    },
+    {
+      "name": "wrong-value",
+      "files": {
+        "message.go": "package greet\n\nfunc Message() string {\n\treturn \"bonjour\"\n}\n"
+      }
+    }
+  ]
+}

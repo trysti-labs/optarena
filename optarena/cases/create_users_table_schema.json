@@ -35,5 +35,8 @@
   },
   "check_command": "python3 test_schema.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    email TEXT NOT NULL UNIQUE,\n    created_at TEXT NOT NULL\n);\n"
+  }
 }

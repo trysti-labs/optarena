@@ -6,7 +6,12 @@
   "domain": "backend",
   "difficulty": 1,
   "task_type": "bug_fix",
-  "tags": ["rest", "http", "flask", "validation"],
+  "tags": [
+    "rest",
+    "http",
+    "flask",
+    "validation"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "The Flask app in app.py has a POST /users endpoint meant to create a user from a JSON body with a required `username` field. When a client sends a request without the `username` field, the server currently crashes with an unhandled 500 error (a raw KeyError). Fix app.py so that if `username` is missing, the endpoint returns a 400 status code with a JSON body containing an `error` key describing the problem, instead of crashing. Valid requests (with `username` present) must keep working exactly as before. Run with app.run(port=8013)."
@@ -17,8 +22,13 @@
   "expected_files": [
     {
       "path_pattern": "app.py",
-      "content_patterns": ["flask", "/users"],
-      "regex_patterns": ["400"]
+      "content_patterns": [
+        "flask",
+        "/users"
+      ],
+      "regex_patterns": [
+        "400"
+      ]
     }
   ],
   "test_setup_files": {
@@ -26,5 +36,8 @@
   },
   "check_command": "python3 test_validation.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "app.py": "from flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\nusers = []\n\n\n@app.route('/users', methods=['POST'])\ndef create_user():\n    data = request.get_json(silent=True) or {}\n    if 'username' not in data:\n        return jsonify({'error': 'username is required'}), 400\n    username = data['username']\n    users.append(username)\n    return jsonify({'username': username}), 201\n\n\nif __name__ == '__main__':\n    app.run(port=8013)\n"
+  }
 }

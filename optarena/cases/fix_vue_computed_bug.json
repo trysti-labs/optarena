@@ -38,5 +38,8 @@
   },
   "check_command": "node test_computed.js",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "counter.js": "const { ref, computed } = require('vue');\n\nfunction createCounter(initial) {\n  const count = ref(initial || 0);\n  const multiplier = ref(2);\n\n  const doubled = computed(() => count.value * multiplier.value);\n\n  function setMultiplier(m) {\n    multiplier.value = m;\n  }\n\n  return { count, doubled, setMultiplier };\n}\n\nmodule.exports = { createCounter };\n"
+  }
 }

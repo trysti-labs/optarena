@@ -74,6 +74,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -118,6 +119,23 @@ _HARDENING_ARGS = [
     # adding a second tmpfs mount; harmless no-op on non-Go images.
     "-e", "GOCACHE=/tmp/go-build",
 ]
+
+
+def _writable_cache_args(image: str) -> list[str]:
+    """
+    Images whose pre-warmed build cache lives on the (now read-only) rootfs and
+    which the toolchain must still WRITE to at check_command time. The
+    ``--read-only`` hardening otherwise hard-fails these: `cargo` aborts when it
+    cannot write ``$CARGO_TARGET_DIR/debug/.cargo-build-lock`` (the rust image
+    pre-warms deps at ``/opt/cargo-target``, on the rootfs). An anonymous volume
+    at that path is initialized from the image - so the pre-warmed dependency
+    artifacts are preserved (a bare tmpfs would hide them and force a full,
+    timeout-prone recompile) - yet is writable; ``docker run --rm`` removes the
+    anonymous volume when the container goes away. Maven (writes a cosmetic log
+    to ``/root/.m2`` but "carries on") and dotnet (writes bin/obj into the
+    writable ``/workspace``) do NOT need this - only rust does.
+    """
+    return ["-v", "/opt/cargo-target"] if "rust" in image.lower() else []
 
 
 def _sandbox_user_args() -> list[str]:
@@ -416,7 +434,7 @@ class DockerSandbox:
             subprocess.run(
                 ["docker", "run", "-d", "--rm", "--name", self.name,
                  "--network", "none", "--memory", "2g", "--cpus", "2",
-                 *_HARDENING_ARGS, *_sandbox_user_args(),
+                 *_HARDENING_ARGS, *_sandbox_user_args(), *_writable_cache_args(self.image),
                  "-v", f"{self.root}:/workspace", "-w", "/workspace",
                  self.image, "sleep", "infinity"],
                 capture_output=True, timeout=20, check=True,
@@ -702,7 +720,7 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
         # Same resources as the shared DockerSandbox - a Spring Boot app under
         # 512m would OOM here but pass in the shared container, and vice versa.
         "--memory", "2g", "--cpus", "2",
-        *_HARDENING_ARGS, *_sandbox_user_args(),
+        *_HARDENING_ARGS, *_sandbox_user_args(), *_writable_cache_args(image),
         "-v", f"{root.resolve()}:/workspace",
         "-w", "/workspace",
         image,
@@ -799,6 +817,48 @@ def diff_stats(case: dict, created: list[str], root: Path) -> dict:
     return {"files_changed": len(created), "lines_changed_approx": lines_changed}
 
 
+def trajectory_stats(case: dict, created: list[str], root: Path) -> dict:
+    """
+    Driver-agnostic *trajectory* signals - "judge the path, not just the answer".
+    The oracle's pass/fail verdict says whether the agent reached the right end
+    state; these say something about HOW it got there, from the one artifact
+    every driver produces: the set of files it actually changed (``created``).
+
+    - ``off_target_files``: files the agent created/modified that match NO
+      expected-file pattern and aren't one of the case's own ``setup_files`` -
+      i.e. edits the task never asked for. A disciplined agent (and every
+      raw-model baseline) touches only expected paths, so this is 0; a value > 0
+      means the agent also modified unrelated files (thrash, scratch files, or
+      collateral edits) even if it still passed. Reported, never used to gate
+      pass/fail - it's a quality signal, not a verdict. Paired with
+      ``execution_ok`` (tool exited cleanly) it powers the ``clean_pass`` rollup
+      in metrics.aggregate: passed AND no off-target edits AND clean exit - the
+      "right answer via a clean path" the trace-eval literature calls for.
+    """
+    expected = case.get("expected_files", []) or []
+    setup = set((case.get("setup_files") or {}).keys())
+
+    def _matches_expected(rel: str) -> bool:
+        name = Path(rel).name.lower()
+        for spec in expected:
+            pat = str(spec.get("path_pattern", "")).lower()
+            if not pat:
+                continue
+            if fnmatch.fnmatch(name, pat) or fnmatch.fnmatch(rel.lower(), pat):
+                return True
+        return False
+
+    off_target = [rel for rel in created if rel not in setup and not _matches_expected(rel)]
+    return {
+        "files_touched": len(created),
+        "expected_file_count": len(expected),
+        "off_target_count": len(off_target),
+        # Cap the stored list so a pathological run can't bloat the JSON; the
+        # count above is always exact.
+        "off_target_files": sorted(off_target)[:25],
+    }
+
+
 def evaluate_case(case: dict, created: list[str], root: Path) -> tuple[list[str], dict]:
     """
     Full oracle for one case: write test_setup_files (real test code the
@@ -816,13 +876,63 @@ def evaluate_case(case: dict, created: list[str], root: Path) -> tuple[list[str]
         info = _new_oracle_info(case.get("check_command"))
         info["test_setup_files"] = test_files
         info["diff"] = diff_stats(case, created, root)
+        info["trajectory"] = trajectory_stats(case, created, root)
         return failures, info
     failures, info = run_check_command(case, root)
     info["test_setup_files"] = test_files
     info["diff"] = diff_stats(case, created, root)
+    info["trajectory"] = trajectory_stats(case, created, root)
     if failures:
         info["failure_class"] = classify_failure(info)
     return failures, info
+
+
+def _copy_workspace_for_verification(src: Path, dest: Path) -> None:
+    """Recursively copy ``src`` into ``dest`` (same IGNORE_DIRS/``.aider*``
+    skip rules as ``snapshot``), for grading on a private copy instead of a
+    live workspace. Symlinks are skipped outright - defense in depth, a
+    workspace shouldn't need them for grading and following one could copy
+    arbitrary host file content."""
+    dest.mkdir(parents=True, exist_ok=True)
+    for entry in src.iterdir():
+        if entry.is_symlink():
+            continue
+        if entry.is_dir():
+            if entry.name in IGNORE_DIRS:
+                continue
+            _copy_workspace_for_verification(entry, dest / entry.name)
+        elif entry.is_file():
+            if entry.name.startswith(".aider"):
+                continue
+            shutil.copy2(entry, dest / entry.name)
+
+
+def evaluate_case_isolated(case: dict, created: list[str], live_root: Path) -> tuple[list[str], dict]:
+    """
+    Same as ``evaluate_case``, but grades a PRIVATE COPY of ``live_root``
+    instead of ``live_root`` itself (C-01, mirroring the UI harness's
+    ``/verify`` mount in ``ui-harness/src/oracle.js``).
+
+    ``evaluate_case`` writes the case's hidden ``test_setup_files`` straight
+    into whatever root it's given - fine when called once at the very end of
+    a case, after the last prompt (nothing will ever read the workspace
+    again). It is NOT fine for the precise per-step attribution check
+    (Tier 3): that call happens BETWEEN prompts, in the SAME live workspace a
+    CLI agent's next invocation runs in (``cwd=workspace``) - writing hidden
+    test files straight into it would let the agent list/read them on its
+    next turn, discovering exactly what its hidden test expects and
+    defeating the "never seen by the model" guarantee documented in this
+    module's docstring. Grading a disposable sibling copy instead (still
+    under the same run root, so the existing shared Docker sandbox can reach
+    it) keeps the live workspace read-only from grading's perspective.
+    """
+    live_root = live_root.resolve()
+    verify_root = live_root.parent / f".optarena-verify-{uuid.uuid4().hex[:10]}"
+    try:
+        _copy_workspace_for_verification(live_root, verify_root)
+        return evaluate_case(case, created, verify_root)
+    finally:
+        shutil.rmtree(verify_root, ignore_errors=True)
 
 
 def write_setup_files(root: Path, setup_files: dict[str, str] | None) -> None:
@@ -889,6 +999,118 @@ def git_init_workspace(root: Path) -> None:
             subprocess.run(cmd, cwd=root, capture_output=True, timeout=15, env=env)
     except (OSError, subprocess.TimeoutExpired):
         pass
+
+
+# ── Dynamic evaluation: mid-session disruptions (RoadmapBench/REALM-Bench-style) ──
+
+
+def _disruption_ready(dis: dict, root: Path, after_index: int) -> bool:
+    """
+    Has this disruption's trigger fired at this prompt boundary? Two styles
+    (schema.py enforces exactly one is present):
+
+    - ``after_prompt``: fixed - fires when ``after_index`` equals it.
+    - ``when``: REACTIVE/state-conditioned - fires the first prompt boundary
+      where the *workspace* satisfies a condition, not a hardcoded step count.
+      ``file_exists``: a path now exists (e.g. the agent finally created the
+      file the task asked for, and NOW the rug gets pulled). ``file_contains``:
+      a path exists and its text contains a substring (e.g. the agent's own
+      output reveals it read a specific stale value). This is what lets a
+      disruption respond to what the agent actually did instead of assuming a
+      fixed turn count - REALM-Bench-style disruptions are keyed off plan
+      state, not a clock.
+    """
+    if "after_prompt" in dis:
+        return dis["after_prompt"] == after_index
+    when = dis.get("when") or {}
+    if "file_exists" in when:
+        return (root / when["file_exists"]).exists()
+    if "file_contains" in when:
+        fc = when["file_contains"]
+        target = (root / fc["path"]).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            return False
+        try:
+            return fc["pattern"] in target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+    return False
+
+
+def _fire_disruption(dis: dict, root: Path, label: str) -> str:
+    """Apply one disruption's write/delete effects (containment-checked, like
+    ``write_setup_files``/``copy_setup_repo``) and return its description."""
+    write_setup_files(root, dis.get("write_files"))
+    for rel in dis.get("delete_files") or []:
+        dest = (root / rel).resolve()
+        if not dest.is_relative_to(root):
+            raise ValueError(f"disruption delete path escapes workspace: {rel!r}")
+        if dest.is_file() or dest.is_symlink():
+            dest.unlink(missing_ok=True)
+        elif dest.is_dir():
+            shutil.rmtree(dest, ignore_errors=True)
+    return dis.get("description") or label
+
+
+def apply_disruptions(case: dict, root: Path, after_index: int,
+                       fired_indices: "set[int] | None" = None) -> list[str]:
+    """
+    Fire every not-yet-fired disruption whose trigger is satisfied at this
+    prompt boundary (1-based ``after_index``): a mid-session environment change
+    the agent must adapt to on its NEXT prompt - a file rewritten (a
+    config/dependency that changed under it) or deleted (a reverted edit).
+    Drivers call this between prompts. Returns a short description of each
+    disruption that fired (for the per-step trajectory record).
+
+    ``fired_indices`` is a ``set`` the CALLER owns and passes back in on every
+    call across one case run (fresh per run - never reused across cases/trials):
+    it's what makes a reactive ``when`` trigger fire exactly ONCE even though
+    its condition can stay true across several later prompt boundaries (e.g.
+    a file that, once created, stays created). A fixed ``after_prompt`` trigger
+    doesn't strictly need this (each ``after_index`` value is only ever seen
+    once in a normal ascending prompt loop) but is tracked the same way for
+    uniformity and defense-in-depth. Omitting it (``None``) reproduces the old
+    stateless behavior for ``after_prompt``-only cases.
+
+    This is what makes OptArena a *dynamic* coding-agent evaluator: the frontier
+    (REALM-Bench, PlanBench-XL, CostBench) shows agents lose ~40% when the
+    environment shifts mid-task; a static final-state oracle can't see that.
+    """
+    root = root.resolve()
+    fired: list[str] = []
+    seen = set() if fired_indices is None else fired_indices
+    for idx, dis in enumerate(case.get("disruptions") or []):
+        if idx in seen:
+            continue
+        if not _disruption_ready(dis, root, after_index):
+            continue
+        fired.append(_fire_disruption(dis, root, f"disruption after prompt {after_index}"))
+        seen.add(idx)
+    return fired
+
+
+def apply_all_disruptions(case: dict, root: Path) -> None:
+    """Force-apply EVERY disruption in declaration order, regardless of its
+    trigger (fixed or reactive) - the fully-perturbed final world. Used by
+    ``verify-corpus`` so the reference solution is validated *through* every
+    disruption (the correct answer must hold in the worst-case, fully-changed
+    world), not just against the pristine setup. A reactive ``when`` trigger's
+    condition generally depends on the AGENT's edits (which verify-corpus does
+    not simulate - it lays down a whole solution at once), so "would it have
+    fired during a real run" isn't decidable here; forcing it is the
+    conservative choice; a case author who needs the un-perturbed world checked
+    too can add an explicit ``broken_solutions`` variant for that.
+
+    Order: fixed (``after_prompt``) disruptions apply in ascending temporal
+    order (2 then 1 in declaration order still ends with 2's effect last, as
+    a compounding case's LAST write is the one that should stick); reactive
+    (``when``) ones - which have no inherent order - apply after all fixed
+    ones, in declaration order among themselves."""
+    root = root.resolve()
+    indexed = list(enumerate(case.get("disruptions") or []))
+    indexed.sort(key=lambda pair: (pair[1].get("after_prompt", float("inf")), pair[0]))
+    for idx, dis in indexed:
+        _fire_disruption(dis, root, f"disruption[{idx}]")
 
 
 def prepare_workspace(root: Path, case: dict) -> None:

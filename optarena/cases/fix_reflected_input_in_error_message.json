@@ -34,5 +34,8 @@
   },
   "check_command": "python3 test_echo.py",
   "check_command_timeout": 120,
-  "timeout": 210
+  "timeout": 210,
+  "reference_solution": {
+    "src/main/java/com/optarena/echo/EchoController.java": "package com.optarena.echo;\n\nimport org.springframework.http.MediaType;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RequestParam;\nimport org.springframework.web.bind.annotation.RestController;\n\n@RestController\npublic class EchoController {\n\n    private static String sanitize(String s) {\n        return s.replaceAll(\"[\\\\r\\\\n<>]\", \"\");\n    }\n\n    @GetMapping(value = \"/echo\", produces = MediaType.TEXT_PLAIN_VALUE)\n    public ResponseEntity<String> echo(@RequestParam(required = false) String input) {\n        String value = (input == null) ? \"\" : input;\n        String safe = sanitize(value);\n        if (value.isBlank()) {\n            return ResponseEntity.badRequest().body(\"Error: input must not be blank (received: '\" + safe + \"')\");\n        }\n        return ResponseEntity.ok(\"You said: \" + safe);\n    }\n}\n"
+  }
 }

@@ -6,7 +6,11 @@
   "domain": "backend",
   "difficulty": 2,
   "task_type": "security",
-  "tags": ["security", "sql-injection", "sqlite3"],
+  "tags": [
+    "security",
+    "sql-injection",
+    "sqlite3"
+  ],
   "docker_image": "optarena-tester-python:latest",
   "prompts": [
     "The function `find_user(conn, username)` in db.py builds its SQL query by directly interpolating the `username` argument into the query string (an f-string), which makes it vulnerable to SQL injection. Fix db.py so the query is safely parametrized (e.g. using \"?\" placeholders and passing `username` as a bound parameter to sqlite3), instead of interpolating it directly into the SQL text. The function's behavior for normal usernames must stay the same: it should still return the matching row (or None if no match)."
@@ -17,9 +21,17 @@
   "expected_files": [
     {
       "path_pattern": "db.py",
-      "content_patterns": ["def find_user", "execute"],
-      "regex_patterns": ["\\?"],
-      "not_content_patterns": ["f\"select", "f'select"]
+      "content_patterns": [
+        "def find_user",
+        "execute"
+      ],
+      "regex_patterns": [
+        "\\?"
+      ],
+      "not_content_patterns": [
+        "f\"select",
+        "f'select"
+      ]
     }
   ],
   "test_setup_files": {
@@ -27,5 +39,8 @@
   },
   "check_command": "python3 test_injection.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "db.py": "import sqlite3\n\n\ndef find_user(conn, username):\n    cur = conn.cursor()\n    query = \"SELECT * FROM users WHERE username = ?\"\n    cur.execute(query, (username,))\n    return cur.fetchone()\n"
+  }
 }

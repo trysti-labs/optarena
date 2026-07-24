@@ -39,5 +39,8 @@
   },
   "check_command": "node test_refactor.js",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "utils.js": "function readConfig(id) {\n  return new Promise((resolve, reject) => {\n    setTimeout(() => {\n      if (id < 0) {\n        reject(new Error('invalid id'));\n        return;\n      }\n      resolve({ id, name: `config-${id}` });\n    }, 10);\n  });\n}\n\nmodule.exports = { readConfig };\n"
+  }
 }

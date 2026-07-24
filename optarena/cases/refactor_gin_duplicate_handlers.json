@@ -35,5 +35,8 @@
   },
   "check_command": "python3 test_refactor.py",
   "check_command_timeout": 60,
-  "timeout": 150
+  "timeout": 150,
+  "reference_solution": {
+    "main.go": "package main\n\nimport (\n\t\"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\ntype Numbers struct {\n\tA int `json:\"a\"`\n\tB int `json:\"b\"`\n}\n\nfunc bindAndValidate(c *gin.Context) (*Numbers, bool) {\n\tvar n Numbers\n\tif err := c.ShouldBindJSON(&n); err != nil {\n\t\tc.JSON(http.StatusBadRequest, gin.H{\"error\": \"invalid body\"})\n\t\treturn nil, false\n\t}\n\tif n.A < 0 || n.B < 0 {\n\t\tc.JSON(http.StatusBadRequest, gin.H{\"error\": \"inputs must be non-negative\"})\n\t\treturn nil, false\n\t}\n\treturn &n, true\n}\n\nfunc main() {\n\tr := gin.Default()\n\n\tr.POST(\"/sum\", func(c *gin.Context) {\n\t\tn, ok := bindAndValidate(c)\n\t\tif !ok {\n\t\t\treturn\n\t\t}\n\t\tc.JSON(http.StatusOK, gin.H{\"result\": n.A + n.B})\n\t})\n\n\tr.POST(\"/product\", func(c *gin.Context) {\n\t\tn, ok := bindAndValidate(c)\n\t\tif !ok {\n\t\t\treturn\n\t\t}\n\t\tc.JSON(http.StatusOK, gin.H{\"result\": n.A * n.B})\n\t})\n\n\tr.Run(\":8034\")\n}\n"
+  }
 }

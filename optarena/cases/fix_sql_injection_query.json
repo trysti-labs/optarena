@@ -35,5 +35,8 @@
   },
   "check_command": "python3 test_injection.py",
   "check_command_timeout": 60,
-  "timeout": 120
+  "timeout": 120,
+  "reference_solution": {
+    "lookup.py": "import sqlite3\n\n\ndef get_user_by_name(conn, name):\n    query = \"SELECT * FROM users WHERE name = ?\"\n    cur = conn.execute(query, (name,))\n    return cur.fetchall()\n"
+  }
 }

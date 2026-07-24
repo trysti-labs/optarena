@@ -35,5 +35,8 @@
   },
   "check_command": "python3 test_greet.py",
   "check_command_timeout": 100,
-  "timeout": 180
+  "timeout": 180,
+  "reference_solution": {
+    "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\nstatic IResult Greet(HttpRequest request, Func<string, string> format)\n{\n    if (!request.Query.TryGetValue(\"name\", out var nameValues) || string.IsNullOrWhiteSpace(nameValues.ToString()))\n    {\n        return Results.BadRequest(new { error = \"name is required\" });\n    }\n    var raw = nameValues.ToString().Trim();\n    var normalized = char.ToUpperInvariant(raw[0]) + raw.Substring(1).ToLowerInvariant();\n    return Results.Ok(new { greeting = format(normalized) });\n}\n\napp.MapGet(\"/greet/formal\", (HttpRequest request) => Greet(request, n => $\"Good day, {n}.\"));\napp.MapGet(\"/greet/casual\", (HttpRequest request) => Greet(request, n => $\"Hey {n}!\"));\n\napp.Run(\"http://0.0.0.0:8054\");\n"
+  }
 }
