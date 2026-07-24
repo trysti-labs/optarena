@@ -35,8 +35,8 @@ import tempfile
 from pathlib import Path
 
 from .cases import (
-    DOCKER_IMAGE_DEFAULT, DockerSandbox, evaluate_case, prepare_workspace,
-    write_setup_files,
+    DOCKER_IMAGE_DEFAULT, DockerSandbox, apply_all_disruptions, evaluate_case,
+    prepare_workspace, write_setup_files,
 )
 
 # Task types where an unmodified workspace must FAIL the oracle even without
@@ -64,6 +64,11 @@ def _run_variant(case: dict, files: dict | None, ws: Path) -> list[str]:
     """One variant through the real oracle; returns its failure strings."""
     ws.mkdir(parents=True, exist_ok=True)
     prepare_workspace(ws, case)
+    # Dynamic cases: apply every disruption to reach the fully-perturbed final
+    # world, THEN lay the variant's solution over it - so a reference solution is
+    # proven correct *through* the disruption (must hold in the changed world),
+    # and a "didn't adapt" broken/unmodified variant fails there.
+    apply_all_disruptions(case, ws)
     if files is None:                    # implicit "unmodified" variant
         created: list[str] = []
     else:

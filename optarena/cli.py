@@ -136,6 +136,15 @@ def cmd_run(args) -> int:
         clean = f", {s['clean_passes']} clean" if s.get("clean_passes") is not None else ""
         print(f"  -> {s['passed']}/{s['cases']} passed ({s['pass_rate']:.0%}{ci_str}{clean}, "
               f"mean {s['mean_duration_s']}s) - saved {path.name}")
+        eff = []
+        if s.get("tokens_per_pass"):
+            eff.append(f"{s['tokens_per_pass']} tokens/pass")
+        if s.get("steps_per_pass"):
+            eff.append(f"{s['steps_per_pass']} steps/pass")
+        if s.get("security_findings"):
+            eff.append(f"{s['security_findings']} security finding(s)")
+        if eff:
+            print(f"     efficiency: {', '.join(eff)}")
         records.append(rec)
 
     if len(records) == 2:

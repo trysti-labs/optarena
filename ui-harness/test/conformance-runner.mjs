@@ -14,10 +14,16 @@
  *   changed_files   -> [rel, ...] (against a supplied `before` map)
  *   check_expected  -> [failure-string, ...]
  *   write_setup     -> {error: message|null}   (containment behavior)
+ *   apply_disruptions -> {fired: [str, ...], error: message|null}
+ *                        (job.case, job.after_index; `fired` reflects the
+ *                        workspace's state AFTER firing - the caller's own
+ *                        snapshot before/after is what actually gets compared)
  */
 import fs from 'node:fs';
 import process from 'node:process';
-import { snapshot, changedFiles, checkExpected, writeSetupFiles } from '../src/oracle.js';
+import {
+  snapshot, changedFiles, checkExpected, writeSetupFiles, applyDisruptions,
+} from '../src/oracle.js';
 
 const jobFile = process.argv[2];
 if (!jobFile) {
@@ -48,6 +54,15 @@ for (const job of jobs) {
         results[job.id] = { error: null };
       } catch (e) {
         results[job.id] = { error: String(e.message || e) };
+      }
+      break;
+    }
+    case 'apply_disruptions': {
+      try {
+        const fired = applyDisruptions(job.case, job.dir, job.after_index, new Set());
+        results[job.id] = { fired, error: null };
+      } catch (e) {
+        results[job.id] = { fired: [], error: String(e.message || e) };
       }
       break;
     }

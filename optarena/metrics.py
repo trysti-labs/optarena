@@ -55,6 +55,47 @@ def is_clean_pass(c: dict) -> bool:
     return case_trajectory(c).get("off_target_count", 0) == 0
 
 
+def attribute_failure(c: dict) -> str | None:
+    """
+    For a FAILED case with per-step records, a one-line attribution of *where* it
+    went wrong across the prompts - the coding analog of multi-agent failure
+    attribution (Tier 3). Uses the per-step ``ok``/``disrupted`` flags every
+    driver records, plus whichever verdict signal is present per step:
+
+    - ``oracle_ok`` (precise): the REAL oracle (expected files AND
+      check_command) evaluated at that step - only present for cases with
+      ``disruptions``, since running check_command after every prompt of
+      every case would multiply Docker execs for no benefit elsewhere.
+    - ``expected_ok`` (cheap fallback): just the expected-file shape check,
+      recorded for every case/step regardless.
+
+    Returns None when there's nothing to attribute (passed, or fewer than two
+    steps).
+    """
+    if c.get("passed"):
+        return None
+    steps = (c.get("extra", {}) or {}).get("steps") or []
+    if len(steps) < 2:
+        return None
+    precise = any("oracle_ok" in st for st in steps)
+    verdict_key = "oracle_ok" if precise else "expected_ok"
+    verb = "the case's real oracle (behavior) passed" if precise else "expected files satisfied"
+    last_ok = max((st["i"] for st in steps if st.get(verdict_key)), default=None)
+    last_i = steps[-1]["i"]
+    if last_ok is not None and last_ok < last_i:
+        after = next((st for st in steps if st["i"] == last_ok), {})
+        disrupted = after.get("disrupted")
+        why = f" (disruption fired here: {disrupted[0]})" if disrupted else ""
+        return f"{verb} after prompt {last_ok}, regressed by prompt {last_i}{why}"
+    first_bad = next((st["i"] for st in steps if st.get("ok") is False), None)
+    if first_bad is not None:
+        return f"tool reported failure at prompt {first_bad}"
+    if last_ok is None:
+        return ("the case's real oracle never passed at any prompt" if precise
+                else "expected files were never satisfied by any prompt")
+    return None
+
+
 def aggregate(case_dicts: list[dict]) -> dict:
     """Summary metrics for one run."""
     total = len(case_dicts)
@@ -93,6 +134,13 @@ def aggregate(case_dicts: list[dict]) -> dict:
     step_counts = [c["extra"]["n_steps"] for c in case_dicts
                    if isinstance(c.get("extra", {}).get("n_steps"), int)]
     ci_low, ci_high = wilson_ci(passed, total)
+    # Efficiency / long-horizon rollups (Tier 2, LoCoBench-Agent's cost framing):
+    # how much did each *success* cost? tokens-per-pass and steps-per-pass make
+    # a "cheaper to get right" comparison first-class, not just pass rate.
+    tokens_per_pass = round(tokens / passed) if (tokens and passed) else None
+    pass_steps = [c["extra"]["n_steps"] for c in case_dicts
+                  if c.get("passed") and isinstance(c.get("extra", {}).get("n_steps"), int)]
+    steps_per_pass = round(statistics.mean(pass_steps), 1) if pass_steps else None
     return {
         "cases": total,
         "passed": passed,
@@ -117,6 +165,9 @@ def aggregate(case_dicts: list[dict]) -> dict:
         # Security scan (None unless --security-scan ran).
         "security_findings": sec_total,
         "security_high": sec_high,
+        # Efficiency: cost of each success (None when no token/step telemetry).
+        "tokens_per_pass": tokens_per_pass,
+        "steps_per_pass": steps_per_pass,
     }
 
 

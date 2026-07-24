@@ -20,7 +20,7 @@ import path from 'node:path';
 import { WORKSPACE, BACKEND_URL, API_MODE, MODEL_ID, DESCRIPTOR, RESULTS_FILE } from '../src/paths.js';
 import {
   snapshot, changedFiles, checkExpected, evaluateCase, writeSetupFiles, loadCases,
-  startDockerSandboxes, stopDockerSandboxes,
+  startDockerSandboxes, stopDockerSandboxes, applyDisruptions,
 } from '../src/oracle.js';
 
 const CASE_TIMEOUT = Number(process.env.CASE_TIMEOUT || 150) * 1000;
@@ -340,6 +340,14 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
     const caseStart = Date.now();
     let lastActivity = caseStart;
 
+    // Dynamic eval (JS mirror of the Python drivers' per-step loop): a
+    // per-trial record of what happened at each prompt boundary, plus the
+    // disruption engine's own once-only firing state (fresh per trial, never
+    // shared - reactive `when` triggers must fire exactly once per session).
+    const steps = [];
+    const firedIndices = new Set();
+    const hasDisruptions = Boolean((testCase.disruptions || []).length);
+
     const emit = (error) => emitResult({
       name: testCase.name,
       passed: !error && failures.length === 0,
@@ -349,14 +357,21 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
       failures,
       error: error ? String(error.message || error) : null,
       // trial/nTrials let the Python driver group + majority-merge lines
-      extra: { ...(oracle ? { oracle } : {}), trial: trial + 1, n_trials: nTrials },
+      extra: {
+        ...(oracle ? { oracle } : {}),
+        trial: trial + 1,
+        n_trials: nTrials,
+        ...(steps.length ? { steps, n_steps: steps.length } : {}),
+      },
     });
 
     const prompts = testCase.prompts || [];
     try {
       for (let i = 0; i < prompts.length; i++) {
         const isFinal = i === prompts.length - 1;
-        console.log(`  [inject ${i + 1}/${prompts.length}] ${prompts[i].slice(0, 70)}...`);
+        const promptIndex = i + 1; // 1-based, matches the Python drivers/disruption schema
+        const stepStart = Date.now();
+        console.log(`  [inject ${promptIndex}/${prompts.length}] ${prompts[i].slice(0, 70)}...`);
         await injectPrompt(prompts[i], i === 0);
 
         const budget = isFinal ? CASE_TIMEOUT : INTER_PROMPT_WAIT;
@@ -386,10 +401,35 @@ describe(`${DESCRIPTOR.label} UI × backend (${API_MODE})`, function () {
           }
           await sleep(POLL_MS);
         }
+
+        // Per-step trajectory record ("judge the path"), mirroring the
+        // Python drivers: one entry per prompt/turn, with precise
+        // (check_command-backed) attribution for disruption cases.
+        const step = { i: promptIndex, duration_s: (Date.now() - stepStart) / 1000 };
+        if (hasDisruptions && !isFinal) {
+          const stepEval = evaluateCase(testCase, changedFiles(before, WORKSPACE), WORKSPACE);
+          step.oracle_ok = stepEval.failures.length === 0;
+        }
+        // Tier 1 (dynamic eval): fire any disruption whose trigger is
+        // satisfied at THIS prompt boundary, so the NEXT prompt (still to be
+        // injected) runs in the changed live workspace - the agent sees it
+        // exactly like a real environment change.
+        const fired = applyDisruptions(testCase, WORKSPACE, promptIndex, firedIndices);
+        if (fired.length) {
+          step.disrupted = fired;
+          console.log(`  [disrupt] ${fired.join('; ')}`);
+        }
+        steps.push(step);
       }
     } catch (err) {
       emit(err);
       return { passed: false, failures: [String(err.message || err)] };
+    }
+
+    if (hasDisruptions && steps.length) {
+      // The final prompt's real-oracle verdict IS the case verdict - reuse
+      // it rather than evaluating check_command a second time.
+      steps[steps.length - 1].oracle_ok = failures.length === 0;
     }
 
     console.log(`  [result] created/changed: ${created.join(', ') || 'none'}`);

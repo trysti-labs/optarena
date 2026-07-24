@@ -332,6 +332,10 @@ def format_table(cmp: dict) -> str:
         lines.append(
             f"  clean passes:  {sa['clean_passes']}/{sa['cases']} vs {sb['clean_passes']}/{sb['cases']}"
             f"   (passed with no off-target edits / clean exit)")
+    # Efficiency: cost of each success (LoCoBench-Agent's "cheaper to get right").
+    if sa.get("tokens_per_pass") and sb.get("tokens_per_pass"):
+        lines.append(f"  tokens/pass:   {sa['tokens_per_pass']} vs {sb['tokens_per_pass']}"
+                     f"   (tokens spent per passing case)")
     if sa.get("p95_duration_s") is not None and sb.get("p95_duration_s") is not None:
         lines.append(
             f"  p95 duration:  {sa['p95_duration_s']:.1f}s vs {sb['p95_duration_s']:.1f}s")

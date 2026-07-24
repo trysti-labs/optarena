@@ -788,6 +788,126 @@ class ExecutionOkTests(unittest.TestCase):
         self.assertFalse(result.passed)
 
 
+class DynamicDriverIntegrationTests(unittest.TestCase):
+    """End-to-end (mocked-subprocess) check that a driver's per-prompt loop
+    actually wires up the dynamic-eval engine: fires disruptions between
+    prompts, records them on the per-step trajectory, and only pays for the
+    precise (check_command-backed) per-step oracle on cases that declare
+    ``disruptions`` - not on the rest of the corpus."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_dyn_"))
+
+    @staticmethod
+    def _disruption_case():
+        return {
+            "name": "dyn", "prompts": ["p1", "p2"],
+            "setup_files": {"config.txt": "10\n"},
+            "disruptions": [{"after_prompt": 1, "description": "cfg changed",
+                              "write_files": {"config.txt": "30\n"}}],
+            "expected_files": [{"path_pattern": "out.txt", "content_patterns": ["ok"]}],
+        }
+
+    def test_cli_agent_fires_disruption_and_records_precise_steps(self):
+        driver = CLIAgentDriver("codex")
+        driver._binary = "fake-codex"
+        sc = Scenario(name="x", driver="codex", backend=Backend())
+
+        def fake_run(*_a, **_kw):
+            (self.ws / "out.txt").write_text("ok\n", encoding="utf-8")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("optarena.drivers.cli_agents.run_capture", side_effect=fake_run):
+            result = driver.run_case(self._disruption_case(), sc, self.ws)
+
+        steps = result.extra["steps"]
+        self.assertEqual(len(steps), 2)
+        # The disruption's fixed trigger (after_prompt=1) fires on step 1 only.
+        self.assertEqual(steps[0]["disrupted"], ["cfg changed"])
+        self.assertNotIn("disrupted", steps[1])
+        self.assertEqual((self.ws / "config.txt").read_text(), "30\n")
+        # Precise per-step attribution (oracle_ok) is present because this
+        # case declares disruptions - both prompts satisfy expected_files here.
+        self.assertTrue(steps[0]["oracle_ok"])
+        self.assertTrue(steps[1]["oracle_ok"])
+        self.assertTrue(result.passed)
+
+    def test_cli_agent_omits_oracle_ok_for_non_disruption_cases(self):
+        # Running the real oracle after every prompt is only worth the extra
+        # Docker execs for the small, deliberate subset of cases with
+        # `disruptions` - everything else keeps the cheap expected_ok-only path.
+        driver = CLIAgentDriver("codex")
+        driver._binary = "fake-codex"
+        sc = Scenario(name="x", driver="codex", backend=Backend())
+        case = {"name": "c", "prompts": ["p1", "p2"],
+                "expected_files": [{"path_pattern": "out.txt"}]}
+
+        def fake_run(*_a, **_kw):
+            (self.ws / "out.txt").write_text("x\n", encoding="utf-8")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("optarena.drivers.cli_agents.run_capture", side_effect=fake_run):
+            result = driver.run_case(case, sc, self.ws)
+        for st in result.extra["steps"]:
+            self.assertNotIn("oracle_ok", st)
+            self.assertIn("expected_ok", st)
+
+    def test_precise_step_check_does_not_leak_hidden_tests_into_live_workspace(self):
+        # Regression: the precise per-step oracle check (Tier 3) runs BETWEEN
+        # prompts, in the SAME workspace the next prompt's agent invocation
+        # gets as its cwd. If that check wrote test_setup_files straight into
+        # the live workspace (evaluate_case's normal behavior), a real CLI
+        # agent could list/read them on its next turn and discover exactly
+        # what its hidden test expects - defeating "never seen by the model".
+        # evaluate_case_isolated must grade a private copy instead, leaving
+        # the live workspace exactly as the driver/agent left it.
+        driver = CLIAgentDriver("codex")
+        driver._binary = "fake-codex"
+        sc = Scenario(name="x", driver="codex", backend=Backend())
+        case = {
+            "name": "dyn", "prompts": ["p1", "p2"],
+            "disruptions": [{"after_prompt": 1, "write_files": {"x.txt": "y\n"}}],
+            "expected_files": [{"path_pattern": "out.txt"}],
+            "test_setup_files": {"hidden_test.txt": "secret expected value\n"},
+        }
+
+        def fake_run(*_a, **_kw):
+            (self.ws / "out.txt").write_text("x\n", encoding="utf-8")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("optarena.drivers.cli_agents.run_capture", side_effect=fake_run):
+            driver.run_case(case, sc, self.ws)
+        # After the WHOLE case finishes, the hidden test file is written once
+        # by the final evaluate_case call (expected, no more prompts follow)
+        # - but it must never have been visible mid-session. We can't observe
+        # "mid-session" directly here, so assert the stronger invariant: no
+        # stray `.optarena-verify-*` directory (the isolation copy) was left
+        # behind, and only ONE copy of hidden_test.txt exists (from the final
+        # call), not artifacts from a leaked intermediate write into a place
+        # the next prompt's subprocess would also see.
+        leaked_verify_dirs = list(self.ws.parent.glob(".optarena-verify-*"))
+        self.assertEqual(leaked_verify_dirs, [], "isolation copy must be cleaned up")
+
+    def test_evaluate_case_isolated_does_not_write_into_live_root(self):
+        from optarena.cases import evaluate_case_isolated
+        case = {
+            "expected_files": [{"path_pattern": "out.txt", "content_patterns": ["ok"]}],
+            "test_setup_files": {"hidden.txt": "shh\n"},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            live_root = Path(d) / "live"
+            live_root.mkdir()
+            (live_root / "out.txt").write_text("ok\n", encoding="utf-8")
+            failures, _info = evaluate_case_isolated(case, ["out.txt"], live_root)
+            self.assertEqual(failures, [])
+            # The hidden test file must NOT appear in the live workspace -
+            # only in the (already-cleaned-up) private copy.
+            self.assertFalse((live_root / "hidden.txt").exists())
+            # And the private copy must have been cleaned up, not left behind.
+            leaked = list(live_root.parent.glob(".optarena-verify-*"))
+            self.assertEqual(leaked, [])
+
+
 class StabilityMetricsTests(unittest.TestCase):
     """--trials stability surfaced in aggregate/compare, not hidden behind the majority verdict."""
 
@@ -2024,6 +2144,190 @@ class PackTests(unittest.TestCase):
                 "expected_files": [{"path_pattern": "y.py", "content_patterns": ["y"]}]}))
             with self.assertRaises(FileExistsError):
                 packs.install_pack(packs.build_pack(src, "p", "1.0.0"), packs_dir=reg)
+
+
+class DisruptionTests(unittest.TestCase):
+    def _case(self):
+        return {"name": "d", "prompts": ["a", "b"],
+                "disruptions": [
+                    {"after_prompt": 1, "description": "cfg changed",
+                     "write_files": {"config.py": "X = 2\n"}, "delete_files": ["old.txt"]}]}
+
+    def test_fires_only_matching_after_prompt(self):
+        from optarena.cases import apply_disruptions
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "config.py").write_text("X = 1\n")
+            (root / "old.txt").write_text("stale")
+            # after prompt 2: nothing scheduled -> no change
+            self.assertEqual(apply_disruptions(self._case(), root, 2), [])
+            self.assertEqual((root / "config.py").read_text(), "X = 1\n")
+            self.assertTrue((root / "old.txt").exists())
+            # after prompt 1: fires
+            fired = apply_disruptions(self._case(), root, 1)
+            self.assertEqual(fired, ["cfg changed"])
+            self.assertEqual((root / "config.py").read_text(), "X = 2\n")
+            self.assertFalse((root / "old.txt").exists())
+
+    def test_apply_all_disruptions(self):
+        from optarena.cases import apply_all_disruptions
+        case = {"disruptions": [
+            {"after_prompt": 2, "write_files": {"f.txt": "second\n"}},
+            {"after_prompt": 1, "write_files": {"f.txt": "first\n"}}]}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            apply_all_disruptions(case, root)
+            self.assertEqual((root / "f.txt").read_text(), "second\n")  # order: 1 then 2
+
+    def test_delete_containment_refused(self):
+        from optarena.cases import apply_disruptions
+        case = {"disruptions": [{"after_prompt": 1, "delete_files": ["../escape.txt"]}]}
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                apply_disruptions(case, Path(d), 1)
+
+    def test_schema_validates_disruptions(self):
+        base = {"name": "x", "prompts": ["a"]}
+        validate_case({**base, "disruptions": [{"after_prompt": 1, "write_files": {"a": "b"}}]})
+        with self.assertRaises(SchemaError):
+            validate_case({**base, "disruptions": [{"after_prompt": 0}]})       # 1-based
+        with self.assertRaises(SchemaError):
+            validate_case({**base, "disruptions": [{"after_prompt": 1, "bogus": 1}]})  # unknown key
+        with self.assertRaises(SchemaError):
+            validate_case({**base, "disruptions": "nope"})                       # not a list
+
+    # ── Reactive (`when`) triggers ──────────────────────────────────────────
+
+    def test_schema_validates_when_triggers(self):
+        base = {"name": "x", "prompts": ["a"]}
+        validate_case({**base, "disruptions": [{"when": {"file_exists": "a.py"}}]})
+        validate_case({**base, "disruptions": [
+            {"when": {"file_contains": {"path": "a.py", "pattern": "TODO"}}}]})
+        with self.assertRaises(SchemaError):  # both after_prompt and when
+            validate_case({**base, "disruptions": [
+                {"after_prompt": 1, "when": {"file_exists": "a.py"}}]})
+        with self.assertRaises(SchemaError):  # neither
+            validate_case({**base, "disruptions": [{"write_files": {"a": "b"}}]})
+        with self.assertRaises(SchemaError):  # both file_exists and file_contains
+            validate_case({**base, "disruptions": [{"when": {
+                "file_exists": "a.py", "file_contains": {"path": "a.py", "pattern": "x"}}}]})
+        with self.assertRaises(SchemaError):  # file_contains missing 'pattern'
+            validate_case({**base, "disruptions": [
+                {"when": {"file_contains": {"path": "a.py"}}}]})
+        with self.assertRaises(SchemaError):  # unknown key under 'when'
+            validate_case({**base, "disruptions": [{"when": {"bogus": 1}}]})
+
+    def test_reactive_file_exists_fires_once_workspace_satisfies_it(self):
+        from optarena.cases import apply_disruptions
+        case = {"disruptions": [
+            {"when": {"file_exists": "app.py"}, "description": "reactive",
+             "write_files": {"flag.txt": "x\n"}}]}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            seen: set[int] = set()
+            # Not created yet - condition false, nothing fires.
+            self.assertEqual(apply_disruptions(case, root, 1, seen), [])
+            self.assertFalse((root / "flag.txt").exists())
+            # Now it exists - fires on the next boundary.
+            (root / "app.py").write_text("x\n")
+            self.assertEqual(apply_disruptions(case, root, 2, seen), ["reactive"])
+            self.assertTrue((root / "flag.txt").exists())
+            # Condition still true, but already fired (tracked via `seen`) -
+            # must NOT fire again.
+            (root / "flag.txt").unlink()
+            self.assertEqual(apply_disruptions(case, root, 3, seen), [])
+            self.assertFalse((root / "flag.txt").exists())
+
+    def test_reactive_file_contains_checks_content(self):
+        from optarena.cases import apply_disruptions
+        case = {"disruptions": [
+            {"when": {"file_contains": {"path": "out.txt", "pattern": "READY"}},
+             "write_files": {"flag.txt": "x\n"}}]}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "out.txt").write_text("still working\n")
+            self.assertEqual(apply_disruptions(case, root, 1), [])
+            (root / "out.txt").write_text("READY\n")
+            self.assertEqual(len(apply_disruptions(case, root, 2)), 1)
+
+    def test_apply_all_disruptions_forces_reactive_triggers_too(self):
+        # verify-corpus doesn't simulate agent turns, so `when` triggers are
+        # force-fired unconditionally - the conservative "fully perturbed
+        # world" a reference solution must still be correct in.
+        from optarena.cases import apply_all_disruptions
+        case = {"disruptions": [{"when": {"file_exists": "never-created.txt"},
+                                  "write_files": {"f.txt": "fired\n"}}]}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            apply_all_disruptions(case, root)
+            self.assertEqual((root / "f.txt").read_text(), "fired\n")
+
+
+class FailureAttributionTests(unittest.TestCase):
+    def test_regression_after_disruption(self):
+        from optarena.metrics import attribute_failure
+        c = {"passed": False, "extra": {"steps": [
+            {"i": 1, "ok": True, "expected_ok": True, "disrupted": ["cfg changed"]},
+            {"i": 2, "ok": True, "expected_ok": False}]}}
+        s = attribute_failure(c)
+        self.assertIn("satisfied after prompt 1", s)
+        self.assertIn("regressed by prompt 2", s)
+        self.assertIn("cfg changed", s)
+
+    def test_never_satisfied(self):
+        from optarena.metrics import attribute_failure
+        c = {"passed": False, "extra": {"steps": [
+            {"i": 1, "expected_ok": False}, {"i": 2, "expected_ok": False}]}}
+        self.assertIn("never", attribute_failure(c))
+
+    def test_tool_failure_attributed(self):
+        from optarena.metrics import attribute_failure
+        c = {"passed": False, "extra": {"steps": [
+            {"i": 1, "ok": True, "expected_ok": False},
+            {"i": 2, "ok": False, "expected_ok": False}]}}
+        self.assertIn("prompt 2", attribute_failure(c))
+
+    def test_none_when_passed_or_single_step(self):
+        from optarena.metrics import attribute_failure
+        self.assertIsNone(attribute_failure({"passed": True, "extra": {"steps": [{"i": 1}, {"i": 2}]}}))
+        self.assertIsNone(attribute_failure({"passed": False, "extra": {"steps": [{"i": 1}]}}))
+
+    def test_precise_oracle_ok_preferred_over_expected_ok(self):
+        # A step can look fine by the cheap expected-file check (file exists,
+        # right name) yet fail the REAL oracle (check_command) - oracle_ok, when
+        # present, must be the signal attribution trusts, not expected_ok.
+        from optarena.metrics import attribute_failure
+        c = {"passed": False, "extra": {"steps": [
+            {"i": 1, "ok": True, "expected_ok": True, "oracle_ok": True, "disrupted": ["cfg changed"]},
+            {"i": 2, "ok": True, "expected_ok": True, "oracle_ok": False}]}}
+        s = attribute_failure(c)
+        self.assertIn("real oracle (behavior) passed", s)
+        self.assertIn("after prompt 1", s)
+        self.assertIn("regressed by prompt 2", s)
+        self.assertIn("cfg changed", s)
+
+    def test_precise_never_passed(self):
+        from optarena.metrics import attribute_failure
+        c = {"passed": False, "extra": {"steps": [
+            {"i": 1, "ok": True, "expected_ok": True, "oracle_ok": False},
+            {"i": 2, "ok": True, "expected_ok": True, "oracle_ok": False}]}}
+        s = attribute_failure(c)
+        self.assertIn("real oracle never passed", s)
+
+
+class EfficiencyMetricsTests(unittest.TestCase):
+    def test_tokens_and_steps_per_pass(self):
+        s = aggregate([
+            {"passed": True, "duration_s": 1, "extra": {"total_tokens": 100, "n_steps": 2}},
+            {"passed": True, "duration_s": 1, "extra": {"total_tokens": 300, "n_steps": 4}},
+            {"passed": False, "duration_s": 1, "extra": {"total_tokens": 200, "n_steps": 3}}])
+        self.assertEqual(s["tokens_per_pass"], 300)     # 600 total tokens / 2 passes
+        self.assertEqual(s["steps_per_pass"], 3.0)      # mean(2,4) over passing cases
+
+    def test_none_without_telemetry(self):
+        s = aggregate([{"passed": True, "duration_s": 1, "extra": {}}])
+        self.assertIsNone(s["tokens_per_pass"])
+        self.assertIsNone(s["steps_per_pass"])
 
 
 if __name__ == "__main__":

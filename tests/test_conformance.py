@@ -18,7 +18,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optarena.cases import snapshot, changed_files, check_expected, write_setup_files
+from optarena.cases import (
+    apply_disruptions, changed_files, check_expected, snapshot, write_setup_files,
+)
 
 HARNESS = Path(__file__).resolve().parents[1] / "ui-harness"
 RUNNER = HARNESS / "test" / "conformance-runner.mjs"
@@ -118,6 +120,69 @@ class OracleConformanceTests(unittest.TestCase):
             js = _run_js([{"id": "w", "op": "write_setup", "dir": str(d), "files": files}])["w"]
             self.assertEqual(bool(py_error), should_error, f"python case {i}")
             self.assertEqual(bool(js["error"]), should_error, f"js case {i}")
+
+    def test_apply_disruptions_agrees_fixed_and_reactive(self):
+        # Fixed after_prompt trigger.
+        case_fixed = {"disruptions": [
+            {"after_prompt": 1, "description": "cfg changed",
+             "write_files": {"config.py": "X = 2\n"}, "delete_files": ["old.txt"]}]}
+        for after_index in (2, 1):  # no-fire then fire, same as the unit test
+            d = self.ws / f"fixed{after_index}"
+            d.mkdir()
+            (d / "config.py").write_text("X = 1\n", encoding="utf-8")
+            (d / "old.txt").write_text("stale", encoding="utf-8")
+            py_fired = apply_disruptions(case_fixed, d, after_index)
+            py_snap = self._py_snapshot(d)
+
+            d_js = self.ws / f"fixed{after_index}-js"
+            d_js.mkdir()
+            (d_js / "config.py").write_text("X = 1\n", encoding="utf-8")
+            (d_js / "old.txt").write_text("stale", encoding="utf-8")
+            js = _run_js([{
+                "id": "d", "op": "apply_disruptions", "dir": str(d_js),
+                "case": case_fixed, "after_index": after_index,
+            }])["d"]
+            self.assertEqual(js["error"], None)
+            self.assertEqual(py_fired, js["fired"], f"after_index={after_index}")
+            self.assertEqual(py_snap, self._py_snapshot(d_js), f"after_index={after_index}")
+
+        # Reactive `when: file_exists` trigger - only fires once the file exists.
+        case_reactive = {"disruptions": [
+            {"when": {"file_exists": "app.py"}, "description": "reactive",
+             "write_files": {"flag.txt": "x\n"}}]}
+        d = self.ws / "reactive-py"
+        d.mkdir()
+        py_before = apply_disruptions(case_reactive, d, 1)
+        (d / "app.py").write_text("x\n", encoding="utf-8")
+        py_after = apply_disruptions(case_reactive, d, 2)
+
+        d_js = self.ws / "reactive-js"
+        d_js.mkdir()
+        js_before = _run_js([{
+            "id": "r1", "op": "apply_disruptions", "dir": str(d_js),
+            "case": case_reactive, "after_index": 1,
+        }])["r1"]
+        (d_js / "app.py").write_text("x\n", encoding="utf-8")
+        js_after = _run_js([{
+            "id": "r2", "op": "apply_disruptions", "dir": str(d_js),
+            "case": case_reactive, "after_index": 2,
+        }])["r2"]
+        self.assertEqual(py_before, [])
+        self.assertEqual(js_before["fired"], [])
+        self.assertEqual(py_after, ["reactive"])
+        self.assertEqual(js_after["fired"], ["reactive"])
+
+    def test_apply_disruptions_containment_agrees(self):
+        case = {"disruptions": [{"after_prompt": 1, "delete_files": ["../escape.txt"]}]}
+        d = self.ws / "escape"
+        d.mkdir()
+        with self.assertRaises(ValueError):
+            apply_disruptions(case, d, 1)
+        js = _run_js([{
+            "id": "e", "op": "apply_disruptions", "dir": str(d),
+            "case": case, "after_index": 1,
+        }])["e"]
+        self.assertTrue(js["error"])
 
 
 if __name__ == "__main__":

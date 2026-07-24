@@ -266,6 +266,18 @@ def _print_result(result: CaseResult) -> None:
     if result.extra.get("n_steps", 0) and result.extra["n_steps"] > 1:
         print(f"         steps: {result.extra['n_steps']} (per-step timing/tokens in saved run)")
 
+    # Tier 1 (dynamic eval): note any mid-session disruptions that fired.
+    fired = [d for st in (result.extra.get("steps") or []) for d in (st.get("disrupted") or [])]
+    if fired:
+        print(f"         disruptions fired: {'; '.join(fired)}")
+
+    # Tier 3 (failure attribution): for a failed multi-step case, say where.
+    if not result.passed:
+        from .metrics import attribute_failure
+        why = attribute_failure(result.to_dict())
+        if why:
+            print(f"         attribution: {why}")
+
     # Security scan (opt-in --security-scan): flag secrets/injection/unsafe calls
     # the agent introduced, even when the case passes its correctness oracle.
     sec = result.extra.get("security")

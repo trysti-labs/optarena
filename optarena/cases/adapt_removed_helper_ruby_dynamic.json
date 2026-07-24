@@ -1,0 +1,57 @@
+{
+  "name": "adapt_removed_helper_ruby_dynamic",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "docker_image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval + bug_fix: fix a rounding bug that depends on a helper file, then that helper file is DELETED - a fix that leaves a dangling require to it now crashes, not just under-scores",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "test_kind": "unit",
+  "tags": ["ruby", "dynamic", "disruption", "adaptation", "deleted-dependency"],
+  "prompts": [
+    "Checkout#total_cents in checkout.rb rounds to the nearest 10 cents via legacy_round (from legacy_rounding.rb), silently losing precision. Fix total_cents to return the EXACT sum of items_cents, with no rounding at all.",
+    "legacy_rounding.rb has just been deleted from the project entirely. Make sure checkout.rb still works with no require_relative to a missing file, and total_cents still returns the exact sum with no rounding."
+  ],
+  "setup_files": {
+    "legacy_rounding.rb": "def legacy_round(cents)\n  (cents / 10.0).round * 10\nend\n",
+    "checkout.rb": "require_relative \"legacy_rounding\"\n\nclass Checkout\n  def initialize(items_cents)\n    @items_cents = items_cents\n  end\n\n  def total_cents\n    # BUG: rounds to the nearest 10 cents, silently losing precision.\n    legacy_round(@items_cents.sum)\n  end\nend\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "legacy_rounding.rb removed from the project entirely",
+      "delete_files": ["legacy_rounding.rb"]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "checkout.rb",
+      "content_patterns": ["total_cents"],
+      "not_content_patterns": ["legacy_rounding"]
+    }
+  ],
+  "test_setup_files": {
+    "checkout_hidden_test.rb": "require_relative \"checkout\"\n\ntotal = Checkout.new([100, 250, 375]).total_cents\nraise \"total_cents = #{total}, want 725 (exact sum, no rounding)\" unless total == 725\nputs \"all tests passed\"\n"
+  },
+  "check_command": "ruby checkout_hidden_test.rb",
+  "reference_solution": {
+    "checkout.rb": "class Checkout\n  def initialize(items_cents)\n    @items_cents = items_cents\n  end\n\n  def total_cents\n    @items_cents.sum\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-requires-deleted-file",
+      "files": {
+        "checkout.rb": "require_relative \"legacy_rounding\"\n\nclass Checkout\n  def initialize(items_cents)\n    @items_cents = items_cents\n  end\n\n  def total_cents\n    @items_cents.sum\n  end\nend\n"
+      }
+    },
+    {
+      "name": "drops-require-but-still-rounds",
+      "files": {
+        "checkout.rb": "class Checkout\n  def initialize(items_cents)\n    @items_cents = items_cents\n  end\n\n  def total_cents\n    (@items_cents.sum / 10.0).round * 10\n  end\nend\n"
+      }
+    }
+  ]
+}

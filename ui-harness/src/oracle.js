@@ -206,6 +206,34 @@ function newOracleInfo(cmd) {
 }
 
 /**
+ * Driver-agnostic trajectory signals (JS mirror of cases.trajectory_stats) -
+ * "judge the path, not just the answer". `off_target_files`: files the agent
+ * touched that match no expected-file pattern and aren't one of the case's
+ * own setup_files - unrequested edits, reported (never gating pass/fail) so
+ * UI-driven runs carry the same clean-pass signal CLI-driven runs do.
+ */
+function trajectoryStats(testCase, created, root) {
+  const expected = testCase.expected_files || [];
+  const setup = new Set(Object.keys(testCase.setup_files || {}));
+  const matchesExpected = (rel) => {
+    const name = path.basename(rel).toLowerCase();
+    return expected.some((spec) => {
+      const pat = String(spec.path_pattern || '');
+      if (!pat) return false;
+      const re = globToRegExp(pat);
+      return re.test(name) || re.test(rel.toLowerCase());
+    });
+  };
+  const offTarget = created.filter((rel) => !setup.has(rel) && !matchesExpected(rel));
+  return {
+    files_touched: created.length,
+    expected_file_count: expected.length,
+    off_target_count: offTarget.length,
+    off_target_files: [...offTarget].sort().slice(0, 25),
+  };
+}
+
+/**
  * Approximate change size (JS mirror of cases.diff_stats): files touched and
  * lines changed. Modify-cases diff against the case's own setup_files text;
  * new files count their full line length.
@@ -606,6 +634,7 @@ export function evaluateCase(testCase, created, root) {
       const info = newOracleInfo(testCase.check_command);
       info.test_setup_files = testFiles;
       info.diff = diffStats(testCase, created, root);
+      info.trajectory = trajectoryStats(testCase, created, root);
       return { failures, oracle: info };
     }
     const result = runCheckCommand(testCase, verifyRoot);
@@ -614,6 +643,7 @@ export function evaluateCase(testCase, created, root) {
     // always, failure classification only when the check actually failed -
     // so UI-driver results carry the same metric fields as CLI-driver ones.
     result.oracle.diff = diffStats(testCase, created, root);
+    result.oracle.trajectory = trajectoryStats(testCase, created, root);
     if (result.failures.length > 0) {
       result.oracle.failure_class = classifyFailure(result.oracle);
     }
@@ -652,6 +682,96 @@ export function writeSetupFiles(root, setupFiles) {
       throw new Error(`setup file path escapes workspace root via symlink: ${JSON.stringify(rel)}`);
     }
     fs.writeFileSync(dest, content, 'utf-8');
+  }
+}
+
+// ── Dynamic evaluation: mid-session disruptions (JS mirror of the
+// apply_disruptions/apply_all_disruptions family in cases.py - keep in sync) ──
+
+/**
+ * Has this disruption's trigger fired at this prompt boundary? Mirrors
+ * cases._disruption_ready. `after_prompt`: fixed step count. `when`: REACTIVE -
+ * `file_exists` / `file_contains` check live workspace state, so the
+ * disruption can respond to what the agent actually did instead of a clock.
+ */
+function disruptionReady(dis, root, afterIndex) {
+  if (Object.prototype.hasOwnProperty.call(dis, 'after_prompt')) {
+    return dis.after_prompt === afterIndex;
+  }
+  const when = dis.when || {};
+  if (Object.prototype.hasOwnProperty.call(when, 'file_exists')) {
+    return fs.existsSync(path.resolve(root, when.file_exists));
+  }
+  if (Object.prototype.hasOwnProperty.call(when, 'file_contains')) {
+    const fc = when.file_contains;
+    const target = path.resolve(root, fc.path);
+    if (!target.startsWith(path.resolve(root) + path.sep) && target !== path.resolve(root)) return false;
+    try {
+      if (!fs.statSync(target).isFile()) return false;
+      return fs.readFileSync(target, 'utf-8').includes(fc.pattern);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** Apply one disruption's write/delete effects (containment-checked). */
+function fireDisruption(dis, root, label) {
+  writeSetupFiles(root, dis.write_files);
+  for (const rel of dis.delete_files || []) {
+    const dest = path.resolve(root, rel);
+    const relToRoot = path.relative(root, dest);
+    if (relToRoot === '..' || relToRoot.startsWith('..' + path.sep) || path.isAbsolute(relToRoot)) {
+      throw new Error(`disruption delete path escapes workspace: ${JSON.stringify(rel)}`);
+    }
+    try {
+      const st = fs.lstatSync(dest);
+      fs.rmSync(dest, st.isDirectory() ? { recursive: true, force: true } : { force: true });
+    } catch { /* already absent */ }
+  }
+  return dis.description || label;
+}
+
+/**
+ * Fire every not-yet-fired disruption whose trigger is satisfied at this
+ * prompt boundary (JS mirror of cases.apply_disruptions). `firedIndices` is a
+ * Set the CALLER owns and threads through every call for one case/trial
+ * (fresh per trial) - what makes a reactive `when` trigger fire exactly once.
+ * Returns the description of each disruption that fired.
+ */
+export function applyDisruptions(testCase, root, afterIndex, firedIndices) {
+  const resolvedRoot = path.resolve(root);
+  const seen = firedIndices || new Set();
+  const fired = [];
+  (testCase.disruptions || []).forEach((dis, idx) => {
+    if (seen.has(idx)) return;
+    if (!disruptionReady(dis, resolvedRoot, afterIndex)) return;
+    fired.push(fireDisruption(dis, resolvedRoot, `disruption after prompt ${afterIndex}`));
+    seen.add(idx);
+  });
+  return fired;
+}
+
+/**
+ * Force-apply EVERY disruption in declaration order regardless of its trigger
+ * (JS mirror of cases.apply_all_disruptions) - the fully-perturbed final
+ * world, for reference-solution/conformance checks that don't simulate a real
+ * agent session.
+ */
+export function applyAllDisruptions(testCase, root) {
+  const resolvedRoot = path.resolve(root);
+  // Same ordering as cases.apply_all_disruptions: fixed (after_prompt)
+  // disruptions apply in ascending temporal order; reactive (`when`) ones
+  // (no inherent order) apply after all fixed ones, in declaration order.
+  const indexed = (testCase.disruptions || []).map((dis, idx) => [idx, dis]);
+  indexed.sort((a, b) => {
+    const ap = Object.prototype.hasOwnProperty.call(a[1], 'after_prompt') ? a[1].after_prompt : Infinity;
+    const bp = Object.prototype.hasOwnProperty.call(b[1], 'after_prompt') ? b[1].after_prompt : Infinity;
+    return ap !== bp ? ap - bp : a[0] - b[0];
+  });
+  for (const [idx, dis] of indexed) {
+    fireDisruption(dis, resolvedRoot, `disruption[${idx}]`);
   }
 }
 

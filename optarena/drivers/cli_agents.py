@@ -28,7 +28,10 @@ import subprocess
 import time
 from pathlib import Path
 
-from ..cases import changed_files, evaluate_case, prepare_workspace, run_capture, snapshot
+from ..cases import (
+    apply_disruptions, changed_files, check_expected, evaluate_case,
+    evaluate_case_isolated, prepare_workspace, run_capture, snapshot,
+)
 from ..scenario import Scenario
 from .base import CaseResult, Driver, subprocess_env
 
@@ -190,6 +193,22 @@ class CLIAgentDriver(Driver):
                if not any(k.startswith(p) for p in self.spec["scrub_env_prefixes"])}
 
         steps: list[dict] = []
+        n_prompts = len(case.get("prompts", []))
+        # Reactive (`when`) disruption triggers must fire exactly once even
+        # though their condition can stay true across several prompt
+        # boundaries - this set is owned by THIS run_case call (fresh per
+        # case/trial, never shared) and threaded through every
+        # apply_disruptions call below.
+        fired_indices: set[int] = set()
+        # Precise per-step attribution: for cases WITH disruptions (a small,
+        # deliberate subset of the corpus), run the REAL oracle - not just the
+        # cheap expected-file check - after each non-final prompt, so failure
+        # attribution can say "the behavioral test passed after prompt 2,
+        # failed after prompt 3" instead of only "expected files existed".
+        # Gated on has_disruptions: running check_command after every prompt
+        # of every case would multiply Docker exec calls for no benefit on the
+        # vast majority of (non-dynamic) cases.
+        has_disruptions = bool(case.get("disruptions"))
         t0 = time.monotonic()
         try:
             for i, prompt in enumerate(case.get("prompts", []), 1):
@@ -216,6 +235,30 @@ class CLIAgentDriver(Driver):
                     for key in ("prompt_tokens", "completion_tokens", "turns"):
                         if key in metrics:
                             step[key] = metrics[key]
+                # Tier 3 (failure attribution): cheap per-step snapshot of whether
+                # the expected-file checks pass right now, measured BEFORE any
+                # disruption fires - so we can later say "satisfied after prompt 2,
+                # regressed by prompt 3".
+                step_files = changed_files(before, workspace)
+                step["expected_ok"] = not check_expected(
+                    step_files, case.get("expected_files", []), workspace)
+                # Precise attribution: the real oracle (expected files AND
+                # check_command), for every prompt but the last (the last
+                # prompt's real oracle result is the case's own final verdict,
+                # computed once below - no need to run check_command twice).
+                # evaluate_case_isolated (NOT evaluate_case): this call happens
+                # mid-session, in the SAME workspace the next prompt's agent
+                # invocation runs in - grading a private copy keeps the hidden
+                # test_setup_files from ever being visible on disk to the agent.
+                if has_disruptions and i < n_prompts:
+                    step_failures, _step_oracle = evaluate_case_isolated(case, step_files, workspace)
+                    step["oracle_ok"] = not step_failures
+                # Tier 1 (dynamic eval): fire any disruption whose trigger is
+                # satisfied at this prompt boundary, so the NEXT prompt runs in
+                # the changed environment.
+                fired = apply_disruptions(case, workspace, i, fired_indices)
+                if fired:
+                    step["disrupted"] = fired
                 steps.append(step)
                 if proc.returncode != 0:
                     # execution_ok=False (H-XX / Phase 2.7): the tool itself
@@ -241,4 +284,8 @@ class CLIAgentDriver(Driver):
         result.files = changed_files(before, workspace)
         result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
         result.passed = result.execution_ok and result.error is None and not result.failures
+        if has_disruptions and steps:
+            # The final prompt's real-oracle verdict IS the case verdict -
+            # reuse it rather than re-running check_command a second time.
+            steps[-1]["oracle_ok"] = result.passed
         return result
