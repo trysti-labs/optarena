@@ -19,24 +19,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # native `tsgo` compiler), whose API surface breaks ts-node 10.9.2 at bootstrap
 # ("Cannot read properties of undefined (reading 'fileExists')"), which makes
 # every `ts-node main.ts` case (NestJS) unrunnable. ts-node 10.x supports TS 5.x.
+# Everything else pinned too, same reasoning as the base-image digest above -
+# an unpinned package can be silently replaced upstream, changing oracle
+# behavior between identical commits. Versions below are what was already
+# installed and verified working - bump deliberately, not by accident.
 RUN npm install -g \
-        express \
-        react \
-        react-dom \
-        next \
-        vue \
-        @babel/core \
-        @babel/cli \
-        @babel/preset-env \
-        @babel/preset-react \
-        jest \
+        express@5.2.1 \
+        react@19.2.8 \
+        react-dom@19.2.8 \
+        next@16.2.11 \
+        vue@3.5.40 \
+        @babel/core@7.29.7 \
+        @babel/cli@7.29.7 \
+        @babel/preset-env@7.29.7 \
+        @babel/preset-react@7.29.7 \
+        jest@30.4.2 \
         typescript@5.6.3 \
-        ts-node \
-        reflect-metadata \
-        rxjs \
-        @nestjs/core \
-        @nestjs/common \
-        @nestjs/platform-express \
+        ts-node@10.9.2 \
+        reflect-metadata@0.2.2 \
+        rxjs@7.8.2 \
+        @nestjs/core@11.1.28 \
+        @nestjs/common@11.1.28 \
+        @nestjs/platform-express@11.1.28 \
     && npm cache clean --force
 
 ENV NODE_PATH=/usr/local/lib/node_modules

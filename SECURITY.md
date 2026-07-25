@@ -28,26 +28,26 @@ boundary:
    Codex, …) run headlessly with auto-approval flags - that is the point of
    the evaluation - but receive an **explicit environment allowlist** (PATH,
    HOME, locale, temp dirs, plus exactly the provider credential the scenario
-   configures), never a copy of your full shell environment. The VS Code UI
-   harness gets the same allowlist plus the display/session variables VS Code
-   needs to launch. UI extensions are seeded with *workspace-scoped*
-   auto-approval: reads/edits inside the workspace and command execution are
-   auto-approved; reads/edits **outside** the workspace, the browser, and MCP
-   are not. UI workspaces live under the system temp directory, outside any
-   repository checkout. The agent process itself is *not* containerized -
-   only the verifier is - so an agent can still do what your user account can
-   do within those env/approval limits. Don't run agents you don't trust with
-   prompts you don't control.
+   configures), never a copy of your full shell environment. SDK/agent-
+   framework drivers (crewAI, OpenAI Agents SDK, smolagents, LangGraph,
+   AutoGen, Semantic Kernel) run **in-process** instead of as a subprocess,
+   so the environment allowlist doesn't apply to them the same way - each
+   constructs its own explicit client scoped to the scenario's own backend
+   URL/key rather than reading ambient credentials, and none are given file
+   or shell tools (they reply with a single code block, which the driver
+   writes to disk itself). Neither CLI nor SDK agent processes are
+   containerized - only the verifier is - so an agent can still do what your
+   user account can do within those env/tool limits. Don't run agents you
+   don't trust with prompts you don't control.
 
 3. **Hidden tests vs. the agent.** `test_setup_files` are never visible to the
-   agent while it works, by one of two mechanisms depending on the driver.
-   *UI drivers* (VS Code harness): **spatial** isolation - grading runs on a
-   private copy of the workspace in a separate directory, mounted into the
-   sandbox at a separate bind mount (`/verify`), which the agent's workspace
-   never sees. *CLI and baseline drivers*: **temporal** isolation - the hidden
-   tests are written into the workspace only *after* the tool process has
-   exited, so the agent never runs concurrently with them. In both cases the
-   model is graded against tests it could not read or watch during its run.
+   agent while it works: **temporal** isolation - the hidden tests are
+   written into the workspace only *after* the tool process has exited, so
+   the agent never runs concurrently with them. For multi-prompt cases with
+   disruptions, the mid-session per-step attribution check additionally
+   grades a **private copy** of the workspace rather than the live one it
+   will read again on its next turn. The model is graded against tests it
+   could not read or watch during its run.
 
 ## Credentials
 
@@ -72,5 +72,16 @@ settings, use a private case pack via `--cases-dir`.
 
 Orchestration, results, and the dashboard are local. Prompts and generated
 code are sent to whatever backend URL each scenario configures - if that URL
-is a remote provider, your prompts and code go there. Nothing else leaves the
-machine; there is no telemetry, and the dashboard makes no external requests.
+is a remote provider, your prompts and code go there. OptArena's own code has
+no telemetry, and the dashboard makes no external requests - but the
+in-process SDK/agent-framework drivers each pull in a real third-party
+framework, and some of those frameworks ship their own telemetry, enabled by
+default, independent of anything OptArena's own `subprocess_env()`
+allowlisting can reach (that mechanism only scopes subprocess environments;
+these drivers run in-process). The `crewai`, `openai-agents`, and `langgraph`
+drivers explicitly disable their framework's default telemetry/tracing in
+`prepare()` - confirmed by reading each framework's actual tracing code, not
+assumed from its docs - specifically so a scenario aimed at a fully local
+backend doesn't silently phone home. If you add a new SDK-agent driver or
+bump one of these frameworks to a new major version, re-verify this hasn't
+regressed.

@@ -17,20 +17,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
+# Pinned (not floating latest) for the same reason the base image is
+# digest-pinned above: an unpinned package can be silently replaced by a
+# new release upstream, changing oracle behavior between identical
+# OptArena commits. Versions below are what was already installed and
+# verified working - bump deliberately, not by accident.
 RUN pip install --no-cache-dir --break-system-packages \
-        fastapi \
-        pydantic \
-        uvicorn \
-        httpx \
-        requests \
-        pytest \
-        flask \
-        django \
-        sqlalchemy \
-        alembic \
-        pandas \
-        typer \
-        pyyaml
+        fastapi==0.139.2 \
+        pydantic==2.13.4 \
+        uvicorn==0.51.0 \
+        httpx==0.28.1 \
+        requests==2.34.2 \
+        pytest==9.1.1 \
+        flask==3.1.3 \
+        django==5.2.16 \
+        sqlalchemy==2.0.51 \
+        alembic==1.18.5 \
+        pandas==3.0.3 \
+        typer==0.27.0 \
+        pyyaml==6.0.3
 
 # dependency_upgrade cases: the main interpreter above carries the CURRENT
 # (target) version of a library; this venv carries an older, pre-breaking-
