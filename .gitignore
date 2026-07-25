@@ -6,14 +6,6 @@ __pycache__/
 # Results (local run data)
 results/
 
-# ui-harness runtime artifacts
-ui-harness/node_modules/
-ui-harness/.wdio-vscode-service/
-ui-harness/.vscode-storage-*/
-ui-harness/.workspace-*/
-ui-harness/run*.log
-ui-harness/logs/
-
 # Nested standalone repos (separate remotes)
 website/
 website2/
