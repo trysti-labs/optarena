@@ -6,7 +6,7 @@
   "docker_image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
-  "description": "{**acc, **d} rebuild per iteration -> acc.update(d); budget calibrated (naive ~2.5s native at n=30k growing keys vs ~0.002s, budget 1.2s)",
+  "description": "{**acc, **d} rebuild per iteration -> acc.update(d); budget calibrated (naive ~4.1s at n=60k growing keys vs ~0.003s, budget 2.0s)",
   "difficulty": 2,
   "task_type": "performance",
   "tags": [
@@ -30,7 +30,7 @@
     }
   ],
   "test_setup_files": {
-    "test_merging.py": "import time\n\nfrom merging import merge_all\n\n\ndef test_later_keys_win():\n    assert merge_all([{\"a\": 1, \"b\": 1}, {\"b\": 2}, {\"c\": 3}]) == {\"a\": 1, \"b\": 2, \"c\": 3}\n\n\ndef test_empty_list():\n    assert merge_all([]) == {}\n\n\ndef test_single_dict_unchanged():\n    assert merge_all([{\"x\": 1}]) == {\"x\": 1}\n\n\ndef test_inputs_not_mutated():\n    d1, d2 = {\"a\": 1}, {\"b\": 2}\n    merge_all([d1, d2])\n    assert d1 == {\"a\": 1}\n    assert d2 == {\"b\": 2}\n\n\ndef test_performance_many_dicts():\n    n = 30000\n    dicts = [{f\"k{i}\": i} for i in range(n)]\n\n    start = time.perf_counter()\n    got = merge_all(dicts)\n    elapsed = time.perf_counter() - start\n\n    assert len(got) == n\n    assert got[\"k0\"] == 0 and got[f\"k{n - 1}\"] == n - 1\n    # calibrated: {**acc, **d} rebuilds the whole dict every iteration - ~2.5s\n    # on fast native hardware at n=30000 growing keys, and slower in the\n    # sandbox; acc.update(d) is ~0.002s\n    assert elapsed < 1.2, (\n        f\"merge_all took {elapsed:.2f}s for {n} dicts; expected acc.update(d) \"\n        f\"in the loop, not acc = {{**acc, **d}} which copies the whole \"\n        f\"accumulator every iteration\"\n    )\n"
+    "test_merging.py": "import time\n\nfrom merging import merge_all\n\n\ndef test_later_keys_win():\n    assert merge_all([{\"a\": 1, \"b\": 1}, {\"b\": 2}, {\"c\": 3}]) == {\"a\": 1, \"b\": 2, \"c\": 3}\n\n\ndef test_empty_list():\n    assert merge_all([]) == {}\n\n\ndef test_single_dict_unchanged():\n    assert merge_all([{\"x\": 1}]) == {\"x\": 1}\n\n\ndef test_inputs_not_mutated():\n    d1, d2 = {\"a\": 1}, {\"b\": 2}\n    merge_all([d1, d2])\n    assert d1 == {\"a\": 1}\n    assert d2 == {\"b\": 2}\n\n\ndef test_performance_many_dicts():\n    n = 60000\n    dicts = [{f\"k{i}\": i} for i in range(n)]\n\n    start = time.perf_counter()\n    got = merge_all(dicts)\n    elapsed = time.perf_counter() - start\n\n    assert len(got) == n\n    assert got[\"k0\"] == 0 and got[f\"k{n - 1}\"] == n - 1\n    # calibrated: {**acc, **d} rebuilds the whole dict every iteration -\n    # measured ~4.1s at n=60000 growing keys vs ~0.003s for acc.update(d) -\n    # a >1000x gap, so this stays a reliable discriminator across hardware\n    # speeds rather than sitting close to the naive path's own runtime (n\n    # was doubled from an earlier n=30000/1.2s budget after that margin\n    # turned out too tight on faster-than-originally-assumed hardware).\n    assert elapsed < 2.0, (\n        f\"merge_all took {elapsed:.2f}s for {n} dicts; expected acc.update(d) \"\n        f\"in the loop, not acc = {{**acc, **d}} which copies the whole \"\n        f\"accumulator every iteration\"\n    )\n"
   },
   "check_command": "python3 -m pytest -q test_merging.py",
   "reference_solution": {
