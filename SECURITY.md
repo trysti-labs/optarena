@@ -13,12 +13,13 @@ OptArena runs three kinds of untrusted-or-semi-trusted code, each with its own
 boundary:
 
 1. **Case-defined `check_command`s and test files** (from the built-in corpus
-   or any `--cases-dir` pack you load). These execute inside a hardened Docker
-   container: `--network none`, `--cap-drop=ALL`,
+   or any `--cases-dir` pack you load). These execute inside a hardened
+   container (Docker or Podman, auto-detected -
+   `OPTARENA_CONTAINER_ENGINE` forces one): `--network none`, `--cap-drop=ALL`,
    `--security-opt no-new-privileges`, `--pids-limit`, read-only rootfs with a
-   bounded exec tmpfs, and memory/CPU limits. **If Docker is unavailable,
-   OptArena refuses to run them** - host execution requires an explicit
-   opt-in (`OPTARENA_NO_DOCKER=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
+   bounded exec tmpfs, and memory/CPU limits. **If no container engine is
+   available, OptArena refuses to run them** - host execution requires an
+   explicit opt-in (`OPTARENA_NO_DOCKER=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
    All case-supplied file paths are containment-checked before anything is
    written; traversal (`../`), absolute paths, and symlinked escapes are
    rejected. Only load case packs from sources you trust enough to run in

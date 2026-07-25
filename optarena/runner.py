@@ -49,8 +49,8 @@ def _image_digests(images: list[str]) -> dict[str, str]:
     bits actually graded a run. Digests are recorded for evidence/reproduction
     but deliberately NOT part of `manifest_compatibility` - two machines with
     byte-different local builds of the same image should warn a human, not
-    hard-block a comparison. Empty entries (image not present locally, Docker
-    down) record as "unknown".
+    hard-block a comparison. Empty entries (image not present locally,
+    container engine down) record as "unknown".
     """
     import subprocess
     out: dict[str, str] = {}
@@ -382,8 +382,8 @@ def run_scenario(
     # not one per check_command call, and not just one overall (a run mixing
     # e.g. a Python case and a Go case needs both toolchains at once). Only
     # started for images some case actually needs via check_command; a no-op
-    # (and no print) otherwise or when Docker/the image isn't available
-    # (run_check_command then falls back to the host for that case).
+    # (and no print) otherwise or when the container engine/image isn't
+    # available (run_check_command then falls back to the host for that case).
     # Resolve each case's image exactly the way run_check_command will
     # (including the OPTARENA_DOCKER_IMAGE override) - otherwise a run with
     # the override set would start a sandbox for the wrong image and every

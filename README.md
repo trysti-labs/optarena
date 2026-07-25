@@ -4,9 +4,8 @@
 
 AI agent regression testing: the reproducible evaluation and regression
 platform for AI coding agents. This is the `v0.1` branch, built around CLI,
-raw API, and in-process SDK/agent-framework drivers - see
-[DEV_NOTES/OptArena_Driver_Strategy_v0.1.md](./DEV_NOTES/OptArena_Driver_Strategy_v0.1.md)
-for the strategy behind them.
+raw API, and in-process SDK/agent-framework drivers integrating against
+stable process/library contracts.
 
 OptArena evaluates software engineering agents: headless CLI agents (aider,
 Claude Code, Codex, OpenCode, Goose, Qwen Code), in-process agent-framework/
@@ -14,8 +13,8 @@ SDK agents (crewAI, OpenAI Agents SDK, smolagents, LangGraph, AutoGen,
 Semantic Kernel), and raw-model baselines - all run through the same task
 cases, against **any OpenAI/Ollama-compatible backend** (Ollama, LM Studio, a
 router/optimizer proxy, or a remote API), and verified by actually
-**compiling and running the generated code in an isolated Docker sandbox** -
-not keyword-matching it.
+**compiling and running the generated code in an isolated container sandbox**
+(Docker or Podman) - not keyword-matching it.
 
 ## Why?
 
@@ -42,7 +41,7 @@ OptArena answers these automatically - same task, same oracle, side by side:
       |           |           |           |           |
       +-----------+-----------+-----------+-----------+
                               v
-                Docker-sandboxed verification
+               Container-sandboxed verification
               (compiled, run, asserted for real)
                               v
                      Side-by-side verdict
@@ -66,7 +65,7 @@ optarena serve   # http://localhost:8300/dashboard/
 
 ## What makes this different
 
-1. **Docker-sandboxed real verification** - generated code is compiled/run
+1. **Container-sandboxed real verification** - generated code is compiled/run
    against real test assertions in an isolated container (`--network none`,
    one shared container per run), not keyword-matched. A model once wrote
    valid-looking C++ into a `.c` file and matched every required substring;
@@ -83,10 +82,10 @@ optarena serve   # http://localhost:8300/dashboard/
    remote API.
 6. **Zero infrastructure** - stdlib-only Python core, JSON results, a
    static-HTML dashboard. No database server, no build step, no accounts.
-   Docker is expected for verification: without it OptArena **fails closed**
-   rather than running untrusted test commands on your machine (host
-   execution is an explicit opt-in - `OPTARENA_NO_DOCKER=1` or
-   `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
+   A container engine (Docker or Podman, auto-detected) is expected for
+   verification: without one, OptArena **fails closed** rather than running
+   untrusted test commands on your machine (host execution is an explicit
+   opt-in - `OPTARENA_NO_DOCKER=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
 7. **Cheap extensibility** - a new tool is one driver file. A new task is one
    JSON file (`optarena init` scaffolds one). A new backend is a URL.
 8. **Private by default** - prompts and generated code go only to the
@@ -233,8 +232,8 @@ the generated code and asserts on its actual behavior. Pair it with
 `test_setup_files` - real test code (pytest-style asserts, a Node script, a
 compile-and-run harness) written into the workspace **after** the model's
 run, so the model never sees what it's graded against. The built-in
-catalogue is **510 cases across 18 languages and frameworks**, the full
-target from `DEV_NOTES/CORPUS_EXPANSION_PLAN.md`: Python (120, FastAPI/Flask/Django/
+catalogue is **510 cases across 18 languages and frameworks**:
+Python (120, FastAPI/Flask/Django/
 SQLAlchemy/Pydantic/Typer/pandas), JavaScript (58) and TypeScript (29,
 Express/NestJS/React/Vue/plain Node), Java (35, Spring Boot/plain),
 Kotlin (18, Spring Boot/plain), Go (35, Gin/stdlib), Rust (29, Axum/
@@ -243,17 +242,16 @@ Actix-web/stdlib), C# (29, ASP.NET Core/plain), C (11) and C++ (7), PHP
 Kubernetes/GitHub Actions), HCL/Terraform (12), Dockerfile (10), and
 Makefile (5). Every case covers one of ten task categories - feature, bug
 fix, refactoring, testing, security, performance, devops, data
-engineering, documentation, dependency upgrade - each landing exactly on
-its plan target, and was hand-verified end-to-end - a correct reference
-solution passes, a broken one fails, through the real `--network none`
-Docker sandbox - before being counted as done. The testing-category cases
-(`add_tests_*`) are additionally **mutation-checked**: the hidden oracle
-first runs the model's tests against the correct implementation (they must
-pass), then against deliberately broken variants of it (each must make the
-tests fail) - so a vacuous test file that matches the keyword shape but
-asserts nothing real cannot pass. See `ARCH.md` and `DEV_NOTES/CORPUS_EXPANSION_PLAN.md`
-for what's built versus explicitly deferred (frontier stacks like
-Next.js/Svelte/Deno-Bun, moat hardening, and further repository-scale
+engineering, documentation, dependency upgrade - and was hand-verified
+end-to-end - a correct reference solution passes, a broken one fails,
+through the real `--network none` container sandbox - before being counted
+as done. The testing-category cases (`add_tests_*`) are additionally
+**mutation-checked**: the hidden oracle first runs the model's tests against
+the correct implementation (they must pass), then against deliberately
+broken variants of it (each must make the tests fail) - so a vacuous test
+file that matches the keyword shape but asserts nothing real cannot pass.
+See `ARCH.md` for what's built versus explicitly deferred (frontier stacks
+like Next.js/Svelte/Deno-Bun, moat hardening, and further repository-scale
 Level 3+ starter repos beyond the two already live - `fastapi-tasktracker`
 and `express-ts-shortlink`).
 
@@ -272,26 +270,28 @@ Adversarial-grade benchmarking needs private case packs, which the built-in
 cases and nothing about them ever leaves your machine. See
 [SECURITY.md](./SECURITY.md) for the full trust-boundary write-up.
 
-`check_command` runs inside a Docker sandbox whenever Docker is available -
-the shared `optarena-tester` base image (gcc + python3 + node,
-`docker/Dockerfile`) for the original cases, or a per-language image
+`check_command` runs inside a container whenever a container engine is
+available - Docker or Podman, auto-detected (`OPTARENA_CONTAINER_ENGINE`
+forces one) - using the shared `optarena-tester` base image (gcc + python3 +
+node, `docker/Dockerfile`) for the original cases, or a per-language image
 (`docker/<lang>/Dockerfile`, tagged via a case's `"docker_image"` field) for
 cases that need a real framework toolchain pre-installed (FastAPI, Express,
 Spring Boot, Gin, Axum, ASP.NET Core). Build what you need with `optarena
 docker build` (base), `--lang <name>` (one track), or `--all` (everything) so
 case authors and CI need no language toolchains on the host, and generated
-code never executes directly there. When Docker is unavailable, OptArena
-**refuses to run `check_command` on the host** (a clear non-zero error) -
-host execution is an explicit opt-in via `OPTARENA_NO_DOCKER=1` (Docker
-deliberately disabled, e.g. this repo's own unit-test CI) or
-`OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1` (Docker wanted but missing/broken and
-you accept running untrusted commands directly on this machine).
+code never executes directly there. When no container engine is available,
+OptArena **refuses to run `check_command` on the host** (a clear non-zero
+error) - host execution is an explicit opt-in via `OPTARENA_NO_DOCKER=1`
+(container sandbox deliberately disabled, e.g. this repo's own unit-test CI)
+or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1` (a sandbox is wanted but
+missing/broken and you accept running untrusted commands directly on this
+machine).
 
 **One container per image needed, not one per check_command call.**
-`optarena run` starts one Docker container per distinct image its loaded
+`optarena run` starts one container per distinct image its loaded
 cases actually need (only for cases with a `check_command`) - a run mixing a
 Python case and a Go case gets both toolchains live at once - and every case/
-trial needing a given image `docker exec`s into that same shared container;
+trial needing a given image `exec`s into that same shared container;
 every sandbox started is stopped once when the run finishes. 7 cases x 3
 trials sharing one image means 21 `check_command` invocations against one
 container, not 21 containers.

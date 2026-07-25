@@ -362,10 +362,11 @@ def cmd_doctor(args) -> int:
 
     def _check_info(label: str, good: bool, detail: str = "") -> None:
         # Like _check but advisory only - doesn't flip the overall exit code.
-        # Used for docker: strongly recommended (without it, check_command
-        # REFUSES to run unless host execution is explicitly opted into via
-        # OPTARENA_NO_DOCKER=1 or OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1), but a
-        # doctor run on a docker-less machine shouldn't read as broken.
+        # Used for the container engine: strongly recommended (without it,
+        # check_command REFUSES to run unless host execution is explicitly
+        # opted into via OPTARENA_NO_DOCKER=1 or
+        # OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1), but a doctor run on a machine
+        # with neither Docker nor Podman shouldn't read as broken.
         mark = "ok " if good else "MISS"
         print(f"  [{mark}] {label}" + (f" - {detail}" if detail and not good else ""))
 

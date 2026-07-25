@@ -14,7 +14,7 @@ A case may declare two optional keys:
     "reference_solution": {relpath: content}
         A correct solution. Written over the workspace after setup_files;
         the FULL oracle (expected_files + test_setup_files + check_command,
-        Docker-sandboxed) must PASS it.
+        container-sandboxed) must PASS it.
 
     "broken_solutions": [{"name": str, "files": {relpath: content}}, ...]
         Deliberately wrong solutions (vacuous tests, unfixed bugs, slow

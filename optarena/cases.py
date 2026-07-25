@@ -30,8 +30,8 @@ decides pass/fail:
                                              # test code (pytest/unittest/node
                                              # assert/etc) that check_command runs
       "check_command":         str,          # shell command run in the
-                                             # workspace (inside Docker when
-                                             # available; see run_check_command);
+                                             # workspace (inside a container
+                                             # when available; see run_check_command);
                                              # non-zero exit fails the case
       "check_command_timeout": int,          # seconds (default 60)
       "docker_image":          str,          # optional: which sandbox image this
@@ -48,7 +48,7 @@ decides pass/fail:
           "files": {relpath: content}
       }],
 
-      # Benchmark-corpus metadata (DEV_NOTES/OptArena_Benchmark_Corpus_Specification.md).
+      # Benchmark-corpus metadata.
       # All optional, free-form (not validated against a fixed enum) - they
       # power `--language`/`--framework` filters and `optarena list cases`
       # columns, nothing more today.
@@ -408,10 +408,11 @@ def docker_image_pull(image: str) -> bool:
 def ensure_image(image: str) -> bool:
     """Local image, or a successful GHCR pull tagged to the local name.
 
-    The availability probe is retried once: right after Docker Desktop wakes
-    from resource-saver, the first `docker image inspect` can exceed its
-    timeout, and misreading that as "image missing" would trigger a pointless
-    (and possibly slow) registry pull for an image that's already local.
+    The availability probe is retried once: right after the container
+    engine's VM wakes from an idle/resource-saver state (Docker Desktop,
+    `podman machine`), the first `image inspect` can exceed its timeout, and
+    misreading that as "image missing" would trigger a pointless (and
+    possibly slow) registry pull for an image that's already local.
     """
     if docker_image_available(image) or docker_image_available(image):
         return True
@@ -441,9 +442,9 @@ class DockerSandbox:
     has its toolchain.
 
     Used as a context manager around the whole run (see ``runner.py``):
-    ``with DockerSandbox(root) as sandbox:``. If Docker isn't available (or
-    ``OPTARENA_NO_DOCKER=1``), ``start()`` is a no-op and callers fall back to
-    running check_command on the host - unchanged from before.
+    ``with DockerSandbox(root) as sandbox:``. If no container engine is
+    available (or ``OPTARENA_NO_DOCKER=1``), ``start()`` is a no-op and
+    callers fall back to running check_command on the host - unchanged from before.
     """
 
     def __init__(self, root: Path, image: str | None = None):
@@ -547,11 +548,11 @@ def _unsafe_host_exec_allowed() -> bool:
     Two distinct, both explicit, opt-ins to running an untrusted
     ``check_command`` directly on the host:
 
-    - ``OPTARENA_NO_DOCKER=1`` - "I am deliberately disabling Docker",
-      already an explicit choice (this project's own test suite and CI use
-      it on hosts with no Docker daemon at all).
-    - ``OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`` - covers the C-02 gap: Docker
-      was never explicitly disabled, it's just not installed/running, or an
+    - ``OPTARENA_NO_DOCKER=1`` - "I am deliberately disabling the container
+      sandbox", already an explicit choice (this project's own test suite
+      and CI use it on hosts with no Docker/Podman daemon at all).
+    - ``OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`` - covers the C-02 gap: the
+      sandbox was never explicitly disabled, it's just not installed/running, or an
       image is missing. Previously that case *silently* fell through to
       host execution with only a stderr warning - "a warning is not an
       adequate control for arbitrary code execution" (case-defined
@@ -567,8 +568,8 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     Run the case's optional ``check_command`` and return
     ``(failure_strings, oracle_info)``. Empty failure list = passed or no
     command configured. ``oracle_info`` always reports what actually
-    happened (sandboxed in Docker vs run on the host, exit code, timing, and
-    a tail of captured output) so callers can show it, not just the verdict.
+    happened (sandboxed in a container vs run on the host, exit code, timing,
+    and a tail of captured output) so callers can show it, not just the verdict.
 
     This is the second, behavioral oracle stage: content patterns assert
     shape, the command actually compiles/runs the code and asserts on its
@@ -578,9 +579,9 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     distinct image a run's cases need), this execs into that ONE shared
     container - it does not start a new one per case/trial. Without a
     matching active sandbox (e.g. ``evaluate_case`` called directly, outside
-    the runner), it falls back to one ephemeral ``docker run --rm`` for this
-    call. When Docker is unavailable or an image is missing, this now FAILS
-    CLOSED (C-02) unless the caller has explicitly opted into host execution
+    the runner), it falls back to one ephemeral ``run --rm`` for this
+    call. When no container engine is available or an image is missing, this
+    now FAILS CLOSED (C-02) unless the caller has explicitly opted into host execution
     via ``OPTARENA_NO_DOCKER=1`` or ``OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`` -
     see ``_unsafe_host_exec_allowed``.
     """
@@ -700,7 +701,7 @@ def run_capture(cmd, *, timeout: int, **kwargs) -> subprocess.CompletedProcess:
     session). Raises ``subprocess.TimeoutExpired`` after the tree is reaped,
     so existing call sites that catch it are unchanged. Used for every
     HOST-mode subprocess (check_command on the host, and the CLI-agent
-    drivers) - Docker paths don't need it, the container boundary already is
+    drivers) - container paths don't need it, the container boundary already is
     the process-group boundary (see ``DockerSandbox.reap``).
     """
     kwargs.setdefault("stdout", subprocess.PIPE)
@@ -799,8 +800,8 @@ def classify_failure(oracle_info: dict) -> str | None:
     ``extra["oracle"]["failure_class"]`` for the CLI/dashboard/compare table.
     """
     # Timeouts first: the runners record an explicit `timed_out` marker (a
-    # host timeout never even sets ran/exit_code, and docker's `timeout`
-    # exits 124) - the command's own captured output almost never contains
+    # host timeout never even sets ran/exit_code, and the container's own
+    # `timeout` wrapper exits 124) - the command's own captured output almost never contains
     # the words "timed out", so text-sniffing alone made this class
     # effectively unreachable.
     if oracle_info.get("timed_out") or oracle_info.get("exit_code") == 124:
@@ -963,8 +964,8 @@ def evaluate_case_isolated(case: dict, created: list[str], live_root: Path) -> t
     next turn, discovering exactly what its hidden test expects and
     defeating the "never seen by the model" guarantee documented in this
     module's docstring. Grading a disposable sibling copy instead (still
-    under the same run root, so the existing shared Docker sandbox can reach
-    it) keeps the live workspace read-only from grading's perspective.
+    under the same run root, so the existing shared container sandbox can
+    reach it) keeps the live workspace read-only from grading's perspective.
     """
     live_root = live_root.resolve()
     verify_root = live_root.parent / f".optarena-verify-{uuid.uuid4().hex[:10]}"
