@@ -1,5 +1,5 @@
 {
-  "name": "cline-ollama-direct",
-  "driver": "cline-ui",
+  "name": "aider-ollama-direct",
+  "driver": "aider",
   "backend": { "kind": "ollama", "base_url": "http://localhost:11434", "model": "gemma4:12b" }
 }
