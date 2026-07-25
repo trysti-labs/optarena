@@ -22,8 +22,7 @@ from .base import Driver, CaseResult
 __all__ = ["Driver", "CaseResult", "DRIVERS", "DRIVER_NAMES", "get_driver"]
 
 # name -> {kind, backend, status, summary}
-# CLI, raw API, and in-process agent-framework/SDK drivers - see
-# DEV_NOTES/OptArena_Driver_Strategy_v0.1.md for the strategy behind them.
+# CLI, raw API, and in-process agent-framework/SDK drivers.
 DRIVERS: dict[str, dict] = {
     "openai-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable",
                      "summary": "raw model via /v1/chat/completions (no agent)"},

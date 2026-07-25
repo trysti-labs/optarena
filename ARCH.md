@@ -13,8 +13,7 @@ model, every component, the contracts between them, and how to extend it.
 
 This is the `v0.1` branch, built around CLI, raw-API, and in-process
 SDK/agent-framework drivers integrating against stable process/library
-contracts - see `DEV_NOTES/OptArena_Driver_Strategy_v0.1.md` for the driver
-strategy this branch implements.
+contracts.
 
 ---
 
@@ -142,7 +141,7 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   filter, load everything" instead of "load nothing". Fixed to
   `if names is not None:`; a run with no matching cases now correctly
   reports `cases=0` and does nothing, rather than running the whole catalogue.
-- **Benchmark-corpus metadata** (`DEV_NOTES/OptArena_Benchmark_Corpus_Specification.md`):
+- **Benchmark-corpus metadata**:
   `framework`, `domain`, `difficulty` (1 easy .. 5 expert), `task_type`, `tags`
   are all optional, free-form fields alongside `language` - not validated
   against a fixed enum, purely descriptive. `framework` gets the same
@@ -174,7 +173,8 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   (pytest-style asserts, a Node `assert` script, a Python harness that
   compiles-and-runs a C binary and checks its stdout) instead of relying on
   substring matching for correctness.
-- **`check_command` execution is sandboxed in Docker** when available, via
+- **`check_command` execution is sandboxed in a container** (Docker or
+  Podman - see `cases.container_engine()` below) when available, via
   **one shared container per distinct image needed by a run** (`cases.
   DockerSandbox`, keyed in the module-level `_active_sandboxes: dict[image,
   DockerSandbox]`) - not one container per check_command call, and not just
@@ -186,7 +186,7 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   root at `/workspace`. Every case's `check_command` resolves its own
   required image first (`case.get("docker_image") or ... or
   DOCKER_IMAGE_DEFAULT`) and looks it up in `_active_sandboxes` before
-  `docker exec`ing in; case/trial calls for the same image still share that
+  `exec`ing in; case/trial calls for the same image still share that
   one container (`-w /workspace/<case>/<trial-subdir>`), and every sandbox in
   the run is stopped in the `finally` block so cleanup happens even on error.
   This generalizes an earlier single-container fix - a fresh ephemeral
@@ -194,16 +194,23 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   for one run; the single shared container came first, multi-image support
   (for the benchmark-corpus expansion) came after.
   `DockerSandbox` uses `--network none`, `--memory 2g`, `--cpus 2`; each
-  `docker exec` wraps its command in the container's own `timeout <N>s` so a
+  `exec` wraps its command in the container's own `timeout <N>s` so a
   hung test is killed inside its own process tree rather than needing the
-  shared container itself removed. Falls back to one ephemeral `docker run
+  shared container itself removed. Falls back to one ephemeral `run
   --rm` per call (the pre-fix behavior) when `evaluate_case`/`run_check_command`
   is called with no matching active sandbox for that case's image (e.g.
   `evaluate_case` called directly, outside the runner), and to the host
-  (one-time warning to stderr) when Docker is unreachable or
+  (one-time warning to stderr) when no container engine is reachable or
   `OPTARENA_NO_DOCKER=1` is set. `docker_image_available()` /
-  `_docker_available()` cache their `docker` CLI probes for the process
+  `_docker_available()` cache their engine CLI probes for the process
   lifetime.
+- **`container_engine()`** (`cases.py`) resolves which binary every one of
+  the above calls actually shells out to: `OPTARENA_CONTAINER_ENGINE=docker`
+  or `=podman` forces one, otherwise it auto-detects via `shutil.which`
+  (docker preferred if both are on PATH), cached for the process. Podman
+  implements the same CLI surface (`run`/`exec`/`pull`/`tag`/`stop`/`rm` and
+  every hardening flag below) - verified directly against the published
+  sandbox images, not just read off Podman's docs.
 - **`DOCKER_IMAGES` registry** (`cases.py`) maps a short track name to its
   image tag: `base` (the original combined gcc+python3+node image, unchanged,
   still the default for cases with no `docker_image`), plus `python`, `node`,
@@ -266,7 +273,7 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   `Bind failed: Address already in use` trial-3 failure in an otherwise
   3/3-passing run. This is a pre-existing class of test flakiness (identical
   to running repeated port-binding tests on a shared host), not specific to
-  Docker; case authors writing port-binding tests should prefer an ephemeral
+  the container engine; case authors writing port-binding tests should prefer an ephemeral
   port or tolerate the rare collision via a bind-retry in their
   `test_setup_files` script.
 - **Why content patterns alone are insufficient:** observed in practice - a
@@ -637,7 +644,7 @@ Near-term:
 
 Done (moved out of "near-term" as of the dates noted):
 - **Richer oracles** (2026-07-04) - `test_setup_files` + `check_command`,
-  Docker-sandboxed, real compile/run/assert instead of content-pattern-only.
+  container-sandboxed, real compile/run/assert instead of content-pattern-only.
 - **Run matrix** (2026-07-04, terminal only) - `--matrix-drivers`/
   `--matrix-models` expand to N scenarios with a compact pass-rate/time/
   tokens table; no dashboard grid yet (see above).
@@ -654,12 +661,11 @@ Structural:
 - Sandbox images published to GHCR (§10.2) - done; PyPI publish is the
   remaining "make it installable without cloning" gap.
 
-### 10.1 Benchmark corpus status (vs `DEV_NOTES/OptArena_Benchmark_Corpus_Specification.md`)
+### 10.1 Benchmark corpus status
 
-The corpus stands at **510 cases** across 18 languages/frameworks - the full
-target from `DEV_NOTES/CORPUS_EXPANSION_PLAN.md` (the original 120-case Phase 1
-allocation has since been expanded through the plan's Phase 2 band). Every
-case was hand-verified end-to-end before being counted: a correct reference
+The corpus stands at **510 cases** across 18 languages/frameworks (the
+original 120-case Phase 1 allocation has since been expanded through a
+Phase 2 band). Every case was hand-verified end-to-end before being counted: a correct reference
 solution passes, a broken/unfixed/unchanged one fails, run through the real
 oracle (`evaluate_case`/`DockerSandbox`), not just claimed. All 510 cases ship
 an explicit `reference_solution` (proven to PASS the real oracle); most also
@@ -749,7 +755,7 @@ known-bad solution through the real oracle. That protocol is now a command,
 not a memory:
 
 **`optarena verify-corpus`** - two new optional case-schema keys:
-`reference_solution` (a correct solution; must PASS the full Docker-sandboxed
+`reference_solution` (a correct solution; must PASS the full container-sandboxed
 oracle) and `broken_solutions` (deliberately wrong variants; each must FAIL
 it). `bug_fix`/`refactoring`/`performance`/`security` cases also auto-check
 that an *unmodified* workspace fails, without needing an explicit broken
@@ -763,7 +769,7 @@ original ran the *stale compiled bytecode* of the unmodified source, so the
 mutant was silently never exercised. Fixed by clearing `__pycache__` before
 every mutation-runner test invocation; re-verified clean 5/5 under repeated
 runs before landing. Wired into CI (`.github/workflows/ci.yml`) as a gate
-on every push to `main`.
+on every push to `main`/`v0.1` and every pull request.
 
 **Driver telemetry.** Per-case cost/token reporting previously existed only
 for the two raw-model baselines; every agent driver reported duration only,

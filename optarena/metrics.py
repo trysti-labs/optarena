@@ -65,7 +65,7 @@ def attribute_failure(c: dict) -> str | None:
     - ``oracle_ok`` (precise): the REAL oracle (expected files AND
       check_command) evaluated at that step - only present for cases with
       ``disruptions``, since running check_command after every prompt of
-      every case would multiply Docker execs for no benefit elsewhere.
+      every case would multiply container execs for no benefit elsewhere.
     - ``expected_ok`` (cheap fallback): just the expected-file shape check,
       recorded for every case/step regardless.
 

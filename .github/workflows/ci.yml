@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, v0.1]
   pull_request:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.15.22
       - name: Ruff (lint gate)
         run: ruff check optarena tests
 
@@ -45,7 +45,7 @@ jobs:
         run: OPTARENA_NO_DOCKER=1 python -m unittest discover tests -v
 
   # Corpus self-verification: every case's reference_solution must PASS the
-  # real Docker-sandboxed oracle, every broken/unmodified variant must FAIL.
+  # real container-sandboxed oracle, every broken/unmodified variant must FAIL.
   # Runs when cases or the oracle change; images come from GHCR via the
   # tool's own pull fallback. Skipped on forks (no image pull access needed,
   # but keeps PR checks fast).

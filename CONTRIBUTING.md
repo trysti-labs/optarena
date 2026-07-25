@@ -13,10 +13,11 @@ drivers, or case-content oracle logic. If you're working on a specific SDK
 driver, install its extra too (`pip install -e ".[crewai]"`, etc. - see
 `pyproject.toml` for the full list).
 
-Docker is needed for anything touching real `check_command` verification
-(most of the corpus). `optarena sandbox pull --all` fetches the published
-images (minutes); `optarena sandbox build --all` builds them locally
-(~30 min cold, mostly cached after).
+Docker or Podman is needed for anything touching real `check_command`
+verification (most of the corpus) - auto-detected, or force one with
+`OPTARENA_CONTAINER_ENGINE=docker`/`podman`. `optarena sandbox pull --all`
+fetches the published images (minutes); `optarena sandbox build --all`
+builds them locally (~30 min cold, mostly cached after).
 
 ## Running the checks CI runs
 
@@ -26,10 +27,11 @@ OPTARENA_NO_DOCKER=1 python -m unittest discover tests -v   # unit tests
 python -m optarena cases verify                         # corpus self-verification
 ```
 
-The unit suite runs with Docker deliberately disabled (`OPTARENA_NO_DOCKER=1`)
-so it doesn't depend on a local Docker daemon; corpus verification does need
-Docker, since it replays every case's `reference_solution` and
-`broken_solutions` through the real sandboxed oracle.
+The unit suite runs with the container sandbox deliberately disabled
+(`OPTARENA_NO_DOCKER=1`) so it doesn't depend on a local Docker/Podman
+daemon; corpus verification does need a container engine, since it replays
+every case's `reference_solution` and `broken_solutions` through the real
+sandboxed oracle.
 
 ## Adding a driver
 
@@ -55,7 +57,7 @@ PR.
 [ARCH.md](./ARCH.md) is the reference for how the system fits together - the
 domain model, every component, the contracts between them, and the
 cross-platform gotchas already found the hard way (worth a skim before
-touching `subprocess_env()`, the Docker sandbox, or anything Windows-specific).
+touching `subprocess_env()`, the container sandbox, or anything Windows-specific).
 
 ## Security
 
