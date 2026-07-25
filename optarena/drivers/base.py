@@ -29,7 +29,7 @@ _ENV_ALLOWLIST = (
     "PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
     "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TERM",
     "TMPDIR", "TEMP", "TMP",
-    "SystemRoot", "windir", "ComSpec", "PATHEXT",
+    "SystemRoot", "windir", "ComSpec", "PATHEXT", "SystemDrive",
 )
 
 
@@ -57,6 +57,14 @@ def subprocess_env(extra: dict[str, str] | None = None,
     shelling out to a Node-based tool) crash with `ncrypto::CSPRNG` on a
     Git-Bash-launched host, while running the same command by hand in a
     normal shell worked (full, unfiltered environment, casing intact).
+
+    `SystemDrive` is in the allowlist for the same reason, but was missing
+    outright rather than miscased: without it, part of the qwen-code CLI's
+    Node toolchain fell back to the literal unexpanded string `%SystemDrive%`
+    when building a cache-file path, then created that literal directory name
+    relative to the subprocess's CWD - i.e. inside the sandboxed case
+    workspace - which the oracle then reported as unexpected off-target file
+    changes.
     """
     allow = {name.upper() for name in _ENV_ALLOWLIST}
     wanted = {name.upper() for name in passthrough}
