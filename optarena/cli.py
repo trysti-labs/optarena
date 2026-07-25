@@ -34,7 +34,7 @@ import tempfile
 from pathlib import Path
 
 from .cases import (
-    DOCKER_IMAGES, dockerfile_for, docker_image_available, filter_cases, load_cases,
+    DOCKER_IMAGES, container_engine, dockerfile_for, docker_image_available, filter_cases, load_cases,
 )
 from .compare import compare_runs, format_regression, format_table, regression_summary, save_comparison
 from .drivers import DRIVER_NAMES
@@ -327,9 +327,10 @@ def cmd_docker(args) -> int:
             print(f"no Dockerfile at {dockerfile} - skipping {lang}", file=sys.stderr)
             overall = 1
             continue
-        print(f"building {image} from {dockerfile} ...")
+        engine = container_engine()
+        print(f"building {image} from {dockerfile} (via {engine}) ...")
         proc = _sp.run(
-            ["docker", "build", "-t", image, "-f", str(dockerfile), str(dockerfile.parent)],
+            [engine, "build", "-t", image, "-f", str(dockerfile), str(dockerfile.parent)],
         )
         if proc.returncode == 0:
             print(f"  built {image}")
@@ -383,16 +384,17 @@ def cmd_doctor(args) -> int:
         _check(key, found is not None,
                found or f"install {spec['label']} ({'/'.join(spec['binaries'])})")
 
-    print("docker (sandboxed check_command execution):")
-    docker_bin = _shutil.which("docker")
+    engine = container_engine()
+    print(f"{engine} (sandboxed check_command execution):")
+    engine_bin = _shutil.which(engine)
     docker_running = False
-    if docker_bin:
+    if engine_bin:
         try:
-            docker_running = _sp.run(["docker", "info"], capture_output=True, timeout=10).returncode == 0
+            docker_running = _sp.run([engine, "info"], capture_output=True, timeout=10).returncode == 0
         except Exception:
             docker_running = False
-    _check_info("docker daemon reachable", docker_running,
-                "install/start Docker Desktop - recommended so check_command needs no host toolchains")
+    _check_info(f"{engine} daemon reachable", docker_running,
+                "install/start Docker or Podman - recommended so check_command needs no host toolchains")
     if docker_running:
         for lang, image in DOCKER_IMAGES.items():
             built = docker_image_available(image)
@@ -659,17 +661,18 @@ def cmd_report(args) -> int:
 
 
 def cmd_sandbox_status(args) -> int:
-    """Scriptable view of what `doctor`'s docker section reports: daemon
-    reachability and which sandbox images are built locally."""
+    """Scriptable view of what `doctor`'s container-engine section reports:
+    daemon reachability and which sandbox images are built locally."""
     import subprocess as _sp
 
+    engine = container_engine()
     try:
-        running = _sp.run(["docker", "info"], capture_output=True, timeout=10).returncode == 0
+        running = _sp.run([engine, "info"], capture_output=True, timeout=10).returncode == 0
     except (OSError, _sp.TimeoutExpired):
         running = False
-    print(f"  docker daemon: {'reachable' if running else 'NOT reachable'}")
+    print(f"  {engine} daemon: {'reachable' if running else 'NOT reachable'}")
     if not running:
-        print("  (install/start Docker - without it check_command refuses to run; "
+        print("  (install/start Docker or Podman - without it check_command refuses to run; "
               "see OPTARENA_ALLOW_UNSAFE_HOST_EXEC in the docs)")
         return 1
     missing = 0

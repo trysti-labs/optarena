@@ -9,9 +9,9 @@ Optional (both default to the historical behaviour):
 - ``trials=N``   - run each case N times; ``passed`` is the majority verdict
   and per-trial detail lands in ``extra`` (agent runs are stochastic; one
   trial overstates certainty). Ignored for drivers that cache results from
-  ``prepare()`` (the VS Code UI drivers).
+  ``prepare()`` (see ``Driver.caches_results`` - no current driver sets it).
 - ``parallel=N`` - fan cases out over N worker threads for drivers marked
-  ``parallel_safe`` (baselines, CLI agents). UI drivers stay serial.
+  ``parallel_safe`` (baselines, CLI agents); other drivers stay serial.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .cases import DOCKER_IMAGE_DEFAULT, DockerSandbox, load_cases
+from .cases import DOCKER_IMAGE_DEFAULT, DockerSandbox, container_engine, load_cases
 from .drivers import get_driver
 from .drivers.base import CaseResult
 from .metrics import aggregate
@@ -59,7 +59,7 @@ def _image_digests(images: list[str]) -> dict[str, str]:
             continue
         try:
             proc = subprocess.run(
-                ["docker", "image", "inspect", "--format",
+                [container_engine(), "image", "inspect", "--format",
                  "{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}", image],
                 capture_output=True, text=True, timeout=10,
             )
@@ -220,9 +220,10 @@ def _describe_oracle(oracle: dict | None) -> str | None:
         return f'check_command not run (file checks failed first): {oracle["check_command"]}'
     sandbox = oracle.get("sandbox")
     container = oracle.get("container")
-    where = (f'docker:{oracle.get("image")} (container {container})' if sandbox == "docker" and container else
-             f'docker:{oracle.get("image")}' if sandbox == "docker" else
-             "host (no Docker sandbox)" if sandbox == "host" else "?")
+    engine = oracle.get("engine") or "docker"
+    where = (f'{engine}:{oracle.get("image")} (container {container})' if sandbox == "docker" and container else
+             f'{engine}:{oracle.get("image")}' if sandbox == "docker" else
+             "host (no container sandbox)" if sandbox == "host" else "?")
     failure_class = f' [{oracle["failure_class"]}]' if oracle.get("failure_class") else ""
     return (f'check_command via {where}, exit {oracle.get("exit_code")}{failure_class}, '
             f'{oracle.get("duration_s")}s: {oracle["check_command"]}')
@@ -335,12 +336,12 @@ def run_scenario(
 
     trials = max(1, int(trials))
     if trials > 1 and driver.caches_results:
-        # M-09: a caching driver (the VS Code UI harness) runs the whole case
-        # set once in prepare(), so the runner's own per-case trial loop can't
-        # repeat it. Instead of dropping trials to 1 (which hid stability for
-        # the most stochastic, flakiest driver), hand the trial count TO the
-        # driver so the harness itself repeats each case N times with a fresh
-        # workspace and reports the merged majority verdict + per-trial detail.
+        # M-09: a caching driver runs the whole case set once in prepare(),
+        # so the runner's own per-case trial loop can't repeat it. Instead of
+        # dropping trials to 1 (which would hide stability for what's likely
+        # the most stochastic, flakiest kind of driver), hand the trial count
+        # TO the driver so it repeats each case N times itself, with a fresh
+        # workspace, and reports the merged majority verdict + per-trial detail.
         driver.trials = trials
         print(f"  [runner] {scenario.driver} runs the case set in one session; "
               f"repeating each case {trials}x inside the harness")

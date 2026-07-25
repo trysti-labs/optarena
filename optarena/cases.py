@@ -2,7 +2,7 @@
 optarena/cases.py
 ──────────────
 Case catalogue. A *case* is a task given to a tool plus a filesystem oracle that
-decides pass/fail - the JSON schema shared with the original cline harness:
+decides pass/fail:
 
     {
       "name":           str,
@@ -48,7 +48,7 @@ decides pass/fail - the JSON schema shared with the original cline harness:
           "files": {relpath: content}
       }],
 
-      # Benchmark-corpus metadata (OptArena_Benchmark_Corpus_Specification.md).
+      # Benchmark-corpus metadata (DEV_NOTES/OptArena_Benchmark_Corpus_Specification.md).
       # All optional, free-form (not validated against a fixed enum) - they
       # power `--language`/`--framework` filters and `optarena list cases`
       # columns, nothing more today.
@@ -92,7 +92,7 @@ DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker"
 # case-defined `check_command` (both the shared DockerSandbox and the
 # ephemeral per-call fallback) - the command itself, and anything it runs,
 # is untrusted (case-authored, and can execute model-generated code). None
-# of the corpus's 500 check_commands install packages at runtime (all
+# of the corpus's 510 check_commands install packages at runtime (all
 # toolchains are baked into the image at build time - verified against the
 # whole corpus), so a read-only rootfs + a writable /tmp scratch is
 # sufficient; --user (non-root) was deliberately left out here since none of
@@ -217,7 +217,7 @@ def filter_cases(cases: list[dict], *, language: str | None = None, framework: s
 
 # ── Filesystem oracle (shared by drivers that verify via workspace diff) ──────
 
-IGNORE_DIRS = {".git", ".vscode", ".cline", ".aider", "node_modules", "__pycache__"}
+IGNORE_DIRS = {".git", ".vscode", ".aider", "node_modules", "__pycache__"}
 
 
 def snapshot(root: Path) -> dict[str, str]:
@@ -296,20 +296,53 @@ def check_expected(created: list[str], expected_spec: list[dict], root: Path) ->
     return failures
 
 
+_engine_checked = False
+_engine_bin = "docker"
+
+
+def container_engine() -> str:
+    """
+    Resolve which container engine binary every sandbox call shells out to.
+    Podman implements the same CLI surface this project relies on (`run`,
+    `exec`, `pull`, `tag`, `stop`, `rm`, and every hardening flag in
+    ``_HARDENING_ARGS``) - verified directly against the published sandbox
+    images, not just read off Podman's docs.
+
+    ``OPTARENA_CONTAINER_ENGINE=docker|podman`` forces a specific binary;
+    otherwise this auto-detects, preferring `docker` when both are on PATH
+    (matches what most of this project's own testing has exercised). Cached
+    for the process, like ``_docker_available()``.
+    """
+    global _engine_checked, _engine_bin
+    if _engine_checked:
+        return _engine_bin
+    _engine_checked = True
+    override = os.environ.get("OPTARENA_CONTAINER_ENGINE")
+    if override in ("docker", "podman"):
+        _engine_bin = override
+        return _engine_bin
+    for candidate in ("docker", "podman"):
+        if shutil.which(candidate):
+            _engine_bin = candidate
+            return _engine_bin
+    _engine_bin = "docker"  # nothing on PATH; keep prior (docker-branded) error text accurate
+    return _engine_bin
+
+
 _docker_checked = False
 _docker_ok = False
 _docker_warned = False
 
 
 def _docker_available() -> bool:
-    """Cached check for a reachable Docker daemon (one `docker info` per process)."""
+    """Cached check for a reachable container engine daemon (one `<engine> info` per process)."""
     global _docker_checked, _docker_ok
     if _docker_checked:
         return _docker_ok
     _docker_checked = True
     try:
         proc = subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=10,
+            [container_engine(), "info"], capture_output=True, timeout=10,
         )
         _docker_ok = proc.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -320,7 +353,7 @@ def _docker_available() -> bool:
 def docker_image_available(image: str = DOCKER_IMAGE_DEFAULT) -> bool:
     try:
         proc = subprocess.run(
-            ["docker", "image", "inspect", image],
+            [container_engine(), "image", "inspect", image],
             capture_output=True, timeout=10,
         )
         return proc.returncode == 0
@@ -349,20 +382,21 @@ def docker_image_pull(image: str) -> bool:
         return False
     _pull_attempted.add(image)
     remote = GHCR_PREFIX + image
-    print(f"[optarena] image '{image}' not built locally - trying `docker pull {remote}` ...",
+    engine = container_engine()
+    print(f"[optarena] image '{image}' not built locally - trying `{engine} pull {remote}` ...",
           file=sys.stderr)
     try:
         # 5-minute cap: this is a first-run convenience, not a build step. A
         # registry that can't serve the image by then (unpublished repo, slow
-        # link, waking Docker VM) must not stall the whole run - explicit
+        # link, waking the engine's VM) must not stall the whole run - explicit
         # `optarena docker pull` / `optarena docker build` remain available.
-        proc = subprocess.run(["docker", "pull", remote], capture_output=True, timeout=300)
+        proc = subprocess.run([engine, "pull", remote], capture_output=True, timeout=300)
         if proc.returncode != 0:
             tail = (proc.stderr or b"").decode(errors="replace").strip()[-200:]
             print(f"[optarena] pull failed ({tail}) - build locally with `optarena docker build`",
                   file=sys.stderr)
             return False
-        subprocess.run(["docker", "tag", remote, image], capture_output=True, timeout=30)
+        subprocess.run([engine, "tag", remote, image], capture_output=True, timeout=30)
         print(f"[optarena] pulled {remote} -> {image}", file=sys.stderr)
         return True
     except (OSError, subprocess.TimeoutExpired):
@@ -423,15 +457,16 @@ class DockerSandbox:
             return False
         if not ensure_image(self.image):
             print(
-                f"[optarena] Docker image '{self.image}' not found - check_command "
+                f"[optarena] Container image '{self.image}' not found - check_command "
                 f"will run on the host. Run `optarena docker build` to build the "
                 f"sandboxed test image.",
                 file=sys.stderr,
             )
             return False
+        engine = container_engine()
         try:
             subprocess.run(
-                ["docker", "run", "-d", "--rm", "--name", self.name,
+                [engine, "run", "-d", "--rm", "--name", self.name,
                  "--network", "none", "--memory", "2g", "--cpus", "2",
                  *_HARDENING_ARGS, *_sandbox_user_args(), *_writable_cache_args(self.image),
                  "-v", f"{self.root}:/workspace", "-w", "/workspace",
@@ -439,17 +474,17 @@ class DockerSandbox:
                 capture_output=True, timeout=20, check=True,
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-            print(f"[optarena] could not start docker sandbox: {exc}", file=sys.stderr)
+            print(f"[optarena] could not start {engine} sandbox: {exc}", file=sys.stderr)
             return False
         self.active = True
         _active_sandboxes[self.image] = self
-        print(f"[optarena] docker sandbox: {self.name} (image {self.image}) - "
+        print(f"[optarena] {engine} sandbox: {self.name} (image {self.image}) - "
               f"one container for this whole run")
         return True
 
     def stop(self) -> None:
         if self.active:
-            subprocess.run(["docker", "stop", "-t", "2", self.name], capture_output=True)
+            subprocess.run([container_engine(), "stop", "-t", "2", self.name], capture_output=True)
             self.active = False
         if _active_sandboxes.get(self.image) is self:
             del _active_sandboxes[self.image]
@@ -468,7 +503,7 @@ class DockerSandbox:
         # rather than leaving an orphaned process for the shared container to
         # carry into the next case.
         full_cmd = [
-            "docker", "exec", "-w", f"/workspace/{rel}", self.name,
+            container_engine(), "exec", "-w", f"/workspace/{rel}", self.name,
             "timeout", f"{timeout}s", "sh", "-c", cmd,
         ]
         return subprocess.run(
@@ -489,7 +524,7 @@ class DockerSandbox:
         """
         if self.active:
             subprocess.run(
-                ["docker", "exec", self.name, "sh", "-c", "kill -9 -1 2>/dev/null; true"],
+                [container_engine(), "exec", self.name, "sh", "-c", "kill -9 -1 2>/dev/null; true"],
                 capture_output=True, timeout=10,
             )
 
@@ -498,7 +533,8 @@ def _new_oracle_info(cmd: str | None) -> dict:
     return {
         "check_command": cmd,
         "ran": False,
-        "sandbox": None,     # "docker" | "host" | None
+        "sandbox": None,     # "docker" | "host" | None ("docker" covers Podman too - see "engine")
+        "engine": None,      # the actual container engine binary used, e.g. "docker" or "podman"
         "image": None,
         "exit_code": None,
         "duration_s": None,
@@ -563,14 +599,15 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
         return _run_check_command_sandbox(cmd, root, timeout, active, info)
 
     # `_docker_available()` is short-circuited away entirely when the user
-    # opted out - it must not shell out to `docker info` in that case.
+    # opted out - it must not shell out to `<engine> info` in that case.
     use_docker = (not docker_disabled) and _docker_available()
+    engine = container_engine()
 
     if use_docker and not ensure_image(image):
         use_docker = False
         if not _docker_warned:
             print(
-                f"[optarena] Docker image '{image}' not found - "
+                f"[optarena] Container image '{image}' not found - "
                 + ("falling back to running check_command on the host (unsafe "
                    "host exec explicitly allowed)."
                    if unsafe_ok else
@@ -585,12 +622,12 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     if not use_docker:
         if not docker_disabled and not _docker_ok and not _docker_warned:
             print(
-                "[optarena] Docker not available - "
+                f"[optarena] {engine} not available - "
                 + ("running check_command directly on the host (unsafe host "
                    "exec explicitly allowed)."
                    if unsafe_ok else
                    "refusing to run check_command on the host. Install/start "
-                   "Docker Desktop for sandboxed execution, or set "
+                   "Docker or Podman for sandboxed execution, or set "
                    "OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1 to run this untrusted "
                    "command directly on this machine anyway."),
                 file=sys.stderr,
@@ -598,7 +635,7 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
             _docker_warned = True
         if not unsafe_ok:
             info["sandbox"] = "refused"
-            return ([f'check_command refused: no Docker sandbox available and host '
+            return ([f'check_command refused: no container sandbox available and host '
                      f'execution was not explicitly allowed (see stderr): {cmd}'], info)
         return _run_check_command_local(cmd, root, timeout, info)
     return _run_check_command_docker(cmd, root, timeout, image, info)
@@ -608,6 +645,8 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
     info["sandbox"] = "docker"
     info["image"] = sandbox.image
     info["container"] = sandbox.name
+    engine = container_engine()
+    info["engine"] = engine
     t0 = time.monotonic()
     try:
         proc = sandbox.exec(cmd, root, timeout)
@@ -615,10 +654,10 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
         info["duration_s"] = round(time.monotonic() - t0, 2)
         info["timed_out"] = True
         sandbox.reap()
-        return [f'check_command timed out after {timeout}s (docker exec): {cmd}'], info
+        return [f'check_command timed out after {timeout}s ({engine} exec): {cmd}'], info
     except (OSError, ValueError) as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
-        return [f'check_command could not run (docker exec): {exc}'], info
+        return [f'check_command could not run ({engine} exec): {exc}'], info
     info["duration_s"] = round(time.monotonic() - t0, 2)
     info["ran"] = True
     info["exit_code"] = proc.returncode
@@ -626,9 +665,9 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
     if proc.returncode == 124:
         info["timed_out"] = True
         sandbox.reap()
-        return [f'check_command timed out after {timeout}s (docker exec): {cmd}'], info
+        return [f'check_command timed out after {timeout}s ({engine} exec): {cmd}'], info
     if proc.returncode != 0:
-        return ([f'check_command failed in docker (exit {proc.returncode}): {cmd}'
+        return ([f'check_command failed in {engine} (exit {proc.returncode}): {cmd}'
                  + (f' :: {info["output"]}' if info["output"] else "")], info)
     return [], info
 
@@ -713,8 +752,10 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
     info["image"] = image
     name = f"optarena-check-{uuid.uuid4().hex[:12]}"
     info["container"] = name
+    engine = container_engine()
+    info["engine"] = engine
     docker_cmd = [
-        "docker", "run", "--rm", "--name", name,
+        engine, "run", "--rm", "--name", name,
         "--network", "none",
         # Same resources as the shared DockerSandbox - a Spring Boot app under
         # 512m would OOM here but pass in the shared container, and vice versa.
@@ -732,19 +773,19 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
             timeout=timeout + 15, encoding="utf-8", errors="replace",
         )
     except subprocess.TimeoutExpired:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        subprocess.run([engine, "rm", "-f", name], capture_output=True)
         info["duration_s"] = round(time.monotonic() - t0, 2)
         info["timed_out"] = True
-        return [f'check_command timed out after {timeout}s (docker): {cmd}'], info
+        return [f'check_command timed out after {timeout}s ({engine}): {cmd}'], info
     except OSError as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
-        return [f'check_command could not run (docker): {exc}'], info
+        return [f'check_command could not run ({engine}): {exc}'], info
     info["duration_s"] = round(time.monotonic() - t0, 2)
     info["ran"] = True
     info["exit_code"] = proc.returncode
     info["output"] = ((proc.stdout or "") + (proc.stderr or ""))[-400:].strip()
     if proc.returncode != 0:
-        return ([f'check_command failed in docker (exit {proc.returncode}): {cmd}'
+        return ([f'check_command failed in {engine} (exit {proc.returncode}): {cmd}'
                  + (f' :: {info["output"]}' if info["output"] else "")], info)
     return [], info
 
