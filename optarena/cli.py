@@ -50,7 +50,8 @@ def _scenario_from_args(args, driver: str | None = None, model: str | None = Non
     driver = driver or args.driver
     model = model or args.model
     backend = Backend(kind=args.kind, base_url=args.base_url,
-                      model=model, api_key=args.api_key)
+                      model=model, api_key=args.api_key,
+                      num_ctx=getattr(args, "num_ctx", None))
     name = args.name or f"{driver}-{model}"
     if args.name and (driver != args.driver or model != args.model):
         name = f"{args.name}-{driver}-{model}"   # matrix cells stay distinct
@@ -761,6 +762,10 @@ def main(argv: list[str] | None = None) -> int:
     # OPTARENA_API_KEY env fallback: argv is visible in `ps`/shell history,
     # so a real key should come from the environment, not the command line.
     p_run.add_argument("--api-key", default=os.environ.get("OPTARENA_API_KEY", "optarena"))
+    p_run.add_argument("--num-ctx", type=int, default=None,
+                        help="Ollama context length override - only honored by ollama-chat "
+                             "(native /api/chat); every other driver uses the OpenAI-compat "
+                             "endpoint, which doesn't take a per-request override")
     p_run.add_argument("--cases", help="comma-separated case names (default all)")
     p_run.add_argument("--cases-dir", help="load cases from this directory instead of the built-in catalogue")
     p_run.add_argument("--pack", help="run an installed case pack by name or name@version "

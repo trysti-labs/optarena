@@ -38,6 +38,14 @@ class Backend:
     base_url: str = "http://localhost:11434"
     model: str = "llama3.2"
     api_key: str = "optarena"                 # for openai-compat endpoints
+    # Only honored by ollama-chat (native /api/chat accepts options.num_ctx
+    # per-request). Every other driver goes through the OpenAI-compatible
+    # /v1/chat/completions endpoint, which this Ollama version silently
+    # ignores an options/num_ctx field on (HTTP 200, no error, but the
+    # loaded context stays at whatever OLLAMA_CONTEXT_LENGTH/the model
+    # default is) - there is no per-request override for those drivers;
+    # raising their context requires OLLAMA_CONTEXT_LENGTH on the server.
+    num_ctx: int | None = None
 
     @property
     def openai_base(self) -> str:

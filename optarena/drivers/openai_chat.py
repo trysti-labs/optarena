@@ -175,16 +175,22 @@ class OllamaChatDriver(OpenAIChatDriver):
 
     def _chat(self, prompt: str, scenario: Scenario, timeout: int) -> tuple[str, dict]:
         backend = scenario.backend
+        payload = {
+            "model": backend.model,
+            "messages": [
+                {"role": "system", "content": _SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+        }
+        if backend.num_ctx:
+            # Only the native /api/chat honors this per-request - the
+            # OpenAI-compat /v1/chat/completions path (every other driver)
+            # silently ignores it on this Ollama version; see Backend.num_ctx.
+            payload["options"] = {"num_ctx": backend.num_ctx}
         body = _post_json(
             f"{backend.base_url.rstrip('/')}/api/chat",
-            {
-                "model": backend.model,
-                "messages": [
-                    {"role": "system", "content": _SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-                "stream": False,
-            },
+            payload,
             timeout,
         )
         text = body.get("message", {}).get("content", "")
