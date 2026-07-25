@@ -15,7 +15,10 @@ this file existed.
   drove an evolving third-party UI (selector drift, onboarding-wizard
   churn) - a maintenance surface disproportionate to the value it added.
   The project now focuses on CLI, raw API, and in-process SDK/agent-framework
-  drivers only. (Still available on `main` for anyone who needs it.)
+  drivers only.
+- Repo root trimmed to `ARCH.md`/`CHANGELOG.md`/`CONTRIBUTING.md`/`README.md`/
+  `SECURITY.md`; working notes and planning docs moved out of git tracking
+  entirely (no longer published to either remote).
 
 ### Added
 
@@ -24,6 +27,9 @@ this file existed.
   existing crewAI driver) - each its own `pip install optarena[<extra>]`.
 - `--num-ctx` flag / `backend.num_ctx` scenario field for overriding
   Ollama's context length on the `ollama-chat` driver.
+- Podman support alongside Docker: every sandbox command auto-detects
+  which container engine is on `PATH` (`OPTARENA_CONTAINER_ENGINE=docker`
+  or `=podman` to force one).
 
 ### Fixed
 
@@ -36,3 +42,14 @@ this file existed.
   default - a real, quiet leak against the "local-first" design.
 - `opencode` driver no longer leaves a temp file with the backend's API key
   behind after every run.
+- Docker sandbox images now pin exact dependency versions instead of
+  floating tags; the PHPUnit/Composer installers are verified (GPG
+  signature / SHA-384) before being executed.
+- Three cases' performance-oracle timing budgets
+  (`optimize_python_dict_merge_loop`,
+  `optimize_java_fib_memoized_recursion`,
+  `optimize_csharp_regex_compiled_per_call`) were too tight on fast
+  hardware; widened by increasing input size rather than the budget alone.
+- Both GitHub Actions workflows only triggered on push to `main`; added
+  `v0.1` to their trigger lists so CI and the GHCR image-publish job keep
+  running now that `v0.1` is the active branch.

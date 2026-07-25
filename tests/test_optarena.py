@@ -529,13 +529,13 @@ class LegacyArgvRewriteTests(unittest.TestCase):
             self.assertEqual(self._rw(list(argv)), list(argv))
 
 
-class UITrialsPlumbingTests(unittest.TestCase):
+class CachingDriverTrialsPlumbingTests(unittest.TestCase):
     """
-    M-09: a caching driver (VS Code UI) can't be repeated by the runner's own
-    per-case loop, so instead of silently dropping --trials to 1, the runner
-    hands the trial count to the driver (which repeats each case inside the
-    harness). Verify the count is plumbed through and the runner doesn't also
-    double-run.
+    M-09: a caching driver (one with caches_results=True; see
+    Driver.caches_results) can't be repeated by the runner's own per-case
+    loop, so instead of silently dropping --trials to 1, the runner hands
+    the trial count to the driver (which repeats each case itself). Verify
+    the count is plumbed through and the runner doesn't also double-run.
     """
 
     def setUp(self):
@@ -1066,7 +1066,7 @@ class SafeRunNameTests(unittest.TestCase):
         self.assertEqual(safe_run_name("ollama-chat-qwen3-coder:30b"), "ollama-chat-qwen3-coder-30b")
 
     def test_plain_names_unchanged(self):
-        self.assertEqual(safe_run_name("cline-selfopt"), "cline-selfopt")
+        self.assertEqual(safe_run_name("aider-baseline"), "aider-baseline")
         self.assertEqual(safe_run_name("baseline_v1.2+rc"), "baseline_v1.2+rc")
 
 
