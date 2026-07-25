@@ -22,6 +22,11 @@ from .base import Driver, CaseResult
 __all__ = ["Driver", "CaseResult", "DRIVERS", "DRIVER_NAMES", "get_driver"]
 
 # name -> {kind, backend, status, summary}
+# v0.1 scope (see OptArena_Driver_Strategy_v0.1.md): CLI, API, and in-process
+# agent-framework/SDK drivers. IDE/UI automation (Cline, Roo, Continue, Kilo)
+# is deliberately out of scope for this branch - it added UI-automation and
+# extension-maintenance complexity without validating the core product
+# (regression testing / behavioral verification). Still present on main.
 DRIVERS: dict[str, dict] = {
     "openai-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable",
                      "summary": "raw model via /v1/chat/completions (no agent)"},
@@ -29,14 +34,6 @@ DRIVERS: dict[str, dict] = {
                      "summary": "raw model via Ollama-native /api/chat"},
     "aider":        {"kind": "cli",      "backend": "scenario", "status": "stable",
                      "summary": "aider CLI, headless"},
-    "cline-ui":     {"kind": "ui",       "backend": "scenario", "status": "stable",
-                     "summary": "real Cline extension in VS Code (wdio harness)"},
-    "roo-ui":       {"kind": "ui",       "backend": "scenario", "status": "experimental",
-                     "summary": "Roo Code via the wdio harness"},
-    "continue-ui":  {"kind": "ui",       "backend": "scenario", "status": "experimental",
-                     "summary": "Continue via the wdio harness"},
-    "kilo-ui":      {"kind": "ui",       "backend": "scenario", "status": "experimental",
-                     "summary": "Kilo Code via the wdio harness (Roo family)"},
     "claude-code":  {"kind": "cli",      "backend": "fixed",    "status": "experimental",
                      "summary": "Claude Code headless (claude -p)"},
     "codex":        {"kind": "cli",      "backend": "fixed",    "status": "experimental",
@@ -47,16 +44,30 @@ DRIVERS: dict[str, dict] = {
                      "summary": "Goose (goose run -t)"},
     "qwen-code":    {"kind": "cli",      "backend": "scenario", "status": "experimental",
                      "summary": "Qwen Code (qwen -p)"},
-    "crewai":       {"kind": "sdk",      "backend": "scenario", "status": "optional",
-                     "summary": "crewAI SDK agent (pip install optarena[crewai])"},
+    "crewai":            {"kind": "sdk", "backend": "scenario", "status": "optional",
+                          "summary": "crewAI SDK agent (pip install optarena[crewai])"},
+    "openai-agents":     {"kind": "sdk", "backend": "scenario", "status": "optional",
+                          "summary": "OpenAI Agents SDK (pip install optarena[openai-agents])"},
+    "smolagents":        {"kind": "sdk", "backend": "scenario", "status": "optional",
+                          "summary": "HuggingFace smolagents CodeAgent (pip install optarena[smolagents])"},
+    "langgraph":         {"kind": "sdk", "backend": "scenario", "status": "optional",
+                          "summary": "LangGraph prebuilt ReAct agent (pip install optarena[langgraph])"},
+    "autogen":           {"kind": "sdk", "backend": "scenario", "status": "optional",
+                          "summary": "AutoGen/AG2 AssistantAgent (pip install optarena[autogen])"},
+    "semantic-kernel":   {"kind": "sdk", "backend": "scenario", "status": "optional",
+                          "summary": "Semantic Kernel chat agent (pip install optarena[semantic-kernel])"},
 }
 
 DRIVER_NAMES = list(DRIVERS.keys())
 
-_UI_EXT = {"cline-ui": "cline", "cline": "cline",
-           "roo-ui": "roo", "roo": "roo",
-           "continue-ui": "continue", "continue": "continue",
-           "kilo-ui": "kilo", "kilo": "kilo"}
+_SDK_DRIVERS = {
+    "crewai": ("crewai_sdk", "CrewAIDriver"),
+    "openai-agents": ("openai_agents_sdk", "OpenAIAgentsDriver"),
+    "smolagents": ("smolagents_sdk", "SmolAgentsDriver"),
+    "langgraph": ("langgraph_sdk", "LangGraphDriver"),
+    "autogen": ("autogen_sdk", "AutoGenDriver"),
+    "semantic-kernel": ("semantic_kernel_sdk", "SemanticKernelDriver"),
+}
 
 
 def get_driver(name: str) -> Driver:
@@ -71,12 +82,11 @@ def get_driver(name: str) -> Driver:
     if key == "aider":
         from .aider_cli import AiderDriver
         return AiderDriver()
-    if key in _UI_EXT:
-        from .vscode_ui import VSCodeUIDriver
-        return VSCodeUIDriver(_UI_EXT[key])
-    if key == "crewai":
-        from .crewai_sdk import CrewAIDriver
-        return CrewAIDriver()
+    if key in _SDK_DRIVERS:
+        import importlib
+        module_name, class_name = _SDK_DRIVERS[key]
+        module = importlib.import_module(f".{module_name}", __name__)
+        return getattr(module, class_name)()
     from .cli_agents import CLI_AGENTS
     if key in CLI_AGENTS:
         from .cli_agents import CLIAgentDriver

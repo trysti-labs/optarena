@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "optarena"
 version = "0.1.0"
-description = "Local-first testing & comparison framework for AI coding tools (real UIs, real CLIs, raw-model baselines) against any OpenAI/Ollama-compatible backend."
+description = "Local-first testing & comparison framework for AI coding tools (CLI agents, SDK agents, raw-model baselines) against any OpenAI/Ollama-compatible backend."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -18,6 +18,11 @@ dependencies = []
 
 [project.optional-dependencies]
 crewai = ["crewai>=0.80"]
+openai-agents = ["openai-agents"]
+smolagents = ["smolagents"]
+langgraph = ["langgraph", "langchain-openai"]
+autogen = ["autogen-agentchat", "autogen-ext[openai]"]
+semantic-kernel = ["semantic-kernel"]
 
 [project.scripts]
 optarena = "optarena.cli:main_exit"

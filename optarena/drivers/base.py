@@ -44,11 +44,26 @@ def subprocess_env(extra: dict[str, str] | None = None,
     interactive CLI login), then layers `extra` on top (the scenario
     backend's own env, e.g. OPENAI_API_KEY/OPENAI_BASE_URL) - `extra` always
     wins since it reflects what THIS run was explicitly configured to use.
+
+    Matching is case-insensitive on purpose: Windows env var names are
+    semantically case-insensitive, but the literal key `os.environ` hands
+    back depends on whichever shell originally launched this process - Git
+    Bash/MSYS2 exposes SYSTEMROOT/WINDIR/COMSPEC in all caps, not the
+    SystemRoot/windir/ComSpec casing listed above. A plain `k in
+    _ENV_ALLOWLIST` silently dropped them on that setup, and losing
+    SystemRoot specifically hard-crashes any spawned Node process (its
+    Windows CSPRNG/crypto init needs it to locate bcrypt.dll) - the exact
+    failure that made every `optarena run --driver *-ui` (and any CLI driver
+    shelling out to a Node-based tool) crash with `ncrypto::CSPRNG` on a
+    Git-Bash-launched host, while running the same command by hand in a
+    normal shell worked (full, unfiltered environment, casing intact).
     """
-    env = {k: v for k, v in os.environ.items() if k in _ENV_ALLOWLIST}
-    for key in passthrough:
-        if key in os.environ:
-            env[key] = os.environ[key]
+    allow = {name.upper() for name in _ENV_ALLOWLIST}
+    wanted = {name.upper() for name in passthrough}
+    env = {k: v for k, v in os.environ.items() if k.upper() in allow}
+    for k, v in os.environ.items():
+        if k.upper() in wanted and k not in env:
+            env[k] = v
     env.update(extra or {})
     return env
 

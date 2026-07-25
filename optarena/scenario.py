@@ -8,8 +8,8 @@ different scenarios over the same cases.
 Scenario files are JSON:
 
     {
-      "name":    "cline-llama",
-      "driver":  "cline-ui",
+      "name":    "aider-llama",
+      "driver":  "aider",
       "backend": {
         "kind":     "ollama",                  // ollama | openai
         "base_url": "http://localhost:8001",

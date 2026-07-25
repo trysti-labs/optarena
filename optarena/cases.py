@@ -146,8 +146,7 @@ def _sandbox_user_args() -> list[str]:
     still work. Opt-in rather than default because none of the published
     images create a matching account and each toolchain needs validation
     under a non-root uid (mvn/dotnet/cargo cache paths) - flip it on, run
-    `optarena cases verify --language <x>`, and report breakage. Mirrored in
-    ui-harness/src/oracle.js.
+    `optarena cases verify --language <x>`, and report breakage.
     """
     user = os.environ.get("OPTARENA_SANDBOX_USER")
     return ["--user", user, "-e", "HOME=/tmp"] if user else []
@@ -910,8 +909,8 @@ def _copy_workspace_for_verification(src: Path, dest: Path) -> None:
 def evaluate_case_isolated(case: dict, created: list[str], live_root: Path) -> tuple[list[str], dict]:
     """
     Same as ``evaluate_case``, but grades a PRIVATE COPY of ``live_root``
-    instead of ``live_root`` itself (C-01, mirroring the UI harness's
-    ``/verify`` mount in ``ui-harness/src/oracle.js``).
+    instead of ``live_root`` itself (C-01: never write hidden test files into
+    a workspace the tool under test might read again on its next turn).
 
     ``evaluate_case`` writes the case's hidden ``test_setup_files`` straight
     into whatever root it's given - fine when called once at the very end of

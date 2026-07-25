@@ -398,33 +398,18 @@ def cmd_doctor(args) -> int:
             hint = "run `optarena docker build`" if lang == "base" else f"run `optarena docker build --lang {lang}`"
             _check_info(f"{image} image built", built, hint)
 
-    print("ui drivers:")
-    harness = REPO_ROOT / "ui-harness"
-    _check("node", _shutil.which("node") is not None, "Node 18+ needed for UI drivers")
-    _check("ui-harness node_modules", (harness / "node_modules").exists(),
-           f"cd {harness} && npm install")
-    ext_root = Path.home() / ".vscode" / "extensions"
-    for name, prefix in (("cline", "saoudrizwan.claude-dev"),
-                         ("roo", "rooveterinaryinc.roo-cline"),
-                         ("continue", "continue.continue"),
-                         ("kilo", "kilocode.kilo-code")):
-        installed = ext_root.exists() and any(
-            d.name.lower().startswith(prefix) for d in ext_root.iterdir() if d.is_dir())
-        _check(f"{name} extension", installed, f"install {prefix} in VS Code")
-
-    if os.name == "nt":
-        print("environment:")
-        try:
-            out = _sp.run(["tasklist", "/FI", "IMAGENAME eq CodeSetup*"],
-                          capture_output=True, text=True, timeout=10).stdout or ""
-            stuck = "CodeSetup" in out
-            _check("no stuck VS Code updater", not stuck,
-                   "kill CodeSetup*.exe - it blocks every VS Code launch (ARCH 8.2)")
-        except Exception:
-            pass
-        _check("ELECTRON_RUN_AS_NODE not leaked",
-               "ELECTRON_RUN_AS_NODE" not in os.environ,
-               "unset it or run from a plain terminal (drivers scrub it anyway)")
+    print("sdk drivers (optional - each needs its own pip extra):")
+    import importlib.util as _ilu
+    for driver_key, import_name, extra in (
+        ("crewai", "crewai", "crewai"),
+        ("openai-agents", "agents", "openai-agents"),
+        ("smolagents", "smolagents", "smolagents"),
+        ("langgraph", "langgraph", "langgraph"),
+        ("autogen", "autogen_agentchat", "autogen"),
+        ("semantic-kernel", "semantic_kernel", "semantic-kernel"),
+    ):
+        _check_info(driver_key, _ilu.find_spec(import_name) is not None,
+                    f"pip install optarena[{extra}]")
 
     print()
     print("  doctor result:", "all good" if ok else "some checks failed (see MISS lines)")

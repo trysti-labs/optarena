@@ -3,8 +3,7 @@ optarena/drivers/cli_agents.py
 ------------------------------
 Headless terminal-agent drivers. One generic driver + a descriptor per tool:
 everything tool-specific (binary name, prompt flags, auto-approval flag,
-backend injection env) is data, mirroring how ui-harness/src/extensions.js
-describes VS Code extensions.
+backend injection env) is data.
 
 The 2026 CLI agents all share the same shape - spawn in a workspace, pass a
 prompt, exit when done - which is exactly what the filesystem oracle wants.
