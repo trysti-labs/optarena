@@ -6,7 +6,7 @@ Register new tools here; everything else (runner, metrics, compare, dashboard)
 is driver-agnostic.
 
 Registry metadata per driver:
-- kind:    ui | cli | sdk | baseline
+- kind:    cli | sdk | baseline
 - backend: scenario (points at the scenario backend; backend-vs-backend
            comparisons are valid) | fixed (uses its own account/provider;
            only tool-vs-tool comparisons are valid)
@@ -22,11 +22,8 @@ from .base import Driver, CaseResult
 __all__ = ["Driver", "CaseResult", "DRIVERS", "DRIVER_NAMES", "get_driver"]
 
 # name -> {kind, backend, status, summary}
-# v0.1 scope (see OptArena_Driver_Strategy_v0.1.md): CLI, API, and in-process
-# agent-framework/SDK drivers. IDE/UI automation (Cline, Roo, Continue, Kilo)
-# is deliberately out of scope for this branch - it added UI-automation and
-# extension-maintenance complexity without validating the core product
-# (regression testing / behavioral verification). Still present on main.
+# CLI, raw API, and in-process agent-framework/SDK drivers - see
+# DEV_NOTES/OptArena_Driver_Strategy_v0.1.md for the strategy behind them.
 DRIVERS: dict[str, dict] = {
     "openai-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable",
                      "summary": "raw model via /v1/chat/completions (no agent)"},

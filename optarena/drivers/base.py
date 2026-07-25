@@ -5,8 +5,9 @@ Driver interface + CaseResult record.
 
 A driver receives a case and a scratch workspace, runs the tool, and returns a
 CaseResult. Drivers must be *stateless across cases* except via prepare()/
-teardown() (e.g. the VS Code UI driver keeps one editor session alive for a
-whole scenario run because launching VS Code per case would dominate timing).
+teardown() - a driver with expensive per-scenario startup could run every case
+inside prepare() in one session and serve cached results from run_case() (see
+caches_results below), rather than paying that startup cost per case.
 """
 
 from __future__ import annotations
@@ -115,7 +116,8 @@ class Driver:
     # case, so cases may run concurrently (each in its own workspace).
     parallel_safe = False
     # True when prepare() executes ALL cases once and run_case() serves cached
-    # results (the VS Code UI driver). Repeat trials are meaningless there.
+    # results - for a driver with expensive per-scenario startup, where
+    # repeat trials would be meaningless. No current driver needs this.
     caches_results = False
 
     def prepare(self, scenario: Scenario, workspace: Path) -> None:

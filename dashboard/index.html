@@ -176,7 +176,7 @@ code{font-family:var(--mono);font-size:.88em;color:var(--accent);background:var(
 <footer class="site-footer">
   <div class="footer-wordmark">Opt<span>Arena</span></div>
   <p>Results read from <code>results/index.json</code> &middot;
-     new runs: <code>optarena run --driver cline-ui --name my-run</code></p>
+     new runs: <code>optarena run --driver aider --name my-run</code></p>
   <p>Apache-2.0 &middot; &copy; 2026 Trysti Labs and contributors</p>
 </footer>
 
@@ -398,8 +398,8 @@ function compareHTML(runA, runB) {
     const tipAttr = t.replace(/'/g, "&#39;");
     const wPct = Math.max(1, (c.duration_s || 0) / maxDur * 88);
     // Per-step timeline: split the bar into segments sized by each step's share
-    // of the total step time (only when >1 step is recorded, i.e. CLI/baseline
-    // drivers on a multi-prompt case; UI drivers cache results and record none).
+    // of the total step time (only when >1 step is recorded, i.e. a
+    // multi-prompt case; a driver that caches results records no steps).
     if (steps.length > 1) {
       const tot = steps.reduce((a, st) => a + (st.duration_s || 0), 0) || 1;
       const segs = steps.map((st) =>
