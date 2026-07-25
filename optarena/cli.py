@@ -50,7 +50,8 @@ def _scenario_from_args(args, driver: str | None = None, model: str | None = Non
     driver = driver or args.driver
     model = model or args.model
     backend = Backend(kind=args.kind, base_url=args.base_url,
-                      model=model, api_key=args.api_key)
+                      model=model, api_key=args.api_key,
+                      num_ctx=getattr(args, "num_ctx", None))
     name = args.name or f"{driver}-{model}"
     if args.name and (driver != args.driver or model != args.model):
         name = f"{args.name}-{driver}-{model}"   # matrix cells stay distinct
@@ -398,33 +399,18 @@ def cmd_doctor(args) -> int:
             hint = "run `optarena docker build`" if lang == "base" else f"run `optarena docker build --lang {lang}`"
             _check_info(f"{image} image built", built, hint)
 
-    print("ui drivers:")
-    harness = REPO_ROOT / "ui-harness"
-    _check("node", _shutil.which("node") is not None, "Node 18+ needed for UI drivers")
-    _check("ui-harness node_modules", (harness / "node_modules").exists(),
-           f"cd {harness} && npm install")
-    ext_root = Path.home() / ".vscode" / "extensions"
-    for name, prefix in (("cline", "saoudrizwan.claude-dev"),
-                         ("roo", "rooveterinaryinc.roo-cline"),
-                         ("continue", "continue.continue"),
-                         ("kilo", "kilocode.kilo-code")):
-        installed = ext_root.exists() and any(
-            d.name.lower().startswith(prefix) for d in ext_root.iterdir() if d.is_dir())
-        _check(f"{name} extension", installed, f"install {prefix} in VS Code")
-
-    if os.name == "nt":
-        print("environment:")
-        try:
-            out = _sp.run(["tasklist", "/FI", "IMAGENAME eq CodeSetup*"],
-                          capture_output=True, text=True, timeout=10).stdout or ""
-            stuck = "CodeSetup" in out
-            _check("no stuck VS Code updater", not stuck,
-                   "kill CodeSetup*.exe - it blocks every VS Code launch (ARCH 8.2)")
-        except Exception:
-            pass
-        _check("ELECTRON_RUN_AS_NODE not leaked",
-               "ELECTRON_RUN_AS_NODE" not in os.environ,
-               "unset it or run from a plain terminal (drivers scrub it anyway)")
+    print("sdk drivers (optional - each needs its own pip extra):")
+    import importlib.util as _ilu
+    for driver_key, import_name, extra in (
+        ("crewai", "crewai", "crewai"),
+        ("openai-agents", "agents", "openai-agents"),
+        ("smolagents", "smolagents", "smolagents"),
+        ("langgraph", "langgraph", "langgraph"),
+        ("autogen", "autogen_agentchat", "autogen"),
+        ("semantic-kernel", "semantic_kernel", "semantic-kernel"),
+    ):
+        _check_info(driver_key, _ilu.find_spec(import_name) is not None,
+                    f"pip install optarena[{extra}]")
 
     print()
     print("  doctor result:", "all good" if ok else "some checks failed (see MISS lines)")
@@ -776,6 +762,10 @@ def main(argv: list[str] | None = None) -> int:
     # OPTARENA_API_KEY env fallback: argv is visible in `ps`/shell history,
     # so a real key should come from the environment, not the command line.
     p_run.add_argument("--api-key", default=os.environ.get("OPTARENA_API_KEY", "optarena"))
+    p_run.add_argument("--num-ctx", type=int, default=None,
+                        help="Ollama context length override - only honored by ollama-chat "
+                             "(native /api/chat); every other driver uses the OpenAI-compat "
+                             "endpoint, which doesn't take a per-request override")
     p_run.add_argument("--cases", help="comma-separated case names (default all)")
     p_run.add_argument("--cases-dir", help="load cases from this directory instead of the built-in catalogue")
     p_run.add_argument("--pack", help="run an installed case pack by name or name@version "

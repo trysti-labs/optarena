@@ -1,15 +1,24 @@
 # OptArena - Architecture
 
-_Last updated: 2026-07-02_
+_Last updated: 2026-07-25 (v0.1 branch: CLI/API/SDK drivers only, no IDE automation)_
 
 OptArena is a **local-first testing and comparison framework for AI coding
-tools**. It runs the same task cases through real tools - a VS Code extension's
-actual UI, a CLI agent, an SDK agent, or a raw model - against any
+tools**. It runs the same task cases through real tools - a headless CLI
+agent, an in-process agent-framework/SDK agent, or a raw model - against any
 OpenAI/Ollama-compatible backend, records per-case metrics, and compares
 scenarios side-by-side.
 
 This document is the reference for how the system is put together: the domain
 model, every component, the contracts between them, and how to extend it.
+
+This is the `v0.1` branch: it strips the VS Code/IDE UI-automation drivers
+(`main` still has them) and keeps/adds only CLI, raw-API, and in-process
+SDK/agent-framework drivers, per
+[OptArena_Driver_Strategy_v0.1.md](./OptArena_Driver_Strategy_v0.1.md). The
+rationale: IDE automation drives an evolving third-party UI (selector drift,
+onboarding-wizard changes, stuck auto-updaters) - a maintenance surface
+disproportionate to the value it adds, whereas CLI/SDK drivers integrate
+against stable process/library contracts.
 
 ---
 
@@ -17,9 +26,9 @@ model, every component, the contracts between them, and how to extend it.
 
 ### Goals
 
-1. **UI-native testing.** Where a tool has a real UI (Cline in VS Code), drive
-   *that* - real webview typing, real approval buttons - not a simulation of
-   its API traffic. Bugs live in the seams the UI exercises.
+1. **Same harness, every driver.** Headless CLI tools and in-process
+   agent-framework SDKs run through the exact same case set, oracle, and
+   comparison output, so tool-vs-tool numbers are apples-to-apples.
 2. **Comparison as the primary output.** Every question OptArena answers is an
    A/B: tool vs tool, backend vs backend, model vs model, agent vs raw-model
    baseline. Single runs are just comparison inputs.
@@ -39,8 +48,8 @@ model, every component, the contracts between them, and how to extend it.
   about *your* tool+backend combos on *your* machine in minutes.
 - **Not observability.** LangFuse-style tracing of production LLM calls is out
   of scope; OptArena runs controlled experiments.
-- **Not (yet) a CI gate.** Headed UI runs need a display. Headless operation is
-  on the roadmap (§10).
+- **Not IDE automation (this branch).** Driving a real VS Code extension's UI
+  lives on `main` only; see the note above.
 
 ---
 
@@ -66,20 +75,16 @@ optarena/                       repo root
 │   ├── pricing.py               USD cost estimation from token usage
 │   └── drivers/                ── tool adapters ──
 │       ├── __init__.py         registry (name → Driver, lazy imports)
-│       ├── base.py             Driver interface + CaseResult
+│       ├── base.py             Driver interface + CaseResult + subprocess_env()
 │       ├── openai_chat.py      raw-model baselines (OpenAI + Ollama protocol)
 │       ├── aider_cli.py        aider CLI driver
-│       ├── vscode_ui.py        VS Code extension UI driver (subprocess → ui-harness)
-│       └── crewai_sdk.py       optional SDK-agent driver
-├── ui-harness/                 ── Node/WebdriverIO engine for VS Code UIs ──
-│   ├── package.json            wdio-vscode-service + better-sqlite3
-│   ├── wdio.conf.js            VS Code launch config + profile seeding
-│   ├── src/
-│   │   ├── paths.js            run config from env; deterministic dirs
-│   │   ├── extensions.js       per-extension descriptors (Cline/Roo/Continue)
-│   │   ├── seed.js             globalState (state.vscdb) writer
-│   │   └── oracle.js           filesystem oracle (JS mirror of cases.py)
-│   └── test/agent.e2e.js       the generic driving spec
+│       ├── cli_agents.py       generic headless-CLI driver (Claude Code/Codex/OpenCode/Goose/Qwen Code)
+│       ├── crewai_sdk.py       optional SDK-agent driver
+│       ├── openai_agents_sdk.py   optional SDK-agent driver (OpenAI Agents SDK)
+│       ├── smolagents_sdk.py      optional SDK-agent driver (smolagents)
+│       ├── langgraph_sdk.py       optional SDK-agent driver (LangGraph)
+│       ├── autogen_sdk.py         optional SDK-agent driver (AutoGen/AG2)
+│       └── semantic_kernel_sdk.py optional SDK-agent driver (Semantic Kernel)
 ├── dashboard/
 │   └── index.html              static dashboard (fetches ../results/*)
 ├── docker/                     ── check_command sandbox images ──
@@ -91,17 +96,15 @@ optarena/                       repo root
 │   ├── rust/Dockerfile           + cargo, registry cache warmed with axum/tokio
 │   └── dotnet/Dockerfile         + dotnet SDK, NuGet cache warmed + offline.nuget.config
 ├── scenarios/                  example scenario JSON files
-├── results/                    run records (gitignored)
-│   ├── runs/<run_id>.json
-│   ├── comparisons/*.json
-│   └── index.json
-└── legacy/                     retired first-generation harness (reference only)
+└── results/                    run records (gitignored)
+    ├── runs/<run_id>.json
+    ├── comparisons/*.json
+    └── index.json
 ```
 
-Two languages by necessity: driving VS Code requires Node (wdio-vscode-service
-is the only maintained stack that switches WebDriver context into webview
-iframes). Everything else is Python. The two sides communicate only via
-**environment variables in** and a **JSONL results file out** (§6.3) - no RPC.
+Pure Python, stdlib-only core; SDK drivers each pull in exactly one optional
+framework package (`pip install optarena[<extra>]`), lazily imported so an
+uninstalled framework never breaks the drivers you do have.
 
 ---
 
@@ -152,7 +155,7 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   first-class filter as `language`: `cases.filter_cases(cases, language=,
   framework=)` ANDs both together, used by both `optarena run
   --language/--framework` and `optarena list cases --language/--framework`.
-  The corpus is 500 cases spanning 18 languages/frameworks (Python,
+  The corpus is 510 cases spanning 18 languages/frameworks (Python,
   JavaScript/TypeScript, Java, Kotlin, Go, Rust, C#, C/C++, PHP, Ruby, SQL,
   Shell, YAML, Terraform, Dockerfile, Makefile) at the per-track allocation the spec's own
   Phase 1 table asks for - see §10.1 for the full breakdown and what's
@@ -167,17 +170,13 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
 - Optional per-case `check_command` (+ `check_command_timeout`, default 60 s):
   a shell command run in the workspace after the file checks pass; non-zero
   exit fails the case. Content patterns assert shape, the command asserts
-  behavior (compile it, run the real tests). Implemented in both the Python
-  oracle (`cases.py`) and the JS mirror (`ui-harness/src/oracle.js`), kept in
-  sync by hand - same SHA-1 content snapshots, sandbox hardening flags, diff
-  stats, and failure classes; any semantic change must land in both files.
+  behavior (compile it, run the real tests) - implemented once, in the
+  Python oracle (`cases.py`), same SHA-1 content snapshots, sandbox
+  hardening flags, diff stats, and failure classes for every driver.
 - Optional per-case `test_setup_files`: `{relpath: content}`, written by
-  `evaluate_case`/`evaluateCase` *after* the driver's run (so the model never
-  sees the tests it's graded against, unlike `setup_files`), just before
-  `check_command` runs. The UI harness additionally grades a private *copy*
-  of the workspace (its own directory, mounted separately in Docker), so
-  hidden tests are never written anywhere the still-open editor session
-  could observe. This is how a case ships real test code
+  `evaluate_case` *after* the driver's run (so the model never sees the
+  tests it's graded against, unlike `setup_files`), just before
+  `check_command` runs. This is how a case ships real test code
   (pytest-style asserts, a Node `assert` script, a Python harness that
   compiles-and-runs a C binary and checks its stdout) instead of relying on
   substring matching for correctness.
@@ -303,8 +302,8 @@ model that correctly chose `float`).
 
 ```json
 {
-  "name":    "cline-gemma12b",
-  "driver":  "cline-ui",
+  "name":    "aider-gemma12b",
+  "driver":  "aider",
   "backend": {"kind": "ollama", "base_url": "http://localhost:11434",
               "model": "gemma4:12b"},
   "cases":   ["create_factorial"],
@@ -321,7 +320,7 @@ local servers that ignore it.
 
 ```json
 {
-  "run_id": "20260702-094708_cline-selfopt",
+  "run_id": "20260702-094708_aider-selfopt",
   "scenario": { …scenario as above… },
   "started_at": "2026-07-02T09:47:08",
   "cases": [{"name": "…", "passed": true, "duration_s": 72.9,
@@ -369,23 +368,26 @@ Two opt-in runner modes (defaults preserve the single-trial serial behaviour):
 
 - `--trials N` - each case runs N times in fresh workspaces; `passed` is the
   majority verdict and per-trial detail lands in `extra` (`trials`, `passes`,
-  `pass_rate_trials`, `durations_s`). Ignored for drivers that execute all
-  cases inside `prepare()` (the UI drivers), which set `caches_results`.
+  `pass_rate_trials`, `durations_s`). A driver with expensive per-scenario
+  startup can opt out by running all cases inside `prepare()` and setting
+  `caches_results` to serve them from `run_case()` (no current driver needs
+  this on `v0.1` - it existed for the retired VS Code UI drivers).
 - `--parallel N` - cases fan out over N worker threads for drivers marked
-  `parallel_safe` (baselines, CLI agents). UI drivers stay serial (one
-  display).
+  `parallel_safe` (baselines, CLI agents, SDK agents - see each driver's
+  `parallel_safe` flag).
 
 ### Driver lifecycle contract
 
-- `prepare()` / `teardown()` bracket the whole scenario. Drivers with expensive
-  startup (a VS Code session) run **all cases inside `prepare()`** in one
-  session and serve cached results from `run_case()` (§6.3). Per-case launch
-  would dominate every timing measurement.
+- `prepare()` / `teardown()` bracket the whole scenario; most drivers use
+  `prepare()` only to check the tool/package is installed and raise early if
+  not.
 - `run_case()` must never raise for tool-level failure - it returns a
   CaseResult with `error` set. Raising is reserved for "the experiment cannot
-  proceed at all" (missing binary, harness not installed).
-- Drivers must scrub `ELECTRON_RUN_AS_NODE` and `VSCODE_*` from any subprocess
-  environment (§8.1).
+  proceed at all" (missing binary, package not installed).
+- Drivers spawning subprocesses build the child environment via
+  `subprocess_env()` (`drivers/base.py`) - an explicit allowlist, not the
+  full parent environment, so a scenario's backend key/config never leaks
+  host secrets into an untrusted agent subprocess (§8.2).
 
 ---
 
@@ -460,29 +462,38 @@ check) - two free local runs correctly show no cost line at all.
 
 ### 6.1 Registry (`drivers/__init__.py`)
 
-Name → class with lazy imports so optional dependencies (crewai) don't tax
+Name → class with lazy imports so optional dependencies (crewai,
+openai-agents, smolagents, langgraph, autogen, semantic-kernel) don't tax
 everyone. Adding a driver = one module + one registry entry. Each entry
 carries metadata surfaced by `optarena list drivers`:
 
-- `kind`: `ui | cli | sdk | baseline`
+- `kind`: `cli | sdk | baseline`
 - `backend`: `scenario` (obeys the scenario backend; backend-vs-backend is
   valid) or `fixed` (own account/provider; tool-vs-tool only)
 - `status`: `stable | experimental | optional`
 
 The headless terminal agents (Claude Code, Codex, OpenCode, Goose, Qwen Code)
 share one generic driver (`drivers/cli_agents.py`) specialized by per-tool
-descriptors - binary name, prompt/auto-approve flags, backend-injection env -
-the same data-not-code pattern as `ui-harness/src/extensions.js`.
+descriptors - binary name, prompt/auto-approve flags, backend-injection env.
+The six SDK-agent drivers share one *pattern* (§6.3) but not one module, since
+each framework's agent-construction API differs.
 
 | Driver | Status | Mechanism |
 |---|---|---|
 | `openai-chat` | stable | `POST /v1/chat/completions`; driver writes extracted code block |
 | `ollama-chat` | stable | `POST /api/chat` (Ollama native); same convention |
 | `aider` | stable | `aider --message … --yes --no-git` per prompt, cwd=workspace |
-| `cline-ui` | stable | subprocess → ui-harness, `EXT=cline` |
-| `roo-ui` | experimental | subprocess → ui-harness, `EXT=roo` (first-run wizard quirks) |
-| `continue-ui` | experimental | subprocess → ui-harness, `EXT=continue` (agent-mode selection) |
+| `claude-code` | experimental | `claude -p`, `--output-format json` |
+| `codex` | experimental | `codex exec --full-auto` |
+| `opencode` | experimental | `opencode run` |
+| `goose` | experimental | `goose run -t` |
+| `qwen-code` | experimental | `qwen -p` |
 | `crewai` | optional | crewAI SDK, single coder agent, LLM → backend |
+| `openai-agents` | optional | OpenAI Agents SDK, single `Agent` + `OpenAIChatCompletionsModel` |
+| `smolagents` | optional | smolagents `ToolCallingAgent` + `OpenAIServerModel` |
+| `langgraph` | optional | LangGraph `create_react_agent` + `ChatOpenAI` |
+| `autogen` | optional | AutoGen/AG2 `AssistantAgent` + `OpenAIChatCompletionClient` |
+| `semantic-kernel` | optional | Semantic Kernel `ChatCompletionAgent` + `OpenAIChatCompletion` |
 
 ### 6.2 The raw-model baselines
 
@@ -494,60 +505,48 @@ They also enable *model vs model* and *endpoint vs endpoint* comparisons with
 no tool in the loop. Multi-turn cases feed the current file content back into
 the next prompt.
 
-### 6.3 The VS Code UI driver + ui-harness
+### 6.3 SDK-agent drivers
 
-The flagship. `vscode_ui.py` shells out to `ui-harness/` (`npm test`), which:
+All six (`crewai_sdk.py`, `openai_agents_sdk.py`, `smolagents_sdk.py`,
+`langgraph_sdk.py`, `autogen_sdk.py`, `semantic_kernel_sdk.py`) follow one
+shape, established by `crewai_sdk.py` and repeated deliberately rather than
+factored into a shared base class (each framework's agent-construction API
+differs enough - some sync, some async, different constructor shapes - that a
+shared abstraction would be thinner than just reading five short files):
 
-1. **Launches an isolated VS Code** via `wdio-vscode-service` - pinned version
-   (newest with bundled locators, currently 1.123.0; `stable` rejects the
-   service's ChromeDriver flags), throwaway profile under
-   `ui-harness/.vscode-storage-<ext>/`, workspace under `.workspace-<ext>/`.
-2. **Seeds the extension's configuration** before launch so it boots pointed
-   at the scenario backend with auto-approval, no onboarding:
-   - Cline/Roo: rows in the profile's `state.vscdb` (`ItemTable`, keys
-     `<extId>/<key>`, JSON values) - provider, base URL, model, permissive
-     auto-approval, telemetry off.
-   - Continue: `config.yaml` in an isolated `CONTINUE_GLOBAL_DIR`.
-3. **Drives the real webview**: opens the extension's view by command ID,
-   switches the WebDriver context *into* the webview iframe, walks any
-   onboarding/provider wizard, types the prompt with real key events, submits.
-4. **Auto-approves**: each poll tick re-acquires the webview (handles moves/
-   re-renders), clicks approve-class buttons (`Save/Approve/Run/…`), never
-   reject-class, then `saveAll`.
-5. **Judges via the same filesystem oracle** (JS mirror in `src/oracle.js`)
-   and **appends one JSON line per case** to `RESULTS_FILE`.
+1. **No file/shell tools are given to the agent.** Each is a single
+   agent/LLM object pointed at the scenario backend's OpenAI-compatible
+   endpoint (`backend.openai_base`, `backend.api_key`, `backend.model`) and
+   instructed to reply with exactly one fenced code block containing the
+   complete file - the driver parses that block
+   (`_CODE_BLOCK = re.compile(r"```(?:\w+[^\n]*)?\n(.*?)```", re.DOTALL)`)
+   and writes it to `concrete_target(...)` itself. This measures the SDK's
+   own orchestration/prompting stack on top of the backend, not a
+   tool-using agent - the same "baseline caveat" as the raw-model drivers
+   (§6.2): multi-file cases are effectively agent-only.
+2. **Same oracle plumbing as every other driver**: `prepare_workspace`,
+   `snapshot`, `changed_files`, `evaluate_case` from `cases.py` - a case
+   passes or fails by the identical filesystem oracle regardless of which
+   framework produced the file.
+3. **Async frameworks (AutoGen, Semantic Kernel) are driven via
+   `asyncio.run()`** inside the synchronous `run_case()`, with an explicit
+   `await client.close()` in a `finally` block - without it, the
+   framework's `AsyncOpenAI`/httpx client tries to close its connections
+   after `asyncio.run()` has already torn down the event loop, raising
+   `RuntimeError: Event loop is closed` on interpreter exit (a real bug hit
+   and fixed while building the Semantic Kernel driver).
+4. **Local/proxied models aren't in a framework's built-in capability
+   table** (only hosted-provider model names are), so drivers that validate
+   against one must supply it explicitly - e.g. AutoGen's
+   `OpenAIChatCompletionClient(..., model_info={"vision": False,
+   "function_calling": False, "json_output": False, "family": "unknown",
+   "structured_output": False})`, all `False`/`unknown` because no tools are
+   given to the agent in the first place.
 
-**Python↔Node protocol** - environment in:
-
-| Env | Meaning |
-|---|---|
-| `EXT` | `cline` \| `roo` \| `continue` |
-| `BACKEND_URL` | backend base URL |
-| `API_KIND` | `ollama` \| `openai` (provider config flavor) |
-| `MODEL_ID` | model name to seed |
-| `CASES_DIR` | case catalogue directory (the Python package's `cases/`) |
-| `CASES` | comma-separated case subset |
-| `CASE_TIMEOUT` | per-case seconds |
-| `RESULTS_FILE` | where to append JSONL case records |
-
-JSONL out (one line per case):
-
-```json
-{"name": "create_hello_world", "passed": true, "duration_s": 68.4,
- "files": ["hello.py"], "failures": [], "error": null}
-```
-
-The subprocess boundary is deliberate: wdio owns its own event loop, VS Code
-download cache, and crash cleanup; Python stays dependency-free; and a hung UI
-run is bounded by a subprocess timeout.
-
-### 6.4 Extension descriptors (`ui-harness/src/extensions.js`)
-
-Everything extension-specific is data, not code: install-dir prefix, view/
-new-task/focus-input command IDs, approve/reject button regexes, config
-mechanism (`globalState` vs config file) and its seed content, optional
-onboarding-wizard flag, optional agent-mode hint. The driving spec
-(`agent.e2e.js`) is generic across extensions.
+Each driver's `prepare()` does an `import <package>` and raises a clear
+`RuntimeError` naming the missing pip extra if it's not installed, so a
+scenario naming an uninstalled SDK driver fails fast with actionable text
+rather than an ImportError traceback.
 
 ---
 
@@ -584,46 +583,32 @@ share an origin - or any static server you point at those two directories.
 
 ## 8. Cross-platform & environment notes (hard-won)
 
-### 8.1 Launching VS Code from inside VS Code
-
-Any terminal inside VS Code leaks `ELECTRON_RUN_AS_NODE=1` and `VSCODE_*` into
-children. An inherited `ELECTRON_RUN_AS_NODE` makes a spawned `Code.exe` run as
-plain Node (rejecting every Chromium flag: `bad option: --no-sandbox`);
-`VSCODE_IPC_HOOK` routes it into the parent instance. **Both the Python drivers
-and `wdio.conf.js` scrub these** - the double scrub is intentional (either side
-may be entered directly).
-
-### 8.2 The stuck-updater mutex
-
-A pending VS Code auto-update (`CodeSetup*.exe … /verysilent
-/nocloseapplications`) holds the global `vscode-updating` mutex while waiting
-for all VS Code windows to close. Every new `Code.exe` then waits 30 s and
-aborts ("Code is currently being updated"), which surfaces as the wdio proxy's
-`Connection timeout exceeded`. Diagnosis: profile `main.log` says
-`checkInnoSetupMutex … giving up`. Remedy: kill `CodeSetup*` processes (the
-update re-attempts on next VS Code restart).
-
-### 8.3 Windows specifics
+### 8.1 Windows specifics
 
 - `tempfile.mkstemp` returns an **open** fd - close it before any later
   `unlink` (WinError 32).
-- Always pass `encoding="utf-8", errors="replace"` to subprocesses; npm and VS
-  Code emit UTF-8 that cp1252 consoles cannot decode.
+- Always pass `encoding="utf-8", errors="replace"` to subprocesses; agent CLI
+  tools emit UTF-8 that cp1252 consoles cannot decode.
 - Console prints stick to ASCII-safe glyphs (cp1252 lacks `→`, `⚠`, `…`).
-- Kill orphaned `index.exe`/`chromedriver` (wdio's shim) after crashed runs -
-  they linger and destabilize subsequent sessions.
 
-### 8.4 Webview driving rules (from the Cline port)
+### 8.2 `subprocess_env()` allowlist matching must be case-insensitive
 
-- **Never cache a webview handle** - moving the view or an SPA re-render
-  replaces the iframe. Re-acquire per interaction.
-- This Electron lacks the Actions-API scroll CDP command
-  (`Browser.getWindowForTarget`): use JS `scrollIntoView()+focus()` and a JS
-  click fallback, never rely on native scroll-into-view.
-- Onboarding/wizards navigate the SPA and transiently blank the frame: advance
-  **one step per freshly-acquired frame** in a loop, not a linear script.
-- Type with real key events (`browser.keys`) so React registers input;
-  `setValue` alone is unreliable in webviews.
+`drivers/base.py`'s `subprocess_env()` builds a minimal, explicit child
+environment from an allowlist (plus an optional passthrough set) rather than
+forwarding the whole parent environment - deliberate, so a scenario's
+backend key never leaks host secrets into an untrusted agent subprocess. On
+this machine `os.environ` surfaces `SYSTEMROOT`/`WINDIR`/`COMSPEC` in
+**uppercase** (inherited via Git Bash/MSYS2), not the `SystemRoot`/`windir`/
+`ComSpec` casing Python docs and CPython examples conventionally use. An
+allowlist/passthrough match done case-sensitively silently dropped
+`SystemRoot` - which Node needs on Windows to locate `bcrypt.dll` during its
+crypto init (`ncrypto::CSPRNG`). Missing it isn't a clean error: Node
+hard-crashes (SIGABRT / exit 134) deep inside native code, which looked like
+a broken driver rather than a missing env var. Fixed by uppercasing both
+sides of the comparison in `subprocess_env()`; any driver spawning a
+subprocess is exposed to this class of bug if it adds its own passthrough
+list, so new passthrough names should be added to the allowlist rather than
+compared ad hoc.
 
 ---
 
@@ -631,21 +616,22 @@ update re-attempts on next VS Code restart).
 
 Everything is local: prompts and generated code go only to the backend URL in
 the scenario; results are local JSON; the dashboard server binds `127.0.0.1`.
-No telemetry. Seeded extension profiles are throwaway directories inside the
-repo (gitignored) and never touch the user's real VS Code profile - with one
-deliberate exception: the ui-harness *reads* the user's installed extensions
-directory to load the extension under test.
+No telemetry. Subprocess-based drivers (CLI agents) build the child
+environment via `subprocess_env()`'s explicit allowlist (§8.2), not the full
+parent environment, so a scenario's backend key never leaks host secrets into
+an untrusted agent subprocess.
 
 ---
 
 ## 10. Roadmap
 
 Near-term:
-- **Headless CI mode** - Xvfb on Linux for UI drivers; baselines/CLI drivers
-  already run headless. Not implemented.
-- **More drivers** - Cline CLI (headless `cline --auto-approve`), OpenHands,
-  Continue CLI, Copilot agent mode when automatable. `opencode`/`goose`/
-  `qwen-code`/`codex` descriptors shipped (experimental); the rest open.
+- **More CLI/SDK drivers** - OpenHands, Copilot CLI when automatable.
+  `opencode`/`goose`/`qwen-code`/`codex` descriptors shipped (experimental);
+  all six planned SDK-agent frameworks (crewAI, OpenAI Agents SDK,
+  smolagents, LangGraph, AutoGen, Semantic Kernel) shipped as of this branch.
+- **IDE UI automation** - lives on `main` only as of this branch (`v0.1`);
+  see the note in §1.
 - **Remaining driver telemetry** - `aider` and `claude-code` report real
   token/cost (and `claude-code` turns) as of §10.2; `opencode`/`goose`/
   `qwen-code`/`codex` still report duration only pending a `parse_metrics`
@@ -663,13 +649,12 @@ Done (moved out of "near-term" as of the dates noted):
   `--matrix-models` expand to N scenarios with a compact pass-rate/time/
   tokens table; no dashboard grid yet (see above).
 - **Parallelism** (2026-07-04) - `--parallel N` fans baselines/CLI drivers
-  out over a thread pool; UI drivers stay serial (one display).
+  out over a thread pool.
 - **Corpus self-verification** (2026-07-08, §10.2) - `optarena verify-corpus`
   replays reference/broken solutions through the real oracle; wired into CI.
 
 Structural:
-- Publish to PyPI (`pip install optarena`); ui-harness fetched on first UI run.
-  Not implemented.
+- Publish to PyPI (`pip install optarena`). Not implemented.
 - Per-project case packs (`optarena init` scaffolding a local `cases/`) - done.
 - Optional SQLite index if run counts outgrow index.json (schema unchanged).
   Not implemented; `index.json` has been sufficient at current run volumes.
@@ -678,12 +663,12 @@ Structural:
 
 ### 10.1 Benchmark corpus status (vs `OptArena_Benchmark_Corpus_Specification.md`)
 
-The corpus stands at **500 cases** across 18 languages/frameworks - the full
+The corpus stands at **510 cases** across 18 languages/frameworks - the full
 target from `CORPUS_EXPANSION_PLAN.md` (the original 120-case Phase 1
 allocation has since been expanded through the plan's Phase 2 band). Every
 case was hand-verified end-to-end before being counted: a correct reference
 solution passes, a broken/unfixed/unchanged one fails, run through the real
-oracle (`evaluate_case`/`DockerSandbox`), not just claimed. All 500 cases ship
+oracle (`evaluate_case`/`DockerSandbox`), not just claimed. All 510 cases ship
 an explicit `reference_solution` (proven to PASS the real oracle); most also
 ship `broken_solutions` (proven to FAIL). `optarena cases verify` skips no case.
 
@@ -702,7 +687,7 @@ ship `broken_solutions` (proven to FAIL). `optarena cases verify` skips no case.
   (`CHECKPOINT_DISABLE=1`, no network phone-home) and pyyaml/sqlite3 for the
   SQL/Shell/Docker-Compose/Terraform tracks, none of which need a
   per-language toolchain image.
-- 500 cases across all 18 language tracks, each tagged with the spec's task
+- 510 cases across all 18 language tracks, each tagged with the spec's task
   categories (feature/bug_fix/refactoring/testing/security/performance/
   devops/data_engineering/documentation/dependency_upgrade) and difficulty 1-3.
 - **A corpus-wide oracle bug found and fixed during verification**: 6 of the

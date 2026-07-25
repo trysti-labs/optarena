@@ -49,7 +49,7 @@ def _validate_string_list(value, where: str) -> None:
 # ── Scenario files ─────────────────────────────────────────────────────────
 
 _SCENARIO_KNOWN_KEYS = {"name", "driver", "backend", "cases", "timeout", "cases_dir"}
-_BACKEND_KNOWN_KEYS = {"kind", "base_url", "model", "api_key"}
+_BACKEND_KNOWN_KEYS = {"kind", "base_url", "model", "api_key", "num_ctx"}
 
 
 def validate_scenario(data: dict, source: str = "<scenario>") -> None:
@@ -79,6 +79,9 @@ def validate_scenario(data: dict, source: str = "<scenario>") -> None:
         for key in ("base_url", "model", "api_key"):
             if key in backend and not isinstance(backend[key], str):
                 raise _err(f"{source}.backend.{key}", "must be a string")
+        if "num_ctx" in backend and backend["num_ctx"] is not None:
+            if not isinstance(backend["num_ctx"], int) or isinstance(backend["num_ctx"], bool) or backend["num_ctx"] <= 0:
+                raise _err(f"{source}.backend.num_ctx", "must be a positive integer")
 
     cases = data.get("cases")
     if cases is not None and (not isinstance(cases, list) or not all(isinstance(c, str) for c in cases)):

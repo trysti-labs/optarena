@@ -1,15 +1,20 @@
 # OptArena
 
-**The arena where AI coding agents compete.**
+**Know when your AI agents actually get better.**
 
-OptArena evaluates software engineering agents: UI agents (Cline's actual
-VS Code UI, Roo, Continue, Kilo), headless CLI agents (aider, Claude Code,
-Codex, OpenCode, Goose, Qwen Code), SDK agents (crewAI), and raw-model
-baselines - all run through the same task cases, against **any
-OpenAI/Ollama-compatible backend** (Ollama, LM Studio, a router/optimizer
-proxy, or a remote API), and verified by actually **compiling
-and running the generated code in an isolated Docker sandbox** - not
-keyword-matching it.
+AI agent regression testing: the reproducible evaluation and regression
+platform for AI coding agents. (This is the `v0.1` branch - CLI and API/SDK
+drivers only, no IDE automation. See
+[OptArena_Driver_Strategy_v0.1.md](./OptArena_Driver_Strategy_v0.1.md).)
+
+OptArena evaluates software engineering agents: headless CLI agents (aider,
+Claude Code, Codex, OpenCode, Goose, Qwen Code), in-process agent-framework/
+SDK agents (crewAI, OpenAI Agents SDK, smolagents, LangGraph, AutoGen,
+Semantic Kernel), and raw-model baselines - all run through the same task
+cases, against **any OpenAI/Ollama-compatible backend** (Ollama, LM Studio, a
+router/optimizer proxy, or a remote API), and verified by actually
+**compiling and running the generated code in an isolated Docker sandbox** -
+not keyword-matching it.
 
 ## Why?
 
@@ -17,10 +22,10 @@ keyword-matching it.
 Did your prompt optimization make things better? Did your latest update
 regress performance?**
 
-The arena answers these automatically - same task, same oracle, side by side:
+OptArena answers these automatically - same task, same oracle, side by side:
 
-- *tool vs tool* - Cline vs aider vs Continue on the same backend
-- *backend vs backend* - Cline through an optimizing proxy vs raw Ollama
+- *tool vs tool* - aider vs Claude Code vs Goose on the same backend
+- *backend vs backend* - the same tool through an optimizing proxy vs raw Ollama
 - *model vs model* - gemma4:8b vs gemma4:12b through the same tool
 - *agent vs no-agent* - any tool vs the raw-model baseline (what does the tool add?)
 - *before vs after* - `optarena regression` names exactly which cases broke
@@ -32,7 +37,7 @@ The arena answers these automatically - same task, same oracle, side by side:
                               |
       +-----------+-----------+-----------+-----------+
       v           v           v           v           v
-    Cline        Roo        Aider    Claude Code   raw model
+    Aider    Claude Code    Goose      crewAI       raw model
       |           |           |           |           |
       +-----------+-----------+-----------+-----------+
                               v
@@ -42,11 +47,9 @@ The arena answers these automatically - same task, same oracle, side by side:
                      Side-by-side verdict
 ```
 
-Where a tool has a real UI, OptArena drives that UI - a real VS Code window,
-real webview chat, real approval buttons - rather than simulating API
-traffic. And the verdict comes from actually running the generated code
-against real assertions in an isolated container, not from checking whether
-a keyword shows up in a file.
+The verdict comes from actually running the generated code against real
+assertions in an isolated container, not from checking whether a keyword
+shows up in a file.
 
 ## See it in action
 
@@ -67,8 +70,9 @@ optarena serve   # http://localhost:8300/dashboard/
    one shared container per run), not keyword-matched. A model once wrote
    valid-looking C++ into a `.c` file and matched every required substring;
    `gcc` correctly rejected it. See [Cases & the oracle](#cases--the-oracle).
-2. **UI-native testing** - bugs live in the seams the UI exercises. OptArena
-   clicks the same buttons your users do, not a simulation of API traffic.
+2. **Same harness for CLI and SDK agents** - headless CLI tools and
+   in-process agent-framework SDKs run through the exact same case set,
+   oracle, and comparison output, so tool-vs-tool numbers are apples-to-apples.
 3. **Comparison-first** - per-case deltas and a verdict (more-accurate,
    faster) saved as JSON and rendered in the terminal and dashboard.
 4. **Regression testing** - `optarena regression <before> <after>` names the
@@ -95,26 +99,27 @@ See **[ARCH.md](./ARCH.md)** for the full architecture.
 git clone https://github.com/trysti-labs/optarena.git && cd optarena
 pip install -e .            # provides the `optarena` command (no dependencies)
 
-# only for VS Code UI drivers (cline-ui / roo-ui / continue-ui):
-cd ui-harness && npm install
+# only for SDK/agent-framework drivers, one extra per framework you want:
+pip install -e ".[crewai]"           # or openai-agents / smolagents /
+                                      # langgraph / autogen / semantic-kernel
 ```
 
-Requirements: Python ≥ 3.10. UI drivers additionally need Node ≥ 18 and the
-extension under test installed in `~/.vscode/extensions` (first UI run also
-downloads a pinned VS Code, ~280 MB).
+Requirements: Python ≥ 3.10. CLI drivers (aider, Claude Code, Codex,
+OpenCode, Goose, Qwen Code) each need their own binary installed and on
+`PATH` - `optarena doctor` reports what's missing.
 
 **Source-checkout install only** - `pyproject.toml` only packages the
 `optarena` Python package itself (plus the built-in `cases/*.json`), which is
-all the CLI, baseline drivers, and case-content oracle logic need. But
-`docker/` (sandbox Dockerfiles), `dashboard/` (the results UI), `repos/`
-(L3 `setup_repo` starter projects), and `ui-harness/` (the VS Code UI
-drivers) are separate top-level directories, not bundled into the package -
-a wheel built and installed elsewhere (`pip install` from a copied/published
-wheel rather than a checkout) won't have them, and `optarena docker build`,
-`optarena serve`, `setup_repo` cases, and the `*-ui` drivers will fail with a
-clear "not found" error rather than a working degraded mode. There is no
-supported "everything bundled in one wheel" install today - keep the git
-checkout around next to wherever `optarena` is installed from it.
+all the CLI, baseline, and SDK drivers plus the case-content oracle logic
+need. But `docker/` (sandbox Dockerfiles), `dashboard/` (the results UI), and
+`repos/` (L3 `setup_repo` starter projects) are separate top-level
+directories, not bundled into the package - a wheel built and installed
+elsewhere (`pip install` from a copied/published wheel rather than a
+checkout) won't have them, and `optarena docker build`, `optarena serve`, and
+`setup_repo` cases will fail with a clear "not found" error rather than a
+working degraded mode. There is no supported "everything bundled in one
+wheel" install today - keep the git checkout around next to wherever
+`optarena` is installed from it.
 
 ## Quick start
 
@@ -126,12 +131,12 @@ optarena cases list                   # task catalogue (also: cases show <name>)
 optarena run --driver ollama-chat --name baseline --model llama3.2
 
 # A/B: two scenarios in one command → auto-compares and saves the comparison
-optarena run --scenario scenarios/cline-proxy.json \
-             --scenario scenarios/cline-ollama-direct.json
+optarena run --scenario scenarios/aider-proxy.json \
+             --scenario scenarios/aider-ollama-direct.json
 
 # Compare any two saved runs later
 optarena runs list
-optarena compare cline-proxy cline-ollama-direct
+optarena compare aider-proxy aider-ollama-direct
 
 # Dashboard at http://localhost:8300/dashboard/
 optarena serve
@@ -167,8 +172,8 @@ Scenario files are small JSON documents:
 
 ```json
 {
-  "name":    "cline-gemma12b",
-  "driver":  "cline-ui",
+  "name":    "aider-gemma12b",
+  "driver":  "aider",
   "backend": { "kind": "ollama", "base_url": "http://localhost:11434", "model": "gemma4:12b" },
   "cases":   ["create_factorial", "modify_add_type_hints"]
 }
@@ -178,7 +183,6 @@ Scenario files are small JSON documents:
 
 | Driver | Kind | Backend | Status | What it exercises |
 |---|---|---|---|---|
-| `cline-ui` | ui | scenario | stable | The real Cline extension in an isolated VS Code (real webview typing, auto-approval, workspace diff) |
 | `aider` | cli | scenario | stable | aider CLI, headless |
 | `openai-chat` | baseline | scenario | stable | Raw model via `/v1/chat/completions` - the no-agent baseline |
 | `ollama-chat` | baseline | scenario | stable | Raw model via Ollama-native `/api/chat` |
@@ -187,23 +191,25 @@ Scenario files are small JSON documents:
 | `opencode` | cli | scenario | experimental | OpenCode (`opencode run`) |
 | `goose` | cli | scenario | experimental | Goose (`goose run -t`) |
 | `qwen-code` | cli | scenario | experimental | Qwen Code (`qwen -p`) |
-| `roo-ui` | ui | scenario | experimental | Roo Code via the same VS Code harness |
-| `continue-ui` | ui | scenario | experimental | Continue via the same VS Code harness |
-| `kilo-ui` | ui | scenario | experimental | Kilo Code via the same VS Code harness (Roo family) |
 | `crewai` | sdk | scenario | optional | crewAI SDK agent (`pip install optarena[crewai]`) |
+| `openai-agents` | sdk | scenario | optional | OpenAI Agents SDK agent (`pip install optarena[openai-agents]`) |
+| `smolagents` | sdk | scenario | optional | smolagents `ToolCallingAgent` (`pip install optarena[smolagents]`) |
+| `langgraph` | sdk | scenario | optional | LangGraph `create_react_agent` (`pip install optarena[langgraph]`) |
+| `autogen` | sdk | scenario | optional | AutoGen/AG2 `AssistantAgent` (`pip install optarena[autogen]`) |
+| `semantic-kernel` | sdk | scenario | optional | Semantic Kernel `ChatCompletionAgent` (`pip install optarena[semantic-kernel]`) |
 
 **Backend column**: `scenario` drivers point at the backend in your scenario
 file, so backend-vs-backend comparisons are valid. `fixed` drivers (Claude
 Code, Codex) use their own account/provider - tool-vs-tool comparisons only.
 `optarena doctor` shows which drivers can actually run on your machine.
 
-**Baseline caveat**: the raw-model baselines (and the bare crewAI agent)
-have no file tools - they write the model's single code block to the case's
-*first* expected path themselves. Cases that require several files or a
-project layout (e.g. the Maven-tree Java cases) are therefore effectively
-agent-only: a baseline fails them by construction, which *is* part of what
-"agent vs no-agent" measures, but don't read those specific failures as a
-statement about the model.
+**Baseline caveat**: the raw-model baselines and the SDK agents have no file
+tools - they write the model's single code block to the case's *first*
+expected path themselves. Cases that require several files or a project
+layout (e.g. the Maven-tree Java cases) are therefore effectively agent-only:
+a baseline fails them by construction, which *is* part of what "agent vs
+no-agent" measures, but don't read those specific failures as a statement
+about the model.
 
 Adding a driver = one file in `optarena/drivers/` implementing
 `run_case(case, scenario, workspace) -> CaseResult`, plus a registry line.
@@ -226,13 +232,13 @@ the generated code and asserts on its actual behavior. Pair it with
 `test_setup_files` - real test code (pytest-style asserts, a Node script, a
 compile-and-run harness) written into the workspace **after** the model's
 run, so the model never sees what it's graded against. The built-in
-catalogue is **500 cases across 18 languages and frameworks**, the full
-target from `CORPUS_EXPANSION_PLAN.md`: Python (115, FastAPI/Flask/Django/
-SQLAlchemy/Pydantic/Typer/pandas), JavaScript (57) and TypeScript (29,
-Express/NestJS/React/Vue/plain Node), Java (34, Spring Boot/plain),
-Kotlin (18, Spring Boot/plain), Go (34, Gin/stdlib), Rust (28, Axum/
+catalogue is **510 cases across 18 languages and frameworks**, the full
+target from `CORPUS_EXPANSION_PLAN.md`: Python (120, FastAPI/Flask/Django/
+SQLAlchemy/Pydantic/Typer/pandas), JavaScript (58) and TypeScript (29,
+Express/NestJS/React/Vue/plain Node), Java (35, Spring Boot/plain),
+Kotlin (18, Spring Boot/plain), Go (35, Gin/stdlib), Rust (29, Axum/
 Actix-web/stdlib), C# (29, ASP.NET Core/plain), C (11) and C++ (7), PHP
-(19) and Ruby (19), SQL (25), Shell (16), YAML (32, Docker Compose/
+(19) and Ruby (20), SQL (25), Shell (16), YAML (32, Docker Compose/
 Kubernetes/GitHub Actions), HCL/Terraform (12), Dockerfile (10), and
 Makefile (5). Every case covers one of ten task categories - feature, bug
 fix, refactoring, testing, security, performance, devops, data
@@ -252,7 +258,7 @@ and `express-ts-shortlink`).
 
 **Trust model - what these public cases are (and are not).** The corpus ships
 in the open, *including* every case's hidden tests and `reference_solution`
-(all 500 cases carry one), plus `broken_solutions` on most cases - that
+(all 510 cases carry one), plus `broken_solutions` on most cases - that
 openness is what lets `verify-corpus` prove each oracle can pass (the reference
 solution, for every case) and fail (a broken/unmodified variant), and lets you
 audit exactly what a PASS means.
@@ -376,17 +382,6 @@ That's real output from the two runs above - swap the argument order and it
 correctly reports 6 regressions with exit code 1. Both runs here were free
 local Ollama backends, so no `cost` line appears; a `cost $X.XX -> $Y.YY`
 line is added automatically whenever both runs priced a paid backend.
-
-## Notes for UI runs
-
-The VS Code UI drivers launch a **visible** editor window - don't touch mouse
-or keyboard during a run. If a UI run fails with `Connection timeout
-exceeded`, check for a stuck VS Code auto-updater (`CodeSetup*.exe`) holding
-the global update mutex - see ARCH.md §8 for this and the other
-environment gotchas the harness absorbs.
-
-`legacy/` contains the retired first-generation (CDP + pyautogui) harness,
-kept for reference only.
 
 ## License
 

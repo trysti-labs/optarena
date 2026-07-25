@@ -547,7 +547,7 @@ class UITrialsPlumbingTests(unittest.TestCase):
     def test_trials_handed_to_caching_driver_not_dropped(self):
         driver = mock.Mock(parallel_safe=False, caches_results=True, trials=1)
         driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
-        sc = Scenario(name="x", driver="cline-ui", cases_dir=str(self.cases_dir))
+        sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
         with mock.patch("optarena.runner.get_driver", return_value=driver):
             run_scenario(sc, trials=3)
         # the trial count reached the driver...

@@ -3,8 +3,7 @@ optarena/drivers/cli_agents.py
 ------------------------------
 Headless terminal-agent drivers. One generic driver + a descriptor per tool:
 everything tool-specific (binary name, prompt flags, auto-approval flag,
-backend injection env) is data, mirroring how ui-harness/src/extensions.js
-describes VS Code extensions.
+backend injection env) is data.
 
 The 2026 CLI agents all share the same shape - spawn in a workspace, pass a
 prompt, exit when done - which is exactly what the filesystem oracle wants.
@@ -23,8 +22,10 @@ invocation shapes track each tool's documented headless mode.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -81,6 +82,42 @@ def _scenario_openai_env(backend) -> dict:
     }
 
 
+# opencode's built-in "openai" provider ID is reserved for the real OpenAI
+# model catalog - pointing OPENAI_BASE_URL at a local server and asking for
+# an unlisted model ID (e.g. "openai/gemma4:12b") fails fast with
+# ProviderModelNotFoundError rather than treating it as a custom endpoint. A
+# local/proxied backend has to be registered as its own named provider via a
+# config file (https://opencode.ai/docs/providers/); this ID is that
+# provider's name, referenced from both `_opencode_env` (writes the config)
+# and the "opencode" argv below (selects it via `-m <id>/<model>`).
+_OPENCODE_PROVIDER_ID = "optarena-local"
+
+
+def _opencode_env(backend) -> dict:
+    """
+    Writes a scratch opencode.json registering the scenario backend as a
+    custom `@ai-sdk/openai-compatible` provider, and points OPENCODE_CONFIG
+    at it - never the user's real ~/.config/opencode/opencode.json. A fresh
+    file per call (not a shared cached path) because run_case can be invoked
+    concurrently across cases (this driver is parallel_safe).
+    """
+    config = {
+        "$schema": "https://opencode.ai/config.json",
+        "provider": {
+            _OPENCODE_PROVIDER_ID: {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "OptArena backend",
+                "options": {"baseURL": backend.openai_base, "apiKey": backend.api_key or "optarena"},
+                "models": {backend.model: {}},
+            },
+        },
+    }
+    fd, path = tempfile.mkstemp(prefix="optarena-opencode-config-", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    return {"OPENCODE_CONFIG": path}
+
+
 CLI_AGENTS: dict[str, dict] = {
     "claude-code": {
         "label":    "Claude Code",
@@ -118,8 +155,10 @@ CLI_AGENTS: dict[str, dict] = {
         "label":    "OpenCode",
         "binaries": ["opencode"],
         "backend":  "scenario",
-        "argv":     lambda prompt, backend: ["run", prompt],
-        "env":      _scenario_openai_env,
+        "argv":     lambda prompt, backend: [
+            "run", "-m", f"{_OPENCODE_PROVIDER_ID}/{backend.model}", prompt,
+        ],
+        "env":      _opencode_env,
         "scrub_env_prefixes": (),
     },
     "goose": {
