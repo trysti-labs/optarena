@@ -3,9 +3,10 @@
 **Know when your AI agents actually get better.**
 
 AI agent regression testing: the reproducible evaluation and regression
-platform for AI coding agents. (This is the `v0.1` branch - CLI and API/SDK
-drivers only, no IDE automation. See
-[OptArena_Driver_Strategy_v0.1.md](./OptArena_Driver_Strategy_v0.1.md).)
+platform for AI coding agents. This is the `v0.1` branch, built around CLI,
+raw API, and in-process SDK/agent-framework drivers - see
+[DEV_NOTES/OptArena_Driver_Strategy_v0.1.md](./DEV_NOTES/OptArena_Driver_Strategy_v0.1.md)
+for the strategy behind them.
 
 OptArena evaluates software engineering agents: headless CLI agents (aider,
 Claude Code, Codex, OpenCode, Goose, Qwen Code), in-process agent-framework/
@@ -233,7 +234,7 @@ the generated code and asserts on its actual behavior. Pair it with
 compile-and-run harness) written into the workspace **after** the model's
 run, so the model never sees what it's graded against. The built-in
 catalogue is **510 cases across 18 languages and frameworks**, the full
-target from `CORPUS_EXPANSION_PLAN.md`: Python (120, FastAPI/Flask/Django/
+target from `DEV_NOTES/CORPUS_EXPANSION_PLAN.md`: Python (120, FastAPI/Flask/Django/
 SQLAlchemy/Pydantic/Typer/pandas), JavaScript (58) and TypeScript (29,
 Express/NestJS/React/Vue/plain Node), Java (35, Spring Boot/plain),
 Kotlin (18, Spring Boot/plain), Go (35, Gin/stdlib), Rust (29, Axum/
@@ -250,7 +251,7 @@ Docker sandbox - before being counted as done. The testing-category cases
 first runs the model's tests against the correct implementation (they must
 pass), then against deliberately broken variants of it (each must make the
 tests fail) - so a vacuous test file that matches the keyword shape but
-asserts nothing real cannot pass. See `ARCH.md` and `CORPUS_EXPANSION_PLAN.md`
+asserts nothing real cannot pass. See `ARCH.md` and `DEV_NOTES/CORPUS_EXPANSION_PLAN.md`
 for what's built versus explicitly deferred (frontier stacks like
 Next.js/Svelte/Deno-Bun, moat hardening, and further repository-scale
 Level 3+ starter repos beyond the two already live - `fastapi-tasktracker`

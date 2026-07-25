@@ -13,6 +13,7 @@ stack on top of the backend.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from pathlib import Path
@@ -29,6 +30,13 @@ class CrewAIDriver(Driver):
     name = "crewai"
 
     def prepare(self, scenario: Scenario, workspace: Path) -> None:
+        # crewai.telemetry.Telemetry is a module-level singleton that reads
+        # this env var once, at first construction (on import or first
+        # Agent/Crew) - must be set before `import crewai` below, or the
+        # singleton latches "enabled" for the rest of the process and every
+        # run silently phones home to crewAI's own telemetry endpoint, even
+        # for a fully local/offline scenario.
+        os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
         try:
             import crewai  # noqa: F401
         except ImportError as exc:

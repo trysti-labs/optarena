@@ -1,6 +1,6 @@
 # OptArena - Architecture
 
-_Last updated: 2026-07-25 (v0.1 branch: CLI/API/SDK drivers only, no IDE automation)_
+_Last updated: 2026-07-25 (v0.1 branch)_
 
 OptArena is a **local-first testing and comparison framework for AI coding
 tools**. It runs the same task cases through real tools - a headless CLI
@@ -11,14 +11,10 @@ scenarios side-by-side.
 This document is the reference for how the system is put together: the domain
 model, every component, the contracts between them, and how to extend it.
 
-This is the `v0.1` branch: it strips the VS Code/IDE UI-automation drivers
-(`main` still has them) and keeps/adds only CLI, raw-API, and in-process
-SDK/agent-framework drivers, per
-[OptArena_Driver_Strategy_v0.1.md](./OptArena_Driver_Strategy_v0.1.md). The
-rationale: IDE automation drives an evolving third-party UI (selector drift,
-onboarding-wizard changes, stuck auto-updaters) - a maintenance surface
-disproportionate to the value it adds, whereas CLI/SDK drivers integrate
-against stable process/library contracts.
+This is the `v0.1` branch, built around CLI, raw-API, and in-process
+SDK/agent-framework drivers integrating against stable process/library
+contracts - see `DEV_NOTES/OptArena_Driver_Strategy_v0.1.md` for the driver
+strategy this branch implements.
 
 ---
 
@@ -48,8 +44,6 @@ against stable process/library contracts.
   about *your* tool+backend combos on *your* machine in minutes.
 - **Not observability.** LangFuse-style tracing of production LLM calls is out
   of scope; OptArena runs controlled experiments.
-- **Not IDE automation (this branch).** Driving a real VS Code extension's UI
-  lives on `main` only; see the note above.
 
 ---
 
@@ -148,7 +142,7 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   filter, load everything" instead of "load nothing". Fixed to
   `if names is not None:`; a run with no matching cases now correctly
   reports `cases=0` and does nothing, rather than running the whole catalogue.
-- **Benchmark-corpus metadata** (`OptArena_Benchmark_Corpus_Specification.md`):
+- **Benchmark-corpus metadata** (`DEV_NOTES/OptArena_Benchmark_Corpus_Specification.md`):
   `framework`, `domain`, `difficulty` (1 easy .. 5 expert), `task_type`, `tags`
   are all optional, free-form fields alongside `language` - not validated
   against a fixed enum, purely descriptive. `framework` gets the same
@@ -370,8 +364,7 @@ Two opt-in runner modes (defaults preserve the single-trial serial behaviour):
   majority verdict and per-trial detail lands in `extra` (`trials`, `passes`,
   `pass_rate_trials`, `durations_s`). A driver with expensive per-scenario
   startup can opt out by running all cases inside `prepare()` and setting
-  `caches_results` to serve them from `run_case()` (no current driver needs
-  this on `v0.1` - it existed for the retired VS Code UI drivers).
+  `caches_results` to serve them from `run_case()`.
 - `--parallel N` - cases fan out over N worker threads for drivers marked
   `parallel_safe` (baselines, CLI agents, SDK agents - see each driver's
   `parallel_safe` flag).
@@ -661,10 +654,10 @@ Structural:
 - Sandbox images published to GHCR (§10.2) - done; PyPI publish is the
   remaining "make it installable without cloning" gap.
 
-### 10.1 Benchmark corpus status (vs `OptArena_Benchmark_Corpus_Specification.md`)
+### 10.1 Benchmark corpus status (vs `DEV_NOTES/OptArena_Benchmark_Corpus_Specification.md`)
 
 The corpus stands at **510 cases** across 18 languages/frameworks - the full
-target from `CORPUS_EXPANSION_PLAN.md` (the original 120-case Phase 1
+target from `DEV_NOTES/CORPUS_EXPANSION_PLAN.md` (the original 120-case Phase 1
 allocation has since been expanded through the plan's Phase 2 band). Every
 case was hand-verified end-to-end before being counted: a correct reference
 solution passes, a broken/unfixed/unchanged one fails, run through the real

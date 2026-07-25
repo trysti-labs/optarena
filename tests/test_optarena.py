@@ -1095,12 +1095,15 @@ class ConcreteTargetTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_all_registered_drivers_instantiate(self):
+        # No skip needed for any optional SDK driver (crewai, openai-agents,
+        # smolagents, langgraph, autogen, semantic-kernel): each only
+        # imports its package lazily inside prepare()/run_case(), never at
+        # module scope, so get_driver() succeeds regardless of whether the
+        # package is actually installed - only calling prepare() would fail.
         for name, meta in DRIVERS.items():
-            if name == "crewai":
-                continue   # optional dependency
             driver = get_driver(name)
             self.assertTrue(hasattr(driver, "run_case"), name)
-            self.assertIn(meta["kind"], ("ui", "cli", "sdk", "baseline"))
+            self.assertIn(meta["kind"], ("cli", "sdk", "baseline"))
             self.assertIn(meta["backend"], ("scenario", "fixed"))
 
     def test_fixed_backend_drivers_are_marked(self):

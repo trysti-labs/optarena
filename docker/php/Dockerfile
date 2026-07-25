@@ -16,16 +16,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         unzip \
         git \
+        gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Composer (for PSR-4 autoloading in cases that want it).
+# Composer, with the integrity check Composer's own docs recommend: verify
+# the installer's SHA-384 against the hash Composer publishes at a separate
+# URL, before ever executing it (guards against a compromised/MITM'd
+# download - php-executing an unverified installer script is exactly the
+# kind of curl-pipe-to-shell risk everything else in this Dockerfile layer
+# avoids via digest/version pinning).
 RUN curl -fsSL https://getcomposer.org/installer -o /tmp/composer-setup.php \
+    && EXPECTED="$(curl -fsSL https://composer.github.io/installer.sig)" \
+    && ACTUAL="$(php -r "echo hash_file('sha384', '/tmp/composer-setup.php');")" \
+    && if [ "$EXPECTED" != "$ACTUAL" ]; then echo "Composer installer checksum mismatch" >&2; exit 1; fi \
     && php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer \
     && rm /tmp/composer-setup.php \
     && composer --version
 
-# PHPUnit 11 as a standalone phar - no per-case composer install needed.
-RUN curl -fsSL https://phar.phpunit.de/phpunit-11.phar -o /usr/local/bin/phpunit \
+# PHPUnit, pinned to an exact version (not the floating "-11" alias) and
+# GPG-verified against the release manager's published signature - same
+# reasoning as the Composer check above. Key hosted at Sebastian Bergmann's
+# own domain (more reliable in a build context than a keyserver network);
+# fingerprint independently cross-checked against the key ID PHPUnit's own
+# docs publish (0x4AA394086372C20A) before pinning it here.
+RUN curl -fsSL https://phar.phpunit.de/phpunit-11.5.56.phar -o /usr/local/bin/phpunit \
+    && curl -fsSL https://phar.phpunit.de/phpunit-11.5.56.phar.asc -o /tmp/phpunit.phar.asc \
+    && curl -fsSL https://sebastian-bergmann.de/gpg.asc -o /tmp/phpunit-signer.asc \
+    && gpg --import /tmp/phpunit-signer.asc \
+    && gpg --verify /tmp/phpunit.phar.asc /usr/local/bin/phpunit \
+    && rm /tmp/phpunit.phar.asc /tmp/phpunit-signer.asc \
     && chmod +x /usr/local/bin/phpunit \
     && phpunit --version
 

@@ -160,6 +160,9 @@ CLI_AGENTS: dict[str, dict] = {
         ],
         "env":      _opencode_env,
         "scrub_env_prefixes": (),
+        # OPENCODE_CONFIG's value is a temp file _opencode_env wrote the
+        # backend's API key into - see the cleanup in run_case's finally.
+        "temp_env_keys": ("OPENCODE_CONFIG",),
     },
     "goose": {
         "label":    "Goose",
@@ -315,6 +318,17 @@ class CLIAgentDriver(Driver):
             result.error = f"{self.name} timed out after {timeout}s"
         except Exception as exc:  # noqa: BLE001 - report, don't crash the run
             result.error = f"{type(exc).__name__}: {exc}"
+        finally:
+            # A driver's env-builder can create a scratch file (e.g.
+            # opencode's per-run config carrying the backend's API key) -
+            # temp_env_keys names the env-dict keys whose values are such
+            # paths, so they get deleted regardless of success/timeout/
+            # exception rather than accumulating indefinitely in the OS
+            # temp dir with credentials still readable inside them.
+            for _key in self.spec.get("temp_env_keys", ()):
+                _path = env.get(_key)
+                if _path:
+                    Path(_path).unlink(missing_ok=True)
         result.duration_s = time.monotonic() - t0
         if steps:
             result.extra["steps"] = steps

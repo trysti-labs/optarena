@@ -35,7 +35,7 @@ class OpenAIAgentsDriver(Driver):
             raise RuntimeError("openai-agents not installed - pip install openai-agents") from exc
 
     def run_case(self, case: dict, scenario: Scenario, workspace: Path) -> CaseResult:
-        from agents import Agent, OpenAIChatCompletionsModel, Runner
+        from agents import Agent, OpenAIChatCompletionsModel, RunConfig, Runner
         from openai import AsyncOpenAI
 
         result = CaseResult(name=case["name"])
@@ -58,6 +58,12 @@ class OpenAIAgentsDriver(Driver):
                          "containing the complete file content, and nothing else.",
             model=model,
         )
+        # Tracing defaults to ON and, independently of the explicit client
+        # above, reads the host's ambient OPENAI_API_KEY (not backend.api_key)
+        # to export every prompt/completion to https://api.openai.com - a
+        # scenario aimed at a local Ollama backend would otherwise silently
+        # ship its content to OpenAI whenever that env var happens to be set.
+        run_config = RunConfig(tracing_disabled=True)
 
         t0 = time.monotonic()
         try:
@@ -72,6 +78,7 @@ class OpenAIAgentsDriver(Driver):
                     agent,
                     prompt + context +
                     "\nReply with exactly one fenced code block containing the full file.",
+                    run_config=run_config,
                 )
                 out = str(run_result.final_output)
                 blocks = _CODE_BLOCK.findall(out)

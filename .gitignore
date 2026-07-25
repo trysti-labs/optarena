@@ -11,6 +11,9 @@ website/
 website2/
 website-docs/
 
+# Internal working notes - not part of any published repo
+DEV_NOTES/
+
 # OS noise
 Thumbs.db
 .DS_Store

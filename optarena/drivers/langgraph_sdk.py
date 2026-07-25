@@ -13,6 +13,7 @@ top of the backend, not a tool-using agent.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 import warnings
@@ -30,6 +31,16 @@ class LangGraphDriver(Driver):
     name = "langgraph"
 
     def prepare(self, scenario: Scenario, workspace: Path) -> None:
+        # LangSmith tracing is off by default, but a developer who already
+        # has it enabled globally for other LangChain work would otherwise
+        # have every OptArena prompt/response traced there too - override
+        # (not just default) all four var names langsmith checks, and do it
+        # before any langchain/langgraph import: langsmith.utils.get_env_var
+        # is lru_cache'd, so a later override wouldn't take effect once
+        # something has already read it.
+        for _var in ("LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING_V2",
+                     "LANGCHAIN_TRACING", "LANGSMITH_TRACING"):
+            os.environ[_var] = "false"
         try:
             import langgraph  # noqa: F401
             import langchain_openai  # noqa: F401
