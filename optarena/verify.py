@@ -98,38 +98,62 @@ def verify_cases(cases: list[dict], root: Path | None = None) -> tuple[list[str]
     root = root or Path(tempfile.mkdtemp(prefix="optarena_verify_"))
     root.mkdir(parents=True, exist_ok=True)
 
-    # Same shared-container model as the runner: one sandbox per distinct
-    # image any verified case needs, every variant execs into it.
+    # One sandbox per distinct image any verified case needs, but only ONE
+    # ALIVE AT A TIME (grouped by image, not all started up front) - the
+    # corpus now spans 9 per-language images, each started with `--memory
+    # 2g --cpus 2`; starting all 9 simultaneously for the whole verify run
+    # (most of it spent on cases that don't even need most of those images)
+    # requests 18 CPUs/18GiB concurrently, which is fine on a beefy dev
+    # machine but reliably destabilizes a resource-constrained CI runner -
+    # confirmed live: the exact cases that failed with "Permission denied"/
+    # "No such container" under a full 9-image `cases verify` run passed
+    # cleanly when re-run in isolation (one image, one sandbox). Grouping by
+    # image keeps the original optimization (every case sharing an image
+    # still execs into ONE container, not one per check_command) while
+    # capping concurrent sandboxes at 1.
     import os
-    images = {
-        c.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT)
-        for c, _v in todo if c.get("check_command")
-    }
-    sandboxes = [DockerSandbox(root, image=img) for img in images]
+
+    def _image_for(case: dict) -> "str | None":
+        if not case.get("check_command"):
+            return None
+        return case.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT)
+
+    grouped: dict[str, list] = {}
+    ungrouped: list = []
+    for case, variants in todo:
+        image = _image_for(case)
+        (grouped.setdefault(image, []) if image else ungrouped).append((case, variants))
 
     violations: list[str] = []
     checked = 0
     try:
-        for sandbox in sandboxes:
-            sandbox.start()
-        for case, variants in todo:
-            for name, files, expect_pass in variants:
-                ws = root / case["name"] / name
-                failures = _run_variant(case, files, ws)
-                checked += 1
-                passed = not failures
-                if passed == expect_pass:
-                    detail = "passed" if passed else f"failed as expected: {failures[0][:100]}"
-                    print(f"  [verify] {case['name']} / {name:12} OK ({detail})")
-                else:
-                    what = ("reference solution FAILED the oracle: " + "; ".join(failures)[:300]
-                            if expect_pass else
-                            "broken variant PASSED the oracle (it must fail)")
-                    violations.append(f"{case['name']} / {name}: {what}")
-                    print(f"  [verify] {case['name']} / {name:12} VIOLATION - {what}")
+        def _run_group(group: list) -> None:
+            nonlocal checked
+            for case, variants in group:
+                for name, files, expect_pass in variants:
+                    ws = root / case["name"] / name
+                    failures = _run_variant(case, files, ws)
+                    checked += 1
+                    passed = not failures
+                    if passed == expect_pass:
+                        detail = "passed" if passed else f"failed as expected: {failures[0][:100]}"
+                        print(f"  [verify] {case['name']} / {name:12} OK ({detail})")
+                    else:
+                        what = ("reference solution FAILED the oracle: " + "; ".join(failures)[:300]
+                                if expect_pass else
+                                "broken variant PASSED the oracle (it must fail)")
+                        violations.append(f"{case['name']} / {name}: {what}")
+                        print(f"  [verify] {case['name']} / {name:12} VIOLATION - {what}")
+
+        for image in sorted(grouped):
+            sandbox = DockerSandbox(root, image=image)
+            try:
+                sandbox.start()
+                _run_group(grouped[image])
+            finally:
+                sandbox.stop()
+        _run_group(ungrouped)
     finally:
-        for sandbox in sandboxes:
-            sandbox.stop()
         # H-11: the per-variant workspaces under our mkdtemp root are never
         # read again once verification reports - remove them so a full
         # verify-corpus run doesn't leak hundreds of MB of scratch per call.

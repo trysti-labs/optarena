@@ -1071,6 +1071,57 @@ class VerifyCorpusTests(unittest.TestCase):
         self.assertEqual((violations, checked, skipped), ([], 0, 1))
 
 
+class VerifyCorpusSandboxConcurrencyTests(unittest.TestCase):
+    """Regression test for a real bug found running `cases verify` against
+    real Docker: verify_cases() used to start a sandbox for EVERY distinct
+    image the corpus needs (9, one per language) simultaneously - each
+    `--memory 2g --cpus 2` - and keep them all alive for the whole run, even
+    though only one is ever used at a time. That reliably destabilized CI's
+    2-vCPU/7GB runners (confirmed live: the exact cases that failed with
+    "Permission denied"/"No such container" under the full 9-image run
+    passed cleanly re-run in isolation). Cases are now grouped by image and
+    processed with one sandbox alive at a time - this pins that invariant
+    with a fast, fully-mocked test (no real Docker needed) so a future
+    "optimization" can't silently reintroduce the concurrency."""
+
+    def test_never_more_than_one_sandbox_active_at_once(self):
+        events: list[tuple[str, str]] = []
+
+        class FakeSandbox:
+            def __init__(self, root, image=None):
+                self.image = image
+
+            def start(self):
+                events.append(("start", self.image))
+
+            def stop(self):
+                events.append(("stop", self.image))
+
+        # "img-a" appears twice (two cases sharing an image) - must still
+        # get ONE sandbox, not one per case.
+        cases = [
+            {"name": f"c{i}", "task_type": "feature", "check_command": "echo hi",
+             "image": img, "reference_solution": {"f.txt": "x"}}
+            for i, img in enumerate(["img-b", "img-a", "img-c", "img-a"])
+        ]
+
+        with mock.patch("optarena.verify.DockerSandbox", FakeSandbox), \
+             mock.patch("optarena.verify._run_variant", return_value=[]):
+            from optarena.verify import verify_cases as _verify_cases
+            _verify_cases(cases)
+
+        active = 0
+        max_active = 0
+        for kind, _image in events:
+            active += 1 if kind == "start" else -1
+            max_active = max(max_active, active)
+        self.assertLessEqual(max_active, 1, f"events: {events}")
+
+        starts = [image for kind, image in events if kind == "start"]
+        self.assertEqual(starts, sorted({"img-a", "img-b", "img-c"}),
+                         "each image must start exactly once, not once per case")
+
+
 class SafeRunNameTests(unittest.TestCase):
     """Model-derived scenario names must survive becoming filenames."""
 

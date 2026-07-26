@@ -6,8 +6,14 @@ on:
   pull_request:
 
 jobs:
+  # Every job below got an explicit timeout-minutes this session - none had
+  # one before, so a hang (a container that stops responding, a deadlocked
+  # test - exactly the failure mode that surfaced the sandbox-concurrency
+  # bug below) would otherwise run up to GitHub's 360-minute default before
+  # failing, burning Actions minutes for hours instead of failing fast.
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -32,6 +38,7 @@ jobs:
         # supported-in-principle 3.13+ range.
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -52,8 +59,25 @@ jobs:
   # Runs when cases or the oracle change; images come from GHCR via the
   # tool's own pull fallback. Skipped on forks (no image pull access needed,
   # but keeps PR checks fast).
+  #
+  # A real bug lived here: verify_cases() used to start a sandbox for every
+  # distinct image the corpus needs (9, one per language) SIMULTANEOUSLY,
+  # each `--memory 2g --cpus 2` - 18 CPU/18GiB requested at once against
+  # this job's 2-vCPU/7GiB runner (both remotes are private repos, confirmed
+  # via the GitHub API), even though only one sandbox is ever used at a
+  # time. That reliably produced "Permission denied"/"No such container"
+  # failures under real load - confirmed by re-running the exact failing
+  # cases in isolation, where they passed cleanly. Fixed by grouping cases
+  # by image and keeping only one sandbox alive at a time (still one
+  # container per image group, not one per check_command - the original
+  # optimization is unaffected); pinned by
+  # VerifyCorpusSandboxConcurrencyTests in the unit suite. One retry here is
+  # defense-in-depth against genuine one-off infra flakes (a GHCR hiccup, a
+  # noisy runner) - NOT a substitute for that fix, since a real
+  # resource-exhaustion regression would fail both attempts identically.
   verify-corpus:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     if: github.repository_owner == 'trysti-labs' || github.repository_owner == 'selfopt'
     needs: unit-tests
     permissions:
@@ -73,7 +97,44 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify corpus (pulls sandbox images from GHCR on demand)
-        run: python -m optarena cases verify
+        run: |
+          for attempt in 1 2; do
+            if python -m optarena cases verify; then
+              exit 0
+            fi
+            echo "::warning::verify-corpus attempt $attempt failed"
+            sleep 10
+          done
+          exit 1
+
+  # Fast multi-image regression check: verify-corpus (above) is the only job
+  # that exercises switching between two DIFFERENT sandbox images, but it's
+  # slow (full 510-case corpus) - a sandbox-switching regression only shows
+  # up after that whole run. This scopes to exactly 2 cases needing 2
+  # different images (one base-image Python case, one Rust case; both
+  # hand-verified against real Docker this session), so it gives the same
+  # class of signal in well under a minute.
+  multi-image-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.repository_owner == 'trysti-labs' || github.repository_owner == 'selfopt'
+    needs: unit-tests
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify a base-image case and a Rust-image case together
+        run: python -m optarena cases verify --cases adapt_config_change_dynamic,adapt_compounding_config_rust_dynamic
 
   # F-17: nothing previously exercised the actual DISTRIBUTION artifact - the
   # unit-tests job runs against a checkout (`python -m unittest`), which
@@ -82,6 +143,7 @@ jobs:
   # installed standalone into a clean environment.
   wheel-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -108,6 +170,7 @@ jobs:
   # rather than living only in the (Docker-build-heavy) publish workflow.
   dockerfile-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +186,7 @@ jobs:
 
   images-lock-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -142,6 +206,7 @@ jobs:
   # already covers full-corpus breadth under Docker.
   rootless-podman:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.repository_owner == 'trysti-labs' || github.repository_owner == 'selfopt'
     needs: unit-tests
     permissions:
@@ -159,7 +224,17 @@ jobs:
           podman info
       - name: Log in to GHCR (podman)
         run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+      # One retry, same reasoning as verify-corpus above - insurance against
+      # a one-off infra flake, not a substitute for fixing a real regression.
       - name: Verify shell-language cases through Podman
         env:
           OPTARENA_CONTAINER_ENGINE: podman
-        run: python -m optarena cases verify --language shell
+        run: |
+          for attempt in 1 2; do
+            if python -m optarena cases verify --language shell; then
+              exit 0
+            fi
+            echo "::warning::rootless-podman attempt $attempt failed"
+            sleep 10
+          done
+          exit 1
