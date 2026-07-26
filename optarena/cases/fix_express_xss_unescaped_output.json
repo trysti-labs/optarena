@@ -11,7 +11,7 @@
     "security",
     "xss"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "The Express server in server.js exposes GET /greet?name=..., which responds with an HTML page greeting the given name, e.g. <h1>Hello, Alice!</h1>. Right now it interpolates the `name` query parameter directly into the HTML response without any escaping - a classic reflected XSS vulnerability, since a value like <script>alert(1)</script> is echoed back verbatim and would execute as a script in a browser. Fix server.js so that any HTML-special characters in `name` (at minimum < > & \" ') are escaped before being embedded in the response, so the response never contains an unescaped '<script' tag or other raw HTML/JS from user input, while a normal name like 'Alice' still renders as before (the response must still contain 'Hello, Alice!' for that case). Keep listening on port 8027."
   ],

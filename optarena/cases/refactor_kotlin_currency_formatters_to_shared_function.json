@@ -3,7 +3,7 @@
   "language": "kotlin",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Collapses three copy-pasted currency formatters (formatUsd/formatEur/formatGbp, identical logic apart from the symbol) into one formatMoney(cents, symbol) function, keeping the three original names as thin wrappers; behavior-drift broken puts the negative sign AFTER the symbol instead of before it",

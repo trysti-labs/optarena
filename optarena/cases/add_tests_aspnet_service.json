@@ -3,7 +3,7 @@
   "language": "csharp",
   "framework": "aspnet-core",
   "domain": "backend",
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "check_command_timeout": 420,
   "timeout": 300,
   "check_command": "python3 mutation_check.py",

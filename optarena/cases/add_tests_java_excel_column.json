@@ -3,7 +3,7 @@
   "language": "java",
   "framework": "plain-java",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Write plain-java tests (main + AssertionError) for an Excel column-name converter; java-native single-file mutation harness (no n-- off-by-one, no reverse, no throw)",

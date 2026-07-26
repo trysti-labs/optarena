@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 90,
   "timeout": 300,
   "description": "Timing-unsafe token equality (=== / short-circuit loop) -> crypto.timingSafeEqual; the oracle times first-char vs last-char mismatch to catch short-circuiting",

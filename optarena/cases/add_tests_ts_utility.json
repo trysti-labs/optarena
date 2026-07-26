@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "typescript",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 150,
   "timeout": 180,
   "description": "Asks the model to write typed tests for string utilities; mutation-checked",

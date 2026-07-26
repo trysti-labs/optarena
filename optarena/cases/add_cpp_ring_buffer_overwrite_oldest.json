@@ -3,7 +3,7 @@
   "language": "cpp",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Change a full-buffer-throws RingBuffer to sliding-window overwrite-oldest semantics; broken overwrites the oldest slot but forgets to advance head, breaking ordering across multiple wraparounds",

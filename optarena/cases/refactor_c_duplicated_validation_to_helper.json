@@ -3,7 +3,7 @@
   "language": "c",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Extracts a duplicated NULL/empty-array guard clause into a shared validation helper across three functions",

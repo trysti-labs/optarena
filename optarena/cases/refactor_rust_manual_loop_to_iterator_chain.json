@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Refactors a manual index-based while loop into an iterator chain (enumerate/map/collect)",

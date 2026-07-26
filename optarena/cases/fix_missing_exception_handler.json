@@ -12,7 +12,7 @@
     "bugfix",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "In this Maven Spring Boot project, POST /divide (src/main/java/com/optarena/calc/DivideController.java) accepts JSON {\"a\": number, \"b\": number} and returns {\"result\": a/b}. When b is 0, the handler currently throws an unhandled ArithmeticException, which propagates as a generic HTTP 500 error. Add exception handling (for example an @ExceptionHandler method, or a try/catch) so that dividing by zero instead returns HTTP 400 Bad Request with a JSON body containing an \"error\" field describing the problem (e.g. {\"error\": \"cannot divide by zero\"}). Valid divisions (b != 0) must keep returning HTTP 200 with the correct result, unchanged."
   ],

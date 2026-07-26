@@ -3,7 +3,7 @@
   "language": "makefile",
   "framework": "make",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "test/lint targets don't depend on build, so `make test` can run against a stale image; add .PHONY, the build prerequisite, and a ci composite target - proven by real `make -n` dry-run ordering",

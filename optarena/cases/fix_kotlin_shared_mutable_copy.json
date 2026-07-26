@@ -3,7 +3,7 @@
   "language": "kotlin",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Fixes a shallow data-class copy() that mutates the original's shared list",

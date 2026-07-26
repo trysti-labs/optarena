@@ -12,7 +12,7 @@
     "bugfix",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "In this Maven Spring Boot project, POST /notes (implemented in src/main/java/com/optarena/notes/NoteController.java) creates a new note and stores it, but it currently returns HTTP 200 OK. Fix it so that a successful creation returns HTTP 201 Created (with the created note as the JSON response body). GET /notes must keep returning HTTP 200 with the list of notes, unchanged. Do not change any other behavior."
   ],

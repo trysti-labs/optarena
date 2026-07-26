@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "fastapi",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "setup_repo": "fastapi-tasktracker",
   "git_init": true,
   "check_command_timeout": 120,

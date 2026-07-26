@@ -19,6 +19,15 @@ this file existed.
 - Repo root trimmed to `ARCH.md`/`CHANGELOG.md`/`CONTRIBUTING.md`/`README.md`/
   `SECURITY.md`; working notes and planning docs moved out of git tracking
   entirely (no longer published to either remote).
+- Renamed Docker-specific and otherwise-confusing user-facing names now that
+  Podman is a first-class engine, no back-compat aliases (pre-release, no
+  versioned release has shipped yet): the case-schema field `docker_image` is
+  now `image` (renamed across all 510 built-in cases); env vars
+  `OPTARENA_DOCKER_IMAGE` -> `OPTARENA_SANDBOX_IMAGE`, `OPTARENA_NO_DOCKER` ->
+  `OPTARENA_DISABLE_SANDBOX`, `OPTARENA_NO_PULL` -> `OPTARENA_DISABLE_PULL`
+  (the last two also drop the double-negative-prone `NO_` prefix in favor of
+  a verb that matches what they actually do). Update any local scenario
+  files, case packs, or CI env vars using the old names.
 
 ### Added
 

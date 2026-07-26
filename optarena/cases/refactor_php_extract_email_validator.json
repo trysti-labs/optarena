@@ -3,7 +3,7 @@
   "language": "php",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-php:latest",
+  "image": "optarena-tester-php:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Extracts duplicated inline email validation from two PHP controllers into a shared Validator, preserving behavior",

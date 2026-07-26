@@ -3,7 +3,7 @@
   "language": "c",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 90,
   "timeout": 200,
   "description": "Write C tests (assert.h) for a fixed-size-stack multi-type balanced-bracket checker (already correct - do not modify it); mutation-checked (empty-stack-pop guard dropped, closer-type check dropped, final all-closed check dropped)",

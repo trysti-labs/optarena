@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Builds a CSV sales aggregator (revenue per category, with row cleaning) consumed by an existing printer",

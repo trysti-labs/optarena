@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 240,
   "timeout": 400,
   "description": "Dynamic eval, COMPOUNDING disruptions: a 3-prompt case where the config changes TWICE (after prompt 1 and after prompt 2), so the agent must keep re-adapting, not just survive one shift",

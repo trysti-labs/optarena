@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Consolidates duplicated quantity-discount tier logic from two modules into one shared function",

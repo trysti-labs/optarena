@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pydantic",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Migrate a model from the deprecated Pydantic v1 API (@validator, .dict()) to Pydantic v2 (@field_validator, model_dump()) without changing behavior",

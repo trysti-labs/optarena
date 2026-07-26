@@ -3,7 +3,7 @@
   "language": "java",
   "framework": "plain-java",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "String += in a loop -> StringBuilder; budget calibrated (naive ~7.5s native at n=120k vs ~0.005s, budget 2.5s); wrong-output broken drops the trailing newline",

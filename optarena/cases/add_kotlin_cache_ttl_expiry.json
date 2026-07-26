@@ -3,7 +3,7 @@
   "language": "kotlin",
   "framework": "spring-boot",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 300,
   "timeout": 400,
   "description": "Add TTL-based expiry to a plain key-value Cache, with an injectable Clock for deterministic testing; broken uses an exclusive expiry boundary so an entry exactly at its expiry instant is served one extra tick",

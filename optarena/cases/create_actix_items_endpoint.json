@@ -12,7 +12,7 @@
     "actix-web",
     "in-memory"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "This Cargo project (Cargo.toml already lists actix-web, tokio, serde, and serde_json as dependencies) needs a src/main.rs. Using Actix-web, build an in-memory REST resource at /items with shared state (a Vec of items behind a Mutex, created once and shared across all Actix workers via web::Data) that supports:\n- GET /items: returns 200 with a JSON array of every item created so far (each item is an object with a \"name\" string field), in insertion order.\n- POST /items: accepts a JSON body {\"name\": \"...\"}, appends it to the in-memory list, and returns 201 Created with the created item as JSON.\nItems must persist across requests within the same server run (do not reset state per-request). Have the server listen on 0.0.0.0:8040."
   ],

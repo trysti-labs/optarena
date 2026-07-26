@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 240,
   "description": "Dynamic eval: a config value changes BETWEEN prompts; the agent must read the current value, not a stale/hardcoded one (disruption fires after prompt 1)",

@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 180,
   "timeout": 240,
   "description": "Fixes a Go function that writes to an uninitialized (nil) map and panics; must make() it",

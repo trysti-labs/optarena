@@ -3,7 +3,7 @@
   "language": "hcl",
   "framework": "terraform",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 150,
   "timeout": 300,
   "description": "Add an S3 lifecycle rule (transition to STANDARD_IA + noncurrent-version expiration), proven by real terraform validate; broken leaves the rule status Disabled, which AWS ignores entirely",

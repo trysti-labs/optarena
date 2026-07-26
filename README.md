@@ -85,7 +85,7 @@ optarena serve   # http://localhost:8300/dashboard/
    A container engine (Docker or Podman, auto-detected) is expected for
    verification: without one, OptArena **fails closed** rather than running
    untrusted test commands on your machine (host execution is an explicit
-   opt-in - `OPTARENA_NO_DOCKER=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
+   opt-in - `OPTARENA_DISABLE_SANDBOX=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
 7. **Cheap extensibility** - a new tool is one driver file. A new task is one
    JSON file (`optarena init` scaffolds one). A new backend is a URL.
 8. **Private by default** - prompts and generated code go only to the
@@ -115,7 +115,7 @@ need. But `docker/` (sandbox Dockerfiles), `dashboard/` (the results UI), and
 `repos/` (L3 `setup_repo` starter projects) are separate top-level
 directories, not bundled into the package - a wheel built and installed
 elsewhere (`pip install` from a copied/published wheel rather than a
-checkout) won't have them, and `optarena docker build`, `optarena serve`, and
+checkout) won't have them, and `optarena sandbox build`, `optarena serve`, and
 `setup_repo` cases will fail with a clear "not found" error rather than a
 working degraded mode. There is no supported "everything bundled in one
 wheel" install today - keep the git checkout around next to wherever
@@ -147,7 +147,7 @@ optarena sandbox pull --all      # every registered image, from GHCR
 optarena sandbox build           # base image (gcc + python3 + node), locally
 optarena sandbox build --lang go # one per-language track
 optarena sandbox build --all     # everything, locally
-# (a run also auto-pulls a missing image on first use; OPTARENA_NO_PULL=1 disables)
+# (a run also auto-pulls a missing image on first use; OPTARENA_DISABLE_PULL=1 disables)
 
 # Corpus self-verification (CI gate): reference solutions must PASS the real
 # oracle, broken/unmodified variants must FAIL it
@@ -274,14 +274,14 @@ cases and nothing about them ever leaves your machine. See
 available - Docker or Podman, auto-detected (`OPTARENA_CONTAINER_ENGINE`
 forces one) - using the shared `optarena-tester` base image (gcc + python3 +
 node, `docker/Dockerfile`) for the original cases, or a per-language image
-(`docker/<lang>/Dockerfile`, tagged via a case's `"docker_image"` field) for
+(`docker/<lang>/Dockerfile`, tagged via a case's `"image"` field) for
 cases that need a real framework toolchain pre-installed (FastAPI, Express,
 Spring Boot, Gin, Axum, ASP.NET Core). Build what you need with `optarena
 docker build` (base), `--lang <name>` (one track), or `--all` (everything) so
 case authors and CI need no language toolchains on the host, and generated
 code never executes directly there. When no container engine is available,
 OptArena **refuses to run `check_command` on the host** (a clear non-zero
-error) - host execution is an explicit opt-in via `OPTARENA_NO_DOCKER=1`
+error) - host execution is an explicit opt-in via `OPTARENA_DISABLE_SANDBOX=1`
 (container sandbox deliberately disabled, e.g. this repo's own unit-test CI)
 or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1` (a sandbox is wanted but
 missing/broken and you accept running untrusted commands directly on this

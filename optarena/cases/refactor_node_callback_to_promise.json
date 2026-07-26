@@ -12,7 +12,7 @@
     "promises",
     "async-await"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "utils.js exports a callback-style function readConfig(id, callback) - it calls callback(error, result), Node's classic error-first callback style, which is hard to compose with modern async/await code. Refactor utils.js so readConfig(id) instead returns a Promise: it should resolve with { id, name: `config-${id}` } for a non-negative integer id, or reject with an Error whose message is 'invalid id' for a negative id. Remove the callback parameter entirely - callers should use readConfig(id).then(...)/.catch(...) or await readConfig(id) inside a try/catch. Keep the exact export name module.exports = { readConfig };"
   ],

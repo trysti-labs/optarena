@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Asks the model to write Go tests for a Luhn checksum validator; mutation-checked",

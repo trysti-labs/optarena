@@ -12,7 +12,7 @@
     "stale-closure",
     "bugfix"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "counter.js models the increment handler behind a React Counter component's onClick. createCounter(initialCount) returns { getState, setState, makeIncrementHandler }, where getState()/setState(newState) read/write the current { count } state, and makeIncrementHandler() returns a handler function meant to be called once per click, each time incrementing the count by exactly 1 relative to whatever the count currently is (mirroring how a real onClick={handleIncrement} works in a React component - every click should add 1, however many clicks happen). Right now makeIncrementHandler() has a stale-closure bug: it captures the count at the moment the handler was created (like a useCallback with a missing/empty dependency array capturing a stale value) instead of reading the current count each time it runs, so calling the same handler multiple times only ever increments the count by 1 in total instead of once per call. Fix the bug in counter.js so that calling the handler returned by makeIncrementHandler() N times increases the count by exactly N, without changing the createCounter/makeIncrementHandler function signatures or the shape of the returned object."
   ],

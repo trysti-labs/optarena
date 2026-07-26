@@ -3,7 +3,7 @@
   "language": "shell",
   "framework": "bash",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Three copy-pasted per-environment blocks -> one function/loop, byte-identical output; drift broken swaps replica counts while deduplicating",

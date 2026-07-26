@@ -3,7 +3,7 @@
   "language": "java",
   "framework": "plain-java",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time Greeter.java's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then Config.NAME changes under it",

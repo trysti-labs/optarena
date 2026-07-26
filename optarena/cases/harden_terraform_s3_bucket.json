@@ -3,7 +3,7 @@
   "language": "hcl",
   "framework": "terraform",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 150,
   "timeout": 300,
   "description": "Harden an S3 bucket with versioning, a fully-locked public access block, and default encryption; broken leaves one public-access-block flag false",

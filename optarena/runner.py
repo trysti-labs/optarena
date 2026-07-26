@@ -11,7 +11,9 @@ Optional (both default to the historical behaviour):
   trial overstates certainty). Ignored for drivers that cache results from
   ``prepare()`` (see ``Driver.caches_results`` - no current driver sets it).
 - ``parallel=N`` - fan cases out over N worker threads for drivers marked
-  ``parallel_safe`` (baselines, CLI agents); other drivers stay serial.
+  ``parallel_safe`` (baselines, CLI agents); other drivers stay serial. Each
+  worker gets its own dedicated sandbox container per image (F-06), not one
+  container shared across workers.
 """
 
 from __future__ import annotations
@@ -19,19 +21,23 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import re
 import shutil
 import statistics
 import tempfile
+import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import cases as cases_mod
+from . import store
 from .cases import DOCKER_IMAGE_DEFAULT, DockerSandbox, container_engine, load_cases
 from .drivers import get_driver
 from .drivers.base import CaseResult
+from .events import RunEvents
 from .metrics import aggregate
 from .scenario import Scenario
 
@@ -70,7 +76,8 @@ def _image_digests(images: list[str]) -> dict[str, str]:
     return out
 
 
-def build_manifest(scenario: Scenario, cases: list[dict], trials: int) -> dict:
+def build_manifest(scenario: Scenario, cases: list[dict], requested_trials: int,
+                    runner_trials: "int | None" = None) -> dict:
     """
     Immutable identity of WHAT a run measured (M-01): the exact resolved case
     set (by name + a content hash of each case, so any edit to a case's
@@ -80,6 +87,15 @@ def build_manifest(scenario: Scenario, cases: list[dict], trials: int) -> dict:
     trials) agree - `compare.manifest_compatibility` enforces that. Driver and
     backend intentionally do NOT gate comparability: tool-vs-tool and
     backend-vs-backend are the whole point of a run comparison.
+
+    F-09: ``trials`` records what was REQUESTED (semantically "how many
+    times was each case attempted"), not runner.py's own local loop count -
+    for a caching driver, the runner hands the count TO the driver and runs
+    its own per-case loop exactly once, but the run still semantically has
+    N trials and must compare against another N-trial run as such.
+    ``runner_trials`` (defaults to ``requested_trials`` when not given)
+    separately records how many times the RUNNER's own loop executed, for
+    anyone who wants to know the mechanism, not just the semantic count.
     """
     case_entries = sorted(
         (c["name"],
@@ -89,7 +105,7 @@ def build_manifest(scenario: Scenario, cases: list[dict], trials: int) -> dict:
     case_set_hash = hashlib.sha1(
         json.dumps(case_entries, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     images = sorted({
-        c.get("docker_image") or os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
+        cases_mod.resolve_image(c.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT))
         for c in cases if c.get("check_command")
     })
     return {
@@ -98,7 +114,8 @@ def build_manifest(scenario: Scenario, cases: list[dict], trials: int) -> dict:
         "case_count": len(cases),
         "case_names": [n for n, _ in case_entries],
         "case_set_hash": case_set_hash,
-        "trials": trials,
+        "trials": requested_trials,
+        "runner_trials": requested_trials if runner_trials is None else runner_trials,
         "driver": scenario.driver,
         "backend_model": scenario.backend.model,
         "backend_base_url": scenario.backend.base_url,
@@ -126,6 +143,11 @@ class RunRecord:
     cases: list[dict] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
     manifest: dict = field(default_factory=dict)
+    # F-02: "running" while the case loop is in progress, "completed" once
+    # every case finished normally, "interrupted" if the process was
+    # killed/Ctrl-C'd mid-run, "error" for a driver/sandbox setup failure
+    # before any case ran. None only for records predating this field.
+    status: "str | None" = None
 
     def to_dict(self) -> dict:
         return vars(self)
@@ -212,6 +234,79 @@ def _run_case(driver, case: dict, scenario: Scenario, root: Path, trials: int,
     return _merge_trials(case["name"], results)
 
 
+def _worker_loop(worker_idx: int, case_queue: "queue.Queue", results_queue: "queue.Queue",
+                  driver, scenario: Scenario, root: Path, trials: int, security_scan: bool,
+                  sandbox_pool: "dict[str, list[DockerSandbox]]", events: RunEvents) -> None:
+    """
+    One F-06 worker thread: binds ITS OWN dedicated {image: DockerSandbox}
+    map into cases_mod's thread-local routing (`_worker_sandboxes`) before
+    touching any case, so every check_command this thread runs execs into a
+    container no other worker ever touches - concurrent execs into one
+    shared container would otherwise collide in its process table/network
+    namespace, and a timeout-triggered `reap()` (`kill -9 -1`) would kill
+    every other worker's in-flight process, not just the one that timed out.
+
+    Pulls cases off the shared queue until empty, pushing each completed
+    result onto results_queue as it finishes - not batched at the end - so
+    the main thread can print/checkpoint incrementally (F-02) instead of
+    only learning about completions once every worker is done.
+    """
+    cases_mod._worker_sandboxes.map = {
+        image: sandboxes[worker_idx] for image, sandboxes in sandbox_pool.items()
+    }
+    while True:
+        try:
+            case = case_queue.get_nowait()
+        except queue.Empty:
+            return
+        # F-18: fired from the worker thread itself (not the main thread's
+        # completion loop below) - under --parallel, "started" genuinely
+        # happens here, concurrently across workers; print()/RunEvents.emit
+        # are safe to call from multiple threads (CPython serializes writes
+        # to one file object), so no extra locking is needed for this.
+        events.emit("case_started", case=case["name"], worker=worker_idx)
+        try:
+            result = _run_case(driver, case, scenario, root, trials, security_scan)
+        finally:
+            case_queue.task_done()
+        results_queue.put(result)
+
+
+def _run_parallel(driver, cases: list[dict], scenario: Scenario, root: Path, trials: int,
+                   security_scan: bool, parallel: int,
+                   sandbox_pool: "dict[str, list[DockerSandbox]]",
+                   on_result, events: RunEvents) -> list[CaseResult]:
+    """F-06: `parallel` persistent worker threads (not a fresh thread pool
+    task per case) so each can hold one dedicated sandbox set for its whole
+    lifetime. `on_result(result)` is called as each case finishes (in
+    completion order, not input order) - the caller uses it to print and
+    checkpoint (F-02) incrementally."""
+    case_queue: "queue.Queue" = queue.Queue()
+    for case in cases:
+        case_queue.put(case)
+    results_queue: "queue.Queue" = queue.Queue()
+    threads = [
+        threading.Thread(
+            target=_worker_loop,
+            args=(w, case_queue, results_queue, driver, scenario, root, trials, security_scan,
+                  sandbox_pool, events),
+            daemon=True,
+        )
+        for w in range(parallel)
+    ]
+    for t in threads:
+        t.start()
+
+    results: list[CaseResult] = []
+    for _ in range(len(cases)):
+        result = results_queue.get()
+        results.append(result)
+        on_result(result)
+    for t in threads:
+        t.join()
+    return results
+
+
 def _describe_oracle(oracle: dict | None) -> str | None:
     """One-line summary of what the oracle actually did for one trial."""
     if not oracle or not oracle.get("check_command"):
@@ -229,7 +324,7 @@ def _describe_oracle(oracle: dict | None) -> str | None:
             f'{oracle.get("duration_s")}s: {oracle["check_command"]}')
 
 
-def _print_result(result: CaseResult) -> None:
+def _print_result(result: CaseResult, events: RunEvents) -> None:
     status = "PASS" if result.passed else ("ERROR" if result.error else "FAIL")
     # Phase 2.7: when the tool itself exited non-zero but the workspace
     # otherwise satisfies the oracle (failures is empty), `result.error` and
@@ -241,16 +336,24 @@ def _print_result(result: CaseResult) -> None:
         f" - {result.error or '; '.join(result.failures[:1]) or exec_note}")
     trial_note = (f" [{result.extra.get('passes')}/{result.extra.get('trials')} trials]"
                   if result.extra.get("trials") else "")
-    print(f" {status} ({result.duration_s:.1f}s){trial_note}{detail}")
+    events.say(f" {status} ({result.duration_s:.1f}s){trial_note}{detail}")
+    # F-18: case_completed fires here (not a separate call at each call
+    # site) so its `status`/`duration_s` always match what the human line
+    # just showed - one source of truth for one case's outcome.
+    events.emit("case_completed", case=result.name, status=status,
+                duration_s=result.duration_s, passed=result.passed)
 
+    # F-18: everything below is a SECONDARY per-case line - .detail(), not
+    # .say(), so --log-level warn/error drop it and keep only the PASS/FAIL
+    # headline above plus (still via .say()) failure attribution below.
     test_files = result.extra.get("oracle", {}).get("test_setup_files") or []
     if test_files:
-        print(f"         test files (hidden from the model): {', '.join(test_files)}")
+        events.detail(f"         test files (hidden from the model): {', '.join(test_files)}")
 
     diff = result.extra.get("oracle", {}).get("diff")
     if diff and diff.get("files_changed"):
-        print(f"         diff: {diff['files_changed']} file(s), "
-              f"~{diff['lines_changed_approx']} line(s) changed")
+        events.detail(f"         diff: {diff['files_changed']} file(s), "
+                      f"~{diff['lines_changed_approx']} line(s) changed")
 
     # Trajectory: flag off-target edits (files the task never asked for) - a
     # "did it stay on task" signal even when the case passes. Read from the
@@ -263,42 +366,45 @@ def _print_result(result: CaseResult) -> None:
         shown = ", ".join(traj.get("off_target_files", [])[:5])
         more = "" if traj["off_target_count"] <= 5 else f" (+{traj['off_target_count'] - 5} more)"
         note = " despite PASS" if result.passed else ""
-        print(f"         off-target edits{note}: {traj['off_target_count']} file(s){' - ' + shown if shown else ''}{more}")
+        events.detail(f"         off-target edits{note}: {traj['off_target_count']} file(s){' - ' + shown if shown else ''}{more}")
     if result.extra.get("n_steps", 0) and result.extra["n_steps"] > 1:
-        print(f"         steps: {result.extra['n_steps']} (per-step timing/tokens in saved run)")
+        events.detail(f"         steps: {result.extra['n_steps']} (per-step timing/tokens in saved run)")
 
     # Tier 1 (dynamic eval): note any mid-session disruptions that fired.
     fired = [d for st in (result.extra.get("steps") or []) for d in (st.get("disrupted") or [])]
     if fired:
-        print(f"         disruptions fired: {'; '.join(fired)}")
+        events.detail(f"         disruptions fired: {'; '.join(fired)}")
 
-    # Tier 3 (failure attribution): for a failed multi-step case, say where.
+    # Tier 3 (failure attribution): for a failed multi-step case, say where -
+    # kept at .say() (not .detail()), unlike the rest of this function: this
+    # is the one line beyond the PASS/FAIL headline that --log-level warn/error
+    # is meant to keep.
     if not result.passed:
         from .metrics import attribute_failure
         why = attribute_failure(result.to_dict())
         if why:
-            print(f"         attribution: {why}")
+            events.say(f"         attribution: {why}")
 
     # Security scan (opt-in --security-scan): flag secrets/injection/unsafe calls
     # the agent introduced, even when the case passes its correctness oracle.
     sec = result.extra.get("security")
     if sec and sec.get("total"):
         c = sec.get("counts", {})
-        print(f"         security: {sec['total']} finding(s) "
-              f"({c.get('error', 0)} error, {c.get('warning', 0)} warning, {c.get('note', 0)} note)")
+        events.detail(f"         security: {sec['total']} finding(s) "
+                      f"({c.get('error', 0)} error, {c.get('warning', 0)} warning, {c.get('note', 0)} note)")
         for f in sec["findings"][:3]:
-            print(f"           - [{f['level']}] {f['title']} ({f['file']}:{f['line']})")
+            events.detail(f"           - [{f['level']}] {f['title']} ({f['file']}:{f['line']})")
 
     oracle_trials = result.extra.get("oracle_all_trials")
     if oracle_trials is not None:
         for i, oracle in enumerate(oracle_trials, 1):
             line = _describe_oracle(oracle)
             if line:
-                print(f"         [trial {i}] {line}")
+                events.detail(f"         [trial {i}] {line}")
     else:
         line = _describe_oracle(result.extra.get("oracle"))
         if line:
-            print(f"         {line}")
+            events.detail(f"         {line}")
 
     # On failure the check_command tail is already embedded in `detail` above;
     # on success there is no failure detail line, so show the captured output
@@ -306,7 +412,7 @@ def _print_result(result: CaseResult) -> None:
     output = result.extra.get("oracle", {}).get("output")
     if output and result.passed:
         first_line = output.splitlines()[0] if output.splitlines() else output
-        print(f"         output: {first_line}" + (" [...see saved run for full output]" if "\n" in output else ""))
+        events.detail(f"         output: {first_line}" + (" [...see saved run for full output]" if "\n" in output else ""))
 
 
 def run_scenario(
@@ -317,7 +423,13 @@ def run_scenario(
     allow_empty: bool = False,
     keep_workspace: bool = False,
     security_scan: bool = False,
+    events: "RunEvents | None" = None,
 ) -> RunRecord:
+    # F-18: a caller that doesn't pass `events` (every pre-existing caller,
+    # including every test) gets a RunEvents with both flags off, which
+    # `.say()`/`.emit()` make behave exactly like the old unconditional
+    # print()s - this parameter is purely additive.
+    events = events or RunEvents()
     cases = load_cases(scenario.cases, cases_dir=scenario.cases_dir)
     if not cases and not allow_empty:
         # H-06: an empty resolved case set (typo'd --cases name, a
@@ -334,7 +446,11 @@ def run_scenario(
         )
     driver = get_driver(scenario.driver)
 
-    trials = max(1, int(trials))
+    # F-09: keep the REQUESTED trial count for the manifest (what "trials"
+    # semantically means for comparability) separate from the runner's own
+    # local loop count, which drops to 1 for a caching driver below.
+    requested_trials = max(1, int(trials))
+    trials = requested_trials
     if trials > 1 and driver.caches_results:
         # M-09: a caching driver runs the whole case set once in prepare(),
         # so the runner's own per-case trial loop can't repeat it. Instead of
@@ -343,13 +459,25 @@ def run_scenario(
         # TO the driver so it repeats each case N times itself, with a fresh
         # workspace, and reports the merged majority verdict + per-trial detail.
         driver.trials = trials
-        print(f"  [runner] {scenario.driver} runs the case set in one session; "
-              f"repeating each case {trials}x inside the harness")
+        events.say(f"  [runner] {scenario.driver} runs the case set in one session; "
+                   f"repeating each case {trials}x inside the harness")
         trials = 1
     parallel = max(1, int(parallel))
     if parallel > 1 and not driver.parallel_safe:
-        print(f"  [runner] NOTE: {scenario.driver} is not parallel-safe; running serially")
+        events.say(f"  [runner] NOTE: {scenario.driver} is not parallel-safe; running serially")
         parallel = 1
+
+    # F-16: a fresh engine-health probe for THIS scenario, not whatever was
+    # cached (even within its TTL) from a previous scenario in the same
+    # process (--matrix-drivers/--matrix-models, or two --scenario files) -
+    # a matrix run shouldn't stay convinced the engine is down for its whole
+    # duration just because an early scenario probed it while it was still
+    # starting up.
+    cases_mod._docker_available(force_recheck=True)
+    # F-15: bind this scenario's image_overrides so every driver's
+    # evaluate_case()->run_check_command() call picks it up without
+    # threading a new parameter through every driver module.
+    cases_mod.set_image_overrides(scenario.image_overrides)
 
     # M-XX: two runs of the same scenario started within the same second
     # (a scripted/parallel launch, or a fast test suite) previously got the
@@ -364,7 +492,8 @@ def run_scenario(
         run_id=run_id,
         scenario=scenario.to_dict(redact=True),
         started_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
-        manifest=build_manifest(scenario, cases, trials),
+        manifest=build_manifest(scenario, cases, requested_trials, runner_trials=trials),
+        status="running",  # F-02
     )
 
     # H-11: only a workspace WE created here is ours to delete in the finally
@@ -373,73 +502,134 @@ def run_scenario(
     root = workspace_root or Path(tempfile.mkdtemp(prefix="optarena_"))
     root.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n=== RUN {run_id}  driver={scenario.driver}  "
-          f"backend={scenario.backend.label()}  cases={len(cases)}"
-          + (f"  trials={trials}" if trials > 1 else "")
-          + (f"  parallel={parallel}" if parallel > 1 else "") + " ===")
+    events.say(f"\n=== RUN {run_id}  driver={scenario.driver}  "
+               f"backend={scenario.backend.label()}  cases={len(cases)}"
+               + (f"  trials={trials}" if trials > 1 else "")
+               + (f"  parallel={parallel}" if parallel > 1 else "") + " ===")
+    # F-18: fired once the run_id/manifest exist but before any case starts -
+    # everything a consumer needs to correlate this run's later events
+    # (case_started/case_completed/checkpoint_saved/run_completed all carry
+    # no run_id of their own, since they're only ever emitted within this
+    # one call's lifetime on one stdout stream).
+    events.emit("run_started", run_id=run_id, driver=scenario.driver,
+                backend=scenario.backend.label(), case_count=len(cases),
+                trials=trials, parallel=parallel)
 
-    # One shared container per distinct image needed by this run's cases -
-    # not one per check_command call, and not just one overall (a run mixing
-    # e.g. a Python case and a Go case needs both toolchains at once). Only
-    # started for images some case actually needs via check_command; a no-op
-    # (and no print) otherwise or when the container engine/image isn't
-    # available (run_check_command then falls back to the host for that case).
-    # Resolve each case's image exactly the way run_check_command will
-    # (including the OPTARENA_DOCKER_IMAGE override) - otherwise a run with
-    # the override set would start a sandbox for the wrong image and every
-    # check would silently fall back to one ephemeral `docker run` per call.
+    # One dedicated container PER WORKER per distinct image needed by this
+    # run's cases - not one per check_command call, and (serially) not just
+    # one overall (a run mixing e.g. a Python case and a Go case needs both
+    # toolchains at once). Only started for images some case actually needs
+    # via check_command; a no-op (and no print) otherwise or when the
+    # container engine/image isn't available (run_check_command then falls
+    # back to the host for that case). Resolve each case's image exactly the
+    # way run_check_command will (including OPTARENA_SANDBOX_IMAGE and F-15's
+    # image_overrides) - otherwise a run with an override set would start a
+    # sandbox for the wrong image and every check would silently fall back
+    # to one ephemeral container per call.
     #
-    # H-02: a shared container is only safe for SERIAL execution. Under
-    # `--parallel`, several cases' check_commands would `docker exec` into
-    # the SAME container concurrently - sharing one process table, network
-    # namespace and port space, and `_run_check_command_sandbox`'s
-    # timeout/reap path (`kill -9 -1`) would kill every other case's
-    # in-flight process along with the one that actually timed out. Skip the
-    # shared sandbox entirely in that case; run_check_command's existing
-    # per-call ephemeral `docker run --rm` fallback gives each concurrent
-    # case its own isolated container instead (slower, but correct).
+    # F-06: `--parallel` used to skip the shared sandbox ENTIRELY (H-02: a
+    # single container shared across concurrent workers would let their
+    # `exec`s collide in its process table/network namespace, and a
+    # timeout-triggered `reap()` - `kill -9 -1` - would kill every other
+    # worker's in-flight process too). Fixed properly instead of just
+    # documented: each worker now gets its OWN dedicated container per
+    # image - `pool_size` sandboxes instead of 1 - so concurrent workers
+    # never share one, restoring the "no container startup per check" win
+    # under --parallel without reintroducing the collision.
     #
-    # C-05: the same skip applies to CUSTOM case packs (`cases_dir` set). The
-    # shared container bind-mounts the WHOLE run root, so one case's
-    # check_command can read or tamper with every other case's workspace -
-    # acceptable for the built-in corpus (repo-controlled, self-verified),
-    # not for a downloaded pack. The ephemeral fallback mounts only that one
-    # case's own workspace directory, so a malicious case is confined to the
-    # case it came from.
-    if parallel > 1 or scenario.cases_dir:
+    # C-05: CUSTOM case packs (`cases_dir` set) still get NO shared/pooled
+    # sandbox at all, serial or parallel - a shared container (pooled or
+    # not) bind-mounts the WHOLE run root, so one case's check_command could
+    # read or tamper with another case's workspace. Acceptable for the
+    # built-in corpus (repo-controlled, self-verified); not for a downloaded
+    # pack. The ephemeral per-call fallback mounts only that one case's own
+    # workspace directory, so a malicious case is confined to itself - a
+    # security property, not a performance one, so pooling doesn't apply.
+    if scenario.cases_dir:
         images_needed = set()
     else:
         images_needed = {
-            c.get("docker_image") or os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
+            cases_mod.resolve_image(c.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT))
             for c in cases if c.get("check_command")
         }
-    sandboxes = [DockerSandbox(root, image=image) for image in images_needed]
+    pool_size = parallel if parallel > 1 else 1
+    sandbox_pool: "dict[str, list[DockerSandbox]]" = {
+        image: [DockerSandbox(root, image=image) for _ in range(pool_size)]
+        for image in images_needed
+    }
+    all_sandboxes = [sb for lst in sandbox_pool.values() for sb in lst]
 
-    driver.prepare(scenario, root)
-    try:
-        for sandbox in sandboxes:
-            sandbox.start()
-        if parallel > 1:
-            with ThreadPoolExecutor(max_workers=parallel) as pool:
-                futures = [pool.submit(_run_case, driver, case, scenario, root, trials, security_scan)
-                           for case in cases]
-                results = [f.result() for f in futures]
-            for result in results:
-                print(f"  [case] {result.name} ...", end="")
-                _print_result(result)
-        else:
-            results = []
-            for case in cases:
-                print(f"  [case] {case['name']} ...", end="", flush=True)
-                result = _run_case(driver, case, scenario, root, trials, security_scan)
-                _print_result(result)
-                results.append(result)
-
+    def _checkpoint(results: list[CaseResult]) -> None:
+        # F-02: best-effort - a failed checkpoint write must not abort the
+        # run itself, only cost it the durability this is here to add.
         record.cases = [r.to_dict() for r in results]
+        try:
+            store.save_checkpoint(record)
+        except OSError:
+            return
+        events.emit("checkpoint_saved", run_id=run_id, cases_completed=len(results))
+
+    results: list[CaseResult] = []
+    status = "running"
+    try:
+        # F-01: driver.prepare() and sandbox startup are now INSIDE the
+        # try/finally that guards cleanup, not before it. A missing CLI
+        # binary or SDK package - an everyday failure, not an edge case -
+        # previously raised straight out of run_scenario() with the
+        # temp workspace from mkdtemp() above never cleaned up, because the
+        # finally block that does so hadn't been entered yet.
+        driver.prepare(scenario, root)
+        for sandbox in all_sandboxes:
+            sandbox.start()
+
+        if parallel > 1:
+            def _on_result(result: CaseResult) -> None:
+                events.say(f"  [case] {result.name} ...", end="")
+                _print_result(result, events)
+                _checkpoint(results)
+            results = _run_parallel(driver, cases, scenario, root, trials, security_scan,
+                                     parallel, sandbox_pool, _on_result, events)
+        else:
+            for case in cases:
+                events.say(f"  [case] {case['name']} ...", end="", flush=True)
+                events.emit("case_started", case=case["name"], worker=0)
+                result = _run_case(driver, case, scenario, root, trials, security_scan)
+                _print_result(result, events)
+                results.append(result)
+                _checkpoint(results)  # F-02: one checkpoint per completed case
+
+        status = "completed"
+    except BaseException:
+        # BaseException, not Exception: a Ctrl-C (KeyboardInterrupt) mid-run
+        # is exactly the case F-02 exists for - whatever's in `results` so
+        # far must still get one final checkpoint reflecting "interrupted"
+        # rather than being silently lost or left claiming "running" forever.
+        status = "interrupted"
+        raise
     finally:
-        for sandbox in sandboxes:
-            sandbox.stop()
-        driver.teardown()
+        # F-01: every cleanup step is now individually best-effort - one
+        # failing must not prevent the rest (a sandbox that won't stop
+        # shouldn't also skip driver.teardown() or workspace cleanup).
+        for sandbox in all_sandboxes:
+            try:
+                sandbox.stop()
+            except Exception:
+                pass
+        try:
+            driver.teardown()
+        except Exception:
+            pass
+        cases_mod.set_image_overrides(None)  # F-15: don't leak into the next scenario in a matrix run
+        record.cases = [r.to_dict() for r in results]
+        record.status = status
+        if status != "completed":
+            # Final on-disk state reflects what actually happened, instead
+            # of being stuck at "running" forever if nothing downstream ever
+            # calls store.save_run for this run_id.
+            try:
+                store.save_checkpoint(record)
+            except OSError:
+                pass
         # H-11: a run's mkdtemp workspace (every case's/trial's files, plus
         # any repo copied in) is never read again once results are saved -
         # leaving it behind leaks disk across runs. Remove the one WE created
@@ -447,7 +637,8 @@ def run_scenario(
         if owns_workspace and not keep_workspace:
             shutil.rmtree(root, ignore_errors=True)
         elif keep_workspace:
-            print(f"  [runner] workspace kept at {root}")
+            events.say(f"  [runner] workspace kept at {root}")
 
     record.summary = aggregate(record.cases)
+    events.emit("run_completed", run_id=run_id, status=status, summary=record.summary)
     return record

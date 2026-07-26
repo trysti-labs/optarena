@@ -3,7 +3,7 @@
   "language": "java",
   "framework": "spring-boot",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 240,
   "timeout": 300,
   "description": "Wires a manual validator into a controller that accepts every registration",

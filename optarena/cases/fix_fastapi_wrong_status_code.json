@@ -12,7 +12,7 @@
     "fastapi",
     "status-code"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The FastAPI app in app.py has a POST /items endpoint meant to create a new item. QA reports that even though the item is created successfully, the endpoint returns HTTP 200 instead of the correct HTTP 201 Created status code. Fix app.py so POST /items returns 201 on success, without changing any other behavior. Run with uvicorn on port 8012."
   ],

@@ -4,7 +4,7 @@
   "framework": "docker",
   "domain": "devops",
   "task_type": "performance",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Reorders Dockerfile so dependency install is cached across code changes",

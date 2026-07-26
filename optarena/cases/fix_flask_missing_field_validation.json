@@ -12,7 +12,7 @@
     "flask",
     "validation"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The Flask app in app.py has a POST /users endpoint meant to create a user from a JSON body with a required `username` field. When a client sends a request without the `username` field, the server currently crashes with an unhandled 500 error (a raw KeyError). Fix app.py so that if `username` is missing, the endpoint returns a 400 status code with a JSON body containing an `error` key describing the problem, instead of crashing. Valid requests (with `username` present) must keep working exactly as before. Run with app.run(port=8013)."
   ],

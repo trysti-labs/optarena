@@ -11,7 +11,7 @@
     "unit-test",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "The class src/main/java/com/optarena/testing/MessageFormatter.java (already implemented, do not modify it) has a public method `String greet(String name)` with this behavior: if name is null, empty, or all-whitespace, it returns exactly \"Hello, stranger!\"; otherwise it returns \"Hello, \" followed by the trimmed name followed by \"!\". Write JUnit 5 tests for it at src/test/java/com/optarena/testing/MessageFormatterTest.java, using org.junit.jupiter.api.Test, with at least 3 separate @Test methods covering: (1) a normal name such as \"Alice\" -> \"Hello, Alice!\"; (2) an empty string name -> \"Hello, stranger!\"; (3) a whitespace-only name (e.g. \"   \") -> \"Hello, stranger!\". You may add a null-name test too. Use assertEquals from org.junit.jupiter.api.Assertions for your assertions."
   ],

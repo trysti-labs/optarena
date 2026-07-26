@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "`x in list` membership test against eligible_ids on every iteration -> convert to a set once; budget calibrated (naive ~2.7s native at n=30k vs ~0.002s, budget 1.5s)",

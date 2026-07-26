@@ -3,7 +3,7 @@
   "language": "cpp",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 90,
   "timeout": 200,
   "description": "Write C++ tests (assert.h) for a case-insensitive, punctuation-ignoring anagram checker (already correct - do not modify it); mutation-checked (case-fold dropped on one side, length-mismatch check loosened, non-alphabetic filtering dropped)",

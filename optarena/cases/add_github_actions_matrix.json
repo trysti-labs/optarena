@@ -2,7 +2,7 @@
   "name": "add_github_actions_matrix",
   "domain": "devops",
   "task_type": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "framework": "github-actions",
   "check_command_timeout": 60,
   "timeout": 180,

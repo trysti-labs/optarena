@@ -3,7 +3,7 @@
   "language": "yaml",
   "framework": "github-actions",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Moves a blanket write permission grant to only the one job that needs it",

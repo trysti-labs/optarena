@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "cargo",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Vec::contains per element inside a dedup loop -> HashSet; budget calibrated in-container on the debug profile (naive ~1.5s at n=30k vs ~11ms, budget 700ms); wrong-output broken sorts first, losing first-occurrence order",

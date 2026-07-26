@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "flask",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 150,
   "timeout": 240,
   "description": "Asks the model to write test_client tests for an order-classification blueprint; mutation-checked",

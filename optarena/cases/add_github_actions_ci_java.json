@@ -12,7 +12,7 @@
     "maven",
     "devops"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "Add a GitHub Actions CI workflow for this Maven project at .github/workflows/ci.yml. It must: trigger on both `push` and `pull_request` events targeting the `main` branch; run on `ubuntu-latest`; check out the repository (e.g. actions/checkout@v4); set up JDK 17 (e.g. actions/setup-java@v4 with distribution 'temurin' and java-version '17'); and run a Maven build/package step (e.g. `mvn -B -DskipTests package`)."
   ],

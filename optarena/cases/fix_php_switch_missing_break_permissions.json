@@ -3,7 +3,7 @@
   "language": "php",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-php:latest",
+  "image": "optarena-tester-php:latest",
   "check_command_timeout": 180,
   "timeout": 240,
   "description": "Fixes a PHP switch whose `admin` case is missing a break and falls through to the default empty list",

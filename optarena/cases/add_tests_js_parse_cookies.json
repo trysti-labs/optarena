@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Write node:test tests for a Cookie-header parser; node-native mutation harness (split-on-every-equals, no-decode, empty-entry-for-flag mutants)",

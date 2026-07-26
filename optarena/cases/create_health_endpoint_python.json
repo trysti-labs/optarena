@@ -13,7 +13,7 @@
     "fastapi",
     "pydantic"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "Create a FastAPI app in app.py with a Pydantic model `HealthStatus` that has a single field `status: str`. Add a GET /health endpoint that returns a `HealthStatus` with status set to \"ok\". The app object must be named `app`."
   ],

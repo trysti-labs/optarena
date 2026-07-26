@@ -12,7 +12,7 @@
     "health-check",
     "express"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "Create an Express server in server.js. Add a GET /health endpoint that responds with JSON {\"status\": \"ok\"}. Have the server listen on port 8002. Do not include a package.json - express is already installed globally."
   ],

@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "express",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "setup_repo": "express-ts-shortlink",
   "git_init": true,
   "check_command_timeout": 240,

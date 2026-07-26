@@ -13,7 +13,7 @@
     "aspnet-core",
     "minimal-api"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Write Program.cs to implement an in-memory todo list with these endpoints: GET /todos returns a JSON array of all todos currently stored (each with integer 'id' and string 'title'), initially empty. POST /todos accepts a JSON body {\"title\": string}, creates a new todo with an auto-assigned integer id starting at 1 and incrementing for each new todo, stores it in memory, and returns HTTP 201 Created with the created todo (id and title) as the JSON body. DELETE /todos/{id} removes the todo with that integer id; if a todo with that id exists, remove it and return HTTP 204 No Content; if no todo with that id exists, return HTTP 404 Not Found. Listen on http://0.0.0.0:8050."
   ],

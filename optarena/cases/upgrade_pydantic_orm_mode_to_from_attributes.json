@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pydantic",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 60,
   "timeout": 150,
   "description": "Migrate pydantic 1.x class Config: orm_mode=True + .from_orm() to 2.x model_config = ConfigDict(from_attributes=True) + .model_validate() - the unmigrated code raises PydanticUserError immediately (from_orm requires from_attributes=True); incomplete-fix broken updates the call site to model_validate() but forgets to set from_attributes=True, so validating a plain (non-dict, non-model) object raises a ValidationError",

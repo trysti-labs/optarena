@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "O(n*m) Array.includes inside a loop -> Set membership; budget calibrated (naive ~7s native at 30k x 30k vs ~0.01s, budget 2.5s)",

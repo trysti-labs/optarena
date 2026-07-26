@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "minitest",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Collapses three copy-pasted pluralization methods (pluralize_item/pluralize_order/pluralize_user, identical logic, only the noun differs) into one shared pluralize(count, word) method; behavior-drift broken treats count <= 1 as singular instead of count == 1, so a count of 0 wrongly renders in the singular",

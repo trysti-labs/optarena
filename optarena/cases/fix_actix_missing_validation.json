@@ -12,7 +12,7 @@
     "actix-web",
     "validation"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "The Actix-web app in src/main.rs has a POST /users endpoint meant to create a user from a JSON body with a required \"username\" field. When a client sends a request without the \"username\" field, the handler currently panics (an unwrapped None), which crashes the request instead of returning a proper error response. Fix src/main.rs so that if \"username\" is missing (or not a string), the endpoint returns a 400 Bad Request status with a JSON body containing an \"error\" key describing the problem, instead of panicking. Valid requests (with \"username\" present) must keep working exactly as before, returning 201 Created with the created user as JSON. The server listens on 0.0.0.0:8043."
   ],

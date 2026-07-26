@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "doctest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 60,
   "timeout": 150,
   "description": "Add a doctest-verified docstring to is_palindrome() (already correct - do not modify its behavior); broken has a docstring example claiming a real case-and-punctuation-insensitive palindrome is not a palindrome",

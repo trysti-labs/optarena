@@ -26,8 +26,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 
 from .schema import validate_case, validate_unique_case_names
@@ -35,6 +37,33 @@ from .schema import validate_case, validate_unique_case_names
 PACK_FORMAT = 1
 PACKS_DIR = Path.home() / ".optarena" / "packs"
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$", re.IGNORECASE)
+
+
+def _version_key(v: str) -> tuple:
+    """
+    Best-effort SEMANTIC version sort key (F-11) - versions were previously
+    compared as plain strings, so "1.9.0" sorted ABOVE "1.10.0" (lexical '9'
+    > '1'), which would resolve a bare `--pack name` reference to the older
+    release. Parses a MAJOR[.MINOR[.PATCH]] numeric prefix and compares those
+    components as integers; anything after that (pre-release/build metadata,
+    e.g. "-rc.1") compares as a string tail. A version string with no numeric
+    prefix at all still sorts consistently (not crashing) rather than being
+    "correct" semver - this project has no external semver dependency to
+    reach for and doesn't need full spec compliance, just "1.10 beats 1.9".
+    """
+    m = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(.*)$", v or "")
+    if not m:
+        return (-1, -1, -1, v or "")
+    major, minor, patch, rest = m.groups()
+    return (int(major), int(minor or 0), int(patch or 0), rest or "")
+
+
+# F-03: a pack can legitimately bundle many cases, so this is far more
+# generous than the backend-response cap, but still bounds the worst case -
+# `resp.read()` with no limit at all would buffer an unbounded amount of
+# memory for a malicious/misconfigured pack URL before anything downstream
+# (JSON parsing, hash check, schema validation) gets a chance to reject it.
+_MAX_PACK_BYTES = 64 * 1024 * 1024
 
 
 def _safe(s: str) -> str:
@@ -92,7 +121,13 @@ def load_pack(source: str) -> dict:
     that its declared hash matches its contents (tamper/corruption check)."""
     if re.match(r"^https?://", source):
         with urllib.request.urlopen(source, timeout=30) as resp:  # noqa: S310 - user-supplied URL, documented
-            raw = resp.read().decode("utf-8")
+            raw_bytes = resp.read(_MAX_PACK_BYTES + 1)
+            if len(raw_bytes) > _MAX_PACK_BYTES:
+                raise ValueError(
+                    f"pack at {source} exceeded {_MAX_PACK_BYTES} bytes - refusing to "
+                    f"buffer further"
+                )
+            raw = raw_bytes.decode("utf-8")
     else:
         raw = Path(source).read_text(encoding="utf-8")
     pack = json.loads(raw)
@@ -103,6 +138,38 @@ def load_pack(source: str) -> dict:
             raise ValueError(f"pack missing required key: {key}")
     if not _NAME_RE.match(str(pack["name"])):
         raise ValueError(f"pack has an invalid name: {pack['name']!r}")
+    # F-11: `cases` itself, and every case inside it, were previously taken
+    # on faith from an external source (a URL or a handed-around file) and
+    # written straight to disk unvalidated - `build_pack()` validates each
+    # case when CREATING a pack, but nothing re-checked one being INSTALLED,
+    # so a malformed/hand-edited pack only surfaced later, at `run --pack`
+    # time, against a registry entry that was already (partially) written.
+    cases = pack["cases"]
+    if not isinstance(cases, dict) or not cases:
+        raise ValueError("pack 'cases' must be a non-empty object of {filename: case}")
+    for fname, data in cases.items():
+        if not isinstance(fname, str) or not fname:
+            raise ValueError(f"pack has an invalid case filename: {fname!r}")
+        validate_case(data, source=f"{source}::{fname}")
+    validate_unique_case_names(list(cases.values()), source=source)
+    declared_count = pack.get("case_count")
+    if declared_count is not None and declared_count != len(cases):
+        raise ValueError(
+            f"pack declares case_count={declared_count} but has {len(cases)} case(s) - "
+            f"refusing to install a pack whose own metadata is internally inconsistent"
+        )
+    # F-11: two different case filenames that sanitize to the SAME on-disk
+    # name (see install_pack's use of _safe()) would otherwise silently
+    # overwrite each other during install, losing a case with no warning.
+    seen_safe: dict[str, str] = {}
+    for fname in cases:
+        safe_name = _safe(fname)
+        if safe_name in seen_safe:
+            raise ValueError(
+                f"pack has a filename collision after sanitization: "
+                f"{seen_safe[safe_name]!r} and {fname!r} both become {safe_name!r}"
+            )
+        seen_safe[safe_name] = fname
     actual = content_hash(pack["cases"])
     if pack.get("hash") and pack["hash"] != actual:
         raise ValueError(f"pack hash mismatch (declared {pack['hash']}, computed {actual}) "
@@ -114,27 +181,44 @@ def load_pack(source: str) -> dict:
 def install_pack(pack: dict, packs_dir: Path | None = None, force: bool = False) -> Path:
     """Extract a loaded pack into ``<packs_dir>/<name>@<version>/`` (one case
     file each) plus a ``_pack.json`` manifest. Refuses to overwrite a different
-    build of the same name@version (hash mismatch) unless *force*."""
+    build of the same name@version (hash mismatch) unless *force*.
+
+    F-11: builds the whole install in a temporary SIBLING directory first,
+    then atomically renames it into place - the previous version deleted old
+    case files and wrote new ones in two separate loops directly on `root`,
+    so a crash between (or during) them could leave a mixture of the old and
+    new pack permanently in the registry, silently corrupting it.
+    """
     root = (packs_dir or PACKS_DIR) / f"{_safe(pack['name'])}@{_safe(pack['version'])}"
     if root.exists() and not force:
         existing = root / "_pack.json"
         if existing.exists():
-            prev = json.loads(existing.read_text(encoding="utf-8"))
+            try:
+                prev = json.loads(existing.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                prev = {}
             if prev.get("hash") == pack["hash"]:
                 return root  # already installed, identical - idempotent
             raise FileExistsError(
                 f"{pack['name']}@{pack['version']} already installed with a DIFFERENT hash "
                 f"({prev.get('hash')} vs {pack['hash']}); pass force=True to overwrite")
-    root.mkdir(parents=True, exist_ok=True)
-    # Clear any stale case files from a forced reinstall.
-    for old in root.glob("*.json"):
-        if old.name != "_pack.json":
-            old.unlink()
-    for fname, data in pack["cases"].items():
-        (root / _safe(fname)).write_text(
-            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    manifest = {k: v for k, v in pack.items() if k != "cases"}
-    (root / "_pack.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    parent = root.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = parent / f".{root.name}.staging-{uuid.uuid4().hex[:8]}"
+    staging.mkdir(parents=True, exist_ok=False)
+    try:
+        for fname, data in pack["cases"].items():
+            (staging / _safe(fname)).write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        manifest = {k: v for k, v in pack.items() if k != "cases"}
+        (staging / "_pack.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    if root.exists():
+        shutil.rmtree(root, ignore_errors=True)
+    staging.replace(root)
     return root
 
 
@@ -170,6 +254,8 @@ def resolve_pack(ref: str, packs_dir: Path | None = None) -> Path:
     candidates = [m for m in list_installed(packs_dir) if m.get("name") == ref]
     if not candidates:
         raise FileNotFoundError(f"pack not installed: {ref} (see `optarena cases packs`)")
-    # Highest version string wins; fall back to newest install.
-    candidates.sort(key=lambda m: (str(m.get("version", "")), m.get("created_at", "")), reverse=True)
+    # F-11: numeric semver compare, not string compare - "1.9.0" must sort
+    # above "1.10.0" (plain string compare puts "1.10.0" first). Falls back
+    # to newest install when versions tie or are absent.
+    candidates.sort(key=lambda m: (_version_key(str(m.get("version", ""))), m.get("created_at", "")), reverse=True)
     return Path(candidates[0]["path"])

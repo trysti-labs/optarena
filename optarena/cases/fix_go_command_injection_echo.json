@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Fixes a Go helper that runs user input through `sh -c` (command injection); must invoke the command without a shell",

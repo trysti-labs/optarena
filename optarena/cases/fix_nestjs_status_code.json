@@ -12,7 +12,7 @@
     "bugfix",
     "typescript"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "The NestJS app in main.ts (tsconfig.json is already set up correctly - do not change it) exposes POST /items, which creates a new item and should respond with HTTP 201 Created, along with the created item {id, name}. Right now the handler is decorated with @HttpCode(200), which forces every response to be 200 even though a resource was just created - this is the wrong status code for a creation endpoint. Fix main.ts so POST /items responds with 201 on success, without changing anything else about the endpoint's behavior (GET /items must still return 200 with the array of items, exactly as before). Keep listening on port 8023."
   ],

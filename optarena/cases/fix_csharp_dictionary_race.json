@@ -3,7 +3,7 @@
   "language": "csharp",
   "framework": "tpl",
   "domain": "backend",
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "check_command_timeout": 180,
   "timeout": 240,
   "tags": [

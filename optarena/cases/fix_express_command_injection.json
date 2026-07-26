@@ -11,7 +11,7 @@
     "security",
     "command-injection"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "The Express server in server.js exposes GET /greet-cmd?name=..., which is supposed to respond with JSON {\"output\": \"Hello, <name>\"} by shelling out to the `echo` command. Right now it builds the shell command by directly interpolating the `name` query parameter into a string passed to child_process.exec, e.g. exec(`echo Hello, ${name}`, ...) - a classic command-injection vulnerability, since a value like `world; echo INJECTED` lets an attacker run arbitrary additional shell commands. Fix server.js so that arbitrary shell commands can no longer be injected via `name` (for example, by using child_process.execFile with the command and arguments passed as a separate array instead of a single interpolated shell string, or by strictly validating/sanitizing `name` to a safe character set and rejecting anything else with 400), while a normal name like 'Alice' still results in output containing 'Hello, Alice' with status 200. Keep listening on port 8028."
   ],

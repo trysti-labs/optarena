@@ -12,7 +12,7 @@
     "rest",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "In this Maven Spring Boot project, GET /echo?input=... (src/main/java/com/optarena/echo/EchoController.java) reflects the raw `input` query parameter directly back into its plain-text response body, in both the success case (\"You said: \" + input) and the blank-input error case, with no sanitization at all. This lets an attacker inject characters like carriage returns/newlines or angle brackets (<, >) straight into the response body (a response-splitting / injected-content risk). Fix EchoController so the value used in the response body is sanitized first - strip or remove carriage return, newline, '<', and '>' characters from it before including it in either response - while keeping the rest of the behavior identical: non-blank input still returns HTTP 200 with \"You said: \" followed by the sanitized value, and blank/missing input still returns HTTP 400 with an error message that includes the (sanitized) received value."
   ],

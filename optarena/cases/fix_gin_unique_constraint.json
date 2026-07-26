@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "gin",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 120,
   "timeout": 240,
   "description": "Enforces unique username across a repository check and a 409 in the handler",

@@ -11,7 +11,7 @@
     "refactor",
     "duplication"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "The Express server in server.js has two endpoints, GET /products/:id and GET /users/:id, that each contain their own copy of the exact same inline logic: parsing the :id route param as an integer, responding with 400 {\"error\": \"invalid id\"} if it isn't a positive integer, then looking up the record and responding with 404 {\"error\": \"not found\"} if it doesn't exist. This duplication makes the two routes hard to keep in sync. Refactor server.js to extract this shared id-validation/lookup logic into a single reusable middleware or helper function used by both routes, without changing the observable behavior of either endpoint (the same status codes and JSON bodies must still be returned for the same inputs). Keep listening on port 8024."
   ],

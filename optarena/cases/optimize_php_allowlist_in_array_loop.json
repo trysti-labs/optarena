@@ -3,7 +3,7 @@
   "language": "php",
   "framework": "phpunit",
   "domain": "backend",
-  "docker_image": "optarena-tester-php:latest",
+  "image": "optarena-tester-php:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "AllowlistFilter::filter calls in_array() per item against the whole allowlist (O(n*m)) -> array_flip() the allowlist once and use isset() (O(n+m)); calibrated in-container at n=m=100000, naive ~2.7s vs 1200ms budget",

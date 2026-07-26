@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Dynamic eval + bug_fix: fix a rounding bug that depends on a helper file, then that helper file is DELETED - a fix that leaves a dangling require to it now crashes, not just under-scores",

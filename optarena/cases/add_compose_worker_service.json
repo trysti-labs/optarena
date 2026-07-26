@@ -3,7 +3,7 @@
   "language": "yaml",
   "framework": "docker-compose",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 150,
   "description": "Add a background 'worker' service to an existing docker-compose.yml (app + db), reusing the app image with a different command; incomplete-fix broken gives the worker its own separate image, which does not contain the worker.py entrypoint the overridden command tries to run",

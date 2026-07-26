@@ -12,7 +12,7 @@
     "aspnet-core",
     "minimal-api"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Program.cs has a GET /files?name=... endpoint that reads a file from the `data/` directory (relative to the working directory) and returns its contents as plain text, but it joins the `name` query parameter directly onto the base directory with no sanitization, so a value containing \"..\" segments (e.g. /files?name=../secret.txt) can escape the `data/` directory and read arbitrary files elsewhere on disk. Fix Program.cs so any attempt to escape the `data/` directory (via \"..\", an absolute path, or a path separator in the name) returns HTTP 400 Bad Request instead of file contents, while legitimate requests for files that actually exist directly inside `data/` (e.g. /files?name=hello.txt) keep working exactly as before. Do not change the port (8056)."
   ],

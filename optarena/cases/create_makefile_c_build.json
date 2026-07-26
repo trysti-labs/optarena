@@ -4,7 +4,7 @@
   "framework": "make",
   "domain": "devops",
   "task_type": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Writes a Makefile that compiles, cleans, and tests a C program",

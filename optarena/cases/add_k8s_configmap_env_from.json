@@ -3,7 +3,7 @@
   "language": "yaml",
   "framework": "kubernetes",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Extract an existing Deployment's hardcoded env vars into a ConfigMap, wired in via envFrom/configMapRef; incomplete-fix broken creates the ConfigMap correctly but has the Deployment's envFrom reference a differently-named (nonexistent) ConfigMap, which would fail to start the pods (CreateContainerConfigError)",

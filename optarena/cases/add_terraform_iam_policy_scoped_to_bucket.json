@@ -3,7 +3,7 @@
   "language": "hcl",
   "framework": "terraform",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 150,
   "timeout": 300,
   "description": "Add a least-privilege aws_iam_policy for read-only access to an existing S3 bucket, proven by real terraform validate; broken scopes Resource to a bare wildcard \"*\" instead of the bucket's own ARN, granting access to every bucket in the account",

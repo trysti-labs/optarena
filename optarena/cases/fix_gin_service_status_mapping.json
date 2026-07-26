@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "gin",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 120,
   "timeout": 240,
   "description": "Maps distinct service errors to correct HTTP status codes in the handler",

@@ -12,7 +12,7 @@
     "rest",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "In this Maven Spring Boot project, PricingController (src/main/java/com/optarena/pricing/PricingController.java) computes the price total directly inline in the GET /price handler (total = amount * (1 + taxRate), rounded to 2 decimal places). Refactor this so the calculation logic is moved into a new class, src/main/java/com/optarena/pricing/PricingService.java (a @Service with a method such as `double calculateTotal(double amount, double taxRate)`), and have PricingController delegate to it instead of computing the total itself. GET /price?amount=..&taxRate=.. must keep returning the exact same JSON shape {\"total\": <value>} with the same values as before."
   ],

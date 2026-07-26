@@ -14,7 +14,7 @@
     "minimal-api",
     "status-code"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Program.cs already contains a POST /products endpoint that stores a new product in memory and returns it as JSON, but it currently returns HTTP 200 OK for a successful creation. Fix Program.cs so a successful creation returns HTTP 201 Created instead, with the same JSON body (the created product's 'id' and 'name'). Do not change the route (/products), the port (8052), or any other behavior."
   ],

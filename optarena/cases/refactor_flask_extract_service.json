@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "flask",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 90,
   "timeout": 240,
   "description": "Extracts pricing logic duplicated across two Flask routes into a service module",

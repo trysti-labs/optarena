@@ -3,7 +3,7 @@
   "language": "csharp",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Optimizes a validator that constructs a new Regex on every call to a single compiled instance",

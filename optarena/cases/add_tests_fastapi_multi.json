@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "fastapi",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 150,
   "timeout": 240,
   "description": "Asks the model to write TestClient tests for an order-classification API; mutation-checked",

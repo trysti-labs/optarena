@@ -11,7 +11,7 @@
     "cors",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "In this Maven Spring Boot project, the `reports()` method in src/main/java/com/optarena/reports/ReportsController.java is annotated `@CrossOrigin(origins = \"*\", allowCredentials = \"true\")`. This is an insecure CORS configuration: combining a wildcard origin with allowCredentials=true would let any website read this endpoint's response while sending the user's credentials. Fix the @CrossOrigin annotation on `reports()` so that `origins` is restricted to a specific, non-empty allow-list of real origins (for example `{\"https://app.example.com\"}`) instead of \"*\", while keeping `allowCredentials = \"true\"` since legitimate authenticated cross-origin calls from that allow-listed origin must still work. Keep the annotation on the `reports()` method and do not remove the /reports endpoint."
   ],

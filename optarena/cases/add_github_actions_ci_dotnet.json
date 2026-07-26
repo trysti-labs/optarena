@@ -12,7 +12,7 @@
     "dotnet",
     "devops"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This repository is a small ASP.NET Core project: app.csproj and Program.cs live at the repo root, and an already-passing test project lives at tests/tests.csproj (do not modify either). Add a GitHub Actions workflow at .github/workflows/ci.yml that: triggers on both `push` and `pull_request` events; runs on `ubuntu-latest`; checks out the repository using `actions/checkout`; sets up the .NET 8 SDK using `actions/setup-dotnet` (dotnet-version 8.0.x); then runs `dotnet build` followed by `dotnet test tests/tests.csproj`, so the job fails if either command fails."
   ],

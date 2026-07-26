@@ -1,0 +1,100 @@
+{
+  "_comment": "F-13: source of truth for what each sandbox image's build is pinned to - base image digest, key direct-dependency versions, and any per-image dependency lockfile. docker/check_images_lock.py verifies this file stays in sync with the Dockerfiles (run in CI, see .github/workflows/ci.yml's dockerfile-lint job). Regenerate the 'base_digest' fields by hand after a deliberate `docker buildx imagetools inspect <tag>` refresh - this file does not auto-update, it's a checked assertion of what the Dockerfiles currently declare.",
+  "lock_version": 1,
+  "images": {
+    "optarena-tester": {
+      "dockerfile": "docker/Dockerfile",
+      "base_image": "debian:bookworm-slim",
+      "base_digest": "sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818",
+      "pinned_dependencies": {
+        "pyyaml": "6.0.2",
+        "terraform": "1.9.8"
+      },
+      "dependency_lockfile": null,
+      "known_gaps": [
+        "apt packages (build-essential, python3, nodejs, npm, sqlite3, curl, unzip) install from the live Debian archive at build time with no snapshot.debian.org pin - deferred, not a 'clear fix': would require repointing apt sources to a dated snapshot mirror and accepting that mirror's availability/rate limits."
+      ]
+    },
+    "optarena-tester-python": {
+      "dockerfile": "docker/python/Dockerfile",
+      "base_image": "debian:bookworm-slim",
+      "base_digest": "sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818",
+      "pinned_dependencies": {},
+      "dependency_lockfile": null,
+      "known_gaps": [
+        "same apt-snapshot-pinning gap as optarena-tester."
+      ]
+    },
+    "optarena-tester-node": {
+      "dockerfile": "docker/node/Dockerfile",
+      "base_image": "node:20-bookworm-slim",
+      "base_digest": "sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0",
+      "pinned_dependencies": {},
+      "dependency_lockfile": "docker/node/package-lock.json",
+      "known_gaps": []
+    },
+    "optarena-tester-go": {
+      "dockerfile": "docker/go/Dockerfile",
+      "base_image": "golang:1.22-bookworm",
+      "base_digest": "sha256:3d699e4d15d0f8f13c9195c0632a16702b8cbdece2955af1c23b37ae5d55a253",
+      "pinned_dependencies": {
+        "github.com/gin-gonic/gin": "v1.10.0",
+        "github.com/gofiber/fiber/v2": "v2.52.5"
+      },
+      "dependency_lockfile": null,
+      "known_gaps": [
+        "no committed go.sum, but this is by design and not the same gap as pyyaml/npm/cargo: `go get <pkg>@<exact version>` at build time resolves the full transitive graph once into the shared module cache, and GOPROXY=off + GOSUMDB=off (set for check_command time) mean nothing can re-resolve against a different upstream state afterward - the cache itself is the lock. A go.sum on disk would be redundant with no drift it actually prevents."
+      ]
+    },
+    "optarena-tester-jvm": {
+      "dockerfile": "docker/jvm/Dockerfile",
+      "base_image": "maven:3.9-eclipse-temurin-17",
+      "base_digest": "sha256:1ed5d1f54416b706707b4f3238f63a20bb06aab27c6d240090a2bb9ad895ed45",
+      "pinned_dependencies": {},
+      "dependency_lockfile": null,
+      "known_gaps": [
+        "Maven resolves the warmup pom.xml's dependency versions (already pinned in scratch-pom.xml/kotlin-pom.xml) against Maven Central at build time with no dependency-tree lockfile equivalent to package-lock.json/Cargo.lock - Maven's ecosystem has no first-class lockfile mechanism analogous to npm/cargo, so this is a real gap without a direct 'clear fix'."
+      ]
+    },
+    "optarena-tester-rust": {
+      "dockerfile": "docker/rust/Dockerfile",
+      "base_image": "rust:1-bookworm",
+      "base_digest": "sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa",
+      "pinned_dependencies": {},
+      "dependency_lockfile": "docker/rust/Cargo.lock",
+      "known_gaps": []
+    },
+    "optarena-tester-dotnet": {
+      "dockerfile": "docker/dotnet/Dockerfile",
+      "base_image": "mcr.microsoft.com/dotnet/sdk:8.0",
+      "base_digest": "sha256:89ce6291bde9acdf59594e79fb8277c6d84c46e4b1f5bf126a4f18766e4bd597",
+      "pinned_dependencies": {},
+      "dependency_lockfile": null,
+      "known_gaps": [
+        "NuGet restore against offline.nuget.config resolves warmup.csproj's already-version-pinned PackageReferences with no packages.lock.json committed - `dotnet restore --use-lock-file` would generate one; deferred here since it requires a .NET toolchain to regenerate and wasn't independently verified against this image's exact restore graph."
+      ]
+    },
+    "optarena-tester-php": {
+      "dockerfile": "docker/php/Dockerfile",
+      "base_image": "php:8.3-cli",
+      "base_digest": "sha256:2a3f699b6cb31e5638c5432e4d37d4047853ba6351a692c91e0a073af00a55cc",
+      "pinned_dependencies": {
+        "phpunit": "11.5.56"
+      },
+      "dependency_lockfile": null,
+      "known_gaps": [
+        "composer itself installs via the upstream installer script (signature-verified against composer.github.io/installer.sig, not floating-tag risk in the H-03 sense) - no case-facing composer.json/composer.lock exists yet to lock."
+      ]
+    },
+    "optarena-tester-ruby": {
+      "dockerfile": "docker/ruby/Dockerfile",
+      "base_image": "ruby:3.3-slim",
+      "base_digest": "sha256:fb6613e39db7b37efb7976390f0fcd4da2ea018a74770ae4a01d21a4c441f637",
+      "pinned_dependencies": {},
+      "dependency_lockfile": null,
+      "known_gaps": [
+        "gem installs (minitest, rake) are version-pinned in the Dockerfile directly; no Gemfile/Gemfile.lock exists since there's no transitive gem graph to lock at this image's current size."
+      ]
+    }
+  }
+}

@@ -3,7 +3,7 @@
   "language": "hcl",
   "framework": "terraform",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 150,
   "timeout": 300,
   "description": "aws_security_group allows SSH (port 22) from 0.0.0.0/0 -> restrict to a specific admin CIDR, proven by real terraform validate; incomplete-fix broken adds a new properly-scoped ingress rule but leaves the original wide-open rule in place, so port 22 is still reachable from the entire internet through it",

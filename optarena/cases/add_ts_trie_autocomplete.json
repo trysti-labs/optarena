@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Implements a prefix-tree (Trie) supporting insertion and alphabetically-sorted prefix lookup",

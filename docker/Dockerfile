@@ -26,10 +26,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --break-system-packages pyyaml
+# F-13: pinned, not floating - an unpinned pyyaml let a new release change
+# YAML-structure-check behavior between identical OptArena commits, the same
+# class of drift the base-image digest pin above already guards against.
+RUN pip install --no-cache-dir --break-system-packages pyyaml==6.0.2
 
+# F-14: TARGETARCH is set by BuildKit to the platform's Go-style arch
+# ("amd64"/"arm64"), which is exactly HashiCorp's release-artifact naming too
+# - no translation table needed. Previously hardcoded to linux_amd64, so a
+# `docker buildx build --platform linux/arm64` produced an image that could
+# never actually start (wrong-architecture binary).
+ARG TARGETARCH
 RUN curl -fsSL -o /tmp/terraform.zip \
-        https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip \
+        "https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_${TARGETARCH}.zip" \
     && unzip -q /tmp/terraform.zip -d /usr/local/bin \
     && rm /tmp/terraform.zip \
     && terraform version

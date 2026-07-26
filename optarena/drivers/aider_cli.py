@@ -101,8 +101,18 @@ class AiderDriver(Driver):
         env = subprocess_env()
 
         t0 = time.monotonic()
+        n_prompts = len(case.get("prompts", []))
+        # F-05: ONE deadline for the whole case, not `timeout` handed out
+        # fresh to every prompt - a multi-prompt case could otherwise consume
+        # roughly N x the configured budget, which is what `timeout` is
+        # documented to mean everywhere else (case-level, not per-prompt).
+        deadline = t0 + timeout
         try:
-            for prompt in case.get("prompts", []):
+            for i, prompt in enumerate(case.get("prompts", []), 1):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    result.error = f"case deadline ({timeout}s) exceeded before prompt {i}/{n_prompts}"
+                    break
                 cmd = [
                     self._aider,
                     "--openai-api-base", backend.openai_base,
@@ -116,8 +126,10 @@ class AiderDriver(Driver):
                 # run_capture (not subprocess.run): on timeout it kills
                 # aider's whole process tree, not just aider itself, so a
                 # subprocess aider spawned can't outlive the case (H-11).
+                # `timeout=remaining`, not the case's full `timeout` - see
+                # the deadline comment above.
                 proc = run_capture(
-                    cmd, cwd=workspace, env=env, timeout=timeout,
+                    cmd, cwd=workspace, env=env, timeout=remaining,
                     text=True, encoding="utf-8", errors="replace",
                 )
                 for key, val in parse_aider_metrics(proc.stdout).items():

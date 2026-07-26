@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 240,
   "description": "Long-horizon: build a Calculator class over three sequential prompts (arithmetic, then guarded division, then a memory), graded on the full final behavior",

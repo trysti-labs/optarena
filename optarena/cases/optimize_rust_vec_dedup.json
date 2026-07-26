@@ -12,7 +12,7 @@
     "algorithms",
     "rust"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "This Cargo library crate (Cargo.toml, no external dependencies needed) contains src/lib.rs with `pub fn dedup_preserve_order(items: &[i32]) -> Vec<i32>` that removes duplicate integers while preserving the order of first occurrence. It currently does this by checking each item against every item already added to the result vector in a nested loop, which is O(n^2) and becomes far too slow for large inputs (tens of thousands of elements). Rewrite dedup_preserve_order in src/lib.rs to run in O(n) time using a `HashSet<i32>` to track which values have already been seen, while preserving the exact same behavior: the returned vector must contain each distinct value exactly once, in the order of its first occurrence in the input slice."
   ],

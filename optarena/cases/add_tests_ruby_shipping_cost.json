@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "minitest",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Asks the model to write Minitest tests for a Ruby shipping-cost calculator; mutation-checked",

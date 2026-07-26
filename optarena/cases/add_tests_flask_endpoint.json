@@ -11,7 +11,7 @@
     "testing",
     "pytest"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The Flask app in app.py (already working, do not modify it) exposes POST /divide, which accepts a JSON body {\"a\": number, \"b\": number} and returns {\"result\": a / b} with status 200, or, when b is 0, returns status 400 with a JSON body containing an \"error\" key (no division is performed). Write tests for this endpoint in test_app.py using pytest and Flask's built-in test client (`app.test_client()`). Cover at least: (1) a normal division that succeeds with the correct result, (2) division by zero returns a 400 with an error field, (3) a missing required field (e.g. no \"b\" key) is handled gracefully (does not crash the test process, and is not treated as a 200 success). Use plain `assert` statements so pytest can collect them."
   ],

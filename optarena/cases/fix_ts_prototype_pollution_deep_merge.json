@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "typescript",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Fixes a TS recursive deep-merge that lets __proto__ keys pollute Object.prototype at any depth",

@@ -3,7 +3,7 @@
   "language": "hcl",
   "framework": "terraform",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 150,
   "timeout": 250,
   "description": "Refactors three copy-pasted null_resource blocks into one for_each over a locals list, proven by real terraform validate",

@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "keys.indexOf(item) per element building a frequency table -> Map; budget calibrated (naive ~3.5s native at n=80k all-distinct vs ~0.01s, budget 2s); wrong-output broken (plain object) reorders numeric-looking keys",

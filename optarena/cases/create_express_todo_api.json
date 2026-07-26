@@ -12,7 +12,7 @@
     "express",
     "crud"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "Create an Express server in server.js implementing an in-memory todo API (no database, no package.json - express is already installed globally). Keep todos in memory as an array. Implement: GET /todos returns 200 with a JSON array of all todos; POST /todos accepts JSON body {\"title\": string} and returns 201 with the created todo {id, title, done: false} (id is a number, auto-incrementing starting at 1); GET /todos/:id returns 200 with the todo if found, else 404 with a JSON error body; PUT /todos/:id accepts JSON body with optional title/done fields, updates the todo and returns 200 with the updated todo, or 404 if not found; DELETE /todos/:id removes the todo and returns 204 with no body, or 404 if not found. Use express.json() to parse request bodies. Listen on port 8020."
   ],

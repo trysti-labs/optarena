@@ -12,7 +12,7 @@
     "gin",
     "crud"
   ],
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "prompts": [
     "This Go module (go.mod/go.sum already list github.com/gin-gonic/gin v1.10.0 as a dependency) needs a main.go. Using Gin, implement in-memory CRUD for /todos: GET /todos returns a JSON array of all todos (each with an integer `id`, a string `title`, and a boolean `done` that starts as false); POST /todos accepts a JSON body {\"title\": string} and creates a new todo with an auto-incrementing integer id starting at 1, responding with 201 Created and the created todo as JSON; DELETE /todos/:id removes the todo with that id and responds with 204 No Content, or 404 if no todo with that id exists. Todos only need to be stored in memory (no database). The server listens on port 8031."
   ],

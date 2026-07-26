@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "cargo",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "std::process::Command via `sh -c` + interpolated string -> direct argv, no shell; incomplete-fix broken single-quote-escapes the value but still shells out",

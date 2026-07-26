@@ -3,7 +3,7 @@
   "language": "yaml",
   "framework": "docker-compose",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Adds a named volume so Postgres data survives container recreation, instead of being lost every restart",

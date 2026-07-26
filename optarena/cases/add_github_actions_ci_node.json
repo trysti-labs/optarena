@@ -12,7 +12,7 @@
     "devops",
     "node"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "Create a GitHub Actions workflow file at .github/workflows/ci.yml for a Node.js project. It must: (1) be named something sensible (e.g. \"CI\"), (2) trigger on push and pull_request events targeting the main branch, (3) define at least one job that runs on ubuntu-latest, (4) check out the repository using actions/checkout, (5) set up Node.js using actions/setup-node (any Node 18+ version), and (6) run at least one command step that would execute the project's tests (for example `npm test` or `npm ci && npm test`). Use valid YAML syntax with 'on:', 'jobs:', 'runs-on:', and 'steps:' keys."
   ],

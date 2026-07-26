@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "typescript",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Asks the model to write boundary tests for a TS byte formatter; mutation-checked",

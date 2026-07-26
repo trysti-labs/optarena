@@ -12,7 +12,7 @@
     "fiber",
     "crud"
   ],
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "prompts": [
     "This Go module (go.mod/go.sum already list github.com/gofiber/fiber/v2 v2.52.5 as a dependency) needs a main.go. Using Fiber, implement an in-memory REST resource for /items: GET /items returns a JSON array of all items created so far (each with an integer `id` and a string `name`), and POST /items accepts a JSON body {\"name\": string} and creates a new item with an auto-incrementing integer id starting at 1, responding with 201 Created and the created item as JSON. Items only need to be stored in memory (no database). The server listens on port 8030."
   ],

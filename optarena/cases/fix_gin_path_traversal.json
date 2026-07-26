@@ -11,7 +11,7 @@
     "path-traversal",
     "gin"
   ],
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "prompts": [
     "The Gin app in main.go has a GET /download/*filename endpoint that reads a file from the `files/` directory and returns its contents as plain text, but it joins the filename directly onto the base directory with no sanitization, so a request whose filename contains \"..\" segments (including percent-encoded variants like /download/..%2Fsecret.txt) can escape the `files/` directory and read arbitrary files on disk. Fix main.go so any attempt to escape the `files/` directory returns a 400 (or 403/404) error instead of file contents, while legitimate requests for files that actually exist directly inside `files/` (e.g. /download/hello.txt) keep working exactly as before. The server keeps listening on port 8036."
   ],

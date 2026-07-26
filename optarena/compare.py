@@ -12,6 +12,7 @@ import json
 import math
 import re
 import time
+import uuid
 from pathlib import Path
 
 from . import store
@@ -144,8 +145,19 @@ def save_comparison(cmp: dict) -> Path:
     # Labels are scenario names, which can embed model ids with "/" or ":" -
     # sanitize so the comparison file lands where intended on every platform.
     safe = lambda s: re.sub(r"[^\w.\-+]+", "-", s)  # noqa: E731
-    name = f"{time.strftime('%Y%m%d-%H%M%S')}_{safe(cmp['a']['label'])}_vs_{safe(cmp['b']['label'])}.json"
-    path = out_dir / name
+    # F-08: a UUID suffix (matching run_id's own collision-proofing) plus an
+    # explicit existence check - two `optarena compare`/`regression` calls
+    # between the same two labels within the same second previously computed
+    # the IDENTICAL filename and silently overwrote each other via
+    # `_write_atomic`'s unconditional replace, with none of `save_run`'s
+    # collision guard.
+    stem = f"{time.strftime('%Y%m%d-%H%M%S')}_{safe(cmp['a']['label'])}_vs_{safe(cmp['b']['label'])}"
+    for _ in range(5):
+        path = out_dir / f"{stem}_{uuid.uuid4().hex[:8]}.json"
+        if not path.exists():
+            break
+    else:
+        raise FileExistsError(f"could not find a free comparison filename under {out_dir} after 5 attempts")
     store._write_atomic(path, json.dumps(cmp, indent=2))
     return path
 
@@ -168,6 +180,12 @@ def regression_summary(cmp: dict) -> dict:
 
     flaky = [r["case"] for r in cmp["cases"]
              if _is_flaky(r.get("a_trials")) or _is_flaky(r.get("b_trials"))]
+    # F-10: cases where either run's verdict may not be trustworthy - the
+    # environment broke, not the code - flagged separately from a genuine
+    # pass<->fail flip so a regression gate can tell "the model regressed"
+    # apart from "the test environment broke" (see cli.cmd_regression).
+    infra_error_cases = [r["case"] for r in cmp["cases"]
+                          if r.get("a_infrastructure_error") or r.get("b_infrastructure_error")]
     p_value = mcnemar_exact_p(len(regressed), len(improved))
     sa, sb = cmp["a"]["summary"], cmp["b"]["summary"]
     ta, tb = sa.get("total_tokens"), sb.get("total_tokens")
@@ -197,6 +215,7 @@ def regression_summary(cmp: dict) -> dict:
         "regressed_cases": regressed,
         "improved_cases": improved,
         "flaky_cases": flaky,
+        "infrastructure_error_cases": infra_error_cases,
     }
 
 
@@ -260,6 +279,13 @@ def format_regression(summary: dict) -> str:
         lines.append("")
         lines.append(f"  flaky cases (non-unanimous across --trials): {len(s['flaky_cases'])}")
         for name in s["flaky_cases"]:
+            lines.append(f"    - {name}")
+    if s.get("infrastructure_error_cases"):
+        lines.append("")
+        lines.append(f"  ** INFRASTRUCTURE ERRORS (not a code verdict): {len(s['infrastructure_error_cases'])} **")
+        lines.append("     the container engine/sandbox failed for these cases in at least one")
+        lines.append("     run - their pass/fail here may reflect the environment, not the model/tool")
+        for name in s["infrastructure_error_cases"]:
             lines.append(f"    - {name}")
     lines.append("")
     return "\n".join(lines)

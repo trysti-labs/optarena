@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 120,
   "description": "Implement an ascending sort, graded by metamorphic relations (length/multiset/order/idempotence/permutation) over random inputs",

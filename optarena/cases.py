@@ -34,7 +34,7 @@ decides pass/fail:
                                              # when available; see run_check_command);
                                              # non-zero exit fails the case
       "check_command_timeout": int,          # seconds (default 60)
-      "docker_image":          str,          # optional: which sandbox image this
+      "image":                 str,          # optional: which sandbox image this
                                              # case needs (see DOCKER_IMAGES in
                                              # drivers-adjacent docker/ dir);
                                              # defaults to DOCKER_IMAGE_DEFAULT
@@ -78,6 +78,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -100,6 +101,26 @@ DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker"
 # per-image verification this session didn't have time for.
 _HARDENING_ARGS = [
     "--cap-drop", "ALL",
+    # `self.root`/the run's workspace is a HOST directory (very often a
+    # fresh `tempfile.mkdtemp()`, which Python deliberately creates 0700) bind-
+    # mounted in as /workspace; the container still runs as root, and without
+    # DAC_OVERRIDE a plain "--cap-drop ALL" root can't read/write files it
+    # doesn't own once permission bits don't line up - which they routinely
+    # don't, since the host side keeps creating new case/variant directories
+    # throughout the run under the runner's own uid. That produced exactly
+    # "Permission denied" / "could not find Cargo.toml" (a blocked directory
+    # traversal looks identical to "not there" to a tool doing its own upward
+    # search) - confirmed live under real Linux Docker (WSL2, GitHub Actions);
+    # invisible under Windows/macOS Docker Desktop, whose bind-mount
+    # translation layer ignores real Unix permission bits, which is exactly
+    # why it went unnoticed through months of local testing. Restoring just
+    # this one capability (root's normal, pre-hardening behavior on its own
+    # bind mount) fixes the whole class at the source instead of chasing
+    # individual directories with chmod; it grants no privilege beyond what
+    # root already has outside a container, and every other capability -
+    # including anything that could matter for container escape or host
+    # interaction - stays dropped.
+    "--cap-add", "DAC_OVERRIDE",
     "--security-opt", "no-new-privileges",
     "--pids-limit", "256",
     "--read-only",
@@ -152,9 +173,9 @@ def _sandbox_user_args() -> list[str]:
     return ["--user", user, "-e", "HOME=/tmp"] if user else []
 
 # Registry of every sandbox image OptArena knows how to build, keyed by the
-# short name used with `optarena docker build --lang <key>`. "base" is the
+# short name used with `optarena sandbox build --lang <key>`. "base" is the
 # original combined image (gcc + python3 + node) and stays the default for
-# cases with no `docker_image` set, so the 7 original cases are unaffected.
+# cases with no `image` set, so the 7 original cases are unaffected.
 # Per-language images add a framework's dependencies pre-fetched at build
 # time (the sandbox runs with --network none, so nothing can be installed
 # at check_command time - it must already be in the image).
@@ -329,17 +350,31 @@ def container_engine() -> str:
     return _engine_bin
 
 
-_docker_checked = False
+_docker_checked_at: float = -1.0  # monotonic timestamp of the last probe; -1 = never probed
 _docker_ok = False
 _docker_warned = False
+# F-16: a bare per-process boolean cache meant one transient failure (Docker
+# Desktop/`podman machine` still waking up) marked the engine "unavailable"
+# for the rest of the process - every later scenario in a --matrix-drivers
+# run would then skip the sandbox entirely. A short TTL lets a later probe
+# recover once the engine actually comes up, without re-probing on every
+# single case (`docker info` is not free).
+_ENGINE_HEALTH_TTL_S = 20.0
 
 
-def _docker_available() -> bool:
-    """Cached check for a reachable container engine daemon (one `<engine> info` per process)."""
-    global _docker_checked, _docker_ok
-    if _docker_checked:
+def _docker_available(*, force_recheck: bool = False) -> bool:
+    """Cached (TTL'd) check for a reachable container engine daemon.
+
+    ``force_recheck=True`` bypasses the TTL - used at the start of each
+    scenario in a multi-scenario run so a matrix run doesn't stay convinced
+    the engine is down for its whole duration just because it was still
+    starting up when scenario 1 probed it.
+    """
+    global _docker_checked_at, _docker_ok
+    now = time.monotonic()
+    if not force_recheck and _docker_checked_at >= 0 and (now - _docker_checked_at) < _ENGINE_HEALTH_TTL_S:
         return _docker_ok
-    _docker_checked = True
+    _docker_checked_at = now
     try:
         proc = subprocess.run(
             [container_engine(), "info"], capture_output=True, timeout=10,
@@ -348,6 +383,15 @@ def _docker_available() -> bool:
     except (OSError, subprocess.TimeoutExpired):
         _docker_ok = False
     return _docker_ok
+
+
+def reset_engine_health_cache() -> None:
+    """Force the next `_docker_available()` call to re-probe regardless of
+    TTL. Called once per scenario by `runner.run_scenario` (F-16) so a
+    transient failure early in a matrix/multi-scenario run doesn't suppress
+    the sandbox for every later scenario even after the engine recovers."""
+    global _docker_checked_at
+    _docker_checked_at = -1.0
 
 
 def docker_image_available(image: str = DOCKER_IMAGE_DEFAULT) -> bool:
@@ -369,40 +413,94 @@ def docker_image_available(image: str = DOCKER_IMAGE_DEFAULT) -> bool:
 # default is the mutable `:latest`, but publish-images.yml also pushes an
 # immutable `:<git-sha>` tag for every build (Phase 2.3 - content-addressed
 # images). Pin to a known-good build with e.g.
-# OPTARENA_DOCKER_IMAGE=optarena-tester:<sha> (or a `docker_image` field in a
+# OPTARENA_SANDBOX_IMAGE=optarena-tester:<sha> (or an `image` field in a
 # case JSON) - no code change needed, this already pulls whatever tag it's given.
 GHCR_PREFIX = "ghcr.io/trysti-labs/optarena/"
-_pull_attempted: set[str] = set()
+# F-16: previously a plain add-only set - one failed pull (a blip, not a
+# permanent registry problem) meant "never try again this process," even for
+# a transient network error. Track attempt count + last-attempt time per
+# image instead, so a *bounded* number of retries with exponential backoff
+# can recover from a blip while still giving up for real on a genuinely
+# unpublished/unreachable image rather than retrying forever.
+_PULL_MAX_ATTEMPTS = 3
+_pull_attempts: dict[str, int] = {}
+_pull_last_attempt_at: dict[str, float] = {}
 
 
 def docker_image_pull(image: str) -> bool:
-    """Pull GHCR_PREFIX+image and tag it as the local name. One attempt per
-    image per process; disable entirely with OPTARENA_NO_PULL=1."""
-    if image in _pull_attempted or os.environ.get("OPTARENA_NO_PULL") == "1":
+    """Pull GHCR_PREFIX+image and tag it as the local name. Up to
+    ``_PULL_MAX_ATTEMPTS`` attempts per image per process with exponential
+    backoff between them; disable entirely with OPTARENA_DISABLE_PULL=1."""
+    if os.environ.get("OPTARENA_DISABLE_PULL") == "1":
         return False
-    _pull_attempted.add(image)
+    attempts = _pull_attempts.get(image, 0)
+    if attempts >= _PULL_MAX_ATTEMPTS:
+        return False
+    if attempts > 0:
+        backoff = min(2 ** attempts, 30)  # 2s, 4s, ... capped at 30s
+        elapsed = time.monotonic() - _pull_last_attempt_at.get(image, 0.0)
+        if elapsed < backoff:
+            return False  # still within this image's backoff window
+    _pull_attempts[image] = attempts + 1
+    _pull_last_attempt_at[image] = time.monotonic()
     remote = GHCR_PREFIX + image
     engine = container_engine()
-    print(f"[optarena] image '{image}' not built locally - trying `{engine} pull {remote}` ...",
-          file=sys.stderr)
+    print(f"[optarena] image '{image}' not built locally - trying `{engine} pull {remote}` "
+          f"(attempt {attempts + 1}/{_PULL_MAX_ATTEMPTS}) ...", file=sys.stderr)
     try:
         # 5-minute cap: this is a first-run convenience, not a build step. A
         # registry that can't serve the image by then (unpublished repo, slow
         # link, waking the engine's VM) must not stall the whole run - explicit
-        # `optarena docker pull` / `optarena docker build` remain available.
+        # `optarena sandbox pull` / `optarena sandbox build` remain available.
         proc = subprocess.run([engine, "pull", remote], capture_output=True, timeout=300)
         if proc.returncode != 0:
             tail = (proc.stderr or b"").decode(errors="replace").strip()[-200:]
-            print(f"[optarena] pull failed ({tail}) - build locally with `optarena docker build`",
+            print(f"[optarena] pull failed ({tail})"
+                  + (" - retrying" if attempts + 1 < _PULL_MAX_ATTEMPTS else
+                     " - build locally with `optarena sandbox build`"),
                   file=sys.stderr)
             return False
-        subprocess.run([engine, "tag", remote, image], capture_output=True, timeout=30)
+        tag_proc = subprocess.run([engine, "tag", remote, image], capture_output=True, timeout=30)
+        if tag_proc.returncode != 0:
+            tail = (tag_proc.stderr or b"").decode(errors="replace").strip()[-200:]
+            print(f"[optarena] pulled {remote} but `{engine} tag` failed ({tail})", file=sys.stderr)
+            return False
         print(f"[optarena] pulled {remote} -> {image}", file=sys.stderr)
         return True
     except (OSError, subprocess.TimeoutExpired):
-        print(f"[optarena] pull of {remote} timed out - build locally with "
-              f"`optarena docker build`", file=sys.stderr)
+        print(f"[optarena] pull of {remote} timed out"
+              + (" - retrying" if attempts + 1 < _PULL_MAX_ATTEMPTS else
+                 " - build locally with `optarena sandbox build`"),
+              file=sys.stderr)
         return False
+
+
+# F-15: run-scoped image-pinning override, mirroring `_active_sandboxes`'
+# own run-scoped-global pattern - set once by `runner.run_scenario()` so
+# every driver's evaluate_case()->run_check_command() call picks it up
+# without threading a new parameter through every driver module.
+_image_overrides: dict[str, str] = {}
+
+
+def set_image_overrides(overrides: "dict[str, str] | None") -> None:
+    global _image_overrides
+    _image_overrides = dict(overrides) if overrides else {}
+
+
+def resolve_image(image: str) -> str:
+    """Apply the active run's `image_overrides` (F-15) to a resolved image
+    name, if any - matched either by the exact image reference or by
+    `DOCKER_IMAGES` short track name (e.g. "python"), so a scenario can pin
+    either a specific unusual `image` value or a whole registered
+    track without knowing every case's exact tag."""
+    if not _image_overrides:
+        return image
+    if image in _image_overrides:
+        return _image_overrides[image]
+    for key, val in DOCKER_IMAGES.items():
+        if val == image and key in _image_overrides:
+            return _image_overrides[key]
+    return image
 
 
 def ensure_image(image: str) -> bool:
@@ -422,7 +520,31 @@ def ensure_image(image: str) -> bool:
 # Keyed by Docker image tag rather than a single slot - a run whose cases
 # span multiple languages (e.g. --cases includes both a Python and a Go
 # case) needs one long-lived container PER distinct image, not one overall.
+# This is the SERIAL-execution registry (one sandbox per image, shared by
+# every case). F-06's --parallel worker pool uses a separate, per-thread
+# registry instead (`_worker_sandboxes` below) so concurrent workers never
+# `exec` into the same container.
 _active_sandboxes: dict[str, "DockerSandbox"] = {}
+
+# F-06: per-worker-thread sandbox routing for --parallel. Each parallel
+# worker thread binds its OWN dedicated {image: DockerSandbox} map here at
+# the start of its work (see runner.py's worker-pool implementation) so
+# `run_check_command` routes each case to a container that only THAT thread
+# ever execs into - concurrent `exec` calls into one shared container would
+# otherwise collide in its process table/network namespace, and a
+# timeout-triggered `reap()` (`kill -9 -1`) would kill every other worker's
+# in-flight process too, not just the one that actually timed out.
+_worker_sandboxes = threading.local()
+
+
+def _active_sandbox_for(image: str) -> "DockerSandbox | None":
+    """The sandbox `run_check_command` should use for `image`: this
+    thread's own worker-pool binding if one is set (--parallel), else the
+    single shared serial-run registry."""
+    worker_map = getattr(_worker_sandboxes, "map", None)
+    if worker_map is not None:
+        return worker_map.get(image)
+    return _active_sandboxes.get(image)
 
 
 class DockerSandbox:
@@ -443,23 +565,23 @@ class DockerSandbox:
 
     Used as a context manager around the whole run (see ``runner.py``):
     ``with DockerSandbox(root) as sandbox:``. If no container engine is
-    available (or ``OPTARENA_NO_DOCKER=1``), ``start()`` is a no-op and
+    available (or ``OPTARENA_DISABLE_SANDBOX=1``), ``start()`` is a no-op and
     callers fall back to running check_command on the host - unchanged from before.
     """
 
     def __init__(self, root: Path, image: str | None = None):
         self.root = root.resolve()
-        self.image = image or os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
+        self.image = image or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT)
         self.name = f"optarena-sandbox-{uuid.uuid4().hex[:12]}"
         self.active = False
 
     def start(self) -> bool:
-        if os.environ.get("OPTARENA_NO_DOCKER") == "1" or not _docker_available():
+        if os.environ.get("OPTARENA_DISABLE_SANDBOX") == "1" or not _docker_available():
             return False
         if not ensure_image(self.image):
             print(
                 f"[optarena] Container image '{self.image}' not found - check_command "
-                f"will run on the host. Run `optarena docker build` to build the "
+                f"will run on the host. Run `optarena sandbox build` to build the "
                 f"sandboxed test image.",
                 file=sys.stderr,
             )
@@ -484,8 +606,24 @@ class DockerSandbox:
         return True
 
     def stop(self) -> None:
+        # F-16: both calls are bounded so a hung engine CLI (not just a hung
+        # container - the `-t 2` grace period only bounds the CONTAINER's
+        # shutdown, not the `docker`/`podman stop` client process itself)
+        # can't hang the whole run's cleanup. Best-effort throughout: this is
+        # cleanup, called from a `finally`, and must never raise - a failed
+        # stop/rm here just means a leftover `--rm` container the engine's
+        # own garbage collection (or the next `sandbox build`) will reclaim.
         if self.active:
-            subprocess.run([container_engine(), "stop", "-t", "2", self.name], capture_output=True)
+            engine = container_engine()
+            try:
+                subprocess.run([engine, "stop", "-t", "2", self.name],
+                                capture_output=True, timeout=15)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    subprocess.run([engine, "rm", "-f", self.name],
+                                    capture_output=True, timeout=15)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
             self.active = False
         if _active_sandboxes.get(self.image) is self:
             del _active_sandboxes[self.image]
@@ -540,6 +678,16 @@ def _new_oracle_info(cmd: str | None) -> dict:
         "exit_code": None,
         "duration_s": None,
         "output": "",
+        # F-10: True when the environment (not the model/tool's code) is why
+        # this failed - the container engine couldn't exec into it, no
+        # engine/image was available at all, etc. A real nonzero-exit test
+        # failure is NOT an infrastructure error even though it's still a
+        # failure - this only marks the case where "failed" would otherwise
+        # be indistinguishable from "the model's code was wrong," which
+        # silently drags down a measured pass rate for reasons that have
+        # nothing to do with what's being evaluated. See metrics.aggregate's
+        # `infrastructure_errors`/`adjusted_pass_rate`.
+        "infrastructure_error": False,
     }
 
 
@@ -548,7 +696,7 @@ def _unsafe_host_exec_allowed() -> bool:
     Two distinct, both explicit, opt-ins to running an untrusted
     ``check_command`` directly on the host:
 
-    - ``OPTARENA_NO_DOCKER=1`` - "I am deliberately disabling the container
+    - ``OPTARENA_DISABLE_SANDBOX=1`` - "I am deliberately disabling the container
       sandbox", already an explicit choice (this project's own test suite
       and CI use it on hosts with no Docker/Podman daemon at all).
     - ``OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`` - covers the C-02 gap: the
@@ -559,7 +707,7 @@ def _unsafe_host_exec_allowed() -> bool:
       check_command and model-generated code are both untrusted input).
       Fail closed instead unless this is set.
     """
-    return (os.environ.get("OPTARENA_NO_DOCKER") == "1"
+    return (os.environ.get("OPTARENA_DISABLE_SANDBOX") == "1"
             or os.environ.get("OPTARENA_ALLOW_UNSAFE_HOST_EXEC") == "1")
 
 
@@ -582,7 +730,7 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     the runner), it falls back to one ephemeral ``run --rm`` for this
     call. When no container engine is available or an image is missing, this
     now FAILS CLOSED (C-02) unless the caller has explicitly opted into host execution
-    via ``OPTARENA_NO_DOCKER=1`` or ``OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`` -
+    via ``OPTARENA_DISABLE_SANDBOX=1`` or ``OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`` -
     see ``_unsafe_host_exec_allowed``.
     """
     global _docker_warned
@@ -591,11 +739,11 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     if not cmd:
         return [], info
     timeout = int(case.get("check_command_timeout", 60) or 60)
-    docker_disabled = os.environ.get("OPTARENA_NO_DOCKER") == "1"
+    docker_disabled = os.environ.get("OPTARENA_DISABLE_SANDBOX") == "1"
     unsafe_ok = _unsafe_host_exec_allowed()
-    image = case.get("docker_image") or os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
+    image = resolve_image(case.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT))
 
-    active = _active_sandboxes.get(image)
+    active = _active_sandbox_for(image)
     if not docker_disabled and active is not None:
         return _run_check_command_sandbox(cmd, root, timeout, active, info)
 
@@ -613,7 +761,7 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
                    "host exec explicitly allowed)."
                    if unsafe_ok else
                    "refusing to run check_command on the host. Run "
-                   "`optarena docker build` to build the sandboxed test image, "
+                   "`optarena sandbox build` to build the sandboxed test image, "
                    "or set OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1 to run this "
                    "untrusted command directly on this machine anyway."),
                 file=sys.stderr,
@@ -636,6 +784,7 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
             _docker_warned = True
         if not unsafe_ok:
             info["sandbox"] = "refused"
+            info["infrastructure_error"] = True
             return ([f'check_command refused: no container sandbox available and host '
                      f'execution was not explicitly allowed (see stderr): {cmd}'], info)
         return _run_check_command_local(cmd, root, timeout, info)
@@ -658,6 +807,7 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
         return [f'check_command timed out after {timeout}s ({engine} exec): {cmd}'], info
     except (OSError, ValueError) as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["infrastructure_error"] = True  # F-10: the engine/container couldn't even exec, not a test failure
         return [f'check_command could not run ({engine} exec): {exc}'], info
     info["duration_s"] = round(time.monotonic() - t0, 2)
     info["ran"] = True
@@ -693,16 +843,53 @@ def _kill_process_tree(pid: int) -> None:
                        capture_output=True)
 
 
+# F-03: `Popen.communicate()` buffers a stream's ENTIRE output in memory
+# before any truncation happens - only a few hundred chars of any output are
+# ever actually shown/stored downstream (see the `[-400:]`/`[-800:]` slices
+# throughout this module and the drivers), so there's no reason to let a
+# pathological or adversarial agent/check_command hold gigabytes in memory
+# on the way to being thrown away.
+_MAX_CAPTURE_BYTES = 256 * 1024  # generous headroom over any tail actually used
+
+
+def _drain_bounded(stream, max_keep: int = _MAX_CAPTURE_BYTES):
+    """Read `stream` to EOF (so the child is never blocked on a full pipe
+    buffer) while keeping only the trailing `max_keep` bytes/chars in
+    memory. Works for both binary and text-mode streams - `chunk[:0]` yields
+    the correctly-typed empty value (``b""`` or ``""``) to join against."""
+    chunks: list = []
+    kept = 0
+    while True:
+        chunk = stream.read(65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        kept += len(chunk)
+        # Compact only once well past budget, so a stream with many small
+        # writes doesn't re-join its whole buffer on every single read.
+        if kept > max_keep * 2:
+            empty = chunk[:0]
+            joined = empty.join(chunks)[-max_keep:]
+            chunks = [joined]
+            kept = len(joined)
+    if not chunks:
+        return ""
+    empty = chunks[0][:0]
+    return empty.join(chunks)[-max_keep:]
+
+
 def run_capture(cmd, *, timeout: int, **kwargs) -> subprocess.CompletedProcess:
     """
-    Like ``subprocess.run(..., capture_output=True, timeout=timeout)`` but on
-    timeout kills the whole process TREE, not just the direct child
+    Like ``subprocess.run(..., capture_output=True, timeout=timeout)`` but
+    (a) on timeout kills the whole process TREE, not just the direct child
     (``subprocess.run`` kills only the immediate process even with a new
-    session). Raises ``subprocess.TimeoutExpired`` after the tree is reaped,
-    so existing call sites that catch it are unchanged. Used for every
-    HOST-mode subprocess (check_command on the host, and the CLI-agent
-    drivers) - container paths don't need it, the container boundary already is
-    the process-group boundary (see ``DockerSandbox.reap``).
+    session), and (b) bounds captured stdout/stderr to a trailing window
+    (F-03) rather than buffering everything a child ever writes. Raises
+    ``subprocess.TimeoutExpired`` after the tree is reaped, so existing call
+    sites that catch it are unchanged. Used for every HOST-mode subprocess
+    (check_command on the host, and the CLI-agent drivers) - container paths
+    don't need it, the container boundary already is the process-group
+    boundary (see ``DockerSandbox.reap``).
     """
     kwargs.setdefault("stdout", subprocess.PIPE)
     kwargs.setdefault("stderr", subprocess.PIPE)
@@ -711,14 +898,52 @@ def run_capture(cmd, *, timeout: int, **kwargs) -> subprocess.CompletedProcess:
     else:
         kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NEW_PROCESS_GROUP
     proc = subprocess.Popen(cmd, **kwargs)
+
+    # Two reader threads, not proc.communicate() - stdout/stderr must be
+    # drained CONCURRENTLY (not one-then-the-other) or the child can deadlock
+    # the moment the not-yet-read stream's OS pipe buffer fills up.
+    captured: dict[str, object] = {}
+
+    def _reader(key: str, stream) -> None:
+        captured[key] = _drain_bounded(stream) if stream is not None else None
+
+    t_out = threading.Thread(target=_reader, args=("stdout", proc.stdout), daemon=True)
+    t_err = threading.Thread(target=_reader, args=("stderr", proc.stderr), daemon=True)
+    t_out.start()
+    t_err.start()
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
+        proc.wait(timeout=timeout)
+        timed_out = False
     except subprocess.TimeoutExpired:
+        timed_out = True
+
+    # Kill BEFORE joining the reader threads, not after: on timeout the
+    # child is still alive and its pipes are still open, so a reader thread
+    # blocked in stream.read() won't see EOF - and won't return - until
+    # something closes those pipes. Joining first (the original bug here)
+    # meant waiting out the FULL join timeout on each of two threads before
+    # the tree-kill even ran, letting the child comfortably outlive the
+    # timeout it was supposed to enforce.
+    if timed_out:
         _kill_process_tree(proc.pid)
         try:
-            stdout, stderr = proc.communicate(timeout=5)
+            proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            stdout, stderr = None, None
+            pass  # best-effort reap; raising regardless
+
+    # NOW the process (and its pipes) are closed - normally, or forcibly by
+    # the kill above - so EOF arrives promptly and these joins are bounded
+    # in practice, not just in theory.
+    t_out.join(timeout=10)
+    t_err.join(timeout=10)
+    stdout, stderr = captured.get("stdout"), captured.get("stderr")
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
+    if timed_out:
         raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr)
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
@@ -737,6 +962,7 @@ def _run_check_command_local(cmd: str, root: Path, timeout: int, info: dict) -> 
         return [f'check_command timed out after {timeout}s: {cmd}'], info
     except OSError as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["infrastructure_error"] = True  # F-10: couldn't even launch the command - not a test failure
         return [f'check_command could not run: {exc}'], info
     info["duration_s"] = round(time.monotonic() - t0, 2)
     info["ran"] = True
@@ -774,12 +1000,16 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
             timeout=timeout + 15, encoding="utf-8", errors="replace",
         )
     except subprocess.TimeoutExpired:
-        subprocess.run([engine, "rm", "-f", name], capture_output=True)
+        try:
+            subprocess.run([engine, "rm", "-f", name], capture_output=True, timeout=15)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # best-effort; the engine's own GC reclaims a leftover container eventually
         info["duration_s"] = round(time.monotonic() - t0, 2)
         info["timed_out"] = True
         return [f'check_command timed out after {timeout}s ({engine}): {cmd}'], info
     except OSError as exc:
         info["duration_s"] = round(time.monotonic() - t0, 2)
+        info["infrastructure_error"] = True  # F-10: couldn't even start the container - not a test failure
         return [f'check_command could not run ({engine}): {exc}'], info
     info["duration_s"] = round(time.monotonic() - t0, 2)
     info["ran"] = True

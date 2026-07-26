@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 180,
   "timeout": 240,
   "description": "Fixes a Go check that uses `==` against a sentinel error that was wrapped with %w; must use errors.Is",

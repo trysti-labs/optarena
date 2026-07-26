@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "data-engineering",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "CSV aggregation into a gap-filled daily time series (missing days sum to zero, not skipped) - the oracle pins the exact ordered output including gap days",

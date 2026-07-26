@@ -2,7 +2,7 @@
   "name": "fix_shell_report_path_traversal",
   "language": "shell",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 120,
   "description": "read_report.sh concatenates an unvalidated filename onto a base directory with no traversal check -> canonicalize with realpath -m and verify the result is still inside the base dir; incomplete-fix broken only rejects a name that STARTS WITH \"../\", missing the equally-effective escape via a real subdirectory (\"subdir/../../secret.txt\")",

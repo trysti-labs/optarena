@@ -14,7 +14,7 @@
     "minimal-api",
     "validation"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Program.cs already contains a POST /register endpoint that trims and lowercases an email address from the request body, but when the request body is missing the 'email' field or it is null/blank, the current code throws an unhandled exception (a raw HTTP 500 error) instead of returning a proper validation error. Fix Program.cs so that: when 'email' is missing, null, or blank (whitespace-only), the endpoint returns HTTP 400 Bad Request with a JSON body containing an 'error' field (no exception); otherwise it returns HTTP 200 OK with a JSON body {\"email\": <trimmed, lowercased email>}. Keep the route (/register) and port (8053) unchanged."
   ],

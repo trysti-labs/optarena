@@ -3,7 +3,7 @@
   "language": "csharp",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Fixes a for-loop that captures the same loop variable in every closure, so all thunks return the final value",

@@ -11,7 +11,7 @@
     "performance",
     "n-plus-one"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The function `load_authors_with_books(session)` in models.py loads all `Author` rows, then for each author separately queries its `Book` rows in a Python loop, causing an N+1 query problem (one query for the authors, plus one additional query per author). Rewrite `load_authors_with_books` so it fetches all authors and their books using a single query with eager loading (e.g. SQLAlchemy's `joinedload` or `selectinload`), instead of querying books separately per author in a loop. The function must keep returning the exact same result shape: a list of (author_name, sorted_list_of_book_titles) tuples, in the same order as before."
   ],

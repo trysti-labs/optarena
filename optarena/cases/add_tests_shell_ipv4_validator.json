@@ -2,7 +2,7 @@
   "name": "add_tests_shell_ipv4_validator",
   "language": "shell",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 90,
   "timeout": 150,
   "description": "Write shell tests for a POSIX-sh IPv4 dotted-quad validator (already correct - do not modify it); mutation-checked (octet upper bound off-by-one both directions, octet-count check loosened to allow extra octets)",

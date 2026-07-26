@@ -3,7 +3,7 @@
   "language": "cpp",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Collapses three copy-pasted clamp functions (int/float/double, identical logic) into one function template, keeping the original three entry points as thin wrappers; behavior-drift broken has a typo in the shared template's low-bound branch, returning hi instead of lo for values below the range",

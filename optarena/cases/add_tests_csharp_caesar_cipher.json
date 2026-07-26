@@ -3,7 +3,7 @@
   "language": "csharp",
   "framework": "xunit",
   "domain": "backend",
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "check_command_timeout": 300,
   "timeout": 400,
   "description": "Asks the model to write xUnit tests for a Caesar cipher encoder; mutation-checked",

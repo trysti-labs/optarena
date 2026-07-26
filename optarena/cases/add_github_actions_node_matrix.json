@@ -3,7 +3,7 @@
   "language": "yaml",
   "framework": "github-actions",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Turn a single-version CI job into a node 18/20/22 matrix with fail-fast: false; broken leaves fail-fast at the default so one failure cancels the rest",

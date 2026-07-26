@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "typescript",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 240,
   "timeout": 300,
   "description": "Creates a generically-typed TS EventBus (on/off/once/emit) consumed by an existing notifier module (cross-file)",

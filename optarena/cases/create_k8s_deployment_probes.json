@@ -3,7 +3,7 @@
   "language": "yaml",
   "framework": "kubernetes",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Authors a production-ready Kubernetes Deployment with probes, resource requests/limits and a non-root securityContext",

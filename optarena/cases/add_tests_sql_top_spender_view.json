@@ -3,7 +3,7 @@
   "language": "sql",
   "framework": "sqlite",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Write pytest-free sqlite3 assertions for a top-spender-per-region window-function view; mutation-checked (ranking direction flipped, ties widened, orderless customers leaking in via LEFT JOIN)",

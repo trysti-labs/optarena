@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "express",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 150,
   "timeout": 240,
   "description": "Asks the model to write in-process tests for an order-classification Express API; mutation-checked",

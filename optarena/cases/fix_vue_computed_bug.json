@@ -12,7 +12,7 @@
     "reactivity",
     "bugfix"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "counter.js exports createCounter(initial), using Vue's Composition API, returning { count, doubled, setMultiplier }. `doubled` is meant to always equal count.value * the current multiplier, and setMultiplier(m) is meant to change that multiplier so doubled immediately reflects the new value. Right now the multiplier is stored in a plain (non-reactive) local variable instead of a ref, so Vue's `computed` never tracks it as a dependency - changing the multiplier via setMultiplier does not cause `doubled` to recompute (it keeps returning the value computed with the old multiplier) until count itself changes. Fix counter.js so the multiplier is reactive (e.g. by storing it in a ref and reading its .value inside the computed getter) so that `doubled` always reflects the latest multiplier immediately after setMultiplier is called, without changing the exported shape { count, doubled, setMultiplier }."
   ],

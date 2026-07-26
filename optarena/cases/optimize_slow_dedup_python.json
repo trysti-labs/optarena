@@ -11,7 +11,7 @@
     "algorithms",
     "python"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The function `dedup_preserve_order(items)` in dedup.py removes duplicate elements from a list while preserving the order of first occurrence, but it does this by checking membership in a plain Python list it's building up (`if x not in result`), which is O(n) per check and O(n^2) overall for large inputs. Optimize dedup.py so `dedup_preserve_order` runs in O(n) time on average (e.g. by tracking seen elements in a set), while still returning the elements in their original first-occurrence order and still working correctly for lists containing unhashable-safe types like ints and strings."
   ],

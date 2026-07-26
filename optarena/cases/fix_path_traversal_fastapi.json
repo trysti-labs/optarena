@@ -11,7 +11,7 @@
     "path-traversal",
     "fastapi"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The FastAPI app in app.py has a GET /download/{filename:path} endpoint that reads a file from the `files/` directory and returns its contents as plain text, but it joins `filename` directly onto the base directory with no sanitization, so a request whose filename contains \"..\" segments (e.g. /download/../secret.txt, including percent-encoded variants like /download/..%2Fsecret.txt) can escape the `files/` directory and read arbitrary files on disk. Fix app.py so any attempt to escape the `files/` directory returns a 400 (or 403/404) error instead of file contents, while legitimate requests for files that actually exist directly inside `files/` (e.g. /download/hello.txt) keep working exactly as before. Run with uvicorn on port 8015."
   ],

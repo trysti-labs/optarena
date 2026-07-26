@@ -3,7 +3,7 @@
   "language": "dockerfile",
   "framework": "docker",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Converts a single-stage Go Dockerfile shipping the full toolchain into a multi-stage build with a minimal final image",

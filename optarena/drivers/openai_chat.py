@@ -34,6 +34,12 @@ _SYSTEM = (
     "the complete file content requested - no commentary outside the block."
 )
 
+# F-03: `resp.read()` with no cap would buffer an unbounded amount of memory
+# for a misbehaving/malicious backend before `json.loads` (or anything else)
+# gets a chance to reject it. A real chat-completion response is KB-scale;
+# 8 MiB is generous headroom while still bounding the worst case.
+_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+
 
 def concrete_target(pattern: str | None) -> Path:
     """
@@ -61,7 +67,13 @@ def _post_json(url: str, payload: dict, timeout: int, headers: dict | None = Non
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
+        body = resp.read(_MAX_RESPONSE_BYTES + 1)
+        if len(body) > _MAX_RESPONSE_BYTES:
+            raise ValueError(
+                f"backend response exceeded {_MAX_RESPONSE_BYTES} bytes - refusing to "
+                f"buffer further (misbehaving backend or wrong endpoint?)"
+            )
+        return json.loads(body.decode())
 
 
 class OpenAIChatDriver(Driver):
@@ -102,8 +114,17 @@ class OpenAIChatDriver(Driver):
         fired_indices: set[int] = set()
         has_disruptions = bool(case.get("disruptions"))
         t0 = time.monotonic()
+        # F-05: ONE deadline for the whole case, not `timeout` handed out
+        # fresh to every prompt - a multi-prompt case could otherwise consume
+        # roughly N x the configured budget, which is what `timeout` is
+        # documented to mean everywhere else (case-level, not per-prompt).
+        deadline = t0 + timeout
         try:
             for i, prompt in enumerate(case.get("prompts", []), 1):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    result.error = f"case deadline ({timeout}s) exceeded before prompt {i}/{n_prompts}"
+                    break
                 context = ""
                 if (workspace / target).exists():
                     context = (
@@ -111,7 +132,7 @@ class OpenAIChatDriver(Driver):
                         f"{(workspace / target).read_text(encoding='utf-8', errors='replace')}\n```"
                     )
                 s0 = time.monotonic()
-                text, usage = self._chat(prompt + context, scenario, timeout)
+                text, usage = self._chat(prompt + context, scenario, remaining)
                 blocks = _CODE_BLOCK.findall(text)
                 content = blocks[0].strip() + "\n" if blocks else text.strip() + "\n"
                 dest = workspace / target

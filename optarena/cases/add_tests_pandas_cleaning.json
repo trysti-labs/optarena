@@ -2,7 +2,7 @@
   "name": "add_tests_pandas_cleaning",
   "language": "python",
   "domain": "data-engineering",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 150,
   "timeout": 180,
   "task_type": "testing",

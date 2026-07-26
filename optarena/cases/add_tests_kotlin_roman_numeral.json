@@ -3,7 +3,7 @@
   "language": "kotlin",
   "framework": "spring-boot",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 300,
   "timeout": 400,
   "description": "Write kotlin tests for an int-to-Roman-numeral formatter; mutation-checked (900/CM dropped from the subtractive table, >= loosened to >, range off-by-one)",

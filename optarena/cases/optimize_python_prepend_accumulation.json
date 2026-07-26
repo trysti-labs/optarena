@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "O(n^2) list.insert(0, ...) accumulation -> linear append+reverse; budget calibrated (naive ~6s native vs ~0.02s fast, budget 2s)",
