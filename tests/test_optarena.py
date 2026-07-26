@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 from optarena.cases import (
-    DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, REPOS_DIR, check_expected,
+    DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, REPOS_DIR, _HARDENING_ARGS, check_expected,
     classify_failure, diff_stats, dockerfile_for, evaluate_case, filter_cases, load_cases,
     prepare_workspace, run_capture, run_check_command,
 )
@@ -1120,6 +1120,33 @@ class VerifyCorpusSandboxConcurrencyTests(unittest.TestCase):
         starts = [image for kind, image in events if kind == "start"]
         self.assertEqual(starts, sorted({"img-a", "img-b", "img-c"}),
                          "each image must start exactly once, not once per case")
+
+
+class SandboxHardeningCapabilitiesTests(unittest.TestCase):
+    """Regression test for a real bug found running `cases verify` against
+    real Linux Docker (never reproduced under Windows/macOS Docker Desktop,
+    whose bind-mount translation layer ignores real Unix permission bits -
+    exactly why it went unnoticed through months of local testing): the
+    sandbox's workspace is a HOST directory bind-mounted as /workspace, and
+    `--cap-drop ALL` on its own strips CAP_DAC_OVERRIDE from the container's
+    root process - so once host-side and container-side permission bits
+    don't line up (routine, since new case/variant directories keep getting
+    created under the runner's own uid throughout the run), root can no
+    longer read/write files on its own bind mount. That produced exactly
+    "Permission denied" / "could not find Cargo.toml" (a blocked directory
+    traversal looks identical to "not there" to a tool doing its own upward
+    search) - confirmed live against two real corpus cases under WSL2 and
+    reproduced again under real GitHub Actions CI. `--cap-add DAC_OVERRIDE`
+    restores root's normal, pre-hardening bind-mount behavior while every
+    other capability - including anything that could matter for container
+    escape or host interaction - stays dropped. This pins that pairing so a
+    future "let's tighten this further" can't silently reintroduce the bug."""
+
+    def test_dac_override_restored_alongside_cap_drop_all(self):
+        self.assertIn("--cap-drop", _HARDENING_ARGS)
+        self.assertEqual(_HARDENING_ARGS[_HARDENING_ARGS.index("--cap-drop") + 1], "ALL")
+        self.assertIn("--cap-add", _HARDENING_ARGS)
+        self.assertEqual(_HARDENING_ARGS[_HARDENING_ARGS.index("--cap-add") + 1], "DAC_OVERRIDE")
 
 
 class SafeRunNameTests(unittest.TestCase):

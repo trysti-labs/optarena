@@ -101,6 +101,26 @@ DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker"
 # per-image verification this session didn't have time for.
 _HARDENING_ARGS = [
     "--cap-drop", "ALL",
+    # `self.root`/the run's workspace is a HOST directory (very often a
+    # fresh `tempfile.mkdtemp()`, which Python deliberately creates 0700) bind-
+    # mounted in as /workspace; the container still runs as root, and without
+    # DAC_OVERRIDE a plain "--cap-drop ALL" root can't read/write files it
+    # doesn't own once permission bits don't line up - which they routinely
+    # don't, since the host side keeps creating new case/variant directories
+    # throughout the run under the runner's own uid. That produced exactly
+    # "Permission denied" / "could not find Cargo.toml" (a blocked directory
+    # traversal looks identical to "not there" to a tool doing its own upward
+    # search) - confirmed live under real Linux Docker (WSL2, GitHub Actions);
+    # invisible under Windows/macOS Docker Desktop, whose bind-mount
+    # translation layer ignores real Unix permission bits, which is exactly
+    # why it went unnoticed through months of local testing. Restoring just
+    # this one capability (root's normal, pre-hardening behavior on its own
+    # bind mount) fixes the whole class at the source instead of chasing
+    # individual directories with chmod; it grants no privilege beyond what
+    # root already has outside a container, and every other capability -
+    # including anything that could matter for container escape or host
+    # interaction - stays dropped.
+    "--cap-add", "DAC_OVERRIDE",
     "--security-opt", "no-new-privileges",
     "--pids-limit", "256",
     "--read-only",
