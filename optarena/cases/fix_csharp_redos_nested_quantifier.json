@@ -3,7 +3,7 @@
   "language": "csharp",
   "framework": "dotnet",
   "domain": "backend",
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Catastrophic-backtracking regex (nested quantifier) -> a linear pattern; budget calibrated in-container (vulnerable ~2.6s on a 26-char near-miss vs 0ms fixed, budget 500ms); incomplete-fix broken adds a MatchTimeout band-aid but keeps the vulnerable pattern, still tying up the caller for close to the full timeout",

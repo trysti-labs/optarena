@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Extracts duplicated age parsing/validation from two Go functions into a shared helper, preserving behavior",

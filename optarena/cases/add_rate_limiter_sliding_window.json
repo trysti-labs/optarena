@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Convert a fixed-window rate limiter to a true sliding window; discriminator is inclusive boundary eviction (a hit exactly `window` ago has expired)",

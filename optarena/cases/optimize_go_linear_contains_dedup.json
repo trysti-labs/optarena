@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Dedup() rescans a growing slice with a linear contains() helper for every item (O(n^2)) -> a map[string]struct{} for O(1) membership (O(n)); calibrated in-container at n=100000, naive ~2.9s vs a 1.2s budget, fast clears it in ~5ms",

@@ -3,7 +3,7 @@
   "language": "kotlin",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 600,
   "timeout": 360,
   "description": "Asks the model to write JUnit tests for a Kotlin classifier; mutation-checked",

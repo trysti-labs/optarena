@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Refactors nested Promise .then() chains into async/await while preserving results and error propagation",

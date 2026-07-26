@@ -3,7 +3,7 @@
   "language": "yaml",
   "framework": "kubernetes",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Hardens a Deployment's container securityContext: read-only rootfs, no privilege escalation, all capabilities dropped, non-root",

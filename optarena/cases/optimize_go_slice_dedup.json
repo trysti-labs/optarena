@@ -12,7 +12,7 @@
     "algorithms",
     "go"
   ],
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "prompts": [
     "The Go file dedup.go contains a function `func RemoveDuplicates(input []int) []int` that removes duplicate integers while preserving the order of first occurrence. It currently does this by checking each item against every item already added to the result slice in a nested loop, which is O(n^2) and becomes too slow for large inputs (tens of thousands of elements). Rewrite RemoveDuplicates in dedup.go to run in O(n) time using a map to track which values have already been seen, while preserving the exact same behavior: the returned slice must contain each distinct value exactly once, in the order of its first occurrence in the input."
   ],

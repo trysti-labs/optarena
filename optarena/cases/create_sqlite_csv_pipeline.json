@@ -2,7 +2,7 @@
   "name": "create_sqlite_csv_pipeline",
   "language": "python",
   "domain": "data-engineering",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 90,
   "timeout": 180,
   "task_type": "data_engineering",

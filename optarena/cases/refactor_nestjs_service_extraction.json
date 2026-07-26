@@ -12,7 +12,7 @@
     "service-layer",
     "typescript"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "The NestJS app in main.ts (tsconfig.json is already set up correctly - do not change it) has an ItemsController that does all of its own business logic (in-memory array storage and name validation) directly inline, and that same validation logic - checking that `name` is a non-empty string, throwing a BadRequestException('name is required and must be a non-empty string') otherwise - is duplicated verbatim in both the create (POST /items) and update (PUT /items/:id) handlers. Refactor main.ts to extract the business logic (storage + validation) out of ItemsController into a separate @Injectable() ItemsService class, injected into ItemsController via its constructor, eliminating the duplicated validation code. Keep everything in the single main.ts file (define both the ItemsService and ItemsController classes there) so the app still runs directly via `ts-node main.ts` with no build step. Do not change any observable behavior: GET /items (200, array), POST /items (201, created item, 400 if name invalid), GET /items/:id (200 or 404), and PUT /items/:id (200 updated item, 400 if name invalid, 404 if not found) must all work exactly as before. Keep listening on port 8025."
   ],

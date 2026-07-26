@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Write go test cases for an alphanumeric-only, case-insensitive palindrome check; mutation-checked (case-fold dropped, digits ignored, comparison inverted)",

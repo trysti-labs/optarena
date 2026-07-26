@@ -11,7 +11,7 @@
     "composition-api",
     "reactivity"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "Create a file counter.js that exports a function createCounter(initial) using Vue's Composition API (require ref and computed from 'vue'). createCounter(initial) should return an object { count, double, increment } where: count is a ref initialized to `initial` (default 0 if not provided); double is a computed ref whose value is always count.value * 2; increment is a function that increases count.value by 1 each time it is called. Export it as module.exports = { createCounter };"
   ],

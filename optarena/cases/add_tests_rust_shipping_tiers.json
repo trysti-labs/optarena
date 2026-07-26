@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 240,
   "timeout": 360,
   "description": "Asks the model to write Rust integration tests for a shipping-cost function; mutation-checked",

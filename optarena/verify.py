@@ -102,7 +102,7 @@ def verify_cases(cases: list[dict], root: Path | None = None) -> tuple[list[str]
     # image any verified case needs, every variant execs into it.
     import os
     images = {
-        c.get("docker_image") or os.environ.get("OPTARENA_DOCKER_IMAGE", DOCKER_IMAGE_DEFAULT)
+        c.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT)
         for c, _v in todo if c.get("check_command")
     }
     sandboxes = [DockerSandbox(root, image=img) for img in images]

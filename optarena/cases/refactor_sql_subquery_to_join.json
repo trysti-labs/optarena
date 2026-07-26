@@ -3,7 +3,7 @@
   "language": "sql",
   "framework": "sqlite",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Refactors a correlated subquery into a LEFT JOIN + GROUP BY producing the identical result set",

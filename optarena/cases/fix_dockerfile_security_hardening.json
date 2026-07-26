@@ -3,7 +3,7 @@
   "language": "dockerfile",
   "framework": "docker",
   "domain": "devops",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Hardens an insecure Dockerfile: pins the base image, drops a baked-in secret, adds a non-root USER and a HEALTHCHECK",

@@ -3,7 +3,7 @@
   "language": "shell",
   "framework": "bash",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 90,
   "timeout": 300,
   "description": "Harden a fragile bash backup script: strict mode, quoted expansions, glob instead of $(ls), argument validation - proven against paths with spaces",

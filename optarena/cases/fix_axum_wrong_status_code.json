@@ -12,7 +12,7 @@
     "axum",
     "status-code"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "The Axum app in src/main.rs has a POST /items endpoint meant to create a new item and store it in shared in-memory state. QA reports that even though the item is created successfully, the endpoint returns HTTP 200 OK instead of the correct HTTP 201 Created status code. Fix src/main.rs so POST /items returns 201 Created on success, without changing any other behavior (GET /items must keep working exactly as before). The server listens on 0.0.0.0:8042."
   ],

@@ -27,10 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CARGO_TARGET_DIR=/opt/cargo-target
 
 WORKDIR /warmup
-COPY Cargo.toml .
+COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src/bin
 COPY main.rs src/main.rs
 COPY actix_warmup.rs src/bin/actix_warmup.rs
-RUN cargo build && rm -rf /warmup
+# F-13: --locked makes the pinned Cargo.lock (regenerate with `docker run
+# --rm -v <this dir>:/warmup -w /warmup rust:1-bookworm cargo
+# generate-lockfile`, using matching src/ layout) load-bearing - without it,
+# a lockfile on disk is just documentation, since plain `cargo build` still
+# re-resolves and silently drifts to newer compatible crate versions.
+RUN cargo build --locked && rm -rf /warmup
 
 WORKDIR /workspace

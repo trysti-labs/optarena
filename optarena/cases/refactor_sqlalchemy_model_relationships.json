@@ -11,7 +11,7 @@
     "orm",
     "refactor"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The SQLAlchemy models in models.py define `Author` and `Book` tables linked by a foreign key, but the helper functions `get_books_for_author` and `get_author_name_for_book` manually query and join across the two tables by hand instead of using SQLAlchemy relationships. Refactor models.py to add a proper `relationship()` (with a backref/back_populates) between `Author` and `Book`, and rewrite `get_books_for_author` and `get_author_name_for_book` to use that relationship instead of manual filtering across both tables. Both functions must keep the exact same signature and return the exact same results as before for the same inputs."
   ],

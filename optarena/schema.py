@@ -48,7 +48,7 @@ def _validate_string_list(value, where: str) -> None:
 
 # ── Scenario files ─────────────────────────────────────────────────────────
 
-_SCENARIO_KNOWN_KEYS = {"name", "driver", "backend", "cases", "timeout", "cases_dir"}
+_SCENARIO_KNOWN_KEYS = {"name", "driver", "backend", "cases", "timeout", "cases_dir", "image_overrides"}
 _BACKEND_KNOWN_KEYS = {"kind", "base_url", "model", "api_key", "num_ctx"}
 
 
@@ -94,13 +94,21 @@ def validate_scenario(data: dict, source: str = "<scenario>") -> None:
     if "cases_dir" in data and data["cases_dir"] is not None and not isinstance(data["cases_dir"], str):
         raise _err(source, "'cases_dir' must be a string")
 
+    # F-15: pin every case's resolved sandbox image for this run without
+    # editing case JSON - keys are either a DOCKER_IMAGES short track name
+    # ("python", "go", ...) or a literal resolved image reference; values
+    # are the pinned image reference to use instead (e.g. a digest or
+    # immutable :<sha> tag).
+    if "image_overrides" in data and data["image_overrides"] is not None:
+        _validate_string_map(data["image_overrides"], f"{source}.image_overrides")
+
 
 # ── Case files ───────────────────────────────────────────────────────────
 
 _CASE_KNOWN_KEYS = {
     "name", "description", "prompts", "setup_files", "setup_repo", "git_init",
     "expected_files", "test_setup_files", "check_command", "check_command_timeout",
-    "docker_image", "timeout",
+    "image", "timeout",
     "reference_solution", "broken_solutions",
     "language", "framework", "domain", "difficulty", "task_type", "tags",
     # Oracle style, for discovery/reporting: "unit" (default), "property"
@@ -154,8 +162,8 @@ def validate_case(data: dict, source: str = "<case>") -> None:
         if not _is_number(t) or t <= 0 or t > MAX_CASE_TIMEOUT:
             raise _err(source, f"'timeout' must be a number in (0, {MAX_CASE_TIMEOUT}]")
 
-    if "docker_image" in data and data["docker_image"] is not None and not isinstance(data["docker_image"], str):
-        raise _err(source, "'docker_image' must be a string")
+    if "image" in data and data["image"] is not None and not isinstance(data["image"], str):
+        raise _err(source, "'image' must be a string")
 
     if "difficulty" in data:
         d = data["difficulty"]

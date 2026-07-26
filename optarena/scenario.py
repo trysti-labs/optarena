@@ -76,6 +76,10 @@ class Scenario:
     cases: list[str] | None = None           # None ⇒ all cases
     timeout: int | None = None               # per-case override, seconds
     cases_dir: str | None = None             # None ⇒ the built-in catalogue
+    # F-15: pin sandbox images for this run - {track_name_or_image: pinned_ref}.
+    # None ⇒ every case resolves its image the normal way (image field
+    # / OPTARENA_SANDBOX_IMAGE / DOCKER_IMAGE_DEFAULT, all mutable tags).
+    image_overrides: dict[str, str] | None = None
 
     @classmethod
     def from_dict(cls, data: dict, source: str = "<scenario>") -> "Scenario":
@@ -93,6 +97,7 @@ class Scenario:
             cases=data.get("cases"),
             timeout=data.get("timeout"),
             cases_dir=data.get("cases_dir"),
+            image_overrides=data.get("image_overrides"),
         )
 
     @classmethod
@@ -122,4 +127,5 @@ class Scenario:
             "cases": self.cases,
             "timeout": self.timeout,
             "cases_dir": self.cases_dir,
+            "image_overrides": self.image_overrides,
         }

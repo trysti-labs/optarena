@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Extracts duplicated name-validation from two Ruby form classes into a shared mixin module, preserving behavior",

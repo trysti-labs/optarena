@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 120,
   "description": "Implement a numeric summary, graded by property-based checks (count/min/max/mean invariants) over random inputs",

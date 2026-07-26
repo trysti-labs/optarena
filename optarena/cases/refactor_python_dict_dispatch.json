@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Refactors a long if/elif command chain into a dict dispatch table without changing behavior",

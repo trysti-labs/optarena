@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Fixes an SSRF-prone URL allowlist that only blocks the substring 'localhost', letting private/metadata IPs through",

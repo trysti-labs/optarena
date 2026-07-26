@@ -1,0 +1,14 @@
+ignored:
+  # F-13: apt packages install from the live Debian archive with no
+  # snapshot.debian.org pin - a real reproducibility gap, but repointing apt
+  # sources to a dated snapshot mirror is a bigger, riskier change (mirror
+  # availability/rate limits) than this pass's other fixes, so it's tracked
+  # as a deliberate known_gap in docker/images.lock.json rather than fixed
+  # here. Every apt-get install in every Dockerfile trips this identically.
+  - DL3008
+  # docker/Dockerfile's terraform-provider-mirror RUN does `(cd
+  # /tmp/tfmirror-src && terraform providers mirror ...)` in a subshell
+  # deliberately, so the directory change is scoped to that one command and
+  # doesn't leak into WORKDIR for the rest of the image - using WORKDIR
+  # instead would be the actual anti-pattern here, not the fix.
+  - DL3003

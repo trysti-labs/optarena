@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "fastapi",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 90,
   "timeout": 240,
   "description": "Adds category/price/text filtering across repository and router",

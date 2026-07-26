@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "axum",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 240,
   "timeout": 300,
   "description": "Fixes handlers that build fresh repositories instead of using shared State",

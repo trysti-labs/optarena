@@ -3,7 +3,7 @@
   "language": "java",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Fixes a Java method comparing boxed Integers with == (broken for values outside the -128..127 cache)",

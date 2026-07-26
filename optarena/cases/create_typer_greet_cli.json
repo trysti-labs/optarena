@@ -10,7 +10,7 @@
     "cli",
     "typer"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "Create a Typer CLI app in cli.py. It should define a `typer.Typer()` app named `app` with a command `greet` that takes a required argument NAME and an optional boolean flag `--loud` (default False). It should print `Hello, NAME!` normally, or `HELLO, NAME!` (uppercased, no exclamation change) when --loud is passed. It must be invocable as `python cli.py greet NAME` and `python cli.py greet NAME --loud` (i.e. `greet` must remain an explicit subcommand name on the command line - since Typer collapses a Typer app with only a single registered command so its one command can be invoked without naming it, add a no-op `@app.callback()` function, or a second command, so `greet` stays an explicit subcommand). The script should call `app()` when run as `__main__`."
   ],

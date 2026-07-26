@@ -12,7 +12,7 @@
     "service-layer",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "In this Maven Spring Boot project, OrderService.describeGift(Order order) (src/main/java/com/optarena/orders/OrderService.java) throws a NullPointerException whenever order.getGiftMessage() is null, because most orders have no gift message. Fix describeGift so that: when getGiftMessage() is null, it returns exactly the string \"Gift note: (none)\"; when getGiftMessage() is non-null, it returns \"Gift note: \" followed by the message with leading/trailing whitespace trimmed. Do not change the method signature or the Order class."
   ],

@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Write pytest tests for run-length encode/decode; mutation-checked (off-by-one count, decode-drops-count, single-run-not-flushed mutants)",

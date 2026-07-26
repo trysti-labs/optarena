@@ -3,7 +3,7 @@
   "language": "php",
   "framework": "phpunit",
   "domain": "backend",
-  "docker_image": "optarena-tester-php:latest",
+  "image": "optarena-tester-php:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Collapses three copy-pasted tiered shipping-cost methods (fedexCost/upsCost/dhlCost, identical tier logic, only the base fee differs) into one private tieredCost($weightKg, $base) helper; behavior-drift broken changes the shared middle-tier per-kg rate from 2.0 to 2.5",

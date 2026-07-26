@@ -13,7 +13,7 @@
     "aspnet-core",
     "minimal-api"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Write Program.cs to add a GET /health endpoint that returns JSON {\"status\": \"ok\"}. Have it listen on http://0.0.0.0:8005."
   ],

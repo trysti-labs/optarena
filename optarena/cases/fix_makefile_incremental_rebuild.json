@@ -4,7 +4,7 @@
   "framework": "make",
   "domain": "devops",
   "task_type": "bug_fix",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Fixes a Makefile rule with no prerequisites that never rebuilds",

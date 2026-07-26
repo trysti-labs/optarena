@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Refactors a manual null/undefined-chasing chain into optional chaining and nullish coalescing",

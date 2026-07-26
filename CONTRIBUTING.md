@@ -23,12 +23,12 @@ builds them locally (~30 min cold, mostly cached after).
 
 ```bash
 ruff check optarena tests                              # lint gate
-OPTARENA_NO_DOCKER=1 python -m unittest discover tests -v   # unit tests
+OPTARENA_DISABLE_SANDBOX=1 python -m unittest discover tests -v   # unit tests
 python -m optarena cases verify                         # corpus self-verification
 ```
 
 The unit suite runs with the container sandbox deliberately disabled
-(`OPTARENA_NO_DOCKER=1`) so it doesn't depend on a local Docker/Podman
+(`OPTARENA_DISABLE_SANDBOX=1`) so it doesn't depend on a local Docker/Podman
 daemon; corpus verification does need a container engine, since it replays
 every case's `reference_solution` and `broken_solutions` through the real
 sandboxed oracle.

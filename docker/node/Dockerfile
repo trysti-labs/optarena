@@ -21,28 +21,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # every `ts-node main.ts` case (NestJS) unrunnable. ts-node 10.x supports TS 5.x.
 # Everything else pinned too, same reasoning as the base-image digest above -
 # an unpinned package can be silently replaced upstream, changing oracle
-# behavior between identical commits. Versions below are what was already
-# installed and verified working - bump deliberately, not by accident.
-RUN npm install -g \
-        express@5.2.1 \
-        react@19.2.8 \
-        react-dom@19.2.8 \
-        next@16.2.11 \
-        vue@3.5.40 \
-        @babel/core@7.29.7 \
-        @babel/cli@7.29.7 \
-        @babel/preset-env@7.29.7 \
-        @babel/preset-react@7.29.7 \
-        jest@30.4.2 \
-        typescript@5.6.3 \
-        ts-node@10.9.2 \
-        reflect-metadata@0.2.2 \
-        rxjs@7.8.2 \
-        @nestjs/core@11.1.28 \
-        @nestjs/common@11.1.28 \
-        @nestjs/platform-express@11.1.28 \
-    && npm cache clean --force
+# behavior between identical commits. Versions in package.json are what was
+# already installed and verified working - bump deliberately, not by accident.
+#
+# F-13: `npm ci` against a committed package-lock.json (not `npm install -g`
+# against bare version specs) pins the whole resolved dependency GRAPH, not
+# just these 17 direct packages - previously a transitive dependency could
+# still drift to a new compatible release between identical builds. Installs
+# locally into /opt/node-packages (npm's global mode doesn't read a
+# lockfile) with NODE_PATH pointed at its node_modules, which resolves
+# `require()` identically to the old global install for every case.
+# Regenerate: `docker run --rm -v docker/node:/w -w /w node:20-bookworm-slim
+# npm install` after editing package.json's versions.
+WORKDIR /opt/node-packages
+COPY package.json package-lock.json ./
+RUN npm ci && npm cache clean --force
 
-ENV NODE_PATH=/usr/local/lib/node_modules
+# NODE_PATH resolves `require()`; PATH is needed separately for cases whose
+# check_command invokes a CLI directly (e.g. bare `tsc ...`) - `npm ci`
+# (unlike the old `npm install -g`) only symlinks bins under
+# node_modules/.bin, not onto a directory already on PATH.
+ENV NODE_PATH=/opt/node-packages/node_modules
+ENV PATH=/opt/node-packages/node_modules/.bin:$PATH
 
 WORKDIR /workspace

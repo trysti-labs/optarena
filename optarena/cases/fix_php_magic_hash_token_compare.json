@@ -3,7 +3,7 @@
   "language": "php",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-php:latest",
+  "image": "optarena-tester-php:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Fixes a PHP auth check that compares tokens with loose `==`, allowing a 'magic hash' scientific-notation bypass",

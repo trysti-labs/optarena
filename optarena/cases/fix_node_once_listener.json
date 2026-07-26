@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 90,
   "timeout": 180,
   "description": "Fixes a listener that re-runs one-time setup on every 'ready' event",

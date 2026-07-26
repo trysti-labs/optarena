@@ -2,7 +2,7 @@
   "name": "fix_csv_manual_split_quoting",
   "language": "python",
   "domain": "data-engineering",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 90,
   "timeout": 180,
   "task_type": "bug_fix",

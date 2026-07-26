@@ -3,7 +3,7 @@
   "language": "kotlin",
   "framework": "spring-boot",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 300,
   "timeout": 400,
   "description": "java.util.Random for session tokens (predictable LCG seeded from clock time) -> java.security.SecureRandom; incomplete-fix broken uses SecureRandom but with a hardcoded seed, making it deterministic again",

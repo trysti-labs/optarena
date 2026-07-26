@@ -12,7 +12,7 @@
     "go",
     "devops"
   ],
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "prompts": [
     "Add a GitHub Actions CI workflow for this Go project at .github/workflows/ci.yml. It must: trigger on both `push` and `pull_request` events targeting the `main` branch; run on `ubuntu-latest`; check out the repository (e.g. actions/checkout@v4); set up Go (e.g. actions/setup-go@v5 with go-version '1.22'); and run both a build step (e.g. `go build ./...`) and a test step (e.g. `go test ./...`)."
   ],

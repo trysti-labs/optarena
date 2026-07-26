@@ -11,7 +11,7 @@
     "component",
     "ssr"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "Create a file counter.js that exports a React function component named Counter (module.exports = { Counter };). The component accepts a single prop `count` (a number) and renders a <div> whose text content is exactly `Count: <count>` (for example, for count=5 it renders 'Count: 5'). Do not use JSX syntax - build the element with React.createElement(...) so the file can be required directly by plain Node without a build step. Do not call ReactDOM.render or start any server; just export the component."
   ],

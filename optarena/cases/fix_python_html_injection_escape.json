@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "HTML injection via unescaped f-string interpolation -> html.escape; incomplete-fix broken hand-replaces < and > only, leaving & and quotes raw",

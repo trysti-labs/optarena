@@ -3,7 +3,7 @@
   "language": "php",
   "framework": "phpunit",
   "domain": "backend",
-  "docker_image": "optarena-tester-php:latest",
+  "image": "optarena-tester-php:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Fixes PHP object injection: unserialize() on an untrusted session blob instantiates arbitrary classes",

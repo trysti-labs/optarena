@@ -12,7 +12,7 @@
     "crud",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "This Maven project (pom.xml already uses spring-boot-starter-parent 3.3.4 with spring-boot-starter-web) needs application code under package com.optarena.items, storing items in memory (no database). Create: (1) src/main/java/com/optarena/items/Application.java as the @SpringBootApplication entry point; (2) src/main/java/com/optarena/items/Item.java, a simple model with a numeric `id` and a String `name`; (3) src/main/java/com/optarena/items/ItemsController.java, a @RestController mapped at /items with: GET /items returning the JSON array of all items currently stored (empty array initially); POST /items accepting a JSON body {\"name\": \"...\"} that creates a new item with an auto-generated numeric id, stores it, and returns HTTP 201 Created with the created item as JSON; DELETE /items/{id} that removes the item with that id and returns HTTP 204 No Content if it existed, or HTTP 404 Not Found if no item with that id exists. The app should run on the default port 8080."
   ],

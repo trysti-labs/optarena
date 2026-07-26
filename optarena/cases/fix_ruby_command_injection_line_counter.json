@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Fixes shell command injection in a line counter that interpolates an untrusted path into a backtick `wc -l` call",

@@ -12,7 +12,7 @@
     "testing",
     "pytest"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The Typer CLI in cli.py (already working, do not modify it) defines a command `add` that takes two integer arguments X and Y and prints their sum, and a command `sub` that takes two integer arguments X and Y and prints X minus Y. Write tests for this CLI in test_cli.py using pytest and Typer's `typer.testing.CliRunner`. Cover at least: (1) `add` with two positive numbers prints the correct sum, (2) `sub` with two numbers prints the correct difference, (3) each invocation's `result.exit_code` is 0. Use plain `assert` statements so pytest can collect them."
   ],

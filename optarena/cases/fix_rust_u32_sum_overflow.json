@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Fixes a total() that sums into u32 (overflows) before widening; should accumulate in u64",

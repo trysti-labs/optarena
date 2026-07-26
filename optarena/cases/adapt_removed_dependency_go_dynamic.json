@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it, not just fail to compile",

@@ -3,7 +3,7 @@
   "language": "sql",
   "framework": "sqlite",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 120,
   "timeout": 180,
   "description": "Rewrites an index-defeating OR across columns as a UNION of index scans",

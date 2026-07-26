@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Fixes a grouping method that uses Hash.new([]) with <<, so all keys share one default array and none are stored",

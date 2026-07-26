@@ -3,7 +3,7 @@
   "language": "kotlin",
   "framework": "spring-boot",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Adds a Kotlin Spring shipping-cost service and controller",

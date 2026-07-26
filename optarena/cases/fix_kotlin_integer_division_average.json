@@ -3,7 +3,7 @@
   "language": "kotlin",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 300,
   "timeout": 360,
   "description": "Fixes an average that does Int/Int integer division and truncates before converting to Double",

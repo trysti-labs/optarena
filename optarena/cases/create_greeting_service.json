@@ -11,7 +11,7 @@
     "unit-test",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "This Maven project (pom.xml already uses spring-boot-starter-parent 3.3.4 with spring-boot-starter-web) needs a service class under package com.optarena.greeting. Create src/main/java/com/optarena/greeting/GreetingService.java as a @Service-annotated class with a public method `String greet(String name)` that returns the string \"Hello, \" followed by the given name followed by \"!\" (e.g. greet(\"World\") returns exactly \"Hello, World!\"). No HTTP endpoint, controller, or main application class is needed for this task - just the service class."
   ],

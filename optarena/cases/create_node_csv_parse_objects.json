@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Builds a quoted-CSV parser (handles commas and escaped quotes inside fields) consumed by an existing module",

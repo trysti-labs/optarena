@@ -11,7 +11,7 @@
     "refactor",
     "duplication"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "The Axum app in src/main.rs has two POST endpoints, /sum and /product, each taking a JSON body {\"a\": i32, \"b\": i32}. Both handlers contain the exact same inline validation logic, duplicated verbatim: they check whether either a or b is negative, and if so return a 400 Bad Request with a JSON body {\"error\": \"inputs must be non-negative\"}. Refactor src/main.rs to extract this duplicated validation logic into a single shared helper function that both the /sum and /product handlers call, removing the duplication. Do not change any observable behavior: valid inputs must still be summed/multiplied exactly as before, and invalid (negative) inputs must still produce the same 400 response with the same error message on both endpoints. The server keeps listening on 0.0.0.0:8044."
   ],

@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Fixes late-binding closures in a loop so each generated function uses its own index",

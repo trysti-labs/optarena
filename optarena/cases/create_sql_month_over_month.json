@@ -3,7 +3,7 @@
   "language": "sql",
   "framework": "sqlite",
   "domain": "backend",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 180,
   "description": "Computes month-over-month deltas per rep with LAG",

@@ -3,7 +3,7 @@
   "language": "csharp",
   "framework": "dotnet",
   "domain": "backend",
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "SQL built by string interpolation -> a parameterized query (text + bound parameters dictionary); incomplete-fix broken quote-escapes the value but still interpolates it into the SQL text instead of binding it",

@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Optimizes a validator that recompiles the same regexp on every call to compiling it once",

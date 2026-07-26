@@ -12,7 +12,7 @@
     "algorithms",
     "dotnet"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This C# project (app.csproj targets net8.0) contains Dedup.cs with a static method `Dedup.RemoveDuplicates(List<int> input)` that removes duplicate integers while preserving the order of first occurrence. It currently does this by checking each item against every item already added to the result list in a nested loop, which is O(n^2) and becomes too slow for large inputs (tens of thousands of elements). Rewrite RemoveDuplicates in Dedup.cs to run in O(n) time using a `HashSet<int>` to track which values have already been seen, while preserving the exact same behavior: the returned list must contain each distinct value exactly once, in the order of its first occurrence in the input."
   ],

@@ -3,7 +3,7 @@
   "language": "rust",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Fixes first-character extraction that byte-slices &s[0..1] and panics on multi-byte UTF-8",

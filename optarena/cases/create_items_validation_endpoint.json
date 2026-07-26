@@ -13,7 +13,7 @@
     "aspnet-core",
     "minimal-api"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Write Program.cs to implement POST /items. It accepts a JSON body {\"name\": string}. If 'name' is missing, null, or empty/whitespace-only after trimming, respond with HTTP 400 Bad Request and a JSON body containing an 'error' field describing the problem (no item is created). Otherwise, create an item with an auto-assigned integer id starting at 1 (incrementing for each new item) and the trimmed name, store it in memory, and respond with HTTP 201 Created whose JSON body contains the created item's 'id' and 'name'. Listen on http://0.0.0.0:8051."
   ],

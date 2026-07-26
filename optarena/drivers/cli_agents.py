@@ -252,16 +252,29 @@ class CLIAgentDriver(Driver):
         # vast majority of (non-dynamic) cases.
         has_disruptions = bool(case.get("disruptions"))
         t0 = time.monotonic()
+        # F-05: ONE deadline for the whole case, not `timeout` handed out
+        # fresh to every prompt - a 3-prompt case could otherwise consume
+        # roughly 3x the configured budget (plus oracle time on top), which
+        # is what `timeout` is documented to mean everywhere else (case-level,
+        # not per-prompt).
+        deadline = t0 + timeout
         try:
             for i, prompt in enumerate(case.get("prompts", []), 1):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    result.error = (
+                        f"case deadline ({timeout}s) exceeded before prompt {i}/{n_prompts}"
+                    )
+                    break
                 # run_capture (not subprocess.run): on timeout it kills the
                 # agent's whole process tree, not just the agent binary, so
                 # anything it spawned (a language server, a shelled-out tool)
-                # can't outlive the case (H-11).
+                # can't outlive the case (H-11). `timeout=remaining`, not the
+                # case's full `timeout` - see the deadline comment above.
                 s0 = time.monotonic()
                 proc = run_capture(
                     [self._binary, *self.spec["argv"](prompt, scenario.backend)],
-                    cwd=workspace, env=env, timeout=timeout,
+                    cwd=workspace, env=env, timeout=remaining,
                     text=True, encoding="utf-8", errors="replace",
                 )
                 # Per-step trajectory record ("judge the path"): one entry per

@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Write pytest tests for an interval-merge function; mutation-checked (touching-not-merged, unsorted-input, contained-interval-shrinks-end mutants)",

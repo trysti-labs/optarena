@@ -11,7 +11,7 @@
     "testing",
     "ssr"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "greeting.js (already working, do not modify it) exports a React function component named Greeting (module.exports = { Greeting };) which accepts a prop `name` and renders a <div> whose text is exactly `Hello, <name>!`. Write tests in a file named exactly test_greeting.js. Your test file must require React, `renderToStaticMarkup` from 'react-dom/server', and the Greeting component from './greeting.js', then render the component with at least two different `name` values and use Node's built-in assert module to check the resulting markup contains the expected greeting text for each (e.g. name='Alice' must produce markup containing 'Hello, Alice!', name='Bob' must produce markup containing 'Hello, Bob!'). Print PASS and exit 0 if all assertions pass."
   ],

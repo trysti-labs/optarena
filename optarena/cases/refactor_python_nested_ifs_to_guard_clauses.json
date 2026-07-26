@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Deeply nested if/else validation -> flat guard clauses (early returns/raises); drift broken flips the weight boundary from > to >= while inverting",

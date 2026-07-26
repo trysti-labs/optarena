@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Write node:test tests for a slugify function; node-native mutation harness (no-lowercase, no-collapse, no-edge-strip mutants)",

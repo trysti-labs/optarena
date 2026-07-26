@@ -3,7 +3,7 @@
   "language": "hcl",
   "framework": "terraform",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 150,
   "timeout": 300,
   "description": "Add validation blocks bounding instance_count (1-10) and restricting environment to an allowlist; broken validates only one of the two variables",

@@ -19,7 +19,7 @@ boundary:
    `--security-opt no-new-privileges`, `--pids-limit`, read-only rootfs with a
    bounded exec tmpfs, and memory/CPU limits. **If no container engine is
    available, OptArena refuses to run them** - host execution requires an
-   explicit opt-in (`OPTARENA_NO_DOCKER=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
+   explicit opt-in (`OPTARENA_DISABLE_SANDBOX=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
    All case-supplied file paths are containment-checked before anything is
    written; traversal (`../`), absolute paths, and symlinked escapes are
    rejected. Only load case packs from sources you trust enough to run in

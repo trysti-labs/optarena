@@ -3,7 +3,7 @@
   "language": "yaml",
   "framework": "github-actions",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Create a nightly cron workflow with the operational guardrails: workflow_dispatch escape hatch, read-only permissions, job timeout, concurrency group; brokens: write-all permissions, no timeout/concurrency",

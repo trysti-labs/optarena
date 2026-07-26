@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "typescript",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Refactors a TS .then/.catch promise chain to async/await while preserving the error-fallback behavior",

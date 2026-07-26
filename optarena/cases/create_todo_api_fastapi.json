@@ -13,7 +13,7 @@
     "fastapi",
     "todo"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "Create a FastAPI app in app.py named `app` that manages an in-memory list of todos. Each todo has an integer `id` and a string `title`. Implement: GET /todos returning a JSON array of all todos; POST /todos accepting JSON body {\"title\": str} that creates a new todo with an auto-incrementing id (starting at 1) and returns the created todo with a 201 status code; DELETE /todos/{todo_id} that removes the todo with that id and returns a 204 status code, or 404 if no todo with that id exists. Run the server with uvicorn on port 8010 when executed directly."
   ],

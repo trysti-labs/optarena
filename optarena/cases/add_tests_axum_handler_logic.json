@@ -11,7 +11,7 @@
     "testing",
     "unit-tests"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "The Rust project in src/main.rs contains a function `pub fn classify_password_strength(password: &str) -> &'static str` (business logic extracted from an Axum signup handler) that is already correct and does not need to be changed. Its rules are: if the password is shorter than 8 characters, it is \"weak\"; if it is at least 8 characters but either shorter than 12 characters or contains no digit, it is \"medium\"; otherwise (at least 12 characters AND contains at least one digit) it is \"strong\". Add unit tests for this function directly in src/main.rs (using a `#[cfg(test)] mod tests` block with `#[test]` functions), covering at least: a short password classified as weak, a password of medium length classified as medium, and a long password containing a digit classified as strong. Do not modify the behavior of classify_password_strength itself."
   ],

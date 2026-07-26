@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "prependAll() calls Array.prototype.unshift() per item (O(n) per call, O(n^2) total) -> push() each item then reverse() once at the end (O(n)); calibrated in-container at n=300000, naive ~2.4s vs a 1.2s budget, fast clears it in ~10ms",

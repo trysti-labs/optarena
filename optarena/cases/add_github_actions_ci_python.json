@@ -12,7 +12,7 @@
     "devops",
     "yaml"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "Create a GitHub Actions workflow at .github/workflows/ci.yml for a Python project. It must trigger on both `push` and `pull_request`. Define at least two jobs: one named (or job-id) `lint` that sets up Python and runs a linter (e.g. flake8 or ruff), and one named (or job-id) `test` that sets up Python and runs the test suite with `pytest`. Use `actions/checkout` and `actions/setup-python` steps as needed."
   ],

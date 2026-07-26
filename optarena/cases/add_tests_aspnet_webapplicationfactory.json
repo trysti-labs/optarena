@@ -13,7 +13,7 @@
     "webapplicationfactory",
     "minimal-api"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "The ASP.NET Core minimal API project at the repo root (app.csproj, net8.0; Program.cs already working, do not modify it) exposes two endpoints: GET /ping, which returns HTTP 200 with JSON {\"message\": \"pong\"}; and GET /square/{n}, which returns HTTP 200 with JSON {\"input\": n, \"result\": n*n} for an integer route parameter n. There is already a test project at tests/tests.csproj (referencing the app project and the xunit/Microsoft.AspNetCore.Mvc.Testing packages; do not modify tests.csproj) but no test file yet. Add a new file at tests/EndpointTests.cs containing xUnit tests that use Microsoft.AspNetCore.Mvc.Testing's WebApplicationFactory<Program> to exercise both endpoints in-process: one [Fact] test that calls GET /ping and asserts the response is successful and the message is \"pong\", and another [Fact] test that calls GET /square/5 and asserts the response is successful and the JSON result equals 25. Do not modify Program.cs or tests.csproj."
   ],

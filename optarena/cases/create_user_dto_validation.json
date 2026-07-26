@@ -12,7 +12,7 @@
     "unit-test",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "This Maven project (pom.xml already uses spring-boot-starter-parent 3.3.4 with spring-boot-starter-web) does NOT have the spring-boot-starter-validation dependency available, so do not use @NotBlank/@Email or any jakarta.validation annotations - implement validation logic by hand in plain Java instead. Create src/main/java/com/optarena/user/UserDto.java: a plain class with String fields `name` and `email`, a constructor `UserDto(String name, String email)`, getters `getName()`/`getEmail()`, and a method `public java.util.List<String> validate()` that returns a list of human-readable error messages (empty list when the DTO is valid): add \"name must not be blank\" if name is null or blank (after trimming); add \"email must not be blank\" if email is null or blank (after trimming); otherwise (email is non-blank) add \"email must be a valid email address\" if email does not contain an '@' character followed later in the string by a '.' character."
   ],

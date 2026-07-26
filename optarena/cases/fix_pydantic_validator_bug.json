@@ -10,7 +10,7 @@
     "pydantic",
     "validation"
   ],
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "prompts": [
     "The pydantic model `User` in models.py in has a custom validator on its `email` field that is supposed to reject invalid emails, but it currently has a bug: it accepts any non-empty string, including strings with no \"@\" character at all (e.g. \"notanemail\"). Fix the validator in models.py so that it raises a validation error (ValueError inside the validator, which pydantic turns into a ValidationError) whenever the value does not contain exactly one \"@\" with at least one character before and after it. Valid emails like \"a@b.com\" must continue to be accepted."
   ],

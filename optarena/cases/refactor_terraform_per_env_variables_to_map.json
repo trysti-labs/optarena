@@ -3,7 +3,7 @@
   "language": "hcl",
   "framework": "terraform",
   "domain": "infrastructure",
-  "docker_image": "optarena-tester:latest",
+  "image": "optarena-tester:latest",
   "check_command_timeout": 150,
   "timeout": 300,
   "description": "Collapses three copy-pasted per-environment string variables (each with an identical allowlist validation block) into one map(string) variable with a single validation checking every value, proven by real terraform validate; behavior-drift broken swaps alltrue for anytrue, so only ONE environment's value needs to be valid for the whole map to pass",

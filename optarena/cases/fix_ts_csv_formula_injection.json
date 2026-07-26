@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "CSV export with no formula-injection guard -> neutralize =/+/-/@/tab/CR prefixes with a leading apostrophe; incomplete-fix broken only guards the '=' prefix",

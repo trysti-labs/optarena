@@ -3,7 +3,7 @@
   "language": "java",
   "framework": "plain-java",
   "domain": "backend",
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "List.contains per element -> LinkedHashSet; budget calibrated (naive ~3.2s native at n=150k all-unique vs ~0.01s, budget 1.5s); wrong-output broken loses insertion order via a plain HashSet",

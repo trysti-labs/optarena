@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "django",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 180,
   "description": "Asks the model to write django.test.Client tests for a discount view; mutation-checked",

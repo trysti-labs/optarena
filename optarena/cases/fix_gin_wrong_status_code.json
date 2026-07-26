@@ -11,7 +11,7 @@
     "bugfix",
     "http-status"
   ],
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "prompts": [
     "The Gin app in main.go has a POST /widgets endpoint that creates a widget with a `name` field and adds it to an in-memory list, but it incorrectly responds with HTTP 200 OK on success instead of 201 Created. Fix main.go so a successful creation responds with 201 Created (the JSON body stays the same: the created widget with its id and name). The server keeps listening on port 8032."
   ],

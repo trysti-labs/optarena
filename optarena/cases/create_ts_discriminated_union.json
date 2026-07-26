@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "typescript",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 90,
   "timeout": 180,
   "description": "Models shapes as a discriminated union with an exhaustive area()",

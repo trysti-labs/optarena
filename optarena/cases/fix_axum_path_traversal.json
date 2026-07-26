@@ -11,7 +11,7 @@
     "path-traversal",
     "axum"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "The Axum app in src/main.rs has a GET /download/*filename endpoint that reads a file from the `files/` directory and returns its contents as plain text, but it joins the filename directly onto the base directory with no sanitization, so a request whose filename contains \"..\" segments can escape the `files/` directory and read arbitrary files on disk. Fix src/main.rs so any attempt to escape the `files/` directory returns an error status (400/403/404) instead of file contents, while legitimate requests for files that actually exist directly inside `files/` (e.g. /download/hello.txt) keep working exactly as before. The server keeps listening on 0.0.0.0:8046."
   ],

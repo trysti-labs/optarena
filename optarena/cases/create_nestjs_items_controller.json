@@ -12,7 +12,7 @@
     "nestjs",
     "typescript"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "Write a NestJS application in main.ts (a tsconfig.json with the right compiler options for decorators is already provided - do not change it) implementing an in-memory items resource with an ItemsController mapped to the /items route. Implement: GET /items returns 200 with a JSON array of all items; POST /items accepts JSON body {\"name\": string} and returns 201 with the created item {id, name} (id is a number, auto-incrementing starting at 1); GET /items/:id returns 200 with the item if found, or throws a NotFoundException (404) if not found. Bootstrap the app with NestFactory and listen on port 8021. The app must be runnable directly with `ts-node main.ts` (no separate build step, no package.json)."
   ],

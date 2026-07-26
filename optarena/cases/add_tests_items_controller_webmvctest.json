@@ -12,7 +12,7 @@
     "mockmvc",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "The class src/main/java/com/optarena/catalog/CatalogController.java (already implemented, do not modify it; the app's @SpringBootApplication class already exists too) exposes: GET /catalog/ping, which returns HTTP 200 with the plain text body \"pong\"; and GET /catalog/greet?name=X, which returns HTTP 200 with JSON body {\"message\": \"Hello, X\"} (and when the `name` query parameter is omitted, it defaults to \"world\", i.e. {\"message\": \"Hello, world\"}). Write tests for it at src/test/java/com/optarena/catalog/CatalogControllerTest.java using Spring's @WebMvcTest(CatalogController.class) test slice with an autowired MockMvc, covering: (1) GET /catalog/ping returns status 200 and body \"pong\"; (2) GET /catalog/greet?name=Sam returns status 200 and JSON {\"message\": \"Hello, Sam\"}; (3) GET /catalog/greet with no name parameter returns status 200 and JSON {\"message\": \"Hello, world\"}."
   ],

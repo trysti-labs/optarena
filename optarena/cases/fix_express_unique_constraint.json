@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "express",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 90,
   "timeout": 240,
   "description": "Enforces unique username across a repository check and a 409 in the route",

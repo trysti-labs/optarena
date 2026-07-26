@@ -3,7 +3,7 @@
   "language": "csharp",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Refactors an imperative accumulation loop into a single LINQ Where/Sum expression without changing behavior",

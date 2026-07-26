@@ -12,7 +12,7 @@
     "health-check",
     "gin"
   ],
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "prompts": [
     "This Go module (go.mod/go.sum already list github.com/gin-gonic/gin v1.10.0 as a dependency) needs a main.go. Using Gin, create a GET /health endpoint that responds with JSON {\"status\": \"ok\"}, and have the server listen on port 8003."
   ],

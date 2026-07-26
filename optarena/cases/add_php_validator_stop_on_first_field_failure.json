@@ -3,7 +3,7 @@
   "language": "php",
   "framework": "plain-php",
   "domain": "backend",
-  "docker_image": "optarena-tester-php:latest",
+  "image": "optarena-tester-php:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Validator chain gains per-field stop-on-first-failure so a later rule on an already-failed field doesn't also fire; broken stops ALL validation instead of just that one field",

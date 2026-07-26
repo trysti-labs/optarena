@@ -11,7 +11,7 @@
     "error-handling",
     "bugfix"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "The Express server in server.js exposes POST /divide, which accepts a JSON body {\"a\": number, \"b\": number} and should respond with 200 and {\"result\": a / b}. Right now, when `a` or `b` is missing or not a number, the handler throws an unhandled exception (it calls .toFixed on values that may be undefined or non-numeric), which crashes the request and causes Express's default error handler to respond with a raw 500 status and an HTML stack trace - a bad, leaky error response. Fix server.js so that when `a` or `b` is missing or not a number, the endpoint instead responds with status 400 and a clean JSON body containing an \"error\" key describing the problem (no exception should be thrown, no stack trace exposed). Valid numeric input must still return 200 with the correct division result exactly as before. Keep listening on port 8022."
   ],

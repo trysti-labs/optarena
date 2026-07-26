@@ -13,7 +13,7 @@
     "yaml",
     "rust"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "Create a GitHub Actions workflow at .github/workflows/ci.yml for a Rust (Cargo) project. It must trigger on both `push` and `pull_request`. Define at least one job that checks out the repository (using `actions/checkout`) and then runs `cargo build` followed by `cargo test` as separate steps."
   ],

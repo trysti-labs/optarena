@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "String += in a loop -> strings.Builder; budget calibrated in-container (naive ~2.5s at n=40k vs ~0.001s, budget 1.2s); wrong-output broken drops the trailing newline",

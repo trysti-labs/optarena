@@ -3,7 +3,7 @@
   "language": "typescript",
   "framework": "typescript",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 90,
   "timeout": 180,
   "description": "Fixes an async map that returns pending promises instead of resolved values",

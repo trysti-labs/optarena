@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "minitest",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 90,
   "timeout": 300,
   "description": "Array#delete called once per blocked id inside a loop -> reject + Set; budget calibrated in-container (naive ~0.86s at n=20k vs ~0.0015s, budget 0.4s); wrong-output broken dedupes surviving items via Set arithmetic",

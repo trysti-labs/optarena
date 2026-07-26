@@ -12,7 +12,7 @@
     "health-check",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "This Maven project (pom.xml already uses spring-boot-starter-parent 3.3.4 with spring-boot-starter-web) needs its application code under package com.optarena.health. Create src/main/java/com/optarena/health/Application.java as the @SpringBootApplication entry point, and src/main/java/com/optarena/health/HealthController.java as a @RestController with a GET /health endpoint that returns {\"status\": \"ok\"} as JSON. The app should run on the default port 8080."
   ],

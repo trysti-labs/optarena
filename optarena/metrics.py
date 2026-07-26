@@ -96,11 +96,46 @@ def attribute_failure(c: dict) -> str | None:
     return None
 
 
+def _case_infrastructure_error(c: dict) -> bool:
+    """F-10: did any trial of this case hit an infrastructure_error (the
+    environment, not the model/tool's code, is why it failed)? Checked
+    across ALL trials, not just the majority-verdict trial - even a single
+    trial hitting a container/engine problem is worth surfacing, regardless
+    of whether the other trials happened to pass anyway."""
+    oracle = (c.get("extra", {}) or {}).get("oracle")
+    if oracle and oracle.get("infrastructure_error"):
+        return True
+    for o in (c.get("extra", {}) or {}).get("oracle_all_trials") or []:
+        if o and o.get("infrastructure_error"):
+            return True
+    return False
+
+
+def _case_total_duration(c: dict) -> float:
+    """Actual work-time for one case (F-09): sum of ALL trial durations for
+    a --trials run (extra.durations_s, set by runner._merge_trials), else
+    the single duration_s. `duration_s` itself is always the MEAN across
+    trials (a stable "how long does one attempt take" reading) - simply
+    summing it across cases understates total work by roughly a factor of N
+    for any trial-repeated case, which is what `total_duration_s` used to do."""
+    trial_durations = (c.get("extra", {}) or {}).get("durations_s")
+    if trial_durations:
+        return sum(trial_durations)
+    return c.get("duration_s") or 0.0
+
+
 def aggregate(case_dicts: list[dict]) -> dict:
     """Summary metrics for one run."""
     total = len(case_dicts)
     passed = sum(1 for c in case_dicts if c.get("passed"))
     errors = sum(1 for c in case_dicts if c.get("error"))
+    # F-10: cases where the ENVIRONMENT (container engine down, couldn't
+    # exec, etc.) is why the case failed, not the model/tool's code - these
+    # silently drag down `pass_rate` for reasons that have nothing to do
+    # with what's being evaluated. `pass_rate` itself is left unchanged
+    # (still exactly what it always meant) so existing comparisons/manifests
+    # stay valid; `adjusted_pass_rate` excludes them as a second, honest lens.
+    infra_errors = sum(1 for c in case_dicts if _case_infrastructure_error(c))
     # `is not None`, not truthiness: an explicit 0.0s duration (an instant
     # failure, a cached result) is a real sample and excluding it silently
     # inflates the mean/median/percentiles (audit L-01).
@@ -141,6 +176,12 @@ def aggregate(case_dicts: list[dict]) -> dict:
     pass_steps = [c["extra"]["n_steps"] for c in case_dicts
                   if c.get("passed") and isinstance(c.get("extra", {}).get("n_steps"), int)]
     steps_per_pass = round(statistics.mean(pass_steps), 1) if pass_steps else None
+    # F-10: excludes infrastructure-error cases from the denominator instead
+    # of counting them as ordinary failures - "of the cases we actually got
+    # a real verdict on, how many passed" alongside the raw, unadjusted rate.
+    non_infra_total = total - infra_errors
+    adjusted_pass_rate = (round(passed / non_infra_total, 3)
+                           if infra_errors and non_infra_total > 0 else None)
     return {
         "cases": total,
         "passed": passed,
@@ -150,7 +191,16 @@ def aggregate(case_dicts: list[dict]) -> dict:
         # 95% Wilson interval on the pass rate - the spread that says whether a
         # pass-rate difference is a real signal or small-sample noise.
         "pass_rate_ci": [ci_low, ci_high],
-        "total_duration_s": round(sum(durations), 1),
+        # F-10: cases where the environment (not the model/tool) is why it
+        # failed, and a pass rate that excludes them - None when there
+        # aren't any, so a clean run's summary doesn't grow a distracting
+        # always-null field.
+        "infrastructure_errors": infra_errors or None,
+        "adjusted_pass_rate": adjusted_pass_rate,
+        # F-09: sum of ACTUAL work across all trials (was silently summing
+        # each case's per-trial MEAN, understating total work under
+        # --trials N by roughly a factor of N).
+        "total_duration_s": round(sum(_case_total_duration(c) for c in case_dicts), 1),
         "mean_duration_s": round(statistics.mean(durations), 1) if durations else 0.0,
         "median_duration_s": round(statistics.median(durations), 1) if durations else 0.0,
         "p95_duration_s": _percentile(durations, 95),
@@ -211,5 +261,10 @@ def case_deltas(run_a: dict, run_b: dict) -> list[dict]:
             ),
             "a_failures": (ca or {}).get("failures", []),
             "b_failures": (cb or {}).get("failures", []),
+            # F-10: so a comparison/regression can flag "this case's verdict
+            # may not be trustworthy - the environment broke, not the code"
+            # distinctly from a genuine pass<->fail flip.
+            "a_infrastructure_error": bool(ca and _case_infrastructure_error(ca)),
+            "b_infrastructure_error": bool(cb and _case_infrastructure_error(cb)),
         })
     return rows

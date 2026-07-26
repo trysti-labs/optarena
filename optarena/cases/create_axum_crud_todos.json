@@ -13,7 +13,7 @@
     "crud",
     "in-memory"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "This Cargo project (Cargo.toml already lists axum, tokio, serde, and serde_json as dependencies) needs a src/main.rs. Using Axum, build an in-memory /todos resource with shared state (protected by a Mutex, wrapped in an Arc, created once in main and shared via State) that supports:\n- GET /todos: returns 200 with a JSON array of all todos created so far. Each todo is a JSON object with an integer \"id\" and a string \"title\".\n- POST /todos: accepts a JSON body {\"title\": \"...\"}, assigns it a new unique integer id (starting at 1 and increasing by 1 for each new todo, even across the whole server run), stores it, and returns 201 Created with the created todo (including its assigned id) as JSON.\n- DELETE /todos/:id: removes the todo with that id if it exists and returns 204 No Content; if no todo has that id, returns 404 Not Found instead.\nTodos must persist across requests within the same server run. Have the server listen on 0.0.0.0:8041."
   ],

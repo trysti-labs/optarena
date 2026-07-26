@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Write pytest tests for a 1h30m45s-style duration parser; mutation-checked (seconds dropped, hours-as-minutes, empty-returns-0 mutants)",

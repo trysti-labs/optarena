@@ -27,7 +27,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12"]
+        # F-17: pyproject.toml declares `requires-python = ">=3.10"` (lower
+        # bound only) but the matrix stopped at 3.12, so nothing tested the
+        # supported-in-principle 3.13+ range.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -42,7 +45,7 @@ jobs:
           node-version: "20"
       - name: Unit tests (no Docker)
         shell: bash
-        run: OPTARENA_NO_DOCKER=1 python -m unittest discover tests -v
+        run: OPTARENA_DISABLE_SANDBOX=1 python -m unittest discover tests -v
 
   # Corpus self-verification: every case's reference_solution must PASS the
   # real container-sandboxed oracle, every broken/unmodified variant must FAIL.
@@ -71,3 +74,92 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify corpus (pulls sandbox images from GHCR on demand)
         run: python -m optarena cases verify
+
+  # F-17: nothing previously exercised the actual DISTRIBUTION artifact - the
+  # unit-tests job runs against a checkout (`python -m unittest`), which
+  # can't catch a packaging bug (a file missing from `package-data`, an entry
+  # point that doesn't resolve) that only shows up once a wheel is built and
+  # installed standalone into a clean environment.
+  wheel-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel --outdir dist
+      - name: Install wheel into a clean venv
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install dist/*.whl
+      - name: Smoke-test the installed CLI
+        run: |
+          /tmp/wheel-venv/bin/optarena --help
+          /tmp/wheel-venv/bin/optarena cases validate
+
+  # F-17/F-13: hadolint catches Dockerfile anti-patterns (missing pins,
+  # unnecessary layers, shell-form footguns) that a human reviewer skims past;
+  # check_images_lock.py catches images.lock.json (F-13's build-reproducibility
+  # ledger) silently drifting from what the Dockerfiles actually declare. Both
+  # are static/no-Docker-daemon-needed, so this stays a fast PR-blocking job
+  # rather than living only in the (Docker-build-heavy) publish workflow.
+  dockerfile-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        context: [docker, docker/python, docker/node, docker/go, docker/jvm,
+                   docker/rust, docker/dotnet, docker/php, docker/ruby]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: hadolint
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: ${{ matrix.context }}/Dockerfile
+          config: .hadolint.yaml
+
+  images-lock-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: docker/images.lock.json matches the Dockerfiles
+        run: python docker/check_images_lock.py
+
+  # F-17: `container_engine()` auto-detects and `OPTARENA_CONTAINER_ENGINE`
+  # can force Podman (added this session), but no CI job had ever actually
+  # run a check_command through a real Podman install - Docker-only coverage
+  # meant a Podman-specific regression (CLI flag Docker accepts but Podman
+  # doesn't, rootless permission/mount quirks) could only be caught by a
+  # Podman user in the wild. `--language shell` scopes this to the base
+  # image only (the 16 shell-tagged cases), not all ~9 per-language images -
+  # deliberately narrow so this stays a fast per-PR job; verify-corpus
+  # already covers full-corpus breadth under Docker.
+  rootless-podman:
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'trysti-labs' || github.repository_owner == 'selfopt'
+    needs: unit-tests
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Install rootless Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman uidmap
+          podman info
+      - name: Log in to GHCR (podman)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Verify shell-language cases through Podman
+        env:
+          OPTARENA_CONTAINER_ENGINE: podman
+        run: python -m optarena cases verify --language shell

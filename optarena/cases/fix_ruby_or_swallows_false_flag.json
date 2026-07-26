@@ -3,7 +3,7 @@
   "language": "ruby",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-ruby:latest",
+  "image": "optarena-tester-ruby:latest",
   "check_command_timeout": 180,
   "timeout": 240,
   "description": "Fixes a Ruby feature-flag lookup that uses `||` and wrongly returns the default for a stored false",

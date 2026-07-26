@@ -3,7 +3,7 @@
   "language": "php",
   "framework": "phpunit",
   "domain": "backend",
-  "docker_image": "optarena-tester-php:latest",
+  "image": "optarena-tester-php:latest",
   "check_command_timeout": 300,
   "timeout": 400,
   "description": "Refactors an if/elseif log-level severity lookup into a PHP 8 match expression",

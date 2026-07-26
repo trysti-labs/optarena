@@ -12,7 +12,7 @@
     "health-check",
     "axum"
   ],
-  "docker_image": "optarena-tester-rust:latest",
+  "image": "optarena-tester-rust:latest",
   "prompts": [
     "This Cargo project (Cargo.toml already lists axum, tokio, serde, and serde_json as dependencies) needs a src/main.rs. Using Axum, create a GET /health endpoint that responds with JSON {\"status\": \"ok\"}, and have the server listen on 0.0.0.0:8004."
   ],

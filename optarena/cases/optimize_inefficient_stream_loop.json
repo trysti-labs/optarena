@@ -11,7 +11,7 @@
     "algorithms",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "DuplicateFinder.findDuplicates(List<Integer> nums) (src/main/java/com/optarena/perf/DuplicateFinder.java) correctly returns every value that appears more than once in `nums`, but it uses a nested loop plus a `.contains()` check on the growing result list, making it O(n^2) - far too slow for large inputs (tens of thousands of elements). Rewrite it to run in roughly linear time using HashSet/HashMap-based counting instead of nested loops or repeated `.contains()` scans, while keeping the exact same public method signature `List<Integer> findDuplicates(List<Integer> nums)` and the same result semantics: every value occurring 2 or more times must appear exactly once in the returned list (the order of the returned list does not matter)."
   ],

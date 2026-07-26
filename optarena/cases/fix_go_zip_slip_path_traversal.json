@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 60,
   "timeout": 300,
   "description": "Fixes a zip-slip path traversal: archive entries are extracted with no containment check against the destination directory",

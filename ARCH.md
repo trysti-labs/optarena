@@ -179,12 +179,12 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   DockerSandbox`, keyed in the module-level `_active_sandboxes: dict[image,
   DockerSandbox]`) - not one container per check_command call, and not just
   one container overall. `runner.run_scenario()` computes `images_needed =
-  {case.get("docker_image") or DOCKER_IMAGE_DEFAULT for case in cases if
+  {case.get("image") or DOCKER_IMAGE_DEFAULT for case in cases if
   case.get("check_command")}` and starts one `DockerSandbox` per image in
   that set, so a run mixing e.g. a Python case and a Go case gets both
   toolchains live at once, each bind-mounting the run's whole temp workspace
   root at `/workspace`. Every case's `check_command` resolves its own
-  required image first (`case.get("docker_image") or ... or
+  required image first (`case.get("image") or ... or
   DOCKER_IMAGE_DEFAULT`) and looks it up in `_active_sandboxes` before
   `exec`ing in; case/trial calls for the same image still share that
   one container (`-w /workspace/<case>/<trial-subdir>`), and every sandbox in
@@ -201,7 +201,7 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   is called with no matching active sandbox for that case's image (e.g.
   `evaluate_case` called directly, outside the runner), and to the host
   (one-time warning to stderr) when no container engine is reachable or
-  `OPTARENA_NO_DOCKER=1` is set. `docker_image_available()` /
+  `OPTARENA_DISABLE_SANDBOX=1` is set. `docker_image_available()` /
   `_docker_available()` cache their engine CLI probes for the process
   lifetime.
 - **`container_engine()`** (`cases.py`) resolves which binary every one of
@@ -213,11 +213,11 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   sandbox images, not just read off Podman's docs.
 - **`DOCKER_IMAGES` registry** (`cases.py`) maps a short track name to its
   image tag: `base` (the original combined gcc+python3+node image, unchanged,
-  still the default for cases with no `docker_image`), plus `python`, `node`,
+  still the default for cases with no `image`), plus `python`, `node`,
   `jvm`, `go`, `rust`, `dotnet` - one per benchmark-corpus track that needed a
   language/framework toolchain the base image doesn't have. `dockerfile_for
   (lang)` resolves the Dockerfile path by convention: `docker/Dockerfile` for
-  `base`, `docker/<lang>/Dockerfile` for everything else. `optarena docker
+  `base`, `docker/<lang>/Dockerfile` for everything else. `optarena sandbox
   build` defaults to `base`; `--lang <name>` builds one track, `--all` builds
   every registered image. `optarena doctor` reports build status for every
   image in the registry (advisory only - doesn't fail the exit code, since
@@ -673,7 +673,7 @@ ship `broken_solutions` (proven to FAIL). `optarena cases verify` skips no case.
 
 **Built:**
 - Case schema extended with `framework`/`domain`/`difficulty`/`task_type`/
-  `tags`/`docker_image` (§3.1), plus a `--framework` filter mirroring
+  `tags`/`image` (§3.1), plus a `--framework` filter mirroring
   `--language` everywhere it appears.
 - Multi-image `DockerSandbox` (one shared container per distinct image a
   run's cases need, not just one overall).
@@ -797,7 +797,7 @@ had to be built locally (~30 min cold). They now publish to
 `.github/workflows/publish-images.yml` on every `docker/**` change; the
 runtime's `DockerSandbox.start()`/`run_check_command()` paths call a new
 `ensure_image()` that pulls-and-tags a missing image before falling back to
-"build it yourself" guidance (`OPTARENA_NO_PULL=1` opts out; capped at 5
+"build it yourself" guidance (`OPTARENA_DISABLE_PULL=1` opts out; capped at 5
 minutes since this is a first-run convenience, not a build step - a slow or
 unreachable registry must not stall a whole `optarena run`). `optarena
 docker pull [--lang X|--all]` exists for explicit prefetch. One related

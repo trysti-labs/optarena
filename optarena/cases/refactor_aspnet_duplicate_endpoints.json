@@ -12,7 +12,7 @@
     "minimal-api",
     "duplication"
   ],
-  "docker_image": "optarena-tester-dotnet:latest",
+  "image": "optarena-tester-dotnet:latest",
   "prompts": [
     "This is an ASP.NET Core minimal API project (app.csproj targets net8.0). Program.cs has two endpoints, GET /greet/formal and GET /greet/casual, each reading a 'name' query parameter and normalizing it (capitalizing the first letter, lowercasing the rest), but the validation-and-normalization code is duplicated verbatim between the two handlers. Refactor Program.cs to remove the duplication (for example, extract a shared local function or helper method for validating and normalizing the name) while preserving the exact same external behavior: GET /greet/formal?name=alice must return HTTP 200 with JSON {\"greeting\": \"Good day, Alice.\"}, GET /greet/casual?name=alice must return HTTP 200 with JSON {\"greeting\": \"Hey Alice!\"}, and both endpoints must return HTTP 400 with a JSON error body when the 'name' query parameter is missing or blank. Do not change the port (8054)."
   ],

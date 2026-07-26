@@ -12,7 +12,7 @@
     "duplication",
     "spring-boot"
   ],
-  "docker_image": "optarena-tester-jvm:latest",
+  "image": "optarena-tester-jvm:latest",
   "prompts": [
     "In this Maven Spring Boot project, RegistrationController (src/main/java/com/optarena/registration/RegistrationController.java) has two endpoints, POST /register and POST /register/admin, that each inline the exact same validation logic (username must not be blank, password must be at least 8 characters) before returning a role-specific result. Refactor the controller to extract that duplicated validation into a single shared private helper method used by both handlers, removing the duplication. The externally observable behavior (status codes, response bodies, and the 'USER' vs 'ADMIN' role difference) must stay exactly the same."
   ],

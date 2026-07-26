@@ -3,7 +3,7 @@
   "language": "go",
   "framework": "stdlib",
   "domain": "backend",
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "check_command_timeout": 180,
   "timeout": 300,
   "description": "Creates a generic Go LRU cache (capacity eviction by recency) used by an existing MemoService (cross-file)",

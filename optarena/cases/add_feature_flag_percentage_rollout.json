@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Add a percentage-rollout flag type to a boolean/allowlist feature-flag evaluator, keyed so independent flags don't share the same enabled-user set",

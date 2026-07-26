@@ -147,7 +147,7 @@ class TestSetupFilesTests(unittest.TestCase):
 
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_"))
-        self._env = mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"})
+        self._env = mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"})
         self._env.start()
         self.addCleanup(self._env.stop)
 
@@ -165,7 +165,7 @@ class TestSetupFilesTests(unittest.TestCase):
         self.assertTrue((self.ws / "test_add.py").exists())
         self.assertEqual(oracle["test_setup_files"], ["test_add.py"])
         self.assertTrue(oracle["ran"])
-        self.assertEqual(oracle["sandbox"], "host")   # OPTARENA_NO_DOCKER=1 in setUp
+        self.assertEqual(oracle["sandbox"], "host")   # OPTARENA_DISABLE_SANDBOX=1 in setUp
 
     def test_hidden_test_file_not_required_in_created_list(self):
         # test_setup_files must not need to appear in `created` (the diff of
@@ -189,15 +189,15 @@ class DockerCheckCommandTests(unittest.TestCase):
         import optarena.cases as cases_mod
         self.cases_mod = cases_mod
         # Reset the module-level docker-availability cache before each test.
-        self._orig = (cases_mod._docker_checked, cases_mod._docker_ok,
+        self._orig = (cases_mod._docker_checked_at, cases_mod._docker_ok,
                       cases_mod._docker_warned, dict(cases_mod._active_sandboxes))
-        cases_mod._docker_checked = False
+        cases_mod._docker_checked_at = -1.0
         cases_mod._docker_ok = False
         cases_mod._docker_warned = False
         cases_mod._active_sandboxes.clear()
 
     def tearDown(self):
-        (self.cases_mod._docker_checked, self.cases_mod._docker_ok,
+        (self.cases_mod._docker_checked_at, self.cases_mod._docker_ok,
          self.cases_mod._docker_warned, sandboxes) = self._orig
         self.cases_mod._active_sandboxes.clear()
         self.cases_mod._active_sandboxes.update(sandboxes)
@@ -217,7 +217,7 @@ class DockerCheckCommandTests(unittest.TestCase):
 
         with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
              mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            os.environ.pop("OPTARENA_DISABLE_SANDBOX", None)
             failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
 
         self.assertEqual(failures, [])
@@ -241,7 +241,7 @@ class DockerCheckCommandTests(unittest.TestCase):
 
         with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
              mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            os.environ.pop("OPTARENA_DISABLE_SANDBOX", None)
             self.assertFalse(self.cases_mod._docker_available())
 
     def test_no_docker_env_forces_local_execution(self):
@@ -254,7 +254,7 @@ class DockerCheckCommandTests(unittest.TestCase):
         # Host exec now goes through run_capture (process-group aware), not
         # subprocess.run directly - see H-11 / _run_check_command_local.
         with mock.patch.object(self.cases_mod, "run_capture", side_effect=fake_capture), \
-             mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"}):
+             mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"}):
             failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
 
         self.assertEqual(failures, [])
@@ -273,7 +273,7 @@ class DockerCheckCommandTests(unittest.TestCase):
 
         with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
              mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            os.environ.pop("OPTARENA_DISABLE_SANDBOX", None)
             os.environ.pop("OPTARENA_ALLOW_UNSAFE_HOST_EXEC", None)
             failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
 
@@ -294,7 +294,7 @@ class DockerCheckCommandTests(unittest.TestCase):
         with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
              mock.patch.object(self.cases_mod, "run_capture", side_effect=fake_capture), \
              mock.patch.dict(os.environ, {"OPTARENA_ALLOW_UNSAFE_HOST_EXEC": "1"}, clear=False):
-            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            os.environ.pop("OPTARENA_DISABLE_SANDBOX", None)
             failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
 
         self.assertEqual(failures, [])
@@ -302,14 +302,14 @@ class DockerCheckCommandTests(unittest.TestCase):
         self.assertTrue(oracle["ran"])
 
     def test_no_docker_env_still_sufficient_on_its_own(self):
-        # OPTARENA_NO_DOCKER=1 alone (the pre-existing, already-explicit
+        # OPTARENA_DISABLE_SANDBOX=1 alone (the pre-existing, already-explicit
         # opt-out) must keep working unchanged - it must not also require
         # OPTARENA_ALLOW_UNSAFE_HOST_EXEC.
         def fake_capture(cmd, **kwargs):
             return mock.Mock(returncode=0, stdout="", stderr="")
 
         with mock.patch.object(self.cases_mod, "run_capture", side_effect=fake_capture), \
-             mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"}, clear=False):
+             mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"}, clear=False):
             os.environ.pop("OPTARENA_ALLOW_UNSAFE_HOST_EXEC", None)
             failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.ws)
 
@@ -332,15 +332,15 @@ class SharedSandboxTests(unittest.TestCase):
         (self.root / "case_b" / "t1").mkdir(parents=True)
         import optarena.cases as cases_mod
         self.cases_mod = cases_mod
-        self._orig = (cases_mod._docker_checked, cases_mod._docker_ok,
+        self._orig = (cases_mod._docker_checked_at, cases_mod._docker_ok,
                       cases_mod._docker_warned, dict(cases_mod._active_sandboxes))
-        cases_mod._docker_checked = False
+        cases_mod._docker_checked_at = -1.0
         cases_mod._docker_ok = False
         cases_mod._docker_warned = False
         cases_mod._active_sandboxes.clear()
 
     def tearDown(self):
-        (self.cases_mod._docker_checked, self.cases_mod._docker_ok,
+        (self.cases_mod._docker_checked_at, self.cases_mod._docker_ok,
          self.cases_mod._docker_warned, sandboxes) = self._orig
         self.cases_mod._active_sandboxes.clear()
         self.cases_mod._active_sandboxes.update(sandboxes)
@@ -364,7 +364,7 @@ class SharedSandboxTests(unittest.TestCase):
 
         with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
              mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            os.environ.pop("OPTARENA_DISABLE_SANDBOX", None)
             with self.cases_mod.DockerSandbox(self.root) as sandbox:
                 self.assertTrue(sandbox.active)
                 f1, o1 = self.cases_mod.run_check_command({"check_command": "echo a"}, self.root / "case_a")
@@ -406,7 +406,7 @@ class SharedSandboxTests(unittest.TestCase):
 
         with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
              mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            os.environ.pop("OPTARENA_DISABLE_SANDBOX", None)
             failures, oracle = self.cases_mod.run_check_command({"check_command": "echo hi"}, self.root / "case_a")
 
         self.assertEqual(failures, [])
@@ -599,6 +599,19 @@ class RunCaptureTests(unittest.TestCase):
         time.sleep(5)
         self.assertFalse(sentinel.exists(),
                          "child outlived the timed-out parent - process tree not killed")
+
+    def test_output_capture_is_bounded_not_unbounded(self):
+        # F-03: a misbehaving process dumping way more than any oracle tail
+        # actually uses must not make run_capture buffer all of it - confirms
+        # captured stdout stays near _MAX_CAPTURE_BYTES, not the ~2MB the
+        # child actually writes.
+        import sys
+        from optarena.cases import _MAX_CAPTURE_BYTES
+        proc = run_capture(
+            [sys.executable, "-c", "import sys; sys.stdout.write('x' * (2 * 1024 * 1024))"],
+            timeout=30, text=True)
+        self.assertEqual(proc.returncode, 0)
+        self.assertLess(len(proc.stdout), 2 * _MAX_CAPTURE_BYTES)
 
 
 class WorkspaceCleanupTests(unittest.TestCase):
@@ -999,7 +1012,7 @@ class VerifyCorpusTests(unittest.TestCase):
     """verify-corpus: reference must pass the real oracle, broken must fail."""
 
     def setUp(self):
-        self._env = mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"})
+        self._env = mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"})
         self._env.start()
         self.addCleanup(self._env.stop)
 
@@ -1402,15 +1415,15 @@ class MultiImageSandboxTests(unittest.TestCase):
         (self.root / "case_go").mkdir()
         import optarena.cases as cases_mod
         self.cases_mod = cases_mod
-        self._orig = (cases_mod._docker_checked, cases_mod._docker_ok,
+        self._orig = (cases_mod._docker_checked_at, cases_mod._docker_ok,
                       cases_mod._docker_warned, dict(cases_mod._active_sandboxes))
-        cases_mod._docker_checked = False
+        cases_mod._docker_checked_at = -1.0
         cases_mod._docker_ok = False
         cases_mod._docker_warned = False
         cases_mod._active_sandboxes.clear()
 
     def tearDown(self):
-        (self.cases_mod._docker_checked, self.cases_mod._docker_ok,
+        (self.cases_mod._docker_checked_at, self.cases_mod._docker_ok,
          self.cases_mod._docker_warned, sandboxes) = self._orig
         self.cases_mod._active_sandboxes.clear()
         self.cases_mod._active_sandboxes.update(sandboxes)
@@ -1437,7 +1450,7 @@ class MultiImageSandboxTests(unittest.TestCase):
 
         with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
              mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OPTARENA_NO_DOCKER", None)
+            os.environ.pop("OPTARENA_DISABLE_SANDBOX", None)
             py_sandbox = DockerSandbox(self.root, image="optarena-tester-python:latest")
             go_sandbox = DockerSandbox(self.root, image="optarena-tester-go:latest")
             py_sandbox.start()
@@ -1447,8 +1460,8 @@ class MultiImageSandboxTests(unittest.TestCase):
                 self.assertIs(self.cases_mod._active_sandboxes["optarena-tester-python:latest"], py_sandbox)
                 self.assertIs(self.cases_mod._active_sandboxes["optarena-tester-go:latest"], go_sandbox)
 
-                py_case = {"check_command": "echo hi", "docker_image": "optarena-tester-python:latest"}
-                go_case = {"check_command": "echo hi", "docker_image": "optarena-tester-go:latest"}
+                py_case = {"check_command": "echo hi", "image": "optarena-tester-python:latest"}
+                go_case = {"check_command": "echo hi", "image": "optarena-tester-go:latest"}
                 _, py_info = run_check_command(py_case, self.root / "case_py")
                 _, go_info = run_check_command(go_case, self.root / "case_go")
                 self.assertEqual(py_info["image"], "optarena-tester-python:latest")
@@ -1614,7 +1627,7 @@ class RichMetricsTests(unittest.TestCase):
             "test_setup_files": {"test_add.py": "import add\nassert add.add(2, 3) == 5\n"},
             "check_command": f'"{sys.executable}" test_add.py',
         }
-        with mock.patch.dict(os.environ, {"OPTARENA_NO_DOCKER": "1"}):
+        with mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"}):
             failures, oracle = evaluate_case(case, ["add.py"], self.ws)
         self.assertTrue(failures)
         self.assertIn("diff", oracle)
@@ -2331,6 +2344,473 @@ class EfficiencyMetricsTests(unittest.TestCase):
         s = aggregate([{"passed": True, "duration_s": 1, "extra": {}}])
         self.assertIsNone(s["tokens_per_pass"])
         self.assertIsNone(s["steps_per_pass"])
+
+
+class PackVersionSortTests(unittest.TestCase):
+    """F-11: version comparisons must be numeric, not lexical - "1.9.0" is a
+    LOWER version than "1.10.0" even though '9' > '1' as characters."""
+
+    def test_numeric_minor_beats_lexical_order(self):
+        from optarena.packs import _version_key
+        self.assertGreater(_version_key("1.10.0"), _version_key("1.9.0"))
+        self.assertGreater(_version_key("2.0.0"), _version_key("1.99.99"))
+
+    def test_missing_components_default_to_zero(self):
+        from optarena.packs import _version_key
+        self.assertEqual(_version_key("1.2"), (1, 2, 0, ""))
+        self.assertEqual(_version_key("3"), (3, 0, 0, ""))
+
+    def test_non_numeric_version_does_not_raise(self):
+        from optarena.packs import _version_key
+        self.assertEqual(_version_key("not-a-version"), (-1, -1, -1, "not-a-version"))
+
+    def test_resolve_pack_picks_numerically_highest_version(self):
+        from optarena.packs import resolve_pack
+        packs_dir = Path(tempfile.mkdtemp(prefix="optarena_test_packs_"))
+        for version in ("1.9.0", "1.10.0", "1.2.0"):
+            d = packs_dir / f"demo@{version}"
+            d.mkdir()
+            (d / "_pack.json").write_text(
+                json.dumps({"name": "demo", "version": version, "created_at": "2026-01-01T00:00:00"}),
+                encoding="utf-8")
+        resolved = resolve_pack("demo", packs_dir=packs_dir)
+        self.assertEqual(resolved.name, "demo@1.10.0")
+
+
+class PackLoadValidationTests(unittest.TestCase):
+    """F-11: a pack's cases are now validated at INSTALL time (load_pack),
+    not just at build time - a hand-edited/corrupted pack must be refused
+    before it's written into the registry, not silently accepted and only
+    discovered broken later at `run --pack` time."""
+
+    @staticmethod
+    def _case(name="c1", **overrides):
+        base = {"name": name, "prompts": ["do it"]}
+        base.update(overrides)
+        return base
+
+    def _write_pack(self, cases: dict, **top_level) -> str:
+        from optarena.packs import content_hash
+        pack = {
+            "optarena_pack": 1, "name": "demo", "version": "1.0.0",
+            "case_count": len(cases), "hash": content_hash(cases), "cases": cases,
+        }
+        pack.update(top_level)
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".optpack.json", delete=False, encoding="utf-8")
+        json.dump(pack, f)
+        f.close()
+        return f.name
+
+    def test_valid_pack_loads(self):
+        from optarena.packs import load_pack
+        path = self._write_pack({"c1.json": self._case()})
+        pack = load_pack(path)
+        self.assertEqual(pack["name"], "demo")
+
+    def test_malformed_case_is_rejected(self):
+        from optarena.packs import load_pack
+        path = self._write_pack({"c1.json": {"prompts": ["missing name field"]}})
+        with self.assertRaises(SchemaError):
+            load_pack(path)
+
+    def test_duplicate_case_names_rejected(self):
+        from optarena.packs import load_pack
+        path = self._write_pack({
+            "a.json": self._case(name="dup"),
+            "b.json": self._case(name="dup"),
+        })
+        with self.assertRaises(ValueError):
+            load_pack(path)
+
+    def test_case_count_mismatch_rejected(self):
+        from optarena.packs import load_pack
+        path = self._write_pack({"c1.json": self._case()}, case_count=99)
+        with self.assertRaises(ValueError) as ctx:
+            load_pack(path)
+        self.assertIn("case_count", str(ctx.exception))
+
+    def test_filename_sanitization_collision_rejected(self):
+        from optarena.packs import load_pack
+        # `_safe()` maps both of these filenames to the same sanitized name
+        # ("a-b.json"), which would silently overwrite one case with the
+        # other at install time without this check.
+        path = self._write_pack({
+            "a/b.json": self._case(name="one"),
+            "a b.json": self._case(name="two"),
+        })
+        with self.assertRaises(ValueError) as ctx:
+            load_pack(path)
+        self.assertIn("collision", str(ctx.exception))
+
+
+class PackInstallAtomicityTests(unittest.TestCase):
+    """F-11: install_pack must never leave a half-written pack directory in
+    the registry - it stages into a sibling temp dir and renames into place,
+    cleaning the staging dir up if anything fails partway through."""
+
+    def test_install_failure_leaves_no_staging_directory_behind(self):
+        from optarena import packs
+        packs_dir = Path(tempfile.mkdtemp(prefix="optarena_test_packinstall_"))
+        pack = {
+            "optarena_pack": 1, "name": "demo", "version": "1.0.0",
+            "case_count": 1, "hash": "sha256:x",
+            "cases": {"c1.json": {"name": "c1", "prompts": ["x"]}},
+        }
+        with mock.patch("optarena.packs.json.dumps", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                packs.install_pack(pack, packs_dir=packs_dir)
+        # no half-written target dir, and no leftover ".demo@1.0.0.staging-*" dir
+        self.assertEqual(list(packs_dir.iterdir()), [])
+
+    def test_successful_install_is_visible_and_idempotent(self):
+        from optarena import packs
+        packs_dir = Path(tempfile.mkdtemp(prefix="optarena_test_packinstall2_"))
+        cases = {"c1.json": {"name": "c1", "prompts": ["x"]}}
+        pack = {
+            "optarena_pack": 1, "name": "demo", "version": "1.0.0",
+            "case_count": 1, "hash": packs.content_hash(cases), "cases": cases,
+        }
+        root = packs.install_pack(pack, packs_dir=packs_dir)
+        self.assertTrue((root / "_pack.json").is_file())
+        self.assertTrue((root / "c1.json").is_file())
+        # re-installing the identical pack is a no-op, not an error
+        root2 = packs.install_pack(pack, packs_dir=packs_dir)
+        self.assertEqual(root, root2)
+
+
+class RunEventsTests(unittest.TestCase):
+    """F-18: RunEvents gates human console output (.say/.detail, --quiet and
+    --log-level) and structured lifecycle events (.emit, --json-events)
+    independently, and a default-constructed RunEvents (what every
+    pre-existing run_scenario caller effectively gets) behaves exactly like
+    an unconditional print()."""
+
+    def _capture(self, events, fn):
+        import io
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            fn(events)
+        finally:
+            sys.stdout = old
+        return buf.getvalue()
+
+    def test_default_prints_unconditionally(self):
+        from optarena.events import RunEvents
+        out = self._capture(RunEvents(), lambda e: e.say("hello"))
+        self.assertIn("hello", out)
+
+    def test_quiet_suppresses_say_and_detail(self):
+        from optarena.events import RunEvents
+        events = RunEvents(quiet=True)
+        out = self._capture(events, lambda e: (e.say("a"), e.detail("b")))
+        self.assertEqual(out, "")
+
+    def test_log_level_warn_drops_detail_but_keeps_say(self):
+        from optarena.events import RunEvents
+        events = RunEvents(log_level="warn")
+        out = self._capture(events, lambda e: (e.say("headline"), e.detail("secondary")))
+        self.assertIn("headline", out)
+        self.assertNotIn("secondary", out)
+
+    def test_log_level_quiet_is_equivalent_to_quiet_flag(self):
+        from optarena.events import RunEvents
+        events = RunEvents(log_level="quiet")
+        self.assertTrue(events.quiet)
+
+    def test_invalid_log_level_rejected(self):
+        from optarena.events import RunEvents
+        with self.assertRaises(ValueError):
+            RunEvents(log_level="verbose")
+
+    def test_emit_only_under_json_events(self):
+        from optarena.events import RunEvents
+        out = self._capture(RunEvents(), lambda e: e.emit("run_started", run_id="x"))
+        self.assertEqual(out, "")
+        out = self._capture(RunEvents(json_events=True), lambda e: e.emit("run_started", run_id="x"))
+        payload = json.loads(out.strip())
+        self.assertEqual(payload["event"], "run_started")
+        self.assertEqual(payload["run_id"], "x")
+        self.assertIn("ts", payload)
+
+    def test_json_events_independent_of_quiet(self):
+        # --json-events without --quiet: both streams are present.
+        from optarena.events import RunEvents
+        events = RunEvents(json_events=True)
+        out = self._capture(events, lambda e: (e.say("human line"), e.emit("run_started")))
+        lines = [line for line in out.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], "human line")
+        json.loads(lines[1])  # the second line is valid JSON
+
+
+class RunScenarioLifecycleEventsTests(unittest.TestCase):
+    """F-18 integration: run_scenario emits all five named lifecycle events,
+    in order, and --quiet suppresses every human line while leaving the
+    JSON event stream intact."""
+
+    def setUp(self):
+        self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_events_"))
+        (self.cases_dir / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do it"],
+        }), encoding="utf-8")
+
+    def test_lifecycle_events_fire_in_order_and_human_output_is_suppressed(self):
+        import io
+        from optarena.events import RunEvents
+        driver = mock.Mock(parallel_safe=False, caches_results=False)
+        driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.01)
+        sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
+        events = RunEvents(quiet=True, json_events=True)
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            with mock.patch("optarena.runner.get_driver", return_value=driver):
+                rec = run_scenario(sc, events=events)
+        finally:
+            sys.stdout = old
+        lines = [json.loads(line) for line in buf.getvalue().splitlines() if line.strip()]
+        # every line parsed as JSON (proves --quiet left no stray human text
+        # interleaved with the event stream), in the documented order.
+        self.assertEqual(
+            [e["event"] for e in lines],
+            ["run_started", "case_started", "case_completed", "checkpoint_saved", "run_completed"])
+        self.assertEqual(lines[1]["case"], "c1")
+        self.assertEqual(lines[2]["case"], "c1")
+        self.assertTrue(lines[2]["passed"])
+        self.assertEqual(lines[4]["status"], "completed")
+        self.assertEqual(rec.status, "completed")
+
+
+class ManifestTrialsTests(unittest.TestCase):
+    """F-09: `trials` in the manifest is what was REQUESTED (for cross-run
+    comparability); `runner_trials` separately records the runner's own
+    local loop count, which drops to 1 for a caching driver even though the
+    run still semantically has N trials."""
+
+    def test_runner_trials_defaults_to_requested(self):
+        from optarena.runner import build_manifest
+        m = build_manifest(
+            Scenario(name="x", driver="aider", backend=Backend(kind="ollama", base_url="http://x", model="m")),
+            [], requested_trials=3)
+        self.assertEqual(m["trials"], 3)
+        self.assertEqual(m["runner_trials"], 3)
+
+    def test_runner_trials_can_diverge_from_requested(self):
+        # a caching driver: requested 3 trials, but the runner's own loop
+        # only executes once (the driver repeats internally).
+        from optarena.runner import build_manifest
+        m = build_manifest(
+            Scenario(name="x", driver="aider", backend=Backend(kind="ollama", base_url="http://x", model="m")),
+            [], requested_trials=3, runner_trials=1)
+        self.assertEqual(m["trials"], 3)
+        self.assertEqual(m["runner_trials"], 1)
+
+    def test_caching_driver_manifest_reflects_requested_trials_not_one(self):
+        cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_manifesttrials_"))
+        (cases_dir / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do it"],
+        }), encoding="utf-8")
+        driver = mock.Mock(parallel_safe=False, caches_results=True, trials=1)
+        driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
+        sc = Scenario(name="x", driver="aider", cases_dir=str(cases_dir))
+        with mock.patch("optarena.runner.get_driver", return_value=driver):
+            rec = run_scenario(sc, trials=5)
+        self.assertEqual(rec.manifest["trials"], 5)
+        self.assertEqual(rec.manifest["runner_trials"], 1)
+
+
+class RunScenarioCleanupResilienceTests(unittest.TestCase):
+    """F-01: every cleanup step in run_scenario's finally block is
+    individually best-effort - driver.teardown() raising must not prevent
+    the run from returning a completed record (previously an uncaught
+    exception here would propagate out of run_scenario after the case loop
+    already succeeded, turning a cosmetic cleanup failure into a fake run
+    failure)."""
+
+    def setUp(self):
+        self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_cleanup_"))
+        (self.cases_dir / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do it"],
+        }), encoding="utf-8")
+
+    def test_teardown_failure_does_not_propagate_or_lose_the_result(self):
+        driver = mock.Mock(parallel_safe=False, caches_results=False)
+        driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
+        driver.teardown.side_effect = RuntimeError("teardown boom")
+        sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
+        with mock.patch("optarena.runner.get_driver", return_value=driver):
+            rec = run_scenario(sc)  # must not raise
+        self.assertEqual(rec.status, "completed")
+        self.assertEqual(rec.summary["passed"], 1)
+
+
+class CheckpointStatusTests(unittest.TestCase):
+    """F-02: an in-progress run is checkpointed after every case (status
+    "running"), and finalizing that SAME run via save_run must not be
+    treated as a run_id collision - only a genuinely different existing
+    file (any other status) still is."""
+
+    def setUp(self):
+        import optarena.store as store_mod
+        self.store = store_mod
+        results_dir = Path(tempfile.mkdtemp(prefix="optarena_test_checkpoint_"))
+        self._orig = (store_mod.RESULTS_DIR, store_mod.RUNS_DIR)
+        store_mod.RESULTS_DIR = results_dir
+        store_mod.RUNS_DIR = results_dir / "runs"
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        self.store.RESULTS_DIR, self.store.RUNS_DIR = self._orig
+
+    @staticmethod
+    def _record(run_id, status, cases=None):
+        data = {"run_id": run_id, "scenario": {"name": "x"}, "status": status, "cases": cases or []}
+        return mock.Mock(run_id=run_id, to_dict=lambda: data)
+
+    def test_checkpoint_then_finalize_same_run_succeeds(self):
+        self.store.save_checkpoint(self._record("run-1", "running", cases=[{"name": "c1"}]))
+        path = self.store.save_run(self._record("run-1", "completed", cases=[{"name": "c1"}]))
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["status"], "completed")
+
+    def test_repeated_checkpoints_do_not_raise(self):
+        for i in range(3):
+            self.store.save_checkpoint(
+                self._record("run-1", "running", cases=[{"name": f"c{i}"}]))
+        # last checkpoint wins on disk
+        path = self.store.RUNS_DIR / "run-1.json"
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(len(saved["cases"]), 1)
+
+    def test_finalizing_a_non_running_existing_file_still_raises(self):
+        self.store.save_run(self._record("run-1", "completed"))
+        with self.assertRaises(FileExistsError):
+            self.store.save_run(self._record("run-1", "completed"))
+
+    def test_checkpoint_updates_index_incrementally(self):
+        self.store.save_checkpoint(self._record("run-1", "running"))
+        index = json.loads((self.store.RESULTS_DIR / "index.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(index), 1)
+        self.assertEqual(index[0]["run_id"], "run-1")
+        self.assertEqual(index[0]["status"], "running")
+
+
+class InfrastructureErrorAggregateTests(unittest.TestCase):
+    """F-10: an infrastructure_error (sandbox/engine failure, not a genuine
+    model/tool failure) must be visible separately from the ordinary pass
+    rate - `adjusted_pass_rate` excludes those cases so an environment
+    outage can't masquerade as a correctness regression."""
+
+    def test_infrastructure_errors_counted_and_excluded_from_adjusted_rate(self):
+        cases = [
+            {"passed": True, "duration_s": 1, "extra": {"oracle": {"infrastructure_error": False}}},
+            {"passed": False, "duration_s": 1, "extra": {"oracle": {"infrastructure_error": False}}},
+            {"passed": False, "duration_s": 1, "extra": {"oracle": {"infrastructure_error": True}}},
+        ]
+        s = aggregate(cases)
+        self.assertEqual(s["infrastructure_errors"], 1)
+        # adjusted_pass_rate excludes the 1 infra-error case: 1 pass / 2 non-infra cases
+        self.assertAlmostEqual(s["adjusted_pass_rate"], 0.5)
+
+    def test_none_when_no_infrastructure_errors(self):
+        cases = [{"passed": True, "duration_s": 1, "extra": {"oracle": {"infrastructure_error": False}}}]
+        s = aggregate(cases)
+        self.assertIsNone(s["infrastructure_errors"])
+        self.assertIsNone(s["adjusted_pass_rate"])
+
+    def test_checks_all_trials_not_just_final_oracle(self):
+        cases = [{"passed": True, "duration_s": 1, "extra": {
+            "oracle": {"infrastructure_error": False},
+            "oracle_all_trials": [{"infrastructure_error": False}, {"infrastructure_error": True}],
+        }}]
+        s = aggregate(cases)
+        self.assertEqual(s["infrastructure_errors"], 1)
+
+
+class ImageOverrideResolutionTests(unittest.TestCase):
+    """F-15: a scenario-level image_overrides map lets a run pin a specific
+    immutable tag per case image without a single global env var replacing
+    every image uniformly."""
+
+    def setUp(self):
+        import optarena.cases as cases_mod
+        self.cases_mod = cases_mod
+        self.addCleanup(cases_mod.set_image_overrides, None)
+
+    def test_no_overrides_returns_image_unchanged(self):
+        self.cases_mod.set_image_overrides(None)
+        self.assertEqual(self.cases_mod.resolve_image("optarena-tester-python:latest"),
+                          "optarena-tester-python:latest")
+
+    def test_exact_image_override_applied(self):
+        self.cases_mod.set_image_overrides({"optarena-tester-python:latest": "optarena-tester-python:sha-abc123"})
+        self.assertEqual(self.cases_mod.resolve_image("optarena-tester-python:latest"),
+                          "optarena-tester-python:sha-abc123")
+
+    def test_unrelated_image_not_affected_by_override(self):
+        self.cases_mod.set_image_overrides({"optarena-tester-python:latest": "optarena-tester-python:sha-abc123"})
+        self.assertEqual(self.cases_mod.resolve_image("optarena-tester-go:latest"),
+                          "optarena-tester-go:latest")
+
+
+class EngineHealthTTLTests(unittest.TestCase):
+    """F-16: engine-health is cached for a short TTL, not for the whole
+    process - a transient Docker/Podman startup failure must self-heal
+    within seconds, not stay "unavailable" until the process exits."""
+
+    def setUp(self):
+        import optarena.cases as cases_mod
+        self.cases_mod = cases_mod
+        self._orig = (cases_mod._docker_checked_at, cases_mod._docker_ok)
+        cases_mod._docker_checked_at = -1.0
+        cases_mod._docker_ok = False
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        self.cases_mod._docker_checked_at, self.cases_mod._docker_ok = self._orig
+
+    def test_within_ttl_result_is_cached_not_reprobed(self):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return mock.Mock(returncode=0)
+
+        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run):
+            self.assertTrue(self.cases_mod._docker_available())
+            self.assertTrue(self.cases_mod._docker_available())
+        self.assertEqual(len(calls), 1)  # second call served from the TTL cache
+
+    def test_force_recheck_bypasses_ttl(self):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return mock.Mock(returncode=0)
+
+        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run):
+            self.assertTrue(self.cases_mod._docker_available())
+            self.assertTrue(self.cases_mod._docker_available(force_recheck=True))
+        self.assertEqual(len(calls), 2)
+
+    def test_expired_ttl_reprobes(self):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return mock.Mock(returncode=0)
+
+        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run):
+            self.assertTrue(self.cases_mod._docker_available())
+        # simulate the TTL having elapsed
+        self.cases_mod._docker_checked_at -= (self.cases_mod._ENGINE_HEALTH_TTL_S + 1)
+        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run):
+            self.assertTrue(self.cases_mod._docker_available())
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == "__main__":

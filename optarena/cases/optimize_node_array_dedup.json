@@ -11,7 +11,7 @@
     "performance",
     "optimization"
   ],
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "prompts": [
     "dedupe.js exports dedupe(arr), which removes duplicate values from an array while preserving the order of first occurrence. The current implementation checks `result.includes(item)` on every element, which is O(n) per lookup and O(n^2) overall - too slow for large arrays (tens of thousands of elements). Optimize dedupe(arr) in dedupe.js to run in O(n) time using a Set (or Map) to track values already seen, while keeping the exact same behavior: the output must contain each distinct value exactly once, in order of first appearance in the input, and module.exports = { dedupe }; must be preserved."
   ],

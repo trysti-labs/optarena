@@ -3,7 +3,7 @@
   "language": "python",
   "framework": "pytest",
   "domain": "backend",
-  "docker_image": "optarena-tester-python:latest",
+  "image": "optarena-tester-python:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "subprocess.run(f-string, shell=True) command injection -> list args without a shell; incomplete-fix broken wraps names in single quotes but keeps the shell",

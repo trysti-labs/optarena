@@ -11,7 +11,7 @@
     "testing",
     "unit-tests"
   ],
-  "docker_image": "optarena-tester-go:latest",
+  "image": "optarena-tester-go:latest",
   "prompts": [
     "The Go file main.go contains a function `func ClassifyOrderPriority(itemCount int, isRush bool) string` (business logic extracted from a Gin order-handler) that is already correct and must not be changed. Its rules are: if isRush is true, priority is \"high\"; otherwise if itemCount is at least 10, priority is \"medium\"; otherwise priority is \"low\". Add unit tests for this function in a new file named main_test.go, using Go's standard `testing` package with `func TestXxx(t *testing.T)` test functions. Cover at least: a rush order classified as \"high\" regardless of item count, a non-rush order with itemCount >= 10 classified as \"medium\", and a non-rush order with itemCount < 10 classified as \"low\". Do not modify main.go."
   ],

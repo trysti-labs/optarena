@@ -3,7 +3,7 @@
   "language": "javascript",
   "framework": "node",
   "domain": "backend",
-  "docker_image": "optarena-tester-node:latest",
+  "image": "optarena-tester-node:latest",
   "check_command_timeout": 120,
   "timeout": 300,
   "description": "Fixes an open redirect: a 'next' target is trusted if it merely starts with '/', allowing //evil.com",
