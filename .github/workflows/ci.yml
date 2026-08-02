@@ -5,6 +5,14 @@ on:
     branches: [main, v0.1]
   pull_request:
 
+# A push to an open PR previously left the superseded run's ~9 jobs (several
+# 15-40 minutes, Docker-heavy) running to completion alongside the new one -
+# pure wasted runner time on a result nobody will read. Scoped per-workflow-
+# per-ref so unrelated branches/PRs never cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Every job below got an explicit timeout-minutes this session - none had
   # one before, so a hang (a container that stops responding, a deadlocked
@@ -54,9 +62,46 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
-      - name: Unit tests (no Docker)
+      # pytest, not bare `python -m unittest discover`: same test suite
+      # (pytest runs unittest.TestCase classes natively, no rewrite), but it
+      # unlocks two things unittest can't do - pytest-randomly (below) and
+      # coverage measurement/enforcement. CI-only tooling, not a runtime
+      # dependency of the package (see the `test` extra's own comment).
+      - name: Install test tooling
+        run: pip install -e .[test]
+      # pytest-randomly (auto-loads once installed, no flag needed) runs the
+      # suite in a different order every invocation and prints the seed it
+      # used on failure - the same class of bug a 2026-08-02 sweep found by
+      # hand (~35 tempfile.mkdtemp() sites with no addCleanup, several
+      # `tearDown()`s that only restored mocked module state) is exactly what
+      # order-dependence catches automatically going forward instead of
+      # needing another manual audit.
+      # Coverage on every leg, one run (not a second full test pass just to
+      # add --cov) - so a Windows- or macOS-only code path (this project has
+      # real ones, e.g. cases.py's _kill_process_tree taskkill-vs-killpg
+      # branch) isn't silently invisible on the legs that don't exercise it.
+      # fail_under lives in pyproject.toml's [tool.coverage.report] (75%,
+      # ~2pp below the 77% measured baseline - a regression trip wire, not a
+      # fragile exact-match gate) and applies uniformly across the matrix;
+      # XML export + the uploaded artifact are limited to one canonical leg
+      # since combining coverage.py data correctly across a 12-way matrix
+      # needs its own combine step, and 12 near-duplicate artifacts add
+      # nothing --term-missing in the log doesn't already show.
+      - name: Unit tests + coverage (no Docker)
         shell: bash
-        run: OPTARENA_DISABLE_SANDBOX=1 python -m unittest discover tests -v
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ] && [ "${{ matrix.python-version }}" = "3.11" ]; then
+            OPTARENA_DISABLE_SANDBOX=1 python -m pytest tests/ -v --cov=optarena --cov-branch --cov-report=xml --cov-report=term-missing
+          else
+            OPTARENA_DISABLE_SANDBOX=1 python -m pytest tests/ -v --cov=optarena --cov-branch --cov-report=term-missing
+          fi
+      - name: Upload coverage report
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 14
 
   # Corpus self-verification: every case's reference_solution must PASS the
   # real container-sandboxed oracle, every broken/unmodified variant must FAIL.
@@ -254,6 +299,81 @@ jobs:
         with:
           dockerfile: ${{ matrix.context }}/Dockerfile
           config: .hadolint.yaml
+
+  # hadolint (above) checks Dockerfile *authoring* patterns; nothing
+  # previously scanned the *built* image for actual CVEs in the OS/language
+  # packages baked into it - the gap matters more than usual here because
+  # these 9 images are published to a public registry (GHCR) and pulled
+  # directly by users, not just used internally. Builds fresh (not pulled
+  # from GHCR) so a PR's own Dockerfile changes are what gets scanned, not
+  # whatever was last published - catching a newly-introduced vulnerable
+  # package before it reaches production, not after.
+  image-vuln-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - context: docker
+            image: optarena-tester:latest
+          - context: docker/python
+            image: optarena-tester-python:latest
+          - context: docker/node
+            image: optarena-tester-node:latest
+          - context: docker/go
+            image: optarena-tester-go:latest
+          - context: docker/jvm
+            image: optarena-tester-jvm:latest
+          - context: docker/rust
+            image: optarena-tester-rust:latest
+          - context: docker/dotnet
+            image: optarena-tester-dotnet:latest
+          - context: docker/php
+            image: optarena-tester-php:latest
+          - context: docker/ruby
+            image: optarena-tester-ruby:latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Build the image
+        run: docker build -t ${{ matrix.image }} -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }}
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+      # Best-effort: the Security tab's code-scanning alerts need GitHub
+      # Advanced Security, which a private mirror of this repo may not have
+      # enabled. The actual pass/fail signal is Trivy's own exit-code above,
+      # not this upload - a private repo without GHAS still fails the job on
+      # a real CRITICAL/HIGH finding, it just won't also get a Security-tab
+      # alert.
+      - name: Upload results to the Security tab
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        with:
+          sarif_file: trivy-results.sarif
+
+  # GitHub's own dependency-review-action, PR-only (it diffs the PR's
+  # lockfile/manifest changes against a vulnerability database - there's
+  # nothing to diff outside a PR). Complements Dependabot: Dependabot files
+  # PRs for vulnerabilities in dependencies already merged, this blocks a PR
+  # from introducing a new vulnerable dependency in the first place.
+  dependency-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
 
   images-lock-check:
     runs-on: ubuntu-latest

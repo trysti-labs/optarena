@@ -1,0 +1,45 @@
+name: codeql
+
+# Semantic static analysis (taint flow, injection patterns) on optarena's
+# OWN source - a different class of check than ruff (which is syntax/style)
+# and different from `optarena scan` (which runs against model-generated
+# output, not this codebase). Directly relevant here: subprocess/argv/env
+# handling is already treated as security-sensitive throughout this project
+# (see AUDIT.md's S-1 through S-4), which is exactly what CodeQL's Python
+# query pack looks for.
+on:
+  push:
+    branches: [main, v0.1]
+  pull_request:
+    branches: [main, v0.1]
+  schedule:
+    # Catches a new CVE/query-pack finding against unchanged code, not just
+    # code that changed since the last push.
+    - cron: "43 4 * * 1"
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        with:
+          languages: python
+          # tests/ and repos/ (starter-repo fixtures for the corpus, not
+          # part of the optarena package) would otherwise dominate the
+          # findings with fixture-code noise - the same reasoning ruff's own
+          # `ruff check optarena tests` scoping already applies, minus tests
+          # here since test code is a legitimate CodeQL target on its own.
+          paths-ignore:
+            - repos/**
+      - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        with:
+          category: "/language:python"

@@ -1327,6 +1327,51 @@ class VerifyCorpusTests(unittest.TestCase):
         self.assertEqual((violations, checked, skipped), ([], 0, 1))
 
 
+class VerifyCorpusNonRootPermissionsTests(unittest.TestCase):
+    """
+    A real bug lived here: under OPTARENA_SANDBOX_USER (the sandbox-nonroot
+    CI job), every case in `cases verify --language shell` failed with
+    "Permission denied" reading test_setup_files - 100% of shell cases, not
+    case-specific. Root cause: verify_cases() nests each variant two levels
+    under its mkdtemp root (root/case_name/variant_name), but
+    relax_workspace_permissions() was only ever called on the leaf variant
+    directory. POSIX requires execute (traversal) permission on EVERY
+    directory in a path, so the still-0700 root and case_name directories
+    blocked access regardless of how open the leaf was. Never reproduced on
+    Windows (Docker Desktop's bind-mount layer ignores Unix permission
+    bits), so this couldn't be caught by local testing - only by reasoning
+    through the actual directory nesting. This test locks in that every
+    level of the chain gets relaxed, without needing a real non-root Linux
+    Docker sandbox to exercise it.
+    """
+
+    def setUp(self):
+        self._env = mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
+    def test_relax_called_on_root_case_dir_and_leaf_not_just_leaf(self):
+        case = dict(VerifyCorpusTests.CASE)
+        relaxed: list[Path] = []
+        with mock.patch("optarena.verify.relax_workspace_permissions",
+                        side_effect=lambda p: relaxed.append(p)):
+            violations, checked, _skipped = verify_cases([case])
+        self.assertEqual(violations, [])
+        self.assertEqual(checked, 3)
+        # One call for the shared mkdtemp root, plus (parent, leaf) for each
+        # of the 3 variants (reference, still-subtracts, unmodified) - every
+        # directory level in root/case_name/variant_name, not just the leaf.
+        self.assertIn(len(relaxed), (1 + 3 * 2,))
+        for path in relaxed:
+            self.assertIsInstance(path, Path)
+        # The case-level intermediate directory must be among the relaxed
+        # paths, not just the mkdtemp root and the per-variant leaves - this
+        # is exactly the directory the original bug left at 0700.
+        case_dirs = {p for p in relaxed if p.name == case["name"]}
+        self.assertTrue(case_dirs, "root/case_name was never relaxed - "
+                        "would still block traversal for a non-root container user")
+
+
 class VerifyCorpusSandboxConcurrencyTests(unittest.TestCase):
     """Regression test for a real bug found running `cases verify` against
     real Docker: verify_cases() used to start a sandbox for EVERY distinct

@@ -1,0 +1,66 @@
+version: 2
+updates:
+  # Root package's optional driver-SDK extras (crewai, openai-agents,
+  # smolagents, langgraph, autogen, semantic-kernel) plus the CI-only `test`
+  # extra (pytest/pytest-cov/pytest-randomly) - each is its own supply-chain
+  # surface even though the core package itself is dependency-free.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      driver-sdks:
+        patterns:
+          - "*"
+
+  # Pinned-by-SHA actions (see every workflow's own comments on why) still
+  # need bumping when a real new release lands - Dependabot understands the
+  # `# vX` trailing comment convention and opens a PR updating both the SHA
+  # and the comment together, not just the comment.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # One entry per Dockerfile directory - Dependabot's docker ecosystem is
+  # scoped per-directory, tracking each FROM line's base-image tag. Matches
+  # the same 9 contexts dockerfile-lint/image-vuln-scan/images-lock-check
+  # all already iterate over.
+  - package-ecosystem: docker
+    directory: "/docker"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/python"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/node"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/go"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/jvm"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/rust"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/dotnet"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/php"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/ruby"
+    schedule:
+      interval: weekly
