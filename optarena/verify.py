@@ -88,6 +88,14 @@ def _run_variant(case: dict, files: dict | None, ws: Path) -> list[str]:
         # so the real check_command judges it - not the expected-file check.
         write_setup_files(ws, files)
         created = sorted(files.keys())
+    # A second relax pass, now that the workspace is FULLY populated - the
+    # two calls above ran before prepare_workspace/write_setup_files existed,
+    # so they fixed traversal (reading) but not writing into content created
+    # afterward: a setup_repo fixture's copied subdirectories, or overwriting
+    # an existing setup_files script (see relax_workspace_permissions' own
+    # docstring for the concrete failures this closes). Recursive, so this
+    # one call covers everything just written, not just `ws` itself.
+    relax_workspace_permissions(ws)
     failures, _info = evaluate_case(case, created, ws)
     return failures
 

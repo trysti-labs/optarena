@@ -1329,20 +1329,33 @@ class VerifyCorpusTests(unittest.TestCase):
 
 class VerifyCorpusNonRootPermissionsTests(unittest.TestCase):
     """
-    A real bug lived here: under OPTARENA_SANDBOX_USER (the sandbox-nonroot
-    CI job), every case in `cases verify --language shell` failed with
-    "Permission denied" reading test_setup_files - 100% of shell cases, not
-    case-specific. Root cause: verify_cases() nests each variant two levels
+    Two real bugs lived here, found in two passes against the same live
+    non-root CI job (sandbox-nonroot: `cases verify --language shell` under
+    OPTARENA_SANDBOX_USER). Neither reproduced on Windows (Docker Desktop's
+    bind-mount layer ignores Unix permission bits), so neither could be
+    caught by local testing - only by reasoning through the actual directory
+    nesting and, for the second, by reading a real CI failure log.
+
+    Bug 1 (READ, fully fixed): verify_cases() nests each variant two levels
     under its mkdtemp root (root/case_name/variant_name), but
     relax_workspace_permissions() was only ever called on the leaf variant
     directory. POSIX requires execute (traversal) permission on EVERY
     directory in a path, so the still-0700 root and case_name directories
-    blocked access regardless of how open the leaf was. Never reproduced on
-    Windows (Docker Desktop's bind-mount layer ignores Unix permission
-    bits), so this couldn't be caught by local testing - only by reasoning
-    through the actual directory nesting. This test locks in that every
-    level of the chain gets relaxed, without needing a real non-root Linux
-    Docker sandbox to exercise it.
+    blocked access regardless of how open the leaf was - 100% of shell cases
+    failed identically with "Permission denied" reading hidden test files.
+    Fixed by relaxing the whole chain (root, case_dir, leaf).
+
+    Bug 2 (WRITE, found in the very next real CI run after Bug 1's fix
+    shipped): relaxing the chain happens BEFORE prepare_workspace() and
+    write_setup_files() populate the workspace, and relax_workspace_
+    permissions() was a single non-recursive chmod - so it never touched
+    content created afterward (a setup_repo fixture's copied subdirectories,
+    an existing setup_files script later overwritten by a mutation-check
+    script). Reading was fixed (644 files are world-readable through an
+    already-traversable chain); WRITING into that later content was not.
+    Fixed by making relax_workspace_permissions recursive AND adding a
+    second call after the workspace is fully populated, right before
+    evaluate_case() grades it.
     """
 
     def setUp(self):
@@ -1358,18 +1371,51 @@ class VerifyCorpusNonRootPermissionsTests(unittest.TestCase):
             violations, checked, _skipped = verify_cases([case])
         self.assertEqual(violations, [])
         self.assertEqual(checked, 3)
-        # One call for the shared mkdtemp root, plus (parent, leaf) for each
-        # of the 3 variants (reference, still-subtracts, unmodified) - every
-        # directory level in root/case_name/variant_name, not just the leaf.
-        self.assertIn(len(relaxed), (1 + 3 * 2,))
+        # One call for the shared mkdtemp root, plus 3 per variant (parent
+        # and leaf before content exists, leaf again after) for each of the
+        # 3 variants (reference, still-subtracts, unmodified).
+        self.assertEqual(len(relaxed), 1 + 3 * 3)
         for path in relaxed:
             self.assertIsInstance(path, Path)
         # The case-level intermediate directory must be among the relaxed
         # paths, not just the mkdtemp root and the per-variant leaves - this
-        # is exactly the directory the original bug left at 0700.
+        # is exactly the directory Bug 1 left at 0700.
         case_dirs = {p for p in relaxed if p.name == case["name"]}
         self.assertTrue(case_dirs, "root/case_name was never relaxed - "
                         "would still block traversal for a non-root container user")
+        # Bug 2: the leaf must be relaxed at least twice - once before
+        # content exists (traversal) and once after (so newly-written
+        # content is actually writable by the non-root container, not just
+        # the directory that contains it).
+        leaf_dirs = [p for p in relaxed if p.name in
+                     ("reference", "still-subtracts", "unmodified")]
+        from collections import Counter
+        leaf_counts = Counter(leaf_dirs)
+        self.assertTrue(all(c >= 2 for c in leaf_counts.values()),
+                        f"expected every leaf relaxed at least twice (before "
+                        f"and after content), got {leaf_counts}")
+
+    def test_relax_workspace_permissions_is_recursive(self):
+        # Bug 2 directly: a non-recursive chmod on the top directory alone
+        # must not be mistaken for "the whole tree is relaxed" ever again.
+        import optarena.cases as cases_mod
+        tmp = Path(tempfile.mkdtemp(prefix="optarena_test_relaxrecur_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        nested = tmp / "sub" / "deeper"
+        nested.mkdir(parents=True)
+        leaf_file = nested / "file.txt"
+        leaf_file.write_text("x", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"OPTARENA_SANDBOX_USER": "1000:1000"}):
+            if os.name == "posix":
+                for p in (tmp, tmp / "sub", nested, leaf_file):
+                    p.chmod(0o700)
+                cases_mod.relax_workspace_permissions(tmp)
+                for p in (tmp, tmp / "sub", nested, leaf_file):
+                    mode = p.stat().st_mode & 0o777
+                    self.assertEqual(mode, 0o777, f"{p} was not relaxed recursively")
+            else:
+                # Windows: must still no-op cleanly, not raise.
+                cases_mod.relax_workspace_permissions(tmp)
 
 
 class VerifyCorpusSandboxConcurrencyTests(unittest.TestCase):
