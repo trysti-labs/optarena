@@ -1,0 +1,72 @@
+{
+  "name": "add_shortlink_link_labels",
+  "language": "typescript",
+  "framework": "express",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "setup_repo": "express-ts-shortlink",
+  "git_init": true,
+  "check_command_timeout": 180,
+  "timeout": 900,
+  "description": "Repo-scale: add a validated labels array to links (model + new labelService + store + route), with a composable ?label= filter on GET /links",
+  "difficulty": 4,
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "express",
+    "l3",
+    "repo-scale",
+    "multi-file",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add labels to links. Link gains a `labels: string[]` field. Validate each label with a new src/services/labelService.ts exporting `isValidLabel` (same shape as slugService's isValidSlug: lowercase alphanumeric groups joined by single hyphens, 1-20 chars) - POST /links must reject with 400 `{ error: \"invalid label\" }` if any provided label fails validation, and default to an empty array when `labels` is omitted entirely. Add an optional `?label=` query parameter to GET /links that returns only links containing that exact label, without breaking the existing unfiltered listing when no label query param is given."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "*/models/types.ts",
+      "content_patterns": [
+        "labels"
+      ]
+    },
+    {
+      "path_pattern": "*/services/labelService.ts",
+      "content_patterns": [
+        "isValidLabel"
+      ]
+    },
+    {
+      "path_pattern": "*/store/linkStore.ts",
+      "content_patterns": [
+        "label"
+      ]
+    },
+    {
+      "path_pattern": "*/routes/links.ts",
+      "content_patterns": [
+        "label"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/labels_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { startServer, api } = require(\"./helpers\");\n\ntest(\"labels: valid labels accepted, invalid rejected\", async () => {\n  const { base, close } = startServer();\n  try {\n    const ok = await api(base, \"POST\", \"/api/links\", {\n      url: \"https://example.com\",\n      labels: [\"news\", \"big-story\"],\n    });\n    assert.strictEqual(ok.status, 201);\n    assert.deepStrictEqual(ok.json.labels.slice().sort(), [\"big-story\", \"news\"]);\n\n    const bad = await api(base, \"POST\", \"/api/links\", {\n      url: \"https://example.com\",\n      labels: [\"Not Valid!\"],\n    });\n    assert.strictEqual(bad.status, 400);\n  } finally {\n    await close();\n  }\n});\n\ntest(\"labels: default to empty array when omitted\", async () => {\n  const { base, close } = startServer();\n  try {\n    const resp = await api(base, \"POST\", \"/api/links\", { url: \"https://example.com\" });\n    assert.strictEqual(resp.status, 201);\n    assert.deepStrictEqual(resp.json.labels, []);\n  } finally {\n    await close();\n  }\n});\n\ntest(\"labels: GET /api/links?label= filters\", async () => {\n  const { base, close } = startServer();\n  try {\n    await api(base, \"POST\", \"/api/links\", { url: \"https://a.example.com\", slug: \"link-a\", labels: [\"news\"] });\n    await api(base, \"POST\", \"/api/links\", { url: \"https://b.example.com\", slug: \"link-b\", labels: [\"news\", \"sports\"] });\n    await api(base, \"POST\", \"/api/links\", { url: \"https://c.example.com\", slug: \"link-c\", labels: [\"sports\"] });\n\n    const resp = await api(base, \"GET\", \"/api/links?label=news\");\n    const slugs = resp.json.map((l) => l.slug).sort();\n    assert.deepStrictEqual(slugs, [\"link-a\", \"link-b\"]);\n\n    const none = await api(base, \"GET\", \"/api/links?label=missing\");\n    assert.deepStrictEqual(none.json, []);\n  } finally {\n    await close();\n  }\n});\n"
+  },
+  "check_command": "tsc -p . && node --test",
+  "reference_solution": {
+    "src/models/types.ts": "export interface Link {\n  slug: string;\n  url: string;\n  createdAt: string; // ISO timestamp\n  labels: string[];\n}\n\nexport interface ClickStats {\n  total: number;\n  byDay: Record<string, number>; // \"YYYY-MM-DD\" -> count\n  peakDay: string | null;\n  peakCount: number;\n}\n",
+    "src/services/labelService.ts": "const LABEL_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;\nconst LABEL_MIN_LENGTH = 1;\nconst LABEL_MAX_LENGTH = 20;\n\n/** A valid label is 1-20 chars of lowercase a-z0-9 groups joined by single hyphens. */\nexport function isValidLabel(label: string): boolean {\n  return (\n    label.length >= LABEL_MIN_LENGTH &&\n    label.length <= LABEL_MAX_LENGTH &&\n    LABEL_PATTERN.test(label)\n  );\n}\n",
+    "src/store/linkStore.ts": "import { Link } from \"../models/types\";\n\nconst links = new Map<string, Link>();\nconst clicks = new Map<string, string[]>(); // slug -> ISO click timestamps\n\nexport function createLink(link: Link): void {\n  links.set(link.slug, link);\n  clicks.set(link.slug, []);\n}\n\nexport function getLink(slug: string): Link | undefined {\n  return links.get(slug);\n}\n\nexport function listLinks(label?: string): Link[] {\n  const all = [...links.values()].sort((a, b) => (a.slug < b.slug ? -1 : 1));\n  if (label === undefined) {\n    return all;\n  }\n  return all.filter((link) => link.labels.includes(label));\n}\n\nexport function deleteLink(slug: string): boolean {\n  clicks.delete(slug);\n  return links.delete(slug);\n}\n\nexport function recordClick(slug: string, at: string): void {\n  const existing = clicks.get(slug);\n  if (existing) {\n    existing.push(at);\n  }\n}\n\nexport function clicksFor(slug: string): string[] {\n  return [...(clicks.get(slug) ?? [])];\n}\n\n/** Test hook: wipe all state (each test file starts from an empty store). */\nexport function resetStore(): void {\n  links.clear();\n  clicks.clear();\n}\n",
+    "src/routes/links.ts": "import express from \"express\";\n\nimport { MAX_URL_LENGTH } from \"../config\";\nimport { Link } from \"../models/types\";\nimport { isValidSlug, randomSlug } from \"../services/slugService\";\nimport { isValidLabel } from \"../services/labelService\";\nimport * as store from \"../store/linkStore\";\n\nexport const linksRouter = express.Router();\n\nlinksRouter.post(\"/\", (req, res) => {\n  const body = req.body ?? {};\n  const url = typeof body.url === \"string\" ? body.url : \"\";\n  if (url.length === 0 || url.length > MAX_URL_LENGTH) {\n    res.status(400).json({ error: \"url is required\" });\n    return;\n  }\n\n  let slug: string;\n  if (body.slug !== undefined) {\n    if (typeof body.slug !== \"string\" || !isValidSlug(body.slug)) {\n      res.status(400).json({ error: \"invalid slug\" });\n      return;\n    }\n    slug = body.slug;\n  } else {\n    do {\n      slug = randomSlug();\n    } while (store.getLink(slug) !== undefined);\n  }\n\n  if (store.getLink(slug) !== undefined) {\n    res.status(409).json({ error: \"slug already taken\" });\n    return;\n  }\n\n  const rawLabels = body.labels;\n  let labels: string[] = [];\n  if (rawLabels !== undefined) {\n    if (!Array.isArray(rawLabels) || !rawLabels.every((l) => typeof l === \"string\")) {\n      res.status(400).json({ error: \"invalid label\" });\n      return;\n    }\n    for (const label of rawLabels) {\n      if (!isValidLabel(label)) {\n        res.status(400).json({ error: \"invalid label\" });\n        return;\n      }\n    }\n    labels = rawLabels;\n  }\n\n  const link: Link = { slug, url, createdAt: new Date().toISOString(), labels };\n  store.createLink(link);\n  res.status(201).json(link);\n});\n\nlinksRouter.get(\"/\", (req, res) => {\n  const label = typeof req.query.label === \"string\" ? req.query.label : undefined;\n  res.status(200).json(store.listLinks(label));\n});\n\nlinksRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(200).json(link);\n});\n\nlinksRouter.delete(\"/:slug\", (req, res) => {\n  if (!store.deleteLink(req.params.slug)) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(204).send();\n});\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "labels-never-validated",
+      "files": {
+        "src/models/types.ts": "export interface Link {\n  slug: string;\n  url: string;\n  createdAt: string; // ISO timestamp\n  labels: string[];\n}\n\nexport interface ClickStats {\n  total: number;\n  byDay: Record<string, number>; // \"YYYY-MM-DD\" -> count\n  peakDay: string | null;\n  peakCount: number;\n}\n",
+        "src/services/labelService.ts": "const LABEL_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;\nconst LABEL_MIN_LENGTH = 1;\nconst LABEL_MAX_LENGTH = 20;\n\n/** A valid label is 1-20 chars of lowercase a-z0-9 groups joined by single hyphens. */\nexport function isValidLabel(label: string): boolean {\n  return (\n    label.length >= LABEL_MIN_LENGTH &&\n    label.length <= LABEL_MAX_LENGTH &&\n    LABEL_PATTERN.test(label)\n  );\n}\n",
+        "src/store/linkStore.ts": "import { Link } from \"../models/types\";\n\nconst links = new Map<string, Link>();\nconst clicks = new Map<string, string[]>(); // slug -> ISO click timestamps\n\nexport function createLink(link: Link): void {\n  links.set(link.slug, link);\n  clicks.set(link.slug, []);\n}\n\nexport function getLink(slug: string): Link | undefined {\n  return links.get(slug);\n}\n\nexport function listLinks(label?: string): Link[] {\n  const all = [...links.values()].sort((a, b) => (a.slug < b.slug ? -1 : 1));\n  if (label === undefined) {\n    return all;\n  }\n  return all.filter((link) => link.labels.includes(label));\n}\n\nexport function deleteLink(slug: string): boolean {\n  clicks.delete(slug);\n  return links.delete(slug);\n}\n\nexport function recordClick(slug: string, at: string): void {\n  const existing = clicks.get(slug);\n  if (existing) {\n    existing.push(at);\n  }\n}\n\nexport function clicksFor(slug: string): string[] {\n  return [...(clicks.get(slug) ?? [])];\n}\n\n/** Test hook: wipe all state (each test file starts from an empty store). */\nexport function resetStore(): void {\n  links.clear();\n  clicks.clear();\n}\n",
+        "src/routes/links.ts": "import express from \"express\";\n\nimport { MAX_URL_LENGTH } from \"../config\";\nimport { Link } from \"../models/types\";\nimport { isValidSlug, randomSlug } from \"../services/slugService\";\nimport * as store from \"../store/linkStore\";\n\nexport const linksRouter = express.Router();\n\nlinksRouter.post(\"/\", (req, res) => {\n  const body = req.body ?? {};\n  const url = typeof body.url === \"string\" ? body.url : \"\";\n  if (url.length === 0 || url.length > MAX_URL_LENGTH) {\n    res.status(400).json({ error: \"url is required\" });\n    return;\n  }\n\n  let slug: string;\n  if (body.slug !== undefined) {\n    if (typeof body.slug !== \"string\" || !isValidSlug(body.slug)) {\n      res.status(400).json({ error: \"invalid slug\" });\n      return;\n    }\n    slug = body.slug;\n  } else {\n    do {\n      slug = randomSlug();\n    } while (store.getLink(slug) !== undefined);\n  }\n\n  if (store.getLink(slug) !== undefined) {\n    res.status(409).json({ error: \"slug already taken\" });\n    return;\n  }\n\n  // BUG: labels are accepted and stored without ever validating them.\n  const rawLabels = body.labels;\n  const labels: string[] = Array.isArray(rawLabels) ? rawLabels : [];\n\n  const link: Link = { slug, url, createdAt: new Date().toISOString(), labels };\n  store.createLink(link);\n  res.status(201).json(link);\n});\n\nlinksRouter.get(\"/\", (req, res) => {\n  const label = typeof req.query.label === \"string\" ? req.query.label : undefined;\n  res.status(200).json(store.listLinks(label));\n});\n\nlinksRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(200).json(link);\n});\n\nlinksRouter.delete(\"/:slug\", (req, res) => {\n  if (!store.deleteLink(req.params.slug)) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(204).send();\n});\n"
+      }
+    }
+  ]
+}

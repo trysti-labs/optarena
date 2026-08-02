@@ -1,0 +1,59 @@
+{
+  "name": "adapt_role_list_ruby_dynamic",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: allowed_roles.txt (a spec file the role check must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old list into roles.rb",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "ruby",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create roles.rb with a method is_allowed?(role) that returns true if role is in the comma-separated list in allowed_roles.txt (currently: admin, editor), else false. Read the list from the file (File.read) at call time - do not hardcode it.",
+    "allowed_roles.txt has changed. Make sure is_allowed? reflects the CURRENT list in the file."
+  ],
+  "setup_files": {
+    "allowed_roles.txt": "admin,editor\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "allowed_roles.txt rewritten to add a new role",
+      "write_files": {
+        "allowed_roles.txt": "admin,editor,viewer\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "roles.rb",
+      "content_patterns": [
+        "is_allowed?"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "roles_hidden_test.rb": "require_relative \"roles\"\n\nallowed = File.read(\"allowed_roles.txt\").strip.split(\",\").map(&:strip)\nallowed.each do |role|\n  raise \"is_allowed?(#{role}) should be true\" unless is_allowed?(role)\nend\nraise \"is_allowed? should reject an unknown role\" if is_allowed?(\"not_a_real_role\")\nputs \"all tests passed\"\n"
+  },
+  "check_command": "ruby roles_hidden_test.rb",
+  "reference_solution": {
+    "roles.rb": "def is_allowed?(role)\n  allowed = File.read(\"allowed_roles.txt\").strip.split(\",\").map(&:strip)\n  allowed.include?(role)\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-role-list",
+      "files": {
+        "roles.rb": "def is_allowed?(role)\n  [\"admin\", \"editor\"].include?(role)\nend\n"
+      }
+    }
+  ]
+}

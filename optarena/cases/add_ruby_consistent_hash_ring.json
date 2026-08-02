@@ -1,0 +1,46 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "ring.rb's HashRing#get_node picks a node with `Digest::MD5.hexdigest(key).to_i(16) % nodes.length` - removing or adding any node reshuffles almost every key. Implement a real consistent-hash ring with virtual nodes: HashRing.new(nodes, replicas) places `replicas` virtual points per physical node around a ring, hashed via Digest::MD5.hexdigest(\"#{node}:#{i}\") for each virtual point. get_node(key) hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). add_node(node) and remove_node(node) update the ring in place."
+  ],
+  "setup_files": {
+    "ring.rb": "require \"digest\"\n\nclass HashRing\n  def initialize(nodes, replicas)\n    @nodes = nodes.dup\n  end\n\n  def get_node(key)\n    idx = Digest::MD5.hexdigest(key).to_i(16) % @nodes.length\n    @nodes[idx]\n  end\n\n  def add_node(node)\n    @nodes << node\n  end\n\n  def remove_node(node)\n    @nodes.delete(node)\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ring.rb",
+      "content_patterns": [
+        "class HashRing"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "ring.rb": "require \"digest\"\n\nclass HashRing\n  def initialize(nodes, replicas)\n    @replicas = replicas\n    @ring = {}\n    @sorted_points = []\n    nodes.each { |n| add_node(n) }\n  end\n\n  def add_node(node)\n    @replicas.times do |i|\n      point = Digest::MD5.hexdigest(\"#{node}:#{i}\").to_i(16)\n      @ring[point] = node\n    end\n    @sorted_points = @ring.keys.sort\n  end\n\n  def remove_node(node)\n    @replicas.times do |i|\n      point = Digest::MD5.hexdigest(\"#{node}:#{i}\").to_i(16)\n      @ring.delete(point)\n    end\n    @sorted_points = @ring.keys.sort\n  end\n\n  def get_node(key)\n    point = Digest::MD5.hexdigest(key).to_i(16)\n    idx = @sorted_points.bsearch_index { |p| p >= point }\n    idx ||= 0\n    @ring[@sorted_points[idx]]\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "ring.rb": "require \"digest\"\n\nclass HashRing\n  def initialize(nodes, replicas)\n    @nodes = nodes.dup\n  end\n\n  def get_node(key)\n    idx = Digest::MD5.hexdigest(key).to_i(16) % @nodes.length\n    @nodes[idx]\n  end\n\n  def add_node(node)\n    @nodes << node\n  end\n\n  def remove_node(node)\n    @nodes.delete(node)\n  end\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_consistent_hash_ring",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "ruby ring_hidden_test.rb",
+  "test_setup_files": {
+    "ring_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"ring\"\n\nclass HashRingTest < Minitest::Test\n  def test_every_key_maps_to_a_current_node\n    ring = HashRing.new([\"a\", \"b\", \"c\"], 50)\n    200.times do |i|\n      node = ring.get_node(\"key-#{i}\")\n      assert_includes [\"a\", \"b\", \"c\"], node\n    end\n  end\n\n  def test_deterministic\n    ring = HashRing.new([\"a\", \"b\", \"c\"], 50)\n    assert_equal ring.get_node(\"stable-key\"), ring.get_node(\"stable-key\")\n  end\n\n  def test_removing_a_node_only_moves_that_nodes_own_keys\n    nodes = [\"n0\", \"n1\", \"n2\", \"n3\", \"n4\"]\n    ring = HashRing.new(nodes, 100)\n    keys = (0...1000).map { |i| \"key-#{i}\" }\n    before = keys.each_with_object({}) { |k, h| h[k] = ring.get_node(k) }\n\n    ring.remove_node(\"n2\")\n\n    moved = 0\n    keys.each do |k|\n      after = ring.get_node(k)\n      if after != before[k]\n        moved += 1\n        assert_equal \"n2\", before[k], \"key #{k} moved but was not on removed node n2\"\n      end\n      refute_equal \"n2\", after\n    end\n    assert moved > 0, \"expected removing a node to move at least some keys\"\n  end\nend\n"
+  }
+}

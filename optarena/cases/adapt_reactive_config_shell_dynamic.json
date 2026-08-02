@@ -1,0 +1,55 @@
+{
+  "name": "adapt_reactive_config_shell_dynamic",
+  "language": "shell",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time greet.sh's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then config.conf's NAME value changes under it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["shell", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "config.conf sets a shell variable NAME (KEY=VALUE format, one per line). Write a POSIX shell script called greet.sh that sources config.conf (e.g. `. ./config.conf`) and prints exactly `Hello, $NAME!` to stdout, reading NAME live from config.conf each run - do not hardcode its value.",
+    "config.conf may have changed since you last checked it. Make sure greet.sh still prints a greeting built from the CURRENT value of NAME in config.conf, not a stale or hardcoded one."
+  ],
+  "setup_files": {
+    "config.conf": "NAME=World\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_contains": {"path": "greet.sh", "pattern": "Hello"}},
+      "description": "config.conf's NAME value changed World -> Universe, triggered reactively once greet.sh's first draft appeared (not a fixed step count)",
+      "write_files": {
+        "config.conf": "NAME=Universe\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "greet.sh",
+      "content_patterns": ["NAME"]
+    }
+  ],
+  "test_setup_files": {
+    "test_greet.py": "import subprocess\n\nwith open('config.conf', encoding='utf-8') as f:\n    current_name = None\n    for line in f:\n        line = line.strip()\n        if line.startswith('NAME='):\n            current_name = line[len('NAME='):]\nassert current_name, 'config.conf has no NAME='\n\nproc = subprocess.run(['sh', 'greet.sh'], capture_output=True, text=True, timeout=10)\nassert proc.returncode == 0, f'exit {proc.returncode}, stderr={proc.stderr!r}'\nwant = f'Hello, {current_name}!'\nassert want in proc.stdout, f'expected {want!r} in output, got {proc.stdout!r} (the CURRENT NAME, not a stale value)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_greet.py",
+  "reference_solution": {
+    "greet.sh": "#!/bin/sh\n. ./config.conf\necho \"Hello, $NAME!\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "greet.sh": "#!/bin/sh\necho \"Hello, World!\"\n"
+      }
+    },
+    {
+      "name": "wrong-variable-name-case",
+      "files": {
+        "greet.sh": "#!/bin/sh\n. ./config.conf\necho \"Hello, $Name!\"\n"
+      }
+    }
+  ]
+}

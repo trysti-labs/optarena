@@ -39,5 +39,13 @@
   "timeout": 150,
   "reference_solution": {
     "app.py": "from fastapi import FastAPI\nfrom pydantic import BaseModel\n\napp = FastAPI()\n\n\nclass HealthStatus(BaseModel):\n    status: str\n\n\n@app.get('/health', response_model=HealthStatus)\ndef health():\n    return HealthStatus(status='ok')\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-status-value",
+      "files": {
+        "app.py": "from fastapi import FastAPI\nfrom pydantic import BaseModel\n\napp = FastAPI()\n\n\nclass HealthStatus(BaseModel):\n    status: str\n\n\n@app.get('/health', response_model=HealthStatus)\ndef health():\n    return HealthStatus(status='OK')\n"
+      }
+    }
+  ]
 }

@@ -1,0 +1,64 @@
+{
+  "name": "adapt_feature_flag_python_dynamic",
+  "language": "python",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time banner.py's own text contains 'Welcome' (i.e. once the agent has produced a first attempt), then flags.NEW_UI_ENABLED flips under it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "feature-flag",
+    "reactive"
+  ],
+  "prompts": [
+    "flags.py exports a bool NEW_UI_ENABLED. Create banner.py with a function banner_text() that returns \"Welcome to the NEW UI!\" if NEW_UI_ENABLED else \"Welcome!\", reading the flag live from flags.py.",
+    "NEW_UI_ENABLED in flags.py may have changed. Make sure banner_text() reflects its CURRENT value, not a stale one."
+  ],
+  "setup_files": {
+    "flags.py": "NEW_UI_ENABLED = False\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "banner.py",
+          "pattern": "Welcome"
+        }
+      },
+      "description": "flags.NEW_UI_ENABLED flipped False -> True, triggered reactively once banner.py's first draft appeared",
+      "write_files": {
+        "flags.py": "NEW_UI_ENABLED = True\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "banner.py",
+      "content_patterns": [
+        "banner_text"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_banner.py": "import importlib.util\nflags_spec = importlib.util.spec_from_file_location('flags_mod', 'flags.py')\nflags_mod = importlib.util.module_from_spec(flags_spec)\nflags_spec.loader.exec_module(flags_mod)\nspec = importlib.util.spec_from_file_location('banner_mod', 'banner.py')\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nwant = 'Welcome to the NEW UI!' if flags_mod.NEW_UI_ENABLED else 'Welcome!'\ngot = mod.banner_text()\nassert got == want, f'banner_text() = {got!r}, want {want!r} (the CURRENT flag, not a stale value)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_banner.py",
+  "reference_solution": {
+    "banner.py": "from flags import NEW_UI_ENABLED\n\n\ndef banner_text():\n    return \"Welcome to the NEW UI!\" if NEW_UI_ENABLED else \"Welcome!\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-stale-flag",
+      "files": {
+        "banner.py": "def banner_text():\n    return \"Welcome!\"\n"
+      }
+    }
+  ]
+}

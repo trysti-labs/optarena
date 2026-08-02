@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 import time
 import urllib.request
 from pathlib import Path
@@ -132,12 +133,30 @@ class OpenAIChatDriver(Driver):
                         f"{(workspace / target).read_text(encoding='utf-8', errors='replace')}\n```"
                     )
                 s0 = time.monotonic()
-                text, usage = self._chat(prompt + context, scenario, remaining)
+                try:
+                    text, usage = self._chat(prompt + context, scenario, remaining)
+                except (TimeoutError, socket.timeout) as exc:
+                    # A-10: the socket timeout handed to urlopen IS the case's
+                    # remaining budget, so this is the deadline expiring - say
+                    # so, instead of surfacing a bare "TimeoutError: timed
+                    # out" that reads like a backend fault and matches nothing
+                    # a user can act on. (An unreachable/slow backend still
+                    # reports through the generic handler below.)
+                    if time.monotonic() >= deadline:
+                        result.error = (f"case deadline ({timeout}s) exceeded during "
+                                        f"prompt {i}/{n_prompts}")
+                        break
+                    raise exc
                 blocks = _CODE_BLOCK.findall(text)
                 content = blocks[0].strip() + "\n" if blocks else text.strip() + "\n"
                 dest = workspace / target
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(content, encoding="utf-8")
+                # newline="" disables universal-newline translation - on
+                # Windows hosts this would otherwise turn every "\n" the
+                # model wrote into "\r\n", which corrupts POSIX shell/etc.
+                # once bind-mounted into the Linux sandbox. Same fix, same
+                # reasoning, as cases.write_setup_files.
+                dest.write_text(content, encoding="utf-8", newline="")
                 for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                     if key in usage:
                         result.extra[key] = result.extra.get(key, 0) + usage[key]

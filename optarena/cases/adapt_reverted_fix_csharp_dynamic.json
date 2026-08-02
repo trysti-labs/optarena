@@ -1,0 +1,60 @@
+{
+  "name": "adapt_reverted_fix_csharp_dynamic",
+  "language": "csharp",
+  "framework": "plain-csharp",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dynamic eval: the agent's bug fix is REVERTED between prompts (fixed after_prompt trigger, Calc.cs rewritten back to the buggy version); the agent must notice and reapply the fix",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "test_kind": "unit",
+  "tags": [
+    "csharp",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "reverted-edit"
+  ],
+  "prompts": [
+    "Calc.cs has a bug in Add(int a, int b) - it currently subtracts instead of adding. Fix it so Add(a, b) returns a + b.",
+    "Your fix to Calc.cs seems to have been reverted - the subtraction bug is back. Please reapply the fix so Add(a, b) correctly returns a + b."
+  ],
+  "setup_files": {
+    "Calc.cs": "public static class Calc\n{\n    public static int Add(int a, int b) => a - b;\n}\n",
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "Calc.cs reverted back to the buggy (subtraction) version",
+      "write_files": {
+        "Calc.cs": "public static class Calc\n{\n    public static int Add(int a, int b) => a - b;\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Calc.cs",
+      "content_patterns": [
+        "Add"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "if (Calc.Add(3, 4) != 7) { Console.Error.WriteLine($\"Add(3,4) = {Calc.Add(3, 4)}\"); Environment.Exit(1); return; }\nif (Calc.Add(-1, 1) != 0) { Console.Error.WriteLine($\"Add(-1,1) = {Calc.Add(-1, 1)}\"); Environment.Exit(1); return; }\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Calc.cs": "public static class Calc\n{\n    public static int Add(int a, int b) => a + b;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fix-not-reapplied",
+      "files": {
+        "Calc.cs": "public static class Calc\n{\n    public static int Add(int a, int b) => a - b;\n}\n"
+      }
+    }
+  ]
+}

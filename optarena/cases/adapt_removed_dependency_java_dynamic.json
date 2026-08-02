@@ -1,0 +1,60 @@
+{
+  "name": "adapt_removed_dependency_java_dynamic",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "java",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "GreetingData.java declares a public final class GreetingData with a public static final String GREETING. Create Message.java with a public final class Message containing a public static String get() that returns GreetingData.GREETING.",
+    "GreetingData.java has just been removed from the project. Update Message.java so it still compiles with NO reference to GreetingData, and get() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "GreetingData.java": "public final class GreetingData {\n    public static final String GREETING = \"hola\";\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "GreetingData.java deleted",
+      "delete_files": [
+        "GreetingData.java"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Message.java",
+      "content_patterns": [
+        "get"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "MessageTest.java": "public final class MessageTest {\n    public static void main(String[] args) {\n        String got = Message.get();\n        if (!got.equals(\"hola\")) {\n            throw new AssertionError(\"get() = \\\"\" + got + \"\\\", want \\\"hola\\\"\");\n        }\n        System.out.println(\"all tests passed\");\n    }\n}\n",
+    "CheckMessage.java": "import java.io.IOException;\n\npublic final class CheckMessage {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Message.java\", \"MessageTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"MessageTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckMessage.java",
+  "reference_solution": {
+    "Message.java": "public final class Message {\n    public static String get() {\n        return \"hola\";\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-value",
+      "files": {
+        "Message.java": "public final class Message {\n    public static String get() {\n        return \"bonjour\";\n    }\n}\n"
+      }
+    }
+  ]
+}

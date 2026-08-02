@@ -1,0 +1,42 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker driven via a stdin command protocol, in place of always calling through",
+  "task_type": "feature",
+  "tags": [
+    "c",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "Create a C program in breaker.c implementing a 3-state circuit breaker, driven by commands from stdin (one per line) until EOF: `init FAILURE_THRESHOLD RESET_TIMEOUT` (both ints) initializes it, starting CLOSED. `call OUTCOME NOW` (OUTCOME is the literal string `ok` or `fail`; NOW is an int, seconds) simulates one call attempt: in CLOSED, the call runs for real - print `ran:ok` or `ran:fail`; count consecutive fails, and once FAILURE_THRESHOLD consecutive fails have happened, trip OPEN (record when). While OPEN, a call must NOT run at all - print `blocked` - UNLESS at least RESET_TIMEOUT seconds have passed since it opened, in which case allow exactly ONE trial call (print `ran:ok` or `ran:fail` for it): success closes the breaker (reset fail count); failure re-opens it AND resets the open-time to NOW (so the next trial needs another full RESET_TIMEOUT)."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "breaker.c",
+      "content_patterns": [
+        "int main"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "breaker.c": "#include <stdio.h>\n#include <string.h>\n\ntypedef enum { CLOSED, OPEN, HALF_OPEN } State;\n\nstatic int failure_threshold;\nstatic int reset_timeout;\nstatic State state = CLOSED;\nstatic int failures = 0;\nstatic int opened_at = 0;\n\nstatic void do_init(int threshold, int timeout) {\n    failure_threshold = threshold;\n    reset_timeout = timeout;\n    state = CLOSED;\n    failures = 0;\n}\n\nstatic void do_call(const char *outcome, int now) {\n    if (state == OPEN) {\n        if (now - opened_at < reset_timeout) {\n            printf(\"blocked\\n\");\n            return;\n        }\n        state = HALF_OPEN;\n    }\n\n    int ok = strcmp(outcome, \"ok\") == 0;\n    printf(\"ran:%s\\n\", outcome);\n\n    if (ok) {\n        state = CLOSED;\n        failures = 0;\n    } else {\n        if (state == HALF_OPEN) {\n            state = OPEN;\n            opened_at = now;\n        } else {\n            failures++;\n            if (failures >= failure_threshold) {\n                state = OPEN;\n                opened_at = now;\n            }\n        }\n    }\n}\n\nint main(void) {\n    char cmd[16], outcome[8];\n    int a, b;\n    while (scanf(\"%15s\", cmd) == 1) {\n        if (strcmp(cmd, \"init\") == 0) {\n            if (scanf(\"%d %d\", &a, &b) == 2) do_init(a, b);\n        } else if (strcmp(cmd, \"call\") == 0) {\n            if (scanf(\"%7s %d\", outcome, &a) == 2) do_call(outcome, a);\n        }\n    }\n    return 0;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "breaker.c": "#include <stdio.h>\n#include <string.h>\n\ntypedef enum { CLOSED, OPEN, HALF_OPEN } State;\n\nstatic int failure_threshold;\nstatic int reset_timeout;\nstatic State state = CLOSED;\nstatic int failures = 0;\nstatic int opened_at = 0;\n\nstatic void do_init(int threshold, int timeout) {\n    failure_threshold = threshold;\n    reset_timeout = timeout;\n    state = CLOSED;\n    failures = 0;\n}\n\nstatic void do_call(const char *outcome, int now) {\n    if (state == OPEN) {\n        if (now - opened_at < reset_timeout) {\n            printf(\"blocked\\n\");\n            return;\n        }\n        state = HALF_OPEN;\n    }\n\n    int ok = strcmp(outcome, \"ok\") == 0;\n    printf(\"ran:%s\\n\", outcome);\n\n    if (ok) {\n        state = CLOSED;\n        failures = 0;\n    } else {\n        if (state == HALF_OPEN) {\n            state = OPEN;\n        } else {\n            failures++;\n            if (failures >= failure_threshold) {\n                state = OPEN;\n                opened_at = now;\n            }\n        }\n    }\n}\n\nint main(void) {\n    char cmd[16], outcome[8];\n    int a, b;\n    while (scanf(\"%15s\", cmd) == 1) {\n        if (strcmp(cmd, \"init\") == 0) {\n            if (scanf(\"%d %d\", &a, &b) == 2) do_init(a, b);\n        } else if (strcmp(cmd, \"call\") == 0) {\n            if (scanf(\"%7s %d\", outcome, &a) == 2) do_call(outcome, a);\n        }\n    }\n    return 0;\n}\n"
+      }
+    }
+  ],
+  "name": "add_c_circuit_breaker_state_machine",
+  "language": "c",
+  "domain": "systems",
+  "check_command_timeout": 60,
+  "timeout": 120,
+  "difficulty": 3,
+  "setup_files": {},
+  "test_setup_files": {
+    "test_breaker.py": "import subprocess\nsubprocess.run(['gcc', '-std=c11', '-Wall', 'breaker.c', '-o', 'breaker_bin'], check=True)\n\ndef run(commands):\n    text = '\\n'.join(commands) + '\\n'\n    proc = subprocess.run(['./breaker_bin'], input=text, capture_output=True, text=True, timeout=10)\n    assert proc.returncode == 0, f'nonzero exit: {proc.returncode}, stderr={proc.stderr[-400:]}'\n    return [l.strip() for l in proc.stdout.strip('\\n').split('\\n') if proc.stdout.strip('\\n')]\n\n# trips open after consecutive failures, then blocks\nout = run(['init 3 10', 'call fail 0', 'call fail 0', 'call fail 0', 'call ok 0'])\nassert out == ['ran:fail', 'ran:fail', 'ran:fail', 'blocked'], f'got {out}'\n\n# half-open trial success closes\nout = run(['init 1 10', 'call fail 0', 'call ok 10', 'call ok 11'])\nassert out == ['ran:fail', 'ran:ok', 'ran:ok'], f'got {out}'\n\n# half-open failure reopens and resets clock\nout = run(['init 1 10', 'call fail 0', 'call fail 10', 'call ok 15', 'call ok 20'])\nassert out == ['ran:fail', 'ran:fail', 'blocked', 'ran:ok'], f'got {out}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_breaker.py"
+}

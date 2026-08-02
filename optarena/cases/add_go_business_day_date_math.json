@@ -1,0 +1,49 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends and is exact for any starting weekday",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "dates.go's AddBusinessDays(start time.Time, n int) just does start.AddDate(0, 0, n) - it counts weekends as business days. Implement it properly: n=0 returns start unchanged (even if start itself falls on a weekend); for n>0, step forward day by day, skipping time.Saturday and time.Sunday, until n business days have been counted, then return that date. It must be exact for any starting weekday and correctly cross month/year boundaries - do not use an approximation formula like `n + 2*(n/5)` calendar-days shortcut, it gives the wrong answer depending on which weekday `start` falls on."
+  ],
+  "setup_files": {
+    "go.mod": "module busdays\n\ngo 1.21\n",
+    "dates.go": "package main\n\nimport \"time\"\n\nfunc AddBusinessDays(start time.Time, n int) time.Time {\n\treturn start.AddDate(0, 0, n)\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dates.go",
+      "content_patterns": [
+        "func AddBusinessDays"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "dates_test.go": "package main\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc iso(d time.Time) string {\n\treturn d.Format(\"2006-01-02\")\n}\n\nfunc TestZeroReturnsStartUnchanged(t *testing.T) {\n\td := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC) // Saturday\n\tif iso(AddBusinessDays(d, 0)) != iso(d) {\n\t\tt.Fatalf(\"expected unchanged\")\n\t}\n}\n\nfunc TestFridayPlusOneSkipsWeekend(t *testing.T) {\n\tfriday := time.Date(2024, 5, 31, 0, 0, 0, 0, time.UTC)\n\tif got := iso(AddBusinessDays(friday, 1)); got != \"2024-06-03\" {\n\t\tt.Fatalf(\"got %s\", got)\n\t}\n}\n\nfunc TestMondayPlusFiveLandsNextMonday(t *testing.T) {\n\tmonday := time.Date(2024, 5, 27, 0, 0, 0, 0, time.UTC)\n\tif got := iso(AddBusinessDays(monday, 5)); got != \"2024-06-03\" {\n\t\tt.Fatalf(\"got %s\", got)\n\t}\n}\n\nfunc TestCrossesMonthAndYearBoundary(t *testing.T) {\n\tfriday := time.Date(2024, 12, 27, 0, 0, 0, 0, time.UTC)\n\tif got := iso(AddBusinessDays(friday, 3)); got != \"2025-01-01\" {\n\t\tt.Fatalf(\"got %s\", got)\n\t}\n}\n\nfunc TestStartingOnAWeekendStillCountsCorrectly(t *testing.T) {\n\tsaturday := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)\n\tif got := iso(AddBusinessDays(saturday, 1)); got != \"2024-06-03\" {\n\t\tt.Fatalf(\"got %s\", got)\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module busdays\n\ngo 1.21\n",
+    "dates.go": "package main\n\nimport \"time\"\n\nfunc AddBusinessDays(start time.Time, n int) time.Time {\n\tif n == 0 {\n\t\treturn start\n\t}\n\tcurrent := start\n\tcounted := 0\n\tfor counted < n {\n\t\tcurrent = current.AddDate(0, 0, 1)\n\t\tif current.Weekday() != time.Saturday && current.Weekday() != time.Sunday {\n\t\t\tcounted++\n\t\t}\n\t}\n\treturn current\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "go.mod": "module busdays\n\ngo 1.21\n",
+        "dates.go": "package main\n\nimport \"time\"\n\nfunc AddBusinessDays(start time.Time, n int) time.Time {\n\tif n == 0 {\n\t\treturn start\n\t}\n\tweeks := n / 5\n\tremainder := n % 5\n\tcalendarDays := weeks*7 + remainder\n\treturn start.AddDate(0, 0, calendarDays)\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_business_day_date_math",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

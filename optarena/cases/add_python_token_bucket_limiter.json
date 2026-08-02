@@ -1,0 +1,46 @@
+{
+  "description": "Replace a fixed-count limiter with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "limiter.py's TokenBucket is a stub that always allows. Implement it properly: __init__(self, capacity, refill_rate) - `refill_rate` tokens are added per second, up to a maximum of `capacity` tokens (never above it, even if a long time has passed). allow(now) refills the bucket based on elapsed time since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns True; otherwise returns False and consumes nothing. The bucket starts full (capacity tokens) at construction time."
+  ],
+  "setup_files": {
+    "limiter.py": "class TokenBucket:\n    def __init__(self, capacity, refill_rate):\n        self.capacity = capacity\n        self.refill_rate = refill_rate\n\n    def allow(self, now):\n        return True\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "limiter.py",
+      "content_patterns": [
+        "class TokenBucket"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_limiter_hidden.py": "from limiter import TokenBucket\n\n\ndef test_starts_full_and_drains():\n    b = TokenBucket(capacity=3, refill_rate=1)\n    assert b.allow(now=0) is True\n    assert b.allow(now=0) is True\n    assert b.allow(now=0) is True\n    assert b.allow(now=0) is False\n\n\ndef test_refills_over_time():\n    b = TokenBucket(capacity=3, refill_rate=1)\n    for _ in range(3):\n        b.allow(now=0)\n    assert b.allow(now=0.5) is False\n    assert b.allow(now=1.0) is True   # ~1 token refilled after 1s\n    assert b.allow(now=1.0) is False\n\n\ndef test_refill_caps_at_capacity():\n    b = TokenBucket(capacity=2, refill_rate=1)\n    b.allow(now=0)\n    b.allow(now=0)\n    # a very long idle period must not let tokens exceed capacity\n    assert b.allow(now=1000) is True\n    assert b.allow(now=1000) is True\n    assert b.allow(now=1000) is False\n"
+  },
+  "check_command": "python3 -m pytest -q test_limiter_hidden.py",
+  "reference_solution": {
+    "limiter.py": "class TokenBucket:\n    def __init__(self, capacity, refill_rate):\n        self.capacity = capacity\n        self.refill_rate = refill_rate\n        self._tokens = float(capacity)\n        self._last = None\n\n    def allow(self, now):\n        if self._last is not None:\n            elapsed = now - self._last\n            self._tokens = min(self.capacity, self._tokens + elapsed * self.refill_rate)\n        self._last = now\n        if self._tokens >= 1:\n            self._tokens -= 1\n            return True\n        return False\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "limiter.py": "class TokenBucket:\n    def __init__(self, capacity, refill_rate):\n        self.capacity = capacity\n        self.refill_rate = refill_rate\n        self._tokens = float(capacity)\n        self._last = None\n\n    def allow(self, now):\n        if self._last is not None:\n            elapsed = now - self._last\n            self._tokens = self._tokens + elapsed * self.refill_rate\n        self._last = now\n        if self._tokens >= 1:\n            self._tokens -= 1\n            return True\n        return False\n"
+      }
+    }
+  ],
+  "name": "add_python_token_bucket_limiter",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

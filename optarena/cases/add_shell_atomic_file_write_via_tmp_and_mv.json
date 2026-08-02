@@ -1,0 +1,53 @@
+{
+  "description": "Write to a temp file and rename it into place instead of writing the destination directly, so a crash mid-write never leaves a half-written config file",
+  "tags": [
+    "shell",
+    "bash",
+    "atomicity",
+    "correctness"
+  ],
+  "prompts": [
+    "scripts/write_config.sh writes its input DIRECTLY to the destination file - if the process is killed partway through (or the disk fills up), readers can observe a half-written, corrupt file, and there is no way to distinguish 'old content' from 'garbage mid-write'. Fix it to write atomically: write the content to a temp file in the SAME directory as the destination (same filesystem, so the final rename is atomic - a temp file elsewhere could make `mv` fall back to a non-atomic copy across filesystems), then `mv` that temp file onto the destination path. Also clean up the temp file with a trap if the script exits before the rename (e.g. content generation fails) so it doesn't leak stray temp files. The destination's final content for a successful run must be byte-identical to before."
+  ],
+  "setup_files": {
+    "scripts/write_config.sh": "#!/bin/bash\nset -euo pipefail\n# Writes directly to the destination - not atomic, a mid-write crash\n# leaves a corrupt partial file.\nDEST=$1\ncat > \"$DEST\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/write_config.sh",
+      "content_patterns": [
+        "mv "
+      ]
+    }
+  ],
+  "reference_solution": {
+    "scripts/write_config.sh": "#!/bin/bash\nset -euo pipefail\n\nDEST=$1\nDEST_DIR=$(dirname \"$DEST\")\nTMP=$(mktemp \"$DEST_DIR/.write_config.XXXXXX\")\ntrap 'rm -f \"$TMP\"' EXIT\n\ncat > \"$TMP\"\nmv \"$TMP\" \"$DEST\"\ntrap - EXIT\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "scripts/write_config.sh": "#!/bin/bash\nset -euo pipefail\nDEST=$1\ncat > \"$DEST\"\n"
+      }
+    },
+    {
+      "name": "copies-instead-of-atomic-rename-and-leaks-temp-file",
+      "files": {
+        "scripts/write_config.sh": "#!/bin/bash\nset -euo pipefail\n\nDEST=$1\nDEST_DIR=$(dirname \"$DEST\")\nTMP=$(mktemp \"$DEST_DIR/.write_config.XXXXXX\")\n\ncat > \"$TMP\"\ncp \"$TMP\" \"$DEST\"\nmv \"$TMP\" \"$TMP.bak\"\n"
+      }
+    }
+  ],
+  "name": "add_shell_atomic_file_write_via_tmp_and_mv",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops",
+  "test_setup_files": {
+    "check_write_config.py": "\"\"\"Behavioral checks for scripts/write_config.sh, run with the real bash.\"\"\"\nimport subprocess\nfrom pathlib import Path\n\nSCRIPT = \"scripts/write_config.sh\"\n\n\ndef run(dest, stdin_text, timeout=10):\n    return subprocess.run(\n        [\"bash\", SCRIPT, dest],\n        input=stdin_text, capture_output=True, text=True, timeout=timeout,\n    )\n\n\nworkdir = Path(\"cfg_check_tmp\")\nworkdir.mkdir(exist_ok=True)\ndest = workdir / \"app.conf\"\n\n# 1. A normal successful write must produce the exact content, no leftovers.\nproc = run(str(dest), \"key=value\\n\")\nassert proc.returncode == 0, f\"write failed: {proc.stdout}{proc.stderr}\"\nassert dest.read_text(encoding=\"utf-8\") == \"key=value\\n\", \"content mismatch after write\"\n\nleftovers = [p for p in workdir.iterdir() if p.name != \"app.conf\"]\nassert not leftovers, f\"temp files leaked into the destination directory: {leftovers}\"\n\n# 2. Overwriting must never leave the OLD content readable mid-write, nor\n#    leave a temp artifact behind - check the write goes through mv (rename),\n#    which is what the expected_files gate already enforces structurally;\n#    here we confirm a second write still cleanly replaces content.\nproc = run(str(dest), \"key=updated\\n\")\nassert proc.returncode == 0\nassert dest.read_text(encoding=\"utf-8\") == \"key=updated\\n\"\nleftovers = [p for p in workdir.iterdir() if p.name != \"app.conf\"]\nassert not leftovers, f\"temp files leaked on overwrite: {leftovers}\"\n\nprint(\"PASS write_config.sh atomicity checks\")\n"
+  },
+  "check_command": "python3 check_write_config.py"
+}

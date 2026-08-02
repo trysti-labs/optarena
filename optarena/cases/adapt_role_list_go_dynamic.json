@@ -1,0 +1,60 @@
+{
+  "name": "adapt_role_list_go_dynamic",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: allowed_roles.txt (a spec file the role check must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old list into roles.go",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "go",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create roles.go (package rolecase) with a function IsAllowed(role string) bool returning true if role is in the comma-separated list in allowed_roles.txt (currently: admin, editor), else false. Read the list from the file (os.ReadFile) at call time - do not hardcode it.",
+    "allowed_roles.txt has changed. Make sure IsAllowed() reflects the CURRENT list in the file."
+  ],
+  "setup_files": {
+    "go.mod": "module rolecase\n\ngo 1.22\n",
+    "allowed_roles.txt": "admin,editor\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "allowed_roles.txt rewritten to add a new role",
+      "write_files": {
+        "allowed_roles.txt": "admin,editor,viewer\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "roles.go",
+      "content_patterns": [
+        "IsAllowed"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "roles_test.go": "package rolecase\n\nimport (\n\t\"os\"\n\t\"strings\"\n\t\"testing\"\n)\n\nfunc TestIsAllowed(t *testing.T) {\n\tdata, _ := os.ReadFile(\"allowed_roles.txt\")\n\tfor _, role := range strings.Split(strings.TrimSpace(string(data)), \",\") {\n\t\trole = strings.TrimSpace(role)\n\t\tif !IsAllowed(role) {\n\t\t\tt.Fatalf(\"IsAllowed(%q) should be true\", role)\n\t\t}\n\t}\n\tif IsAllowed(\"not_a_real_role\") {\n\t\tt.Fatal(\"IsAllowed should reject an unknown role\")\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "roles.go": "package rolecase\n\nimport (\n\t\"os\"\n\t\"strings\"\n)\n\nfunc IsAllowed(role string) bool {\n\tdata, err := os.ReadFile(\"allowed_roles.txt\")\n\tif err != nil {\n\t\treturn false\n\t}\n\tfor _, r := range strings.Split(strings.TrimSpace(string(data)), \",\") {\n\t\tif strings.TrimSpace(r) == role {\n\t\t\treturn true\n\t\t}\n\t}\n\treturn false\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-role-list",
+      "files": {
+        "roles.go": "package rolecase\n\nfunc IsAllowed(role string) bool {\n\treturn role == \"admin\" || role == \"editor\"\n}\n"
+      }
+    }
+  ]
+}

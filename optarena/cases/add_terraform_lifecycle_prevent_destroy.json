@@ -1,0 +1,55 @@
+{
+  "description": "Add a lifecycle prevent_destroy guard to a critical resource, so a stray terraform destroy (or a plan that would replace it) fails loudly instead of silently deleting it",
+  "tags": [
+    "terraform",
+    "hcl",
+    "devops",
+    "lifecycle",
+    "safety"
+  ],
+  "prompts": [
+    "main.tf declares an aws_kms_key used to encrypt production data - it has no lifecycle protection, so a mistaken `terraform destroy`, or a config change that forces replacement, would delete it (and everything encrypted under it becomes unrecoverable). Add a `lifecycle { prevent_destroy = true }` block INSIDE the existing aws_kms_key.data_encryption resource (do not create a new resource). Keep every other existing attribute (description, deletion_window_in_days, enable_key_rotation) unchanged."
+  ],
+  "setup_files": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_kms_key\" \"data_encryption\" {\n  description             = \"Encrypts production data at rest\"\n  deletion_window_in_days = 30\n  enable_key_rotation     = true\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": [
+        "lifecycle",
+        "prevent_destroy"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_prevent_destroy.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\ncontent = open('main.tf', encoding='utf-8').read()\n\nkms = re.search(r'resource\\s+\"aws_kms_key\"\\s+\"data_encryption\"\\s*\\{(.*?)\\n\\}', content, re.DOTALL)\nassert kms, 'aws_kms_key.data_encryption not found'\nblock = kms.group(1)\n\nlifecycle = re.search(r'lifecycle\\s*\\{([^}]*)\\}', block, re.DOTALL)\nassert lifecycle, 'no lifecycle block inside aws_kms_key.data_encryption'\nm = re.search(r'prevent_destroy\\s*=\\s*(true|false)', lifecycle.group(1))\nassert m, 'prevent_destroy missing from the lifecycle block'\nassert m.group(1) == 'true', f'prevent_destroy must be true, got {m.group(1)}'\n\nassert re.search(r'deletion_window_in_days\\s*=\\s*30', block), 'deletion_window_in_days changed'\nassert re.search(r'enable_key_rotation\\s*=\\s*true', block), 'enable_key_rotation changed'\n\nprint('PASS prevent_destroy checks')\n"
+  },
+  "check_command": "python3 check_prevent_destroy.py",
+  "reference_solution": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_kms_key\" \"data_encryption\" {\n  description             = \"Encrypts production data at rest\"\n  deletion_window_in_days = 30\n  enable_key_rotation     = true\n\n  lifecycle {\n    prevent_destroy = true\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_kms_key\" \"data_encryption\" {\n  description             = \"Encrypts production data at rest\"\n  deletion_window_in_days = 30\n  enable_key_rotation     = true\n}\n"
+      }
+    },
+    {
+      "name": "prevent-destroy-set-to-false",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_kms_key\" \"data_encryption\" {\n  description             = \"Encrypts production data at rest\"\n  deletion_window_in_days = 30\n  enable_key_rotation     = true\n\n  lifecycle {\n    prevent_destroy = false\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_lifecycle_prevent_destroy",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 150,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

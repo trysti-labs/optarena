@@ -1,0 +1,60 @@
+{
+  "name": "adapt_role_list_java_dynamic",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval: allowed_roles.txt (a spec file the role check must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old list into Roles.java",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "java",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create Roles.java with a public final class Roles containing a public static boolean isAllowed(String role) returning true if role is in the comma-separated list in allowed_roles.txt (currently: admin, editor), else false. Read the list from the file (java.nio.file.Files.readString) at call time - do not hardcode it.",
+    "allowed_roles.txt has changed. Make sure isAllowed() reflects the CURRENT list in the file."
+  ],
+  "setup_files": {
+    "allowed_roles.txt": "admin,editor\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "allowed_roles.txt rewritten to add a new role",
+      "write_files": {
+        "allowed_roles.txt": "admin,editor,viewer\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Roles.java",
+      "content_patterns": [
+        "isAllowed"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "RolesTest.java": "import java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic final class RolesTest {\n    public static void main(String[] args) throws Exception {\n        String data = Files.readString(Path.of(\"allowed_roles.txt\")).trim();\n        for (String role : data.split(\",\")) {\n            role = role.trim();\n            if (!Roles.isAllowed(role)) throw new AssertionError(\"isAllowed(\" + role + \") should be true\");\n        }\n        if (Roles.isAllowed(\"not_a_real_role\")) throw new AssertionError(\"isAllowed should reject an unknown role\");\n        System.out.println(\"all tests passed\");\n    }\n}\n",
+    "CheckRoles.java": "import java.io.IOException;\n\npublic final class CheckRoles {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Roles.java\", \"RolesTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"RolesTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckRoles.java",
+  "reference_solution": {
+    "Roles.java": "import java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic final class Roles {\n    public static boolean isAllowed(String role) throws Exception {\n        String data = Files.readString(Path.of(\"allowed_roles.txt\")).trim();\n        for (String r : data.split(\",\")) {\n            if (r.trim().equals(role)) return true;\n        }\n        return false;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-role-list",
+      "files": {
+        "Roles.java": "public final class Roles {\n    public static boolean isAllowed(String role) {\n        return role.equals(\"admin\") || role.equals(\"editor\");\n    }\n}\n"
+      }
+    }
+  ]
+}

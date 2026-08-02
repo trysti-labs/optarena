@@ -1,0 +1,46 @@
+{
+  "description": "Fix an array-sort-based priority queue that breaks ties by re-sorting on push (losing FIFO order for equal priorities) into a genuinely stable one",
+  "task_type": "feature",
+  "tags": [
+    "javascript",
+    "node",
+    "algorithms"
+  ],
+  "prompts": [
+    "pq.js's StablePriorityQueue keeps an array and re-sorts it on every push by priority alone - Array.prototype.sort is stable in modern V8, but re-sorting the WHOLE array on every push does not preserve original insertion order for equal-priority items once items have been popped and re-pushed in between (the relative array positions get scrambled by intervening sorts). Fix push/pop so that: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO) - track insertion order explicitly with a counter, don't rely on array position."
+  ],
+  "setup_files": {
+    "pq.js": "class StablePriorityQueue {\n  constructor() {\n    this.items = [];\n  }\n\n  push(priority, item) {\n    this.items.push({ priority, item });\n    this.items.sort((a, b) => a.priority - b.priority);\n  }\n\n  pop() {\n    return this.items.shift().item;\n  }\n\n  get length() {\n    return this.items.length;\n  }\n}\n\nmodule.exports = { StablePriorityQueue };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pq.js",
+      "content_patterns": [
+        "class StablePriorityQueue"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_pq_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { StablePriorityQueue } = require(\"./pq\");\n\ntest(\"priority order\", () => {\n  const q = new StablePriorityQueue();\n  q.push(5, \"low\");\n  q.push(1, \"high\");\n  q.push(3, \"mid\");\n  assert.deepStrictEqual([q.pop(), q.pop(), q.pop()], [\"high\", \"mid\", \"low\"]);\n});\n\ntest(\"equal priority is fifo across interleaved pushes and pops\", () => {\n  const q = new StablePriorityQueue();\n  q.push(1, \"first\");\n  q.push(2, \"other\");\n  q.push(1, \"second\");\n  assert.strictEqual(q.pop(), \"first\");\n  q.push(1, \"third\");\n  assert.deepStrictEqual([q.pop(), q.pop()], [\"second\", \"third\"]);\n});\n"
+  },
+  "check_command": "node --test test_pq_hidden.test.js",
+  "reference_solution": {
+    "pq.js": "class StablePriorityQueue {\n  constructor() {\n    this.items = [];\n    this.counter = 0;\n  }\n\n  push(priority, item) {\n    this.items.push({ priority, order: this.counter++, item });\n    this.items.sort((a, b) => a.priority - b.priority || a.order - b.order);\n  }\n\n  pop() {\n    return this.items.shift().item;\n  }\n\n  get length() {\n    return this.items.length;\n  }\n}\n\nmodule.exports = { StablePriorityQueue };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "counter-decrements-reverses-fifo",
+      "files": {
+        "pq.js": "class StablePriorityQueue {\n  constructor() {\n    this.items = [];\n    this.counter = 0;\n  }\n\n  push(priority, item) {\n    this.items.push({ priority, order: this.counter, item });\n    this.counter -= 1;\n    this.items.sort((a, b) => a.priority - b.priority || a.order - b.order);\n  }\n\n  pop() {\n    return this.items.shift().item;\n  }\n\n  get length() {\n    return this.items.length;\n  }\n}\n\nmodule.exports = { StablePriorityQueue };\n"
+      }
+    }
+  ],
+  "name": "add_js_stable_priority_queue",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3
+}

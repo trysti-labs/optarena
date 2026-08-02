@@ -32,6 +32,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import __version__
 from . import cases as cases_mod
 from . import store
 from .cases import DOCKER_IMAGE_DEFAULT, DockerSandbox, container_engine, load_cases
@@ -111,6 +112,11 @@ def build_manifest(scenario: Scenario, cases: list[dict], requested_trials: int,
     return {
         "manifest_version": 1,
         "oracle_version": ORACLE_VERSION,
+        # A-25: which build of the tool produced this result. Recorded for
+        # evidence only - deliberately NOT part of `manifest_compatibility`,
+        # since a patch release that doesn't touch the oracle must not
+        # invalidate comparisons (that's exactly what `oracle_version` is for).
+        "optarena_version": __version__,
         "case_count": len(cases),
         "case_names": [n for n, _ in case_entries],
         "case_set_hash": case_set_hash,
@@ -224,6 +230,9 @@ def _run_case(driver, case: dict, scenario: Scenario, root: Path, trials: int,
         if ws.exists():
             shutil.rmtree(ws, ignore_errors=True)
         ws.mkdir(parents=True, exist_ok=True)
+        # A-36: a non-root sandbox uid can't write into a workspace the HOST
+        # user created 0700. No-op unless OPTARENA_SANDBOX_USER is set.
+        cases_mod.relax_workspace_permissions(ws)
         r = driver.run_case(case, scenario, ws)
         if security_scan:
             # Static-scan the files the agent actually changed, before the
@@ -250,6 +259,15 @@ def _worker_loop(worker_idx: int, case_queue: "queue.Queue", results_queue: "que
     result onto results_queue as it finishes - not batched at the end - so
     the main thread can print/checkpoint incrementally (F-02) instead of
     only learning about completions once every worker is done.
+
+    A-02: EVERY path out of the per-case body must put exactly one result on
+    the queue. The collector below waits for exactly len(cases) results, so a
+    worker that died on an unexpected exception (an OSError creating the
+    workspace, a MemoryError, anything a driver lets escape) used to leave
+    the main thread blocked on `results_queue.get()` forever - the whole run
+    hung with no timeout and no diagnostic. Report the failure as this case's
+    result instead, exactly as the serial path's per-case error handling
+    would, and keep draining the queue.
     """
     cases_mod._worker_sandboxes.map = {
         image: sandboxes[worker_idx] for image, sandboxes in sandbox_pool.items()
@@ -267,20 +285,45 @@ def _worker_loop(worker_idx: int, case_queue: "queue.Queue", results_queue: "que
         events.emit("case_started", case=case["name"], worker=worker_idx)
         try:
             result = _run_case(driver, case, scenario, root, trials, security_scan)
+        except BaseException as exc:   # noqa: BLE001 - see A-02 above
+            result = CaseResult(
+                name=case["name"],
+                error=f"worker {worker_idx} failed: {type(exc).__name__}: {exc}",
+                execution_ok=False,
+            )
         finally:
             case_queue.task_done()
         results_queue.put(result)
 
 
+#: A-02: how long the collector below will wait on an otherwise-silent
+#: results queue before checking whether any worker is still alive. Only a
+#: liveness probe interval, NOT a per-case time limit - a case that legitimately
+#: takes an hour keeps the loop waiting, because its worker thread is alive.
+_COLLECT_POLL_S = 1.0
+
+
 def _run_parallel(driver, cases: list[dict], scenario: Scenario, root: Path, trials: int,
                    security_scan: bool, parallel: int,
                    sandbox_pool: "dict[str, list[DockerSandbox]]",
-                   on_result, events: RunEvents) -> list[CaseResult]:
+                   on_result, events: RunEvents,
+                   results: "list[CaseResult] | None" = None) -> list[CaseResult]:
     """F-06: `parallel` persistent worker threads (not a fresh thread pool
     task per case) so each can hold one dedicated sandbox set for its whole
     lifetime. `on_result(result)` is called as each case finishes (in
     completion order, not input order) - the caller uses it to print and
-    checkpoint (F-02) incrementally."""
+    checkpoint (F-02) incrementally.
+
+    A-01: `results` is the CALLER'S list, appended to in place as each case
+    completes. It used to be a local built here and returned only at the end,
+    while `on_result` closed over the caller's still-empty list - so every
+    parallel checkpoint serialized zero cases, and an interrupted parallel run
+    (the exact scenario F-02 exists for) discarded every completed case,
+    because run_scenario's `finally` also read that empty list. Sharing one
+    list makes "what the checkpoint sees" and "what completed" the same object.
+    """
+    if results is None:
+        results = []
     case_queue: "queue.Queue" = queue.Queue()
     for case in cases:
         case_queue.put(case)
@@ -297,9 +340,22 @@ def _run_parallel(driver, cases: list[dict], scenario: Scenario, root: Path, tri
     for t in threads:
         t.start()
 
-    results: list[CaseResult] = []
     for _ in range(len(cases)):
-        result = results_queue.get()
+        # A-02: _worker_loop now guarantees one result per case even on an
+        # unexpected exception, so this loop terminates on its own. The
+        # timeout + liveness check is the second line of defense: if every
+        # worker is somehow gone with results still outstanding, fail the run
+        # with a diagnostic instead of blocking forever.
+        while True:
+            try:
+                result = results_queue.get(timeout=_COLLECT_POLL_S)
+                break
+            except queue.Empty:
+                if not any(t.is_alive() for t in threads):
+                    raise RuntimeError(
+                        f"every parallel worker exited with {len(cases) - len(results)} "
+                        f"case(s) unaccounted for - aborting rather than waiting forever"
+                    ) from None
         results.append(result)
         on_result(result)
     for t in threads:
@@ -472,8 +528,13 @@ def run_scenario(
     # process (--matrix-drivers/--matrix-models, or two --scenario files) -
     # a matrix run shouldn't stay convinced the engine is down for its whole
     # duration just because an early scenario probed it while it was still
-    # starting up.
-    cases_mod._docker_available(force_recheck=True)
+    # starting up. A-11/A-12: via the module's public reset (which also
+    # re-arms the one-shot "no sandbox" warning) rather than reaching into
+    # `_docker_available(force_recheck=True)`.
+    cases_mod.reset_engine_health_cache()
+    # A-13: image-pull backoff state is per-run too - a registry blip during
+    # scenario 1 must not permanently mark an image unpullable for scenario 5.
+    cases_mod.reset_pull_backoff()
     # F-15: bind this scenario's image_overrides so every driver's
     # evaluate_case()->run_check_command() call picks it up without
     # threading a new parameter through every driver module.
@@ -501,6 +562,9 @@ def run_scenario(
     owns_workspace = workspace_root is None
     root = workspace_root or Path(tempfile.mkdtemp(prefix="optarena_"))
     root.mkdir(parents=True, exist_ok=True)
+    # A-36: the run root is bind-mounted as /workspace; a non-root sandbox uid
+    # needs to traverse it before it can reach any case directory.
+    cases_mod.relax_workspace_permissions(root)
 
     events.say(f"\n=== RUN {run_id}  driver={scenario.driver}  "
                f"backend={scenario.backend.label()}  cases={len(cases)}"
@@ -587,8 +651,12 @@ def run_scenario(
                 events.say(f"  [case] {result.name} ...", end="")
                 _print_result(result, events)
                 _checkpoint(results)
-            results = _run_parallel(driver, cases, scenario, root, trials, security_scan,
-                                     parallel, sandbox_pool, _on_result, events)
+            # A-01: `results` is passed IN and appended to in place - not
+            # rebound from the return value. The rebinding version left this
+            # name pointing at an empty list for the whole run, so both
+            # `_checkpoint` above and the `finally` below saw zero cases.
+            _run_parallel(driver, cases, scenario, root, trials, security_scan,
+                          parallel, sandbox_pool, _on_result, events, results=results)
         else:
             for case in cases:
                 events.say(f"  [case] {case['name']} ...", end="", flush=True)

@@ -1,0 +1,47 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends and is exact for any starting weekday",
+  "task_type": "feature",
+  "tags": [
+    "kotlin",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "Dates.kt's addBusinessDays(start: LocalDate, n: Int) just does start.plusDays(n.toLong()) - it counts weekends as business days. Implement it properly: n=0 returns start unchanged (even if start itself falls on a weekend); for n>0, step forward day by day, skipping SATURDAY and SUNDAY, until n business days have been counted, then return that date. It must be exact for any starting weekday and correctly cross month/year boundaries - do not use an approximation formula like `n + 2*(n/5)` calendar-days shortcut, it gives the wrong answer depending on which weekday `start` falls on."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Dates.kt",
+      "content_patterns": [
+        "fun addBusinessDays"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Dates.kt": "package com.optarena.app\n\nimport java.time.DayOfWeek\nimport java.time.LocalDate\n\nfun addBusinessDays(start: LocalDate, n: Int): LocalDate {\n    if (n == 0) {\n        return start\n    }\n    var current = start\n    var counted = 0\n    while (counted < n) {\n        current = current.plusDays(1)\n        if (current.dayOfWeek != DayOfWeek.SATURDAY && current.dayOfWeek != DayOfWeek.SUNDAY) {\n            counted++\n        }\n    }\n    return current\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Dates.kt": "package com.optarena.app\n\nimport java.time.LocalDate\n\nfun addBusinessDays(start: LocalDate, n: Int): LocalDate {\n    if (n == 0) {\n        return start\n    }\n    val weeks = n / 5\n    val remainder = n % 5\n    val calendarDays = weeks * 7 + remainder\n    return start.plusDays(calendarDays.toLong())\n}\n"
+      }
+    }
+  ],
+  "name": "add_kotlin_business_day_date_math",
+  "language": "kotlin",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "difficulty": 3,
+  "check_command": "mvn -o -q test -Dtest=DatesTest",
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Dates.kt": "package com.optarena.app\n\nimport java.time.LocalDate\n\nfun addBusinessDays(start: LocalDate, n: Int): LocalDate {\n    return start.plusDays(n.toLong())\n}\n"
+  },
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/DatesTest.kt": "package com.optarena.app\n\nimport java.time.LocalDate\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass DatesTest {\n    @Test\n    fun zeroReturnsStartUnchanged() {\n        val d = LocalDate.of(2024, 6, 1) // Saturday\n        assertEquals(d, addBusinessDays(d, 0))\n    }\n\n    @Test\n    fun fridayPlusOneSkipsWeekend() {\n        val friday = LocalDate.of(2024, 5, 31)\n        assertEquals(LocalDate.of(2024, 6, 3), addBusinessDays(friday, 1))\n    }\n\n    @Test\n    fun mondayPlusFiveLandsNextMonday() {\n        val monday = LocalDate.of(2024, 5, 27)\n        assertEquals(LocalDate.of(2024, 6, 3), addBusinessDays(monday, 5))\n    }\n\n    @Test\n    fun crossesMonthAndYearBoundary() {\n        val friday = LocalDate.of(2024, 12, 27)\n        assertEquals(LocalDate.of(2025, 1, 1), addBusinessDays(friday, 3))\n    }\n\n    @Test\n    fun startingOnAWeekendStillCountsCorrectly() {\n        val saturday = LocalDate.of(2024, 6, 1)\n        assertEquals(LocalDate.of(2024, 6, 3), addBusinessDays(saturday, 1))\n    }\n}\n"
+  }
+}

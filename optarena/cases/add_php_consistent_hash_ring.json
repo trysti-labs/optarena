@@ -1,0 +1,44 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "Create src/HashRing.php defining namespace App and class HashRing. The constructor __construct(array $nodes, int $replicas) places $replicas virtual points per physical node around a ring, hashed via crc32(\"$node:$i\") for each virtual point. getNode(string $key): string hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). addNode(string $node): void and removeNode(string $node): void update the ring in place. Do not use a plain modulo of the key's hash directly against the node list - that reshuffles almost every key when a node is added or removed."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/HashRing.php",
+      "content_patterns": [
+        "function getNode"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/HashRing.php": "<?php\nnamespace App;\n\nclass HashRing\n{\n    private int $replicas;\n    private array $ring = []; // point (int) -> node\n\n    public function __construct(array $nodes, int $replicas)\n    {\n        $this->replicas = $replicas;\n        foreach ($nodes as $node) {\n            $this->addNode($node);\n        }\n    }\n\n    public function addNode(string $node): void\n    {\n        for ($i = 0; $i < $this->replicas; $i++) {\n            $this->ring[crc32(\"$node:$i\")] = $node;\n        }\n        ksort($this->ring);\n    }\n\n    public function removeNode(string $node): void\n    {\n        for ($i = 0; $i < $this->replicas; $i++) {\n            unset($this->ring[crc32(\"$node:$i\")]);\n        }\n        ksort($this->ring);\n    }\n\n    public function getNode(string $key): string\n    {\n        $point = crc32($key);\n        foreach ($this->ring as $p => $node) {\n            if ($p >= $point) {\n                return $node;\n            }\n        }\n        return reset($this->ring);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "src/HashRing.php": "<?php\nnamespace App;\n\nclass HashRing\n{\n    private array $nodes;\n\n    public function __construct(array $nodes, int $replicas)\n    {\n        $this->nodes = array_values($nodes);\n    }\n\n    public function addNode(string $node): void\n    {\n        $this->nodes[] = $node;\n    }\n\n    public function removeNode(string $node): void\n    {\n        $this->nodes = array_values(array_filter($this->nodes, fn($n) => $n !== $node));\n    }\n\n    public function getNode(string $key): string\n    {\n        $idx = crc32($key) % count($this->nodes);\n        return $this->nodes[$idx];\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_consistent_hash_ring",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "difficulty": 3,
+  "check_command": "phpunit tests/HashRingTest.php",
+  "setup_files": {},
+  "test_setup_files": {
+    "tests/HashRingTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/HashRing.php';\n\nfinal class HashRingTest extends TestCase\n{\n    public function testEveryKeyMapsToACurrentNode(): void\n    {\n        $ring = new \\App\\HashRing([\"a\", \"b\", \"c\"], 50);\n        for ($i = 0; $i < 200; $i++) {\n            $node = $ring->getNode(\"key-$i\");\n            $this->assertContains($node, [\"a\", \"b\", \"c\"]);\n        }\n    }\n\n    public function testDeterministic(): void\n    {\n        $ring = new \\App\\HashRing([\"a\", \"b\", \"c\"], 50);\n        $this->assertSame($ring->getNode(\"stable-key\"), $ring->getNode(\"stable-key\"));\n    }\n\n    public function testRemovingANodeOnlyMovesThatNodesOwnKeys(): void\n    {\n        $nodes = [\"n0\", \"n1\", \"n2\", \"n3\", \"n4\"];\n        $ring = new \\App\\HashRing($nodes, 100);\n        $keys = [];\n        for ($i = 0; $i < 1000; $i++) { $keys[] = \"key-$i\"; }\n        $before = [];\n        foreach ($keys as $k) { $before[$k] = $ring->getNode($k); }\n\n        $ring->removeNode(\"n2\");\n\n        $moved = 0;\n        foreach ($keys as $k) {\n            $after = $ring->getNode($k);\n            if ($after !== $before[$k]) {\n                $moved++;\n                $this->assertSame(\"n2\", $before[$k]);\n            }\n            $this->assertNotSame(\"n2\", $after);\n        }\n        $this->assertGreaterThan(0, $moved);\n    }\n}\n"
+  }
+}

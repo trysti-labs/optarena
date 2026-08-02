@@ -1,0 +1,46 @@
+{
+  "description": "Replace an unsafe yaml.load(Loader=yaml.Loader) config parser with yaml.safe_load so untrusted YAML can't construct arbitrary Python objects",
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "deserialization"
+  ],
+  "prompts": [
+    "config.py's load_config(text) calls `yaml.load(text, Loader=yaml.Loader)` - the full (unsafe) loader, which will happily construct arbitrary Python objects and invoke arbitrary callables from tags like `!!python/object/apply:...` embedded in the YAML text. Since this text can come from an uploaded config file, that's a remote code execution risk. Fix it to use yaml.safe_load instead, while still correctly parsing ordinary config YAML (nested mappings, lists, scalars) exactly as before."
+  ],
+  "setup_files": {
+    "config.py": "import yaml\n\n\ndef load_config(text):\n    return yaml.load(text, Loader=yaml.Loader)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "config.py",
+      "content_patterns": [
+        "safe_load"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_config_hidden.py": "import pytest\nimport yaml\n\nfrom config import load_config\n\n\ndef test_normal_config_parses():\n    result = load_config('name: svc\\nport: 8080\\ntags:\\n  - a\\n  - b\\n')\n    assert result == {'name': 'svc', 'port': 8080, 'tags': ['a', 'b']}\n\n\ndef test_nested_config_parses():\n    result = load_config('db:\\n  host: localhost\\n  port: 5432\\n')\n    assert result == {'db': {'host': 'localhost', 'port': 5432}}\n\n\ndef test_malicious_tag_is_rejected():\n    malicious = '!!python/object/apply:os.getcwd []'\n    with pytest.raises(yaml.YAMLError):\n        load_config(malicious)\n"
+  },
+  "check_command": "python3 -m pytest -q test_config_hidden.py",
+  "reference_solution": {
+    "config.py": "import yaml\n\n\ndef load_config(text):\n    return yaml.safe_load(text)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-unsafe-loader",
+      "files": {
+        "config.py": "import yaml\n\n\ndef load_config(text):\n    return yaml.load(text, Loader=yaml.Loader)\n"
+      }
+    }
+  ],
+  "name": "fix_python_unsafe_yaml_deserialization",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

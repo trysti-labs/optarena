@@ -1,0 +1,55 @@
+{
+  "description": "Add a CloudWatch alarm on CPU utilization with evaluation_periods that avoid paging on-call for a single noisy spike, and an actions_enabled + alarm_actions wiring so it actually notifies anyone",
+  "tags": [
+    "terraform",
+    "hcl",
+    "devops",
+    "cloudwatch",
+    "observability"
+  ],
+  "prompts": [
+    "There is no alerting at all on the aws_instance.worker CPU usage - it can peg at 100% for hours before anyone notices. Add an aws_cloudwatch_metric_alarm resource named `worker_high_cpu`: metric_name = \"CPUUtilization\", namespace = \"AWS/EC2\", statistic = \"Average\", period = 300 (5-minute datapoints), threshold = 80, comparison_operator = \"GreaterThanThreshold\", evaluation_periods = 3 (must breach for 3 CONSECUTIVE 5-minute periods before firing - a single noisy spike must not page anyone), dimensions = { InstanceId = aws_instance.worker.id }, and alarm_actions = [aws_sns_topic.alerts.arn] (a reference to the existing aws_sns_topic.alerts resource - do not hardcode an ARN string, and do not modify the existing aws_instance or aws_sns_topic resources)."
+  ],
+  "setup_files": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_instance\" \"worker\" {\n  ami           = \"ami-0123456789abcdef0\"\n  instance_type = \"t3.medium\"\n}\n\nresource \"aws_sns_topic\" \"alerts\" {\n  name = \"ops-alerts\"\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": [
+        "aws_cloudwatch_metric_alarm",
+        "evaluation_periods"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_alarm.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\ncontent = open('main.tf', encoding='utf-8').read()\n\nalarm = re.search(\n    r'resource\\s+\"aws_cloudwatch_metric_alarm\"\\s+\"worker_high_cpu\"\\s*\\{(.*?)\\n\\}',\n    content, re.DOTALL,\n)\nassert alarm, 'aws_cloudwatch_metric_alarm.worker_high_cpu not found'\nblock = alarm.group(1)\n\nchecks = {\n    'metric_name': r'metric_name\\s*=\\s*\"CPUUtilization\"',\n    'namespace': r'namespace\\s*=\\s*\"AWS/EC2\"',\n    'statistic': r'statistic\\s*=\\s*\"Average\"',\n    'period': r'period\\s*=\\s*300',\n    'threshold': r'threshold\\s*=\\s*80',\n    'comparison_operator': r'comparison_operator\\s*=\\s*\"GreaterThanThreshold\"',\n}\nfor label, pattern in checks.items():\n    assert re.search(pattern, block), f'{label} missing or wrong in the alarm block'\n\nm = re.search(r'evaluation_periods\\s*=\\s*(\\d+)', block)\nassert m, 'evaluation_periods missing'\nassert int(m.group(1)) >= 3, (\n    f'evaluation_periods is {m.group(1)} - must be at least 3 consecutive breaches to avoid '\n    f'paging on-call for a single noisy spike')\n\nassert re.search(r'InstanceId\\s*=\\s*aws_instance\\.worker\\.id', block), (\n    'dimensions.InstanceId must reference aws_instance.worker.id')\n\nassert re.search(r'alarm_actions\\s*=\\s*\\[\\s*aws_sns_topic\\.alerts\\.arn\\s*\\]', block), (\n    'alarm_actions must reference aws_sns_topic.alerts.arn, not a hardcoded ARN string')\n\nassert 'ami-0123456789abcdef0' in content, 'aws_instance.worker must stay unchanged'\nassert 'ops-alerts' in content, 'aws_sns_topic.alerts must stay unchanged'\n\nprint('PASS CloudWatch alarm checks')\n"
+  },
+  "check_command": "python3 check_alarm.py",
+  "reference_solution": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_instance\" \"worker\" {\n  ami           = \"ami-0123456789abcdef0\"\n  instance_type = \"t3.medium\"\n}\n\nresource \"aws_sns_topic\" \"alerts\" {\n  name = \"ops-alerts\"\n}\n\nresource \"aws_cloudwatch_metric_alarm\" \"worker_high_cpu\" {\n  alarm_name          = \"worker-high-cpu\"\n  metric_name         = \"CPUUtilization\"\n  namespace           = \"AWS/EC2\"\n  statistic           = \"Average\"\n  period              = 300\n  threshold           = 80\n  comparison_operator = \"GreaterThanThreshold\"\n  evaluation_periods  = 3\n\n  dimensions = {\n    InstanceId = aws_instance.worker.id\n  }\n\n  alarm_actions = [aws_sns_topic.alerts.arn]\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_instance\" \"worker\" {\n  ami           = \"ami-0123456789abcdef0\"\n  instance_type = \"t3.medium\"\n}\n\nresource \"aws_sns_topic\" \"alerts\" {\n  name = \"ops-alerts\"\n}\n"
+      }
+    },
+    {
+      "name": "single-evaluation-period-too-noisy",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_instance\" \"worker\" {\n  ami           = \"ami-0123456789abcdef0\"\n  instance_type = \"t3.medium\"\n}\n\nresource \"aws_sns_topic\" \"alerts\" {\n  name = \"ops-alerts\"\n}\n\nresource \"aws_cloudwatch_metric_alarm\" \"worker_high_cpu\" {\n  alarm_name          = \"worker-high-cpu\"\n  metric_name         = \"CPUUtilization\"\n  namespace           = \"AWS/EC2\"\n  statistic           = \"Average\"\n  period              = 300\n  threshold           = 80\n  comparison_operator = \"GreaterThanThreshold\"\n  evaluation_periods  = 1\n\n  dimensions = {\n    InstanceId = aws_instance.worker.id\n  }\n\n  alarm_actions = [aws_sns_topic.alerts.arn]\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_cloudwatch_high_cpu_alarm",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 150,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

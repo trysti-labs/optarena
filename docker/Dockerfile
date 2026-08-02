@@ -65,4 +65,28 @@ ENV TF_CLI_CONFIG_FILE=/etc/terraform-offline.tfrc
 RUN printf 'provider_installation {\n  filesystem_mirror {\n    path    = "/opt/terraform-plugins"\n    include = ["registry.terraform.io/hashicorp/*"]\n  }\n  direct {\n    exclude = ["registry.terraform.io/hashicorp/*"]\n  }\n}\n' \
     > /etc/terraform-offline.tfrc
 
+# A-36: an unprivileged account so `OPTARENA_SANDBOX_USER=1000:1000` is
+# usable at all. The image still DEFAULTS to root (no USER directive): the run
+# root is a HOST bind mount whose ownership a container cannot change, so
+# flipping the default needs per-track validation on real Linux (see the
+# sandbox-nonroot CI job). What was missing before is what this adds - the
+# account itself, a writable HOME, and toolchain caches an unprivileged uid
+# can actually read: with none of that, the documented opt-in failed
+# immediately on every image, which is why it was never a real mitigation.
+#
+# Adopts a pre-existing uid 1000 where the base image already has one
+# (node:20 ships `node`, maven:3.9-eclipse-temurin-17 ships `ubuntu`)
+# instead of failing on a duplicate. Parsed with parameter expansion
+# rather than `cut` so the RUN carries no pipe (hadolint DL4006).
+RUN set -eu; \
+    if ! getent group 1000 >/dev/null; then groupadd -g 1000 optarena; fi; \
+    if ! getent passwd 1000 >/dev/null; then \
+        useradd -u 1000 -g 1000 -m -d /home/optarena -s /bin/sh optarena; \
+    fi; \
+    entry="$(getent passwd 1000)"; \
+    without_shell="${entry%:*}"; \
+    home="${without_shell##*:}"; \
+    mkdir -p "$home"; \
+    chmod 0777 "$home"
+
 WORKDIR /workspace

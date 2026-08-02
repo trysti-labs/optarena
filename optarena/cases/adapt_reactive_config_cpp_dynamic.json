@@ -1,0 +1,56 @@
+{
+  "name": "adapt_reactive_config_cpp_dynamic",
+  "language": "cpp",
+  "domain": "systems",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time greeter.hpp's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then config.hpp's NAME constant changes under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["cpp", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "config.hpp declares namespace app with a constexpr const char* NAME. Create a header-only greeter.hpp that #includes \"config.hpp\" and <string>, and declares an inline std::string app::greet() returning \"Hello, \" + NAME + \"!\" - reading app::NAME (do not copy or hardcode its value).",
+    "app::NAME may have changed since you last checked it. Make sure greet() still returns a string built from the CURRENT value of app::NAME, not a stale or hardcoded one."
+  ],
+  "setup_files": {
+    "config.hpp": "#pragma once\n\nnamespace app {\nconstexpr const char* NAME = \"World\";\n}\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_contains": {"path": "greeter.hpp", "pattern": "Hello"}},
+      "description": "config.hpp's NAME constant changed World -> Universe, triggered reactively once greeter.hpp's first draft appeared (not a fixed step count)",
+      "write_files": {
+        "config.hpp": "#pragma once\n\nnamespace app {\nconstexpr const char* NAME = \"Universe\";\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "greeter.hpp",
+      "content_patterns": ["greet"]
+    }
+  ],
+  "test_setup_files": {
+    "test_greeter_main.cpp": "#include \"greeter.hpp\"\n#include <cassert>\n#include <iostream>\n#include <string>\n\nint main() {\n    std::string got = app::greet();\n    std::string want = std::string(\"Hello, \") + app::NAME + \"!\";\n    if (got != want) {\n        std::cerr << \"greet() = \\\"\" << got << \"\\\", want \\\"\" << want\n                  << \"\\\" (the CURRENT app::NAME, not a stale value)\" << std::endl;\n        return 1;\n    }\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n",
+    "test_greeter.py": "import subprocess\nsubprocess.run(['g++', '-std=c++17', 'test_greeter_main.cpp', '-o', 'test_greeter_bin'], check=True)\nproc = subprocess.run(['./test_greeter_bin'], capture_output=True, text=True, timeout=15)\nassert proc.returncode == 0, f'exit {proc.returncode}, stderr={proc.stderr[-300:]}'\nassert 'PASS' in proc.stdout, f'unexpected output: {proc.stdout!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_greeter.py",
+  "reference_solution": {
+    "greeter.hpp": "#pragma once\n\n#include \"config.hpp\"\n#include <string>\n\nnamespace app {\ninline std::string greet() {\n    return std::string(\"Hello, \") + NAME + \"!\";\n}\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "greeter.hpp": "#pragma once\n\n#include <string>\n\nnamespace app {\ninline std::string greet() {\n    return std::string(\"Hello, World!\");\n}\n}\n"
+      }
+    },
+    {
+      "name": "copies-value-instead-of-reading-live",
+      "files": {
+        "greeter.hpp": "#pragma once\n\n#include <string>\n\nnamespace app {\nconstexpr const char* CachedName = \"World\";\n\ninline std::string greet() {\n    return std::string(\"Hello, \") + CachedName + \"!\";\n}\n}\n"
+      }
+    }
+  ]
+}

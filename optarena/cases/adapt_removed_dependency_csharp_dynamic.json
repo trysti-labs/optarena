@@ -1,0 +1,60 @@
+{
+  "name": "adapt_removed_dependency_csharp_dynamic",
+  "language": "csharp",
+  "framework": "plain-csharp",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "csharp",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "GreetingData.cs declares a public static class GreetingData with a public const string Greeting. Create Message.cs with a public static class Message containing a static method Get() that returns GreetingData.Greeting.",
+    "GreetingData.cs has just been removed from the project. Update Message.cs so it still compiles with NO reference to GreetingData, and Get() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "GreetingData.cs": "public static class GreetingData\n{\n    public const string Greeting = \"hola\";\n}\n",
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "GreetingData.cs deleted",
+      "delete_files": [
+        "GreetingData.cs"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Message.cs",
+      "content_patterns": [
+        "Get"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "string got = Message.Get();\nif (got != \"hola\")\n{\n    Console.Error.WriteLine($\"Get() = \\\"{got}\\\", want \\\"hola\\\"\");\n    Environment.Exit(1);\n    return;\n}\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Message.cs": "public static class Message\n{\n    public static string Get() => \"hola\";\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-value",
+      "files": {
+        "Message.cs": "public static class Message\n{\n    public static string Get() => \"bonjour\";\n}\n"
+      }
+    }
+  ]
+}

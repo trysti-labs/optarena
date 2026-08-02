@@ -1,0 +1,48 @@
+{
+  "description": "Add distinct liveness and readiness probes with a sane initialDelaySeconds, so the app isn't killed before it has finished starting",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "probes",
+    "availability"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml's search-api Deployment has no probes at all - Kubernetes can send traffic to a pod before it's ready and won't restart one that's wedged. Add BOTH a readinessProbe and a livenessProbe on the container: readinessProbe hits GET /ready on port 8080 with initialDelaySeconds 5 and periodSeconds 5; livenessProbe hits GET /healthz on port 8080 with initialDelaySeconds 30 (must be noticeably longer than readiness's, since the app takes up to ~20s to finish warming caches on boot - a liveness probe that fires before that will kill and restart the pod in a crash loop before it ever becomes ready) and periodSeconds 10. Use two DIFFERENT paths (/ready vs /healthz), not the same handler for both."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: search-api\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: search-api\n  template:\n    metadata:\n      labels:\n        app: search-api\n    spec:\n      containers:\n        - name: search-api\n          image: ghcr.io/example/search-api:5.2.0\n          ports:\n            - containerPort: 8080\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/deployment.yaml",
+      "content_patterns": [
+        "readinessprobe",
+        "livenessprobe"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_probes.py": "import yaml\n\nwith open(\"k8s/deployment.yaml\") as f:\n    dep = yaml.safe_load(f)\n\ncontainer = dep[\"spec\"][\"template\"][\"spec\"][\"containers\"][0]\nreadiness = container.get(\"readinessProbe\")\nliveness = container.get(\"livenessProbe\")\nassert readiness, \"readinessProbe missing\"\nassert liveness, \"livenessProbe missing\"\n\nr_path = readiness[\"httpGet\"][\"path\"]\nl_path = liveness[\"httpGet\"][\"path\"]\nassert r_path != l_path, \"readiness and liveness must use different paths, not the same handler\"\nassert r_path == \"/ready\", f\"expected readiness path /ready, got {r_path}\"\nassert l_path == \"/healthz\", f\"expected liveness path /healthz, got {l_path}\"\n\nl_delay = liveness.get(\"initialDelaySeconds\", 0)\nr_delay = readiness.get(\"initialDelaySeconds\", 0)\nassert l_delay >= 30, (\n    f\"livenessProbe.initialDelaySeconds is {l_delay} - too short for a ~20s warmup, \"\n    f\"the pod will be killed before it's ready\")\nassert l_delay > r_delay, \"liveness must start checking noticeably later than readiness\"\n\nprint(\"PASS probe checks\")\n"
+  },
+  "check_command": "python3 check_probes.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: search-api\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: search-api\n  template:\n    metadata:\n      labels:\n        app: search-api\n    spec:\n      containers:\n        - name: search-api\n          image: ghcr.io/example/search-api:5.2.0\n          ports:\n            - containerPort: 8080\n          readinessProbe:\n            httpGet:\n              path: /ready\n              port: 8080\n            initialDelaySeconds: 5\n            periodSeconds: 5\n          livenessProbe:\n            httpGet:\n              path: /healthz\n              port: 8080\n            initialDelaySeconds: 30\n            periodSeconds: 10\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "liveness-fires-before-warmup-completes",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: search-api\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: search-api\n  template:\n    metadata:\n      labels:\n        app: search-api\n    spec:\n      containers:\n        - name: search-api\n          image: ghcr.io/example/search-api:5.2.0\n          ports:\n            - containerPort: 8080\n          readinessProbe:\n            httpGet:\n              path: /ready\n              port: 8080\n            initialDelaySeconds: 5\n            periodSeconds: 5\n          livenessProbe:\n            httpGet:\n              path: /healthz\n              port: 8080\n            initialDelaySeconds: 5\n            periodSeconds: 10\n"
+      }
+    }
+  ],
+  "name": "add_k8s_liveness_probe_warmup_delay",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

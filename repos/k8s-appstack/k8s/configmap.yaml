@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webstore-config
+  namespace: webstore
+data:
+  LOG_LEVEL: "info"
+  FEATURE_FLAGS: "checkout_v2=false"

@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (sql-ecommerce): a new order_discounts table must be netted into customer_order_totals, not just created",
+  "tags": [
+    "sql",
+    "sqlite",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a new table `order_discounts` to schema.sql: `id INTEGER PRIMARY KEY`, `order_id INTEGER NOT NULL REFERENCES orders(id)`, `discount_cents INTEGER NOT NULL CHECK (discount_cents > 0)`. Creating the table alone isn't enough - `customer_order_totals` in views.sql must actually subtract each customer's total discounts from their gross total_cents (summed across all their orders' order_discounts rows), not just keep summing order_items as before. `product_sales_summary` is unaffected by discounts and should be left as-is."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "order_discounts"
+      ]
+    },
+    {
+      "path_pattern": "views.sql",
+      "content_patterns": [
+        "order_discounts"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_discounts_netted.py": "import sqlite3\nfrom pathlib import Path\n\nschema = Path('schema.sql').read_text(encoding='utf-8')\nviews = Path('views.sql').read_text(encoding='utf-8')\n\ncon = sqlite3.connect(':memory:')\ncon.executescript(schema)\ncon.executescript(views)\ncon.executescript(\"\"\"\nINSERT INTO customers VALUES (1, 'Ada', 'ada@example.com');\nINSERT INTO products VALUES (1, 'Widget', 1000);\nINSERT INTO orders VALUES (1, 1, 'paid', '2026-01-01');\nINSERT INTO order_items VALUES (1, 1, 1, 2, 1000);\nINSERT INTO order_discounts VALUES (1, 1, 300);\n\"\"\")\n\ntotal = con.execute(\n    'SELECT total_cents FROM customer_order_totals WHERE customer_id = 1').fetchone()[0]\nassert total == 1700, (\n    f'expected 1700 (2000 gross - 300 discount), got {total} - customer_order_totals '\n    f'must subtract order_discounts, not just the raw order_items sum')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_discounts_netted.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n\nCREATE TABLE order_discounts (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    discount_cents INTEGER NOT NULL CHECK (discount_cents > 0)\n);\n",
+    "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0)\n           - COALESCE((SELECT SUM(od.discount_cents)\n                       FROM order_discounts od\n                       JOIN orders o2 ON o2.id = od.order_id\n                       WHERE o2.customer_id = c.id), 0) AS total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(oi.quantity), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "discounts-table-created-but-not-netted-into-view",
+      "files": {
+        "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n\nCREATE TABLE order_discounts (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    discount_cents INTEGER NOT NULL CHECK (discount_cents > 0)\n);\n",
+        "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) AS total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(oi.quantity), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name;\n"
+      }
+    }
+  ],
+  "name": "add_sql_ecommerce_order_discounts",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "sql-ecommerce",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

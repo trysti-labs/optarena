@@ -1,0 +1,46 @@
+{
+  "description": "Rewrite a nested-quantifier email regex vulnerable to catastrophic backtracking so a pathological input can no longer cause exponential blowup",
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "redos"
+  ],
+  "prompts": [
+    "validator.py's EMAIL_RE pattern `^([a-zA-Z0-9]+)+@[a-zA-Z0-9.]+$` has a nested quantifier - `([a-zA-Z0-9]+)+` - which is classically vulnerable to catastrophic backtracking: a long run of matching characters with no `@` forces the regex engine into exponential-time backtracking before it can fail. Rewrite the pattern to accept exactly the same valid emails and reject the same invalid ones, WITHOUT nested quantifiers that can blow up - a string of 30 'a' characters with no '@' must fail to match near-instantly, not hang."
+  ],
+  "setup_files": {
+    "validator.py": "import re\n\nEMAIL_RE = re.compile(r'^([a-zA-Z0-9]+)+@[a-zA-Z0-9.]+$')\n\n\ndef is_valid_email(s):\n    return EMAIL_RE.match(s) is not None\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "validator.py",
+      "content_patterns": [
+        "EMAIL_RE"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_validator_hidden.py": "import signal\n\nfrom validator import is_valid_email\n\n\nclass _Timeout(Exception):\n    pass\n\n\ndef _run_with_alarm(fn, seconds):\n    def _handler(signum, frame):\n        raise _Timeout()\n\n    old = signal.signal(signal.SIGALRM, _handler)\n    signal.alarm(seconds)\n    try:\n        return fn()\n    finally:\n        signal.alarm(0)\n        signal.signal(signal.SIGALRM, old)\n\n\ndef test_valid_emails_still_accepted():\n    assert is_valid_email('user@example.com') is True\n    assert is_valid_email('user.name123@sub.example.com') is True\n\n\ndef test_invalid_emails_still_rejected():\n    assert is_valid_email('not-an-email') is False\n    assert is_valid_email('@example.com') is False\n\n\ndef test_pathological_input_does_not_hang():\n    payload = 'a' * 30 + '!'\n    try:\n        result = _run_with_alarm(lambda: is_valid_email(payload), seconds=4)\n    except _Timeout:\n        raise AssertionError('is_valid_email took more than 4s on a pathological input - still vulnerable to catastrophic backtracking')\n    assert result is False\n"
+  },
+  "check_command": "python3 -m pytest -q test_validator_hidden.py",
+  "reference_solution": {
+    "validator.py": "import re\n\nEMAIL_RE = re.compile(r'^[a-zA-Z0-9.]+@[a-zA-Z0-9.]+$')\n\n\ndef is_valid_email(s):\n    return EMAIL_RE.match(s) is not None\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "length-cap-band-aid-still-vulnerable",
+      "files": {
+        "validator.py": "import re\n\nEMAIL_RE = re.compile(r'^([a-zA-Z0-9]+)+@[a-zA-Z0-9.]+$')\n\n\ndef is_valid_email(s):\n    if len(s) > 100:\n        return False\n    return EMAIL_RE.match(s) is not None\n"
+      }
+    }
+  ],
+  "name": "fix_python_redos_catastrophic_backtracking",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

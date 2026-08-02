@@ -1,0 +1,60 @@
+{
+  "name": "adapt_role_list_csharp_dynamic",
+  "language": "csharp",
+  "framework": "plain-csharp",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dynamic eval: allowed_roles.txt (a spec file the role check must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old list into Roles.cs",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "csharp",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create Roles.cs with a public static class Roles containing a static method IsAllowed(string role) returning true if role is in the comma-separated list in allowed_roles.txt (currently: admin, editor), else false. Read the list from the file (File.ReadAllText) at call time - do not hardcode it.",
+    "allowed_roles.txt has changed. Make sure IsAllowed() reflects the CURRENT list in the file."
+  ],
+  "setup_files": {
+    "allowed_roles.txt": "admin,editor\n",
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "allowed_roles.txt rewritten to add a new role",
+      "write_files": {
+        "allowed_roles.txt": "admin,editor,viewer\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Roles.cs",
+      "content_patterns": [
+        "IsAllowed"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "var allowed = File.ReadAllText(\"allowed_roles.txt\").Trim().Split(',').Select(s => s.Trim()).ToArray();\nforeach (var role in allowed)\n{\n    if (!Roles.IsAllowed(role)) { Console.Error.WriteLine($\"IsAllowed({role}) should be true\"); Environment.Exit(1); return; }\n}\nif (Roles.IsAllowed(\"not_a_real_role\")) { Console.Error.WriteLine(\"IsAllowed should reject an unknown role\"); Environment.Exit(1); return; }\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Roles.cs": "public static class Roles\n{\n    public static bool IsAllowed(string role)\n    {\n        var allowed = File.ReadAllText(\"allowed_roles.txt\").Trim().Split(',').Select(s => s.Trim());\n        return allowed.Contains(role);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-role-list",
+      "files": {
+        "Roles.cs": "public static class Roles\n{\n    public static bool IsAllowed(string role) => role == \"admin\" || role == \"editor\";\n}\n"
+      }
+    }
+  ]
+}

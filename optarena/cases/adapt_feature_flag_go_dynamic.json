@@ -1,0 +1,66 @@
+{
+  "name": "adapt_feature_flag_go_dynamic",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time banner.go's own text contains 'Welcome' (i.e. once the agent has produced a first attempt), then NewUIEnabled flips under it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "go",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "feature-flag",
+    "reactive"
+  ],
+  "prompts": [
+    "flags.go (package bannercase) exports a bool NewUIEnabled. Create banner.go (same package) with a function BannerText() string that returns \"Welcome to the NEW UI!\" if NewUIEnabled else \"Welcome!\", reading the flag live.",
+    "NewUIEnabled in flags.go may have changed. Make sure BannerText() reflects its CURRENT value, not a stale one."
+  ],
+  "setup_files": {
+    "go.mod": "module bannercase\n\ngo 1.22\n",
+    "flags.go": "package bannercase\n\nvar NewUIEnabled = false\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "banner.go",
+          "pattern": "Welcome"
+        }
+      },
+      "description": "NewUIEnabled flipped false -> true, triggered reactively once banner.go's first draft appeared",
+      "write_files": {
+        "flags.go": "package bannercase\n\nvar NewUIEnabled = true\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "banner.go",
+      "content_patterns": [
+        "BannerText"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "banner_test.go": "package bannercase\n\nimport \"testing\"\n\nfunc TestBannerText(t *testing.T) {\n\twant := \"Welcome!\"\n\tif NewUIEnabled {\n\t\twant = \"Welcome to the NEW UI!\"\n\t}\n\tif got := BannerText(); got != want {\n\t\tt.Fatalf(\"BannerText() = %q, want %q (the CURRENT flag, not a stale value)\", got, want)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "banner.go": "package bannercase\n\nfunc BannerText() string {\n\tif NewUIEnabled {\n\t\treturn \"Welcome to the NEW UI!\"\n\t}\n\treturn \"Welcome!\"\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-stale-flag",
+      "files": {
+        "banner.go": "package bannercase\n\nfunc BannerText() string {\n\treturn \"Welcome!\"\n}\n"
+      }
+    }
+  ]
+}

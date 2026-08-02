@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 180,
   "timeout": 600,
-  "description": "L3 repo-scale (express-ts-shortlink): extract the six inline JSON error responses across three routers into one sendError helper; drift broken changes the body key",
+  "description": "Repo-scale (express-ts-shortlink): extract the six inline JSON error responses across three routers into one sendError helper; drift broken changes the body key",
   "difficulty": 2,
   "task_type": "refactoring",
   "tags": [

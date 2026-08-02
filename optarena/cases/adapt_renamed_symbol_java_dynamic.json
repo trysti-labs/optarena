@@ -1,0 +1,66 @@
+{
+  "name": "adapt_renamed_symbol_java_dynamic",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time Area.java's own text contains 'circleArea' (i.e. once the agent has produced a first attempt), then MathUtils.square is RENAMED to MathUtils.sq under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "java",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "renamed-symbol",
+    "reactive"
+  ],
+  "prompts": [
+    "MathUtils.java declares a public final class MathUtils with a public static double square(double x). Create Area.java with a public final class Area containing a public static double circleArea(double r) that returns 3.14159 * MathUtils.square(r).",
+    "MathUtils.square has just been renamed to MathUtils.sq. Update Area.java to use the new name (do not keep a reference to the old name square)."
+  ],
+  "setup_files": {
+    "MathUtils.java": "public final class MathUtils {\n    public static double square(double x) {\n        return x * x;\n    }\n}\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "Area.java",
+          "pattern": "circleArea"
+        }
+      },
+      "description": "MathUtils.square renamed to MathUtils.sq, triggered reactively once Area.java's first draft appeared",
+      "write_files": {
+        "MathUtils.java": "public final class MathUtils {\n    public static double sq(double x) {\n        return x * x;\n    }\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Area.java",
+      "content_patterns": [
+        "circleArea"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "AreaTest.java": "public final class AreaTest {\n    public static void main(String[] args) {\n        double got = Area.circleArea(2);\n        double want = 3.14159 * 4;\n        if (Math.abs(got - want) > 1e-6) throw new AssertionError(\"circleArea(2) = \" + got + \", want \" + want);\n        System.out.println(\"all tests passed\");\n    }\n}\n",
+    "CheckArea.java": "import java.io.IOException;\n\npublic final class CheckArea {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"MathUtils.java\", \"Area.java\", \"AreaTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"AreaTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckArea.java",
+  "reference_solution": {
+    "Area.java": "public final class Area {\n    public static double circleArea(double r) {\n        return 3.14159 * MathUtils.sq(r);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-name",
+      "files": {
+        "Area.java": "public final class Area {\n    public static double circleArea(double r) {\n        return 3.14159 * MathUtils.square(r);\n    }\n}\n"
+      }
+    }
+  ]
+}

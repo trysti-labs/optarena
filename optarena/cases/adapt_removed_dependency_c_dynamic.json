@@ -1,0 +1,58 @@
+{
+  "name": "adapt_removed_dependency_c_dynamic",
+  "language": "c",
+  "domain": "systems",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: a header the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "c",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "greeting_data.h defines a macro GREETING (a string literal). Create message.c that #includes \"greeting_data.h\" and defines `const char *message(void)` returning GREETING.",
+    "greeting_data.h has just been removed from the project. Update message.c so it still compiles with NO reference to greeting_data.h or GREETING, and message() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "greeting_data.h": "#define GREETING \"hola\"\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "greeting_data.h deleted",
+      "delete_files": [
+        "greeting_data.h"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "message.c",
+      "content_patterns": [
+        "message"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_message_main.c": "#include <stdio.h>\n#include <string.h>\n\nconst char *message(void);\n\nint main(void) {\n    const char *got = message();\n    if (strcmp(got, \"hola\") != 0) {\n        fprintf(stderr, \"message() = \\\"%s\\\", want \\\"hola\\\"\\n\", got);\n        return 1;\n    }\n    printf(\"PASS\\n\");\n    return 0;\n}\n",
+    "test_message.py": "import subprocess\nsubprocess.run(['gcc', 'message.c', 'test_message_main.c', '-o', 'message_bin'], check=True)\nproc = subprocess.run(['./message_bin'], capture_output=True, text=True, timeout=5)\nassert proc.returncode == 0, f'exit {proc.returncode}, stderr={proc.stderr!r}'\nassert 'PASS' in proc.stdout\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_message.py",
+  "reference_solution": {
+    "message.c": "const char *message(void) {\n    return \"hola\";\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-value",
+      "files": {
+        "message.c": "const char *message(void) {\n    return \"bonjour\";\n}\n"
+      }
+    }
+  ]
+}

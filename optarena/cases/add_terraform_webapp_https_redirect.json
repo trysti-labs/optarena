@@ -1,0 +1,55 @@
+{
+  "description": "Repo-scale (terraform-webapp): redirecting HTTP to HTTPS on the ALB listener needs the ALB security group to actually allow port 443 ingress too",
+  "tags": [
+    "hcl",
+    "terraform",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Change the HTTP listener in alb.tf (`aws_lb_listener.http`) so its `default_action` redirects instead of forwarding: `type = \"redirect\"` with a `redirect` block sending clients to port 443, protocol HTTPS, status_code HTTP_301. This alone isn't enough - the ALB's own security group (`aws_security_group.alb` in security_groups.tf) currently only allows inbound port 80. Add a matching ingress rule allowing port 443 too, otherwise every client gets redirected to a port the load balancer itself rejects, breaking all traffic."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "alb.tf",
+      "content_patterns": [
+        "redirect",
+        "443"
+      ]
+    },
+    {
+      "path_pattern": "security_groups.tf",
+      "content_patterns": [
+        "443"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_https_redirect.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\nalb = open('alb.tf', encoding='utf-8').read()\nlistener = re.search(r'resource\\s+\"aws_lb_listener\"\\s+\"http\"\\s*\\{(.*?)\\n\\}\\s*$', alb, re.DOTALL)\nassert listener, 'aws_lb_listener.http not found'\nblock = listener.group(1)\nassert re.search(r'type\\s*=\\s*\"redirect\"', block), 'listener default_action must redirect to HTTPS'\nassert re.search(r'port\\s*=\\s*\"443\"', block), 'redirect must target port 443'\n\nsg = open('security_groups.tf', encoding='utf-8').read()\nalb_sg_match = re.search(r'resource\\s+\"aws_security_group\"\\s+\"alb\"\\s*\\{(.*?)\\n\\}\\s*\\n\\n', sg, re.DOTALL)\nassert alb_sg_match, 'aws_security_group.alb not found'\nalb_sg_block = alb_sg_match.group(1)\nassert re.search(r'ingress\\s*\\{[^}]*from_port\\s*=\\s*443', alb_sg_block, re.DOTALL), (\n    'aws_security_group.alb is missing a 443 ingress rule - the listener now redirects every '\n    'client to HTTPS, but the load balancer itself would reject the resulting inbound 443 '\n    'connections, breaking every request')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_https_redirect.py",
+  "reference_solution": {
+    "alb.tf": "resource \"aws_lb\" \"app\" {\n  name               = \"webapp-alb\"\n  internal           = false\n  load_balancer_type = \"application\"\n  security_groups    = [aws_security_group.alb.id]\n  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n}\n\nresource \"aws_lb_target_group\" \"app\" {\n  name     = \"webapp-tg\"\n  port     = 8080\n  protocol = \"HTTP\"\n  vpc_id   = aws_vpc.main.id\n\n  health_check {\n    path                = \"/health\"\n    interval            = 30\n    timeout             = 5\n    healthy_threshold   = 2\n    unhealthy_threshold = 3\n  }\n}\n\nresource \"aws_lb_listener\" \"http\" {\n  load_balancer_arn = aws_lb.app.arn\n  port              = 80\n  protocol          = \"HTTP\"\n\n  default_action {\n    type = \"redirect\"\n\n    redirect {\n      port        = \"443\"\n      protocol    = \"HTTPS\"\n      status_code = \"HTTP_301\"\n    }\n  }\n}\n",
+    "security_groups.tf": "resource \"aws_security_group\" \"alb\" {\n  name   = \"webapp-alb-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port   = 80\n    to_port     = 80\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  ingress {\n    from_port   = 443\n    to_port     = 443\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n\nresource \"aws_security_group\" \"app\" {\n  name   = \"webapp-app-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port       = 8080\n    to_port         = 8080\n    protocol        = \"tcp\"\n    security_groups = [aws_security_group.alb.id]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "alb-sg-missing-443-ingress",
+      "files": {
+        "alb.tf": "resource \"aws_lb\" \"app\" {\n  name               = \"webapp-alb\"\n  internal           = false\n  load_balancer_type = \"application\"\n  security_groups    = [aws_security_group.alb.id]\n  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n}\n\nresource \"aws_lb_target_group\" \"app\" {\n  name     = \"webapp-tg\"\n  port     = 8080\n  protocol = \"HTTP\"\n  vpc_id   = aws_vpc.main.id\n\n  health_check {\n    path                = \"/health\"\n    interval            = 30\n    timeout             = 5\n    healthy_threshold   = 2\n    unhealthy_threshold = 3\n  }\n}\n\nresource \"aws_lb_listener\" \"http\" {\n  load_balancer_arn = aws_lb.app.arn\n  port              = 80\n  protocol          = \"HTTP\"\n\n  default_action {\n    type = \"redirect\"\n\n    redirect {\n      port        = \"443\"\n      protocol    = \"HTTPS\"\n      status_code = \"HTTP_301\"\n    }\n  }\n}\n",
+        "security_groups.tf": "resource \"aws_security_group\" \"alb\" {\n  name   = \"webapp-alb-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port   = 80\n    to_port     = 80\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n\nresource \"aws_security_group\" \"app\" {\n  name   = \"webapp-app-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port       = 8080\n    to_port         = 8080\n    protocol        = \"tcp\"\n    security_groups = [aws_security_group.alb.id]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_webapp_https_redirect",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "terraform-webapp",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

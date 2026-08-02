@@ -1,0 +1,49 @@
+{
+  "description": "Add RFC4180-style field quoting/escaping to a CSV row builder that currently joins fields with no escaping at all",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "csv",
+    "correctness"
+  ],
+  "prompts": [
+    "csvutil.go's ToCSVRow(fields []string) just does strings.Join(fields, \",\") - a field containing a comma, a double quote, or a newline corrupts the row. Fix it: a field must be wrapped in double quotes if it contains a comma, a double quote, or a newline (\\n); any double quote INSIDE such a field must be escaped by doubling it (\" becomes \"\"); a field with none of those characters stays bare (unquoted). Fields are still joined with commas between them."
+  ],
+  "setup_files": {
+    "go.mod": "module csvutil\n\ngo 1.21\n",
+    "csvutil.go": "package main\n\nimport \"strings\"\n\nfunc ToCSVRow(fields []string) string {\n\treturn strings.Join(fields, \",\")\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "csvutil.go",
+      "content_patterns": [
+        "func ToCSVRow"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "csvutil_test.go": "package main\n\nimport \"testing\"\n\nfunc TestPlainFieldsStayBare(t *testing.T) {\n\tgot := ToCSVRow([]string{\"a\", \"b\", \"c\"})\n\tif got != \"a,b,c\" {\n\t\tt.Fatalf(\"got %q\", got)\n\t}\n}\n\nfunc TestCommaTriggersQuoting(t *testing.T) {\n\tgot := ToCSVRow([]string{\"a,b\", \"c\"})\n\tif got != `\"a,b\",c` {\n\t\tt.Fatalf(\"got %q\", got)\n\t}\n}\n\nfunc TestEmbeddedQuoteIsDoubledAndQuoted(t *testing.T) {\n\tgot := ToCSVRow([]string{`say \"hi\"`})\n\twant := `\"say \"\"hi\"\"\"`\n\tif got != want {\n\t\tt.Fatalf(\"got %q, want %q\", got, want)\n\t}\n}\n\nfunc TestNewlineTriggersQuoting(t *testing.T) {\n\tgot := ToCSVRow([]string{\"line1\\nline2\"})\n\twant := \"\\\"line1\\nline2\\\"\"\n\tif got != want {\n\t\tt.Fatalf(\"got %q, want %q\", got, want)\n\t}\n}\n\nfunc TestMixedRow(t *testing.T) {\n\tgot := ToCSVRow([]string{\"plain\", \"has,comma\", `has\"quote`})\n\twant := `plain,\"has,comma\",\"has\"\"quote\"`\n\tif got != want {\n\t\tt.Fatalf(\"got %q, want %q\", got, want)\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module csvutil\n\ngo 1.21\n",
+    "csvutil.go": "package main\n\nimport (\n\t\"strings\"\n)\n\nfunc escapeField(field string) string {\n\tneedsQuoting := strings.ContainsAny(field, \",\\\"\\n\")\n\tif !needsQuoting {\n\t\treturn field\n\t}\n\tescaped := strings.ReplaceAll(field, `\"`, `\"\"`)\n\treturn `\"` + escaped + `\"`\n}\n\nfunc ToCSVRow(fields []string) string {\n\tout := make([]string, len(fields))\n\tfor i, f := range fields {\n\t\tout[i] = escapeField(f)\n\t}\n\treturn strings.Join(out, \",\")\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "newline-not-checked",
+      "files": {
+        "go.mod": "module csvutil\n\ngo 1.21\n",
+        "csvutil.go": "package main\n\nimport (\n\t\"strings\"\n)\n\nfunc escapeField(field string) string {\n\tneedsQuoting := strings.ContainsAny(field, \",\\\"\")\n\tif !needsQuoting {\n\t\treturn field\n\t}\n\tescaped := strings.ReplaceAll(field, `\"`, `\"\"`)\n\treturn `\"` + escaped + `\"`\n}\n\nfunc ToCSVRow(fields []string) string {\n\tout := make([]string, len(fields))\n\tfor i, f := range fields {\n\t\tout[i] = escapeField(f)\n\t}\n\treturn strings.Join(out, \",\")\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_csv_safe_writer",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

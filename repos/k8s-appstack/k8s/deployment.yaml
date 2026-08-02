@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webstore-api
+  namespace: webstore
+  labels:
+    app: webstore-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: webstore-api
+  template:
+    metadata:
+      labels:
+        app: webstore-api
+    spec:
+      containers:
+        - name: api
+          image: webstore/api:1.0.0
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: webstore-config
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

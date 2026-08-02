@@ -35,5 +35,13 @@
   "timeout": 150,
   "reference_solution": {
     "server.js": "const express = require('express');\nconst app = express();\n\napp.get('/health', (req, res) => res.json({ status: 'ok' }));\n\napp.listen(8002);\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-port",
+      "files": {
+        "server.js": "const express = require('express');\nconst app = express();\n\napp.get('/health', (req, res) => res.json({ status: 'ok' }));\n\napp.listen(8080);\n"
+      }
+    }
+  ]
 }

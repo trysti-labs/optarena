@@ -1,0 +1,49 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded cache",
+  "task_type": "feature",
+  "tags": [
+    "rust",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "src/lib.rs's Cache is an unbounded HashMap wrapper - get/put never evict anything. Turn it into an LRU cache with a TTL: Cache::new(capacity: usize, ttl: i64) takes a max size and a time-to-live in seconds. put(&mut self, key: &str, value: i32, now: i64) stores a value timestamped at `now`. get(&mut self, key: &str, now: i64) -> Option<i32> returns the value if present AND not expired (now - stored_at < ttl), else None - and an expired entry must be REMOVED the moment it's observed to be stale. Both get and put must refresh a key's recency. When put() would exceed `capacity`, evict the LEAST recently used entry (recency = most recent get OR put) before inserting the new one."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"lru_cache\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::collections::HashMap;\n\npub struct Cache {\n    capacity: usize,\n    ttl: i64,\n    store: HashMap<String, i32>,\n}\n\nimpl Cache {\n    pub fn new(capacity: usize, ttl: i64) -> Self {\n        Cache { capacity, ttl, store: HashMap::new() }\n    }\n\n    pub fn put(&mut self, key: &str, value: i32, now: i64) {\n        self.store.insert(key.to_string(), value);\n    }\n\n    pub fn get(&mut self, key: &str, now: i64) -> Option<i32> {\n        self.store.get(key).copied()\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "struct Cache"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/cache_test.rs": "use lru_cache::Cache;\n\n#[test]\nfn capacity_evicts_least_recently_used() {\n    let mut c = Cache::new(2, 1000);\n    c.put(\"a\", 1, 0);\n    c.put(\"b\", 2, 1);\n    c.get(\"a\", 2);\n    c.put(\"c\", 3, 3);\n    assert_eq!(c.get(\"a\", 4), Some(1));\n    assert_eq!(c.get(\"b\", 4), None);\n    assert_eq!(c.get(\"c\", 4), Some(3));\n}\n\n#[test]\nfn get_refreshes_recency() {\n    let mut c = Cache::new(2, 1000);\n    c.put(\"a\", 1, 0);\n    c.put(\"b\", 2, 1);\n    c.get(\"a\", 2);\n    c.get(\"b\", 3);\n    c.put(\"c\", 3, 4);\n    assert_eq!(c.get(\"a\", 5), None);\n    assert_eq!(c.get(\"b\", 5), Some(2));\n}\n\n#[test]\nfn ttl_expiry_independent_of_capacity() {\n    let mut c = Cache::new(5, 10);\n    c.put(\"a\", 1, 0);\n    assert_eq!(c.get(\"a\", 9), Some(1));\n    assert_eq!(c.get(\"a\", 10), None);\n}\n"
+  },
+  "reference_solution": {
+    "Cargo.toml": "[package]\nname = \"lru_cache\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::collections::HashMap;\n\nstruct Entry {\n    value: i32,\n    stored_at: i64,\n}\n\npub struct Cache {\n    capacity: usize,\n    ttl: i64,\n    store: HashMap<String, Entry>,\n    order: Vec<String>, // front = most recently used\n}\n\nimpl Cache {\n    pub fn new(capacity: usize, ttl: i64) -> Self {\n        Cache { capacity, ttl, store: HashMap::new(), order: Vec::new() }\n    }\n\n    fn touch(&mut self, key: &str) {\n        self.order.retain(|k| k != key);\n        self.order.insert(0, key.to_string());\n    }\n\n    pub fn put(&mut self, key: &str, value: i32, now: i64) {\n        if !self.store.contains_key(key) && self.store.len() >= self.capacity {\n            if let Some(oldest) = self.order.pop() {\n                self.store.remove(&oldest);\n            }\n        }\n        self.store.insert(key.to_string(), Entry { value, stored_at: now });\n        self.touch(key);\n    }\n\n    pub fn get(&mut self, key: &str, now: i64) -> Option<i32> {\n        let expired = match self.store.get(key) {\n            Some(e) => now - e.stored_at >= self.ttl,\n            None => return None,\n        };\n        if expired {\n            self.store.remove(key);\n            self.order.retain(|k| k != key);\n            return None;\n        }\n        self.touch(key);\n        self.store.get(key).map(|e| e.value)\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"lru_cache\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n",
+        "src/lib.rs": "use std::collections::HashMap;\n\nstruct Entry {\n    value: i32,\n    stored_at: i64,\n}\n\npub struct Cache {\n    capacity: usize,\n    ttl: i64,\n    store: HashMap<String, Entry>,\n    order: Vec<String>,\n}\n\nimpl Cache {\n    pub fn new(capacity: usize, ttl: i64) -> Self {\n        Cache { capacity, ttl, store: HashMap::new(), order: Vec::new() }\n    }\n\n    fn touch(&mut self, key: &str) {\n        self.order.retain(|k| k != key);\n        self.order.insert(0, key.to_string());\n    }\n\n    pub fn put(&mut self, key: &str, value: i32, now: i64) {\n        if !self.store.contains_key(key) && self.store.len() >= self.capacity {\n            if let Some(oldest) = self.order.pop() {\n                self.store.remove(&oldest);\n            }\n        }\n        self.store.insert(key.to_string(), Entry { value, stored_at: now });\n        self.touch(key);\n    }\n\n    pub fn get(&mut self, key: &str, now: i64) -> Option<i32> {\n        let expired = match self.store.get(key) {\n            Some(e) => now - e.stored_at >= self.ttl,\n            None => return None,\n        };\n        if expired {\n            self.store.remove(key);\n            self.order.retain(|k| k != key);\n            return None;\n        }\n        self.store.get(key).map(|e| e.value)\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_rust_lru_cache_with_ttl",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "cargo test --offline"
+}

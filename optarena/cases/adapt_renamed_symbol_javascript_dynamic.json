@@ -1,0 +1,63 @@
+{
+  "name": "adapt_renamed_symbol_javascript_dynamic",
+  "language": "javascript",
+  "domain": "backend",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time area.js's own text contains 'circleArea' (i.e. once the agent has produced a first attempt), then mathutils.square is RENAMED to mathutils.sq under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "javascript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "renamed-symbol",
+    "reactive"
+  ],
+  "prompts": [
+    "mathutils.js exports a function square(x). Create area.js with a function circleArea(r) that returns 3.14159 * square(r), requiring square from './mathutils'. Export it as module.exports = { circleArea }.",
+    "mathutils.js's square function has just been renamed to sq. Update area.js to use the new name (do not keep a reference to the old name square)."
+  ],
+  "setup_files": {
+    "mathutils.js": "function square(x) {\n  return x * x;\n}\n\nmodule.exports = { square };\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "area.js",
+          "pattern": "circleArea"
+        }
+      },
+      "description": "mathutils.square renamed to mathutils.sq, triggered reactively once area.js's first draft appeared",
+      "write_files": {
+        "mathutils.js": "function sq(x) {\n  return x * x;\n}\n\nmodule.exports = { sq };\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "area.js",
+      "content_patterns": [
+        "circleArea"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_area.js": "const mod = require('./area.js');\nlet got;\ntry {\n  got = mod.circleArea(2);\n} catch (e) {\n  throw new Error('circleArea(2) threw (likely still references the old name square): ' + e.message);\n}\nconst want = 3.14159 * 4;\nif (Math.abs(got - want) > 1e-6) {\n  throw new Error(`circleArea(2) = ${got}, want ${want}`);\n}\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_area.js",
+  "reference_solution": {
+    "area.js": "const { sq } = require('./mathutils');\n\nfunction circleArea(r) {\n  return 3.14159 * sq(r);\n}\n\nmodule.exports = { circleArea };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-name",
+      "files": {
+        "area.js": "const { square } = require('./mathutils');\n\nfunction circleArea(r) {\n  return 3.14159 * square(r);\n}\n\nmodule.exports = { circleArea };\n"
+      }
+    }
+  ]
+}

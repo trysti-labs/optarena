@@ -1,0 +1,48 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker in place of a stub that always calls through",
+  "task_type": "feature",
+  "tags": [
+    "csharp",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "CircuitBreaker.cs's Call always just calls fn(). Implement the real 3-state machine: the constructor takes (int failureThreshold, long resetTimeout). Starts Closed. In Closed, Call(fn, now) invokes fn(); if it throws, count consecutive failures, and once `failureThreshold` CONSECUTIVE failures have happened, trip to Open (recording when it opened) and re-throw. While Open, Call must NOT invoke fn() at all and must instead throw CircuitOpenException - UNLESS at least `resetTimeout` seconds have passed since it opened, in which case it moves to HalfOpen and allows exactly ONE trial call: if that call succeeds, go back to Closed (reset the failure count); if it throws, go back to Open and RESET the open-time to `now` (so the next trial is only allowed after another full resetTimeout, not immediately). Add a CircuitOpenException class in the same file."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "CircuitBreaker.cs": "using System;\n\npublic class CircuitOpenException : Exception { }\n\npublic class CircuitBreaker\n{\n    private readonly int _failureThreshold;\n    private readonly long _resetTimeout;\n\n    public CircuitBreaker(int failureThreshold, long resetTimeout)\n    {\n        _failureThreshold = failureThreshold;\n        _resetTimeout = resetTimeout;\n    }\n\n    public T Call<T>(Func<T> fn, long now)\n    {\n        return fn();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "CircuitBreaker.cs",
+      "content_patterns": [
+        "class CircuitBreaker"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "CircuitBreaker.cs": "using System;\n\npublic class CircuitOpenException : Exception { }\n\npublic class CircuitBreaker\n{\n    private enum State { Closed, Open, HalfOpen }\n\n    private readonly int _failureThreshold;\n    private readonly long _resetTimeout;\n    private State _state = State.Closed;\n    private int _failures;\n    private long _openedAt;\n\n    public CircuitBreaker(int failureThreshold, long resetTimeout)\n    {\n        _failureThreshold = failureThreshold;\n        _resetTimeout = resetTimeout;\n    }\n\n    public T Call<T>(Func<T> fn, long now)\n    {\n        if (_state == State.Open)\n        {\n            if (now - _openedAt < _resetTimeout)\n            {\n                throw new CircuitOpenException();\n            }\n            _state = State.HalfOpen;\n        }\n\n        T result;\n        try\n        {\n            result = fn();\n        }\n        catch\n        {\n            if (_state == State.HalfOpen)\n            {\n                _state = State.Open;\n                _openedAt = now;\n            }\n            else\n            {\n                _failures++;\n                if (_failures >= _failureThreshold)\n                {\n                    _state = State.Open;\n                    _openedAt = now;\n                }\n            }\n            throw;\n        }\n\n        _state = State.Closed;\n        _failures = 0;\n        return result;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "CircuitBreaker.cs": "using System;\n\npublic class CircuitOpenException : Exception { }\n\npublic class CircuitBreaker\n{\n    private enum State { Closed, Open, HalfOpen }\n\n    private readonly int _failureThreshold;\n    private readonly long _resetTimeout;\n    private State _state = State.Closed;\n    private int _failures;\n    private long _openedAt;\n\n    public CircuitBreaker(int failureThreshold, long resetTimeout)\n    {\n        _failureThreshold = failureThreshold;\n        _resetTimeout = resetTimeout;\n    }\n\n    public T Call<T>(Func<T> fn, long now)\n    {\n        if (_state == State.Open)\n        {\n            if (now - _openedAt < _resetTimeout)\n            {\n                throw new CircuitOpenException();\n            }\n            _state = State.HalfOpen;\n        }\n\n        T result;\n        try\n        {\n            result = fn();\n        }\n        catch\n        {\n            if (_state == State.HalfOpen)\n            {\n                _state = State.Open;\n            }\n            else\n            {\n                _failures++;\n                if (_failures >= _failureThreshold)\n                {\n                    _state = State.Open;\n                    _openedAt = now;\n                }\n            }\n            throw;\n        }\n\n        _state = State.Closed;\n        _failures = 0;\n        return result;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_csharp_circuit_breaker_state_machine",
+  "language": "csharp",
+  "framework": "xunit",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "dotnet test tests/tests.csproj",
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/CircuitBreakerTests.cs": "using System;\nusing Xunit;\n\npublic class CircuitBreakerTests\n{\n    private static readonly Exception BoomErr = new InvalidOperationException(\"boom\");\n\n    private static string Boom() => throw BoomErr;\n\n    [Fact]\n    public void TripsOpenAfterConsecutiveFailures()\n    {\n        var b = new CircuitBreaker(3, 10);\n        for (int i = 0; i < 3; i++)\n        {\n            var ex = Assert.Throws<InvalidOperationException>(() => b.Call(Boom, 0));\n            Assert.Same(BoomErr, ex);\n        }\n        Assert.Throws<CircuitOpenException>(() => b.Call(() => \"should not run\", 0));\n    }\n\n    [Fact]\n    public void FailsFastWithoutCallingFnWhileOpen()\n    {\n        var b = new CircuitBreaker(1, 100);\n        Assert.Throws<InvalidOperationException>(() => b.Call(Boom, 0));\n        bool called = false;\n        Assert.Throws<CircuitOpenException>(() => b.Call(() => { called = true; return \"x\"; }, 1));\n        Assert.False(called);\n    }\n\n    [Fact]\n    public void HalfOpenTrialAfterTimeoutSuccessCloses()\n    {\n        var b = new CircuitBreaker(1, 10);\n        Assert.Throws<InvalidOperationException>(() => b.Call(Boom, 0));\n        Assert.Equal(\"ok\", b.Call(() => \"ok\", 10));\n        Assert.Equal(\"still-fine\", b.Call(() => \"still-fine\", 11));\n    }\n\n    [Fact]\n    public void HalfOpenFailureReopensAndResetsClock()\n    {\n        var b = new CircuitBreaker(1, 10);\n        Assert.Throws<InvalidOperationException>(() => b.Call(Boom, 0));\n        Assert.Throws<InvalidOperationException>(() => b.Call(Boom, 10));\n        Assert.Throws<CircuitOpenException>(() => b.Call(() => \"too soon\", 15));\n        Assert.Equal(\"ok now\", b.Call(() => \"ok now\", 20));\n    }\n}\n"
+  }
+}

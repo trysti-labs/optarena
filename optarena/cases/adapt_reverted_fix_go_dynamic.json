@@ -1,0 +1,60 @@
+{
+  "name": "adapt_reverted_fix_go_dynamic",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: the agent's bug fix is REVERTED between prompts (fixed after_prompt trigger, calc.go rewritten back to the buggy version); the agent must notice and reapply the fix",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "test_kind": "unit",
+  "tags": [
+    "go",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "reverted-edit"
+  ],
+  "prompts": [
+    "calc.go has a bug in Add(a, b int) int - it currently subtracts instead of adding. Fix it so Add(a, b) returns a + b.",
+    "Your fix to calc.go seems to have been reverted - the subtraction bug is back. Please reapply the fix so Add(a, b) correctly returns a + b."
+  ],
+  "setup_files": {
+    "go.mod": "module revertcase\n\ngo 1.22\n",
+    "calc.go": "package revertcase\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "calc.go reverted back to the buggy (subtraction) version",
+      "write_files": {
+        "calc.go": "package revertcase\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "calc.go",
+      "content_patterns": [
+        "Add"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "calc_test.go": "package revertcase\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif got := Add(3, 4); got != 7 {\n\t\tt.Fatalf(\"Add(3,4) = %d, want 7\", got)\n\t}\n\tif got := Add(-1, 1); got != 0 {\n\t\tt.Fatalf(\"Add(-1,1) = %d, want 0\", got)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "calc.go": "package revertcase\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fix-not-reapplied",
+      "files": {
+        "calc.go": "package revertcase\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"
+      }
+    }
+  ]
+}

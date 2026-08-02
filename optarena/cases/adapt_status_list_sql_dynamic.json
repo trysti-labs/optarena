@@ -1,0 +1,49 @@
+{
+  "name": "adapt_status_list_sql_dynamic",
+  "language": "sql",
+  "domain": "data",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: allowed_statuses.txt (a spec file the schema's CHECK constraint must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the constraint, not leave the stale list in place",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["sql", "dynamic", "disruption", "adaptation", "requirements-drift"],
+  "prompts": [
+    "Write a SQL schema file named schema.sql that creates a table named orders with columns id (integer primary key) and status (text, not null), with a CHECK constraint restricting status to exactly the comma-separated values listed in allowed_statuses.txt (currently: pending, shipped).",
+    "allowed_statuses.txt has changed. Re-read it and update schema.sql's CHECK constraint so it allows EXACTLY the current list of statuses in that file - no more, no fewer."
+  ],
+  "setup_files": {
+    "allowed_statuses.txt": "pending,shipped\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "allowed_statuses.txt rewritten to add a new status the schema's CHECK constraint must now also allow",
+      "write_files": {
+        "allowed_statuses.txt": "pending,shipped,cancelled\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": ["create table", "orders", "check"]
+    }
+  ],
+  "test_setup_files": {
+    "test_schema.py": "import sqlite3\n\nwith open('allowed_statuses.txt', encoding='utf-8') as f:\n    allowed = [s.strip() for s in f.read().strip().split(',') if s.strip()]\nassert allowed, 'allowed_statuses.txt is empty'\n\nwith open('schema.sql', encoding='utf-8') as f:\n    ddl = f.read()\n\nconn = sqlite3.connect(':memory:')\nconn.executescript(ddl)\n\nfor i, status in enumerate(allowed):\n    conn.execute('INSERT INTO orders (id, status) VALUES (?, ?)', (i + 1, status))\nconn.commit()\n\ntry:\n    conn.execute('INSERT INTO orders (id, status) VALUES (?, ?)', (999, 'not_a_real_status'))\n    conn.commit()\n    raise AssertionError('expected the CHECK constraint to reject a status not in allowed_statuses.txt')\nexcept sqlite3.IntegrityError:\n    pass\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_schema.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    status TEXT NOT NULL CHECK (status IN ('pending', 'shipped', 'cancelled'))\n);\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-status-list",
+      "files": {
+        "schema.sql": "CREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    status TEXT NOT NULL CHECK (status IN ('pending', 'shipped'))\n);\n"
+      }
+    }
+  ]
+}

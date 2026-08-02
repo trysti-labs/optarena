@@ -1,0 +1,49 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "rust",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "src/lib.rs's HashRing::get_node picks a node with a modulo of a simple hash - removing or adding any node reshuffles almost every key. Implement a real consistent-hash ring with virtual nodes: HashRing::new(nodes: Vec<String>, replicas: usize) places `replicas` virtual points per physical node around a ring, hashed via std::collections::hash_map::DefaultHasher over format!(\"{}:{}\", node, i) for each virtual point. get_node(&self, key: &str) -> String hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). add_node(&mut self, node: &str) and remove_node(&mut self, node: &str) update the ring in place."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"hash_ring\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::collections::hash_map::DefaultHasher;\nuse std::hash::{Hash, Hasher};\n\nfn hash_of(s: &str) -> u64 {\n    let mut h = DefaultHasher::new();\n    s.hash(&mut h);\n    h.finish()\n}\n\npub struct HashRing {\n    nodes: Vec<String>,\n}\n\nimpl HashRing {\n    pub fn new(nodes: Vec<String>, _replicas: usize) -> Self {\n        HashRing { nodes }\n    }\n\n    pub fn get_node(&self, key: &str) -> String {\n        let idx = (hash_of(key) as usize) % self.nodes.len();\n        self.nodes[idx].clone()\n    }\n\n    pub fn add_node(&mut self, node: &str) {\n        self.nodes.push(node.to_string());\n    }\n\n    pub fn remove_node(&mut self, node: &str) {\n        self.nodes.retain(|n| n != node);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "struct HashRing"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/ring_test.rs": "use hash_ring::HashRing;\nuse std::collections::HashMap;\n\n#[test]\nfn every_key_maps_to_a_current_node() {\n    let ring = HashRing::new(vec![\"a\".into(), \"b\".into(), \"c\".into()], 50);\n    for i in 0..200 {\n        let node = ring.get_node(&format!(\"key-{}\", i));\n        assert!(node == \"a\" || node == \"b\" || node == \"c\");\n    }\n}\n\n#[test]\nfn deterministic() {\n    let ring = HashRing::new(vec![\"a\".into(), \"b\".into(), \"c\".into()], 50);\n    assert_eq!(ring.get_node(\"stable-key\"), ring.get_node(\"stable-key\"));\n}\n\n#[test]\nfn removing_a_node_only_moves_that_nodes_own_keys() {\n    let nodes: Vec<String> = vec![\"n0\", \"n1\", \"n2\", \"n3\", \"n4\"].into_iter().map(String::from).collect();\n    let mut ring = HashRing::new(nodes, 100);\n    let keys: Vec<String> = (0..1000).map(|i| format!(\"key-{}\", i)).collect();\n    let before: HashMap<String, String> = keys.iter().map(|k| (k.clone(), ring.get_node(k))).collect();\n\n    ring.remove_node(\"n2\");\n\n    let mut moved = 0;\n    for k in &keys {\n        let after = ring.get_node(k);\n        if &after != before.get(k).unwrap() {\n            moved += 1;\n            assert_eq!(before.get(k).unwrap(), \"n2\", \"key {} moved but was not on removed node n2\", k);\n        }\n        assert_ne!(after, \"n2\");\n    }\n    assert!(moved > 0, \"expected removing a node to move at least some keys\");\n}\n"
+  },
+  "reference_solution": {
+    "Cargo.toml": "[package]\nname = \"hash_ring\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::collections::hash_map::DefaultHasher;\nuse std::collections::BTreeMap;\nuse std::hash::{Hash, Hasher};\n\nfn hash_of(s: &str) -> u64 {\n    let mut h = DefaultHasher::new();\n    s.hash(&mut h);\n    h.finish()\n}\n\npub struct HashRing {\n    replicas: usize,\n    ring: BTreeMap<u64, String>,\n}\n\nimpl HashRing {\n    pub fn new(nodes: Vec<String>, replicas: usize) -> Self {\n        let mut r = HashRing { replicas, ring: BTreeMap::new() };\n        for node in nodes {\n            r.add_node(&node);\n        }\n        r\n    }\n\n    pub fn add_node(&mut self, node: &str) {\n        for i in 0..self.replicas {\n            let point = hash_of(&format!(\"{}:{}\", node, i));\n            self.ring.insert(point, node.to_string());\n        }\n    }\n\n    pub fn remove_node(&mut self, node: &str) {\n        for i in 0..self.replicas {\n            let point = hash_of(&format!(\"{}:{}\", node, i));\n            self.ring.remove(&point);\n        }\n    }\n\n    pub fn get_node(&self, key: &str) -> String {\n        let point = hash_of(key);\n        match self.ring.range(point..).next() {\n            Some((_, node)) => node.clone(),\n            None => self.ring.values().next().unwrap().clone(),\n        }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"hash_ring\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n",
+        "src/lib.rs": "use std::collections::hash_map::DefaultHasher;\nuse std::hash::{Hash, Hasher};\n\nfn hash_of(s: &str) -> u64 {\n    let mut h = DefaultHasher::new();\n    s.hash(&mut h);\n    h.finish()\n}\n\npub struct HashRing {\n    nodes: Vec<String>,\n}\n\nimpl HashRing {\n    pub fn new(nodes: Vec<String>, _replicas: usize) -> Self {\n        HashRing { nodes }\n    }\n\n    pub fn get_node(&self, key: &str) -> String {\n        let idx = (hash_of(key) as usize) % self.nodes.len();\n        self.nodes[idx].clone()\n    }\n\n    pub fn add_node(&mut self, node: &str) {\n        self.nodes.push(node.to_string());\n    }\n\n    pub fn remove_node(&mut self, node: &str) {\n        self.nodes.retain(|n| n != node);\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_rust_consistent_hash_ring",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "cargo test --offline"
+}

@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 180,
   "timeout": 600,
-  "description": "L3 repo-scale (express-ts-shortlink): shortener stores and redirects to ANY string - enforce an http/https allowlist via URL parsing; incomplete-fix broken is a case-sensitive prefix blocklist",
+  "description": "Repo-scale (express-ts-shortlink): shortener stores and redirects to ANY string - enforce an http/https allowlist via URL parsing; incomplete-fix broken is a case-sensitive prefix blocklist",
   "difficulty": 3,
   "task_type": "security",
   "tags": [

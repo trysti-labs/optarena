@@ -33,6 +33,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from . import __version__
 from .cases import (
     DOCKER_IMAGES, container_engine, dockerfile_for, docker_image_available, filter_cases, load_cases,
 )
@@ -92,6 +93,45 @@ def _scenario_from_args(args, driver: str | None = None, model: str | None = Non
     )
 
 
+def _warn_baseline_incompatible(scenario: Scenario, events: RunEvents) -> None:
+    """
+    A-40: before spending any compute, warn when the chosen driver has no
+    file tools (writes one flat block of text - every `baseline`/`sdk`
+    driver) and some of the selected cases can never be satisfied by that
+    shape regardless of what the model produces (needs >1 file, a starter
+    repo, or a path a flattened write can't reach - see
+    `cases.baseline_incompatible`).
+
+    Best-effort and purely informational: never raises, never changes
+    `run`'s exit code or behavior. Any failure resolving the driver or
+    loading cases here is silently skipped - `run_scenario` immediately
+    after this call will raise the SAME error through its own, already
+    correct handling (F-04's clean-error path), so this must not pre-empt
+    it with a second, differently formatted one.
+    """
+    from .drivers import DRIVERS
+    if DRIVERS.get(scenario.driver, {}).get("file_tools", True):
+        return   # has real file tools, or an unknown driver - nothing to warn about
+    try:
+        cases = load_cases(scenario.cases, cases_dir=scenario.cases_dir)
+    except Exception:  # noqa: BLE001 - best-effort; run_scenario reports the real error
+        return
+    from .cases import baseline_incompatible
+    hostile = [c["name"] for c in cases if baseline_incompatible(c)]
+    if not hostile:
+        return
+    events.say(f"  [{scenario.name}] NOTE: {scenario.driver} has no file-editing tools - it writes "
+               f"one flat block of text, so {len(hostile)} of {len(cases)} selected case(s) cannot "
+               f"pass regardless of the model's answer (needs multiple files, a starter repo, or a "
+               f"path a flat write can't reach):")
+    shown = hostile[:8]
+    for name in shown:
+        events.say(f"           - {name}")
+    if len(hostile) > len(shown):
+        events.say(f"           ... and {len(hostile) - len(shown)} more")
+    events.say("           Use a CLI-agent driver (aider, claude-code, ...) to measure these fairly.")
+
+
 def cmd_run(args) -> int:
     # --pack is shorthand for --cases-dir pointing at an installed pack.
     if getattr(args, "pack", None):
@@ -147,6 +187,7 @@ def cmd_run(args) -> int:
                         log_level=getattr(args, "log_level", "info"))
     records = []
     for sc in scenarios:
+        _warn_baseline_incompatible(sc, events)
         try:
             rec = run_scenario(sc, trials=args.trials, parallel=args.parallel,
                                 allow_empty=args.allow_empty,
@@ -356,11 +397,35 @@ def cmd_serve(args) -> int:
     # Reflect any --results-dir/OPTARENA_RESULTS_DIR override (applied in
     # main() before this runs) rather than the REPO_ROOT default baked in
     # at class-definition time.
-    _ScopedDashboardHandler._ROOTS = {"dashboard": REPO_ROOT / "dashboard", "results": store.RESULTS_DIR}
-    url = f"http://localhost:{args.port}/dashboard/"
-    print(f"OptArena dashboard: {url}  (Ctrl+C to stop)")
+    dashboard_dir = REPO_ROOT / "dashboard"
+    _ScopedDashboardHandler._ROOTS = {"dashboard": dashboard_dir, "results": store.RESULTS_DIR}
+    # A-26: the dashboard is not packaged into a wheel (see README's
+    # source-checkout note) - say so plainly instead of serving 404s.
+    if not (dashboard_dir / "index.html").is_file():
+        print(f"error: no dashboard at {dashboard_dir} - `optarena serve` needs the "
+              f"source checkout (dashboard/ is not bundled into the installed package)",
+              file=sys.stderr)
+        return 2
+    host = getattr(args, "host", "127.0.0.1")
+    if host != "127.0.0.1":
+        # Loud, because the server has no authentication of any kind and the
+        # results directory can contain prompts, generated code, and (for
+        # records predating redaction) backend keys.
+        print(f"WARNING: binding {host}, not localhost - the dashboard has no "
+              f"authentication and exposes every saved run to that network.",
+              file=sys.stderr)
+    print(f"OptArena dashboard: http://{host}:{args.port}/dashboard/  (Ctrl+C to stop)")
     print(f"  serving only dashboard/ and {store.RESULTS_DIR} - not the repository root")
-    with http.server.ThreadingHTTPServer(("127.0.0.1", args.port), _ScopedDashboardHandler) as httpd:
+    try:
+        server = http.server.ThreadingHTTPServer((host, args.port), _ScopedDashboardHandler)
+    except OSError as exc:
+        # A-26: an in-use port used to surface as a raw traceback out of
+        # ThreadingHTTPServer's constructor.
+        print(f"error: cannot bind {host}:{args.port} - {exc}"
+              f"\n  (another optarena serve already running? try --port {args.port + 1})",
+              file=sys.stderr)
+        return 2
+    with server as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
@@ -430,12 +495,31 @@ def cmd_doctor(args) -> int:
     from .drivers.cli_agents import CLI_AGENTS
 
     ok = True
+    # A-28: --json makes doctor scriptable. Without it an automation wrapper
+    # was back to scraping human-formatted text - the exact problem F-18
+    # solved for `run`.
+    as_json = getattr(args, "json", False)
+    report: dict = {"checks": [], "sections": {}}
+    section = {"name": None}
+
+    def _record(label: str, good: bool, detail: str, required: bool) -> None:
+        report["checks"].append({"section": section["name"], "label": label,
+                                 "ok": bool(good), "detail": detail, "required": required})
+
+    def _print(*args_, **kwargs) -> None:
+        if not as_json:
+            print(*args_, **kwargs)
+
+    def _section(name: str) -> None:
+        section["name"] = name
+        _print(f"{name}:")
 
     def _check(label: str, good: bool, detail: str = "") -> None:
         nonlocal ok
         mark = "ok " if good else "MISS"
         # Detail is the fix hint - only useful when the check failed.
-        print(f"  [{mark}] {label}" + (f" - {detail}" if detail and not good else ""))
+        _print(f"  [{mark}] {label}" + (f" - {detail}" if detail and not good else ""))
+        _record(label, good, detail, required=True)
         if not good:
             ok = False
 
@@ -447,9 +531,10 @@ def cmd_doctor(args) -> int:
         # OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1), but a doctor run on a machine
         # with neither Docker nor Podman shouldn't read as broken.
         mark = "ok " if good else "MISS"
-        print(f"  [{mark}] {label}" + (f" - {detail}" if detail and not good else ""))
+        _print(f"  [{mark}] {label}" + (f" - {detail}" if detail and not good else ""))
+        _record(label, good, detail, required=False)
 
-    print("backend:")
+    _section("backend")
     url = args.base_url.rstrip("/") + ("/api/tags" if args.kind == "ollama" else "/v1/models")
     try:
         with _rq.urlopen(url, timeout=4) as resp:
@@ -457,7 +542,7 @@ def cmd_doctor(args) -> int:
     except Exception as exc:
         _check(f"backend {args.base_url}", False, f"{type(exc).__name__}: {exc}")
 
-    print("cli drivers:")
+    _section("cli drivers")
     _check("aider", _shutil.which("aider") is not None, "pip install aider-chat")
     for key, spec in CLI_AGENTS.items():
         found = next((b for b in spec["binaries"] if _shutil.which(b)), None)
@@ -465,7 +550,7 @@ def cmd_doctor(args) -> int:
                found or f"install {spec['label']} ({'/'.join(spec['binaries'])})")
 
     engine = container_engine()
-    print(f"{engine} (sandboxed check_command execution):")
+    _section(f"{engine} (sandboxed check_command execution)")
     engine_bin = _shutil.which(engine)
     docker_running = False
     if engine_bin:
@@ -481,7 +566,7 @@ def cmd_doctor(args) -> int:
             hint = "run `optarena sandbox build`" if lang == "base" else f"run `optarena sandbox build --lang {lang}`"
             _check_info(f"{image} image built", built, hint)
 
-    print("sdk drivers (optional - each needs its own pip extra):")
+    _section("sdk drivers (optional - each needs its own pip extra)")
     import importlib.util as _ilu
     for driver_key, import_name, extra in (
         ("crewai", "crewai", "crewai"),
@@ -494,8 +579,28 @@ def cmd_doctor(args) -> int:
         _check_info(driver_key, _ilu.find_spec(import_name) is not None,
                     f"pip install optarena[{extra}]")
 
-    print()
-    print("  doctor result:", "all good" if ok else "some checks failed (see MISS lines)")
+    # A-29: the three directories that are NOT packaged into a wheel
+    # (README's source-checkout note). Installed from a wheel they're simply
+    # absent, and the features that need them fail at use time with no earlier
+    # signal - `sandbox build` has no Dockerfiles, `serve` has no dashboard,
+    # and every setup_repo case errors. Report it here instead.
+    from .cases import REPOS_DIR
+    _section("source-checkout assets (not bundled into a wheel)")
+    repo_cases = sum(1 for c in load_cases() if c.get("setup_repo"))
+    _check_info("dashboard/", (REPO_ROOT / "dashboard" / "index.html").is_file(),
+                "needed by `optarena serve` - keep the git checkout")
+    _check_info("docker/", (REPO_ROOT / "docker" / "Dockerfile").is_file(),
+                "needed by `optarena sandbox build` (pulling published images still works)")
+    _check_info(f"repos/ ({repo_cases} case(s) need it)", REPOS_DIR.is_dir(),
+                "needed by setup_repo cases - they error without it")
+
+    if as_json:
+        report["ok"] = ok
+        report["optarena_version"] = __version__
+        print(json.dumps(report, indent=2))
+    else:
+        print()
+        print("  doctor result:", "all good" if ok else "some checks failed (see MISS lines)")
     return 0 if ok else 1
 
 
@@ -505,12 +610,19 @@ def cmd_verify_corpus(args) -> int:
     PASS the real oracle and every broken/unmodified variant must FAIL it.
     See optarena/verify.py for the schema and rationale.
     """
-    from .verify import verify_cases
+    from .verify import cases_without_failing_variant, verify_cases
 
     names = args.cases.split(",") if args.cases else None
     try:
         cases = load_cases(names, cases_dir=args.cases_dir)
-    except ValueError as e:   # SchemaError: a malformed/duplicate case file
+    except (ValueError, OSError) as e:
+        # A-34: OSError as well as ValueError. ValueError covers SchemaError (a
+        # malformed/duplicate case file); a typo in `--cases` raises
+        # FileNotFoundError from load_cases, which used to escape as a raw
+        # traceback - the everyday-failure-should-not-traceback rule (F-04)
+        # that every other command already follows.
+        if getattr(args, "debug", False):
+            raise
         print(f"error: {e}", file=sys.stderr)
         return 2
     cases = filter_cases(cases, language=getattr(args, "language", None),
@@ -518,10 +630,26 @@ def cmd_verify_corpus(args) -> int:
     violations, checked, skipped = verify_cases(cases)
     print(f"\n  verify-corpus: {checked} variant(s) checked across "
           f"{len(cases) - skipped} case(s); {skipped} case(s) declare no variants")
+    # A-31: a case with nothing that must FAIL proves only that its oracle can
+    # pass - it cannot catch an oracle that accepts everything, which is the
+    # exact failure class this command exists for. Always reported; fatal
+    # under --strict.
+    weak = cases_without_failing_variant(cases)
+    if weak:
+        label = "VIOLATION(S)" if getattr(args, "strict", False) else "warning"
+        print(f"  {label}: {len(weak)} case(s) declare no failing variant "
+              f"(no broken_solutions, and not a task_type that gets the implicit "
+              f"'unmodified' check) - their oracle is never proven to discriminate:")
+        for name in weak[:20]:
+            print(f"    - {name}")
+        if len(weak) > 20:
+            print(f"    ... and {len(weak) - 20} more")
     if violations:
         print(f"  {len(violations)} VIOLATION(S):")
         for v in violations:
             print(f"    - {v}")
+        return 1
+    if weak and getattr(args, "strict", False):
         return 1
     print("  all verified")
     return 0
@@ -681,6 +809,95 @@ def cmd_run_show(args) -> int:
     return 0
 
 
+def cmd_runs_rebuild_index(args) -> int:
+    """
+    Rebuild results/index.json from the run files on disk.
+
+    A-23: three separate docstrings in store.py already pointed users here
+    ("recoverable via `optarena runs rebuild-index`") for a corrupt or
+    out-of-sync index - but the command did not exist, so the documented
+    recovery path was unreachable. `store.rebuild_index` has always been
+    there; this exposes it.
+    """
+    path = store.rebuild_index()
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    print(f"  rebuilt {path} from {len(entries)} run file(s)")
+    return 0
+
+
+def cmd_runs_prune(args) -> int:
+    """Delete saved runs, oldest first, keeping the newest --keep (or only
+    those matching --before). Results accumulate one JSON per run forever;
+    there was no supported way to clear them out short of `rm`."""
+    runs = sorted(store.RUNS_DIR.glob("*.json")) if store.RUNS_DIR.is_dir() else []
+    if not runs:
+        print(f"  no runs in {store.RUNS_DIR}")
+        return 0
+    # run_id starts with YYYYmmdd-HHMMSS, so filename order is time order.
+    doomed = runs[:-args.keep] if args.keep > 0 else list(runs)
+    if args.before:
+        doomed = [p for p in doomed if p.name < args.before]
+    if not doomed:
+        print(f"  nothing to prune ({len(runs)} run(s), keeping newest {args.keep})")
+        return 0
+    if not args.yes:
+        print(f"  would delete {len(doomed)} of {len(runs)} run(s), keeping the newest {args.keep}:")
+        for p in doomed[:10]:
+            print(f"    - {p.name}")
+        if len(doomed) > 10:
+            print(f"    ... and {len(doomed) - 10} more")
+        print("  re-run with --yes to actually delete them")
+        return 0
+    for p in doomed:
+        p.unlink(missing_ok=True)
+    store.rebuild_index()
+    print(f"  deleted {len(doomed)} run(s); index rebuilt")
+    return 0
+
+
+def cmd_runs_scrub_secrets(args) -> int:
+    """
+    Redact `backend.api_key` from run records written before redaction
+    existed (A-24).
+
+    Saved runs have stored a redacted backend for a while now, but records
+    from before that still carry the raw key on disk - and `optarena serve`
+    publishes the whole results directory over HTTP to every process on the
+    machine. There was no supported way to clean them.
+    """
+    runs = sorted(store.RUNS_DIR.glob("*.json")) if store.RUNS_DIR.is_dir() else []
+    scrubbed = []
+    for path in runs:
+        try:
+            rec = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        backend = (rec.get("scenario") or {}).get("backend")
+        if not isinstance(backend, dict) or backend.get("api_key") is None:
+            continue
+        if not args.yes:
+            scrubbed.append(path)
+            continue
+        backend["api_key_set"] = bool(backend.get("api_key")) and backend["api_key"] != "optarena"
+        backend["api_key"] = None
+        store._write_atomic(path, json.dumps(rec, indent=2))
+        scrubbed.append(path)
+    if not scrubbed:
+        print(f"  no run records under {store.RUNS_DIR} carry an api_key")
+        return 0
+    if not args.yes:
+        print(f"  {len(scrubbed)} run record(s) still contain a backend api_key:")
+        for p in scrubbed[:10]:
+            print(f"    - {p.name}")
+        if len(scrubbed) > 10:
+            print(f"    ... and {len(scrubbed) - 10} more")
+        print("  re-run with --yes to redact them in place")
+        return 1
+    store.rebuild_index()
+    print(f"  redacted the api_key in {len(scrubbed)} run record(s)")
+    return 0
+
+
 def cmd_scan(args) -> int:
     """Standalone static security scan of a directory (the same rules the
     --security-scan run flag applies to an agent's changed files)."""
@@ -722,19 +939,33 @@ def cmd_report(args) -> int:
                  "html": (_report.to_html, "report.html"),
                  "sarif": (_report.to_sarif, "results.sarif")}
 
-    # --out: a file path when one format is requested, else a directory.
-    out = Path(args.out) if args.out else (store.RESULTS_DIR / "reports" / run["run_id"])
-    single = len(formats) == 1 and args.out and not str(args.out).endswith("/") and not Path(args.out).is_dir()
-    if not single:
-        out.mkdir(parents=True, exist_ok=True)
+    # A-27: --out-dir says "directory", --out says "file" - no guessing.
+    # `--out` alone used to be inferred as a file or a directory from the
+    # format count, a trailing slash, and whether the path already existed, so
+    # `--format junit --out build/reports` wrote a FILE named `reports` when
+    # that directory didn't exist yet and a file INSIDE it when it did.
+    if args.out and args.out_dir:
+        print("error: pass --out (a file) or --out-dir (a directory), not both", file=sys.stderr)
+        return 2
+    if args.out and len(formats) > 1:
+        print(f"error: --out names a single file but --format {args.format} produces "
+              f"{len(formats)} artifacts - use --out-dir", file=sys.stderr)
+        return 2
 
     written = []
-    for fmt in formats:
-        fn, default_name = renderers[fmt]
-        content = fn(run)
-        dest = out if single else (out / default_name)
-        dest.write_text(content, encoding="utf-8")
+    if args.out:
+        dest = Path(args.out)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(renderers[formats[0]][0](run), encoding="utf-8")
         written.append(dest)
+    else:
+        out = Path(args.out_dir) if args.out_dir else (store.RESULTS_DIR / "reports" / run["run_id"])
+        out.mkdir(parents=True, exist_ok=True)
+        for fmt in formats:
+            fn, default_name = renderers[fmt]
+            dest = out / default_name
+            dest.write_text(fn(run), encoding="utf-8")
+            written.append(dest)
     for p in written:
         print(f"  wrote {p}")
     return 0
@@ -766,6 +997,12 @@ def cmd_sandbox_status(args) -> int:
     return 0 if missing == 0 else 1
 
 
+#: Global options that take a VALUE, so `_rewrite_legacy_argv` knows to skip
+#: their argument too when scanning for the command token. Anything else
+#: starting with "-" before the command is treated as a valueless global flag.
+_GLOBAL_VALUE_OPTIONS = ("--results-dir",)
+
+
 def _rewrite_legacy_argv(argv: list[str] | None) -> list[str] | None:
     """
     Translate the pre-grouping command spellings to the grouped ones so both
@@ -777,26 +1014,34 @@ def _rewrite_legacy_argv(argv: list[str] | None) -> list[str] | None:
         docker build|pull ...      ->  sandbox build|pull ...
 
     Only the command token is rewritten; all flags pass through untouched.
-    The single global option that takes a value (`--results-dir X`) is skipped
-    over when locating the command token.
+
+    A-22: ANY leading global flag is skipped over, not just `--results-dir`.
+    The scan used to break out of the loop on the first unrecognized token,
+    so `--debug`/`--version` (added after this function) stopped the rewrite
+    dead and `optarena --debug list runs` failed with "invalid choice: 'list'"
+    while `optarena list runs` worked.
     """
     import sys as _sys
     if argv is None:
         argv = _sys.argv[1:]
     argv = list(argv)
 
-    # Find the command token: first arg that isn't the global option or its value.
+    # Find the command token: the first arg that isn't a global option (or the
+    # value of one).
     i = 0
     while i < len(argv):
         tok = argv[i]
-        if tok in ("--results-dir",):
+        if tok in _GLOBAL_VALUE_OPTIONS:
             i += 2
             continue
-        if tok.startswith("--results-dir="):
+        if any(tok.startswith(opt + "=") for opt in _GLOBAL_VALUE_OPTIONS):
             i += 1
             continue
-        if tok in ("-h", "--help"):
+        if tok in ("-h", "--help", "--version"):
             return argv
+        if tok.startswith("-"):
+            i += 1          # a valueless global flag, e.g. --debug
+            continue
         break
     if i >= len(argv):
         return argv
@@ -830,6 +1075,10 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="optarena", description="OptArena - test & compare AI coding tools")
+    # A-25: a tool whose whole point is reproducible comparison must be able
+    # to say which version produced a result. The version also goes into every
+    # run manifest (see runner.build_manifest).
+    parser.add_argument("--version", action="version", version=f"optarena {__version__}")
     parser.add_argument("--results-dir",
                         help="where runs/comparisons are stored (default: <repo>/results, "
                              "or OPTARENA_RESULTS_DIR); applies to run/compare/regression/list/serve")
@@ -933,6 +1182,10 @@ def main(argv: list[str] | None = None) -> int:
     pc_ver.add_argument("--cases-dir", help="load cases from this directory")
     pc_ver.add_argument("--language", help="only verify cases tagged with this language")
     pc_ver.add_argument("--framework", help="only verify cases tagged with this framework")
+    pc_ver.add_argument("--strict", action="store_true",
+                        help="also fail when a case declares nothing that must FAIL "
+                             "(no broken_solutions and no implicit 'unmodified' check) - "
+                             "such a case only ever proves its oracle can pass")
     pc_ver.set_defaults(fn=cmd_verify_corpus)
     pc_pack = cases_sub.add_parser("pack", help="bundle a cases dir into a shareable, versioned pack file")
     pc_pack.add_argument("dir", help="directory of case JSONs to pack")
@@ -946,12 +1199,32 @@ def main(argv: list[str] | None = None) -> int:
     pc_inst.set_defaults(fn=cmd_cases_install)
     cases_sub.add_parser("packs", help="list installed case packs").set_defaults(fn=cmd_cases_packs)
 
-    p_runs = sub.add_parser("runs", help="saved runs: list/show")
+    p_runs = sub.add_parser("runs", help="saved runs: list/show/rebuild-index/prune/scrub-secrets")
     runs_sub = p_runs.add_subparsers(dest="runs_command", required=True)
     runs_sub.add_parser("list", help="saved runs, newest first").set_defaults(fn=cmd_list, what="runs")
     pr_show = runs_sub.add_parser("show", help="summary + per-case table for one run")
     pr_show.add_argument("run_ref", help="run id, filename, path, or unique substring")
     pr_show.set_defaults(fn=cmd_run_show)
+    # A-23: the recovery path store.py has always pointed users to.
+    runs_sub.add_parser(
+        "rebuild-index",
+        help="rewrite results/index.json from the run files (repair a corrupt/out-of-sync index)"
+    ).set_defaults(fn=cmd_runs_rebuild_index)
+    pr_prune = runs_sub.add_parser("prune", help="delete old runs, keeping the newest N")
+    pr_prune.add_argument("--keep", type=int, default=50,
+                          help="how many of the newest runs to keep (default 50)")
+    pr_prune.add_argument("--before", help="only delete runs whose id sorts before this "
+                                           "(e.g. 20260101 for 'older than 2026-01-01')")
+    pr_prune.add_argument("--yes", action="store_true",
+                          help="actually delete (without this, prints what would go)")
+    pr_prune.set_defaults(fn=cmd_runs_prune)
+    # A-24: clean up records written before backend redaction existed.
+    pr_scrub = runs_sub.add_parser(
+        "scrub-secrets",
+        help="redact backend.api_key from run records written before redaction existed")
+    pr_scrub.add_argument("--yes", action="store_true",
+                          help="actually rewrite the files (without this, only reports them)")
+    pr_scrub.set_defaults(fn=cmd_runs_scrub_secrets)
 
     p_drivers = sub.add_parser("drivers", help="driver registry")
     drivers_sub = p_drivers.add_subparsers(dest="drivers_command", required=True)
@@ -981,17 +1254,25 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("run_ref", help="run id, filename, path, or unique substring")
     p_report.add_argument("--format", choices=["junit", "html", "sarif", "all"], default="all",
                           help="artifact format (default: all)")
-    p_report.add_argument("--out", help="output file (single format) or directory "
-                                        "(default: <results>/reports/<run_id>/)")
+    p_report.add_argument("--out", help="write a single artifact to exactly this file "
+                                        "(requires a single --format)")
+    p_report.add_argument("--out-dir", help="write artifacts into this directory "
+                                            "(default: <results>/reports/<run_id>/)")
     p_report.set_defaults(fn=cmd_report)
 
     p_serve = sub.add_parser("serve", help="serve the results dashboard")
     p_serve.add_argument("--port", type=int, default=8300)
+    p_serve.add_argument("--host", default="127.0.0.1",
+                         help="interface to bind (default 127.0.0.1 - localhost only; "
+                              "anything else exposes every saved run, unauthenticated)")
     p_serve.set_defaults(fn=cmd_serve)
 
     p_doc = sub.add_parser("doctor", help="preflight checks for every installed driver")
     p_doc.add_argument("--base-url", default=os.environ.get("OPTARENA_BASE_URL", "http://localhost:11434"))
     p_doc.add_argument("--kind", default="ollama", choices=["ollama", "openai"])
+    p_doc.add_argument("--json", action="store_true",
+                       help="emit the checks as one JSON object instead of the human table "
+                            "(scriptable preflight; exit code is unchanged)")
     p_doc.set_defaults(fn=cmd_doctor)
 
     # Legacy spellings are rewritten to the grouped commands BEFORE parsing

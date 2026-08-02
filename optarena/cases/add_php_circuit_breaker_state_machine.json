@@ -1,0 +1,44 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker in place of a stub that always calls through",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "Create src/CircuitBreaker.php defining namespace App, a CircuitOpenException extends \\RuntimeException, and class CircuitBreaker with a constructor __construct(int $failureThreshold, int $resetTimeout). call(callable $fn, int $now) always just calls $fn() right now - implement the real 3-state machine instead: starts closed. In closed, call($fn, $now) invokes $fn(); if it throws, count consecutive failures, and once $failureThreshold CONSECUTIVE failures have happened, trip to open (recording when it opened) and re-throw. While open, call must NOT invoke $fn() at all and must instead throw CircuitOpenException - UNLESS at least $resetTimeout seconds have passed since it opened, in which case it moves to half-open and allows exactly ONE trial call: if that call succeeds, go back to closed (reset the failure count); if it throws, go back to open and RESET the open-time to $now (so the next trial is only allowed after another full resetTimeout, not immediately)."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/CircuitBreaker.php",
+      "content_patterns": [
+        "function call"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/CircuitBreaker.php": "<?php\nnamespace App;\n\nclass CircuitOpenException extends \\RuntimeException {}\n\nclass CircuitBreaker\n{\n    private int $failureThreshold;\n    private int $resetTimeout;\n    private string $state = 'closed';\n    private int $failures = 0;\n    private int $openedAt = 0;\n\n    public function __construct(int $failureThreshold, int $resetTimeout)\n    {\n        $this->failureThreshold = $failureThreshold;\n        $this->resetTimeout = $resetTimeout;\n    }\n\n    public function call(callable $fn, int $now)\n    {\n        if ($this->state === 'open') {\n            if ($now - $this->openedAt < $this->resetTimeout) {\n                throw new CircuitOpenException();\n            }\n            $this->state = 'half_open';\n        }\n\n        try {\n            $result = $fn();\n        } catch (\\RuntimeException $e) {\n            if ($this->state === 'half_open') {\n                $this->state = 'open';\n                $this->openedAt = $now;\n            } else {\n                $this->failures++;\n                if ($this->failures >= $this->failureThreshold) {\n                    $this->state = 'open';\n                    $this->openedAt = $now;\n                }\n            }\n            throw $e;\n        }\n\n        $this->state = 'closed';\n        $this->failures = 0;\n        return $result;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "src/CircuitBreaker.php": "<?php\nnamespace App;\n\nclass CircuitOpenException extends \\RuntimeException {}\n\nclass CircuitBreaker\n{\n    private int $failureThreshold;\n    private int $resetTimeout;\n    private string $state = 'closed';\n    private int $failures = 0;\n    private int $openedAt = 0;\n\n    public function __construct(int $failureThreshold, int $resetTimeout)\n    {\n        $this->failureThreshold = $failureThreshold;\n        $this->resetTimeout = $resetTimeout;\n    }\n\n    public function call(callable $fn, int $now)\n    {\n        if ($this->state === 'open') {\n            if ($now - $this->openedAt < $this->resetTimeout) {\n                throw new CircuitOpenException();\n            }\n            $this->state = 'half_open';\n        }\n\n        try {\n            $result = $fn();\n        } catch (\\RuntimeException $e) {\n            if ($this->state === 'half_open') {\n                $this->state = 'open';\n            } else {\n                $this->failures++;\n                if ($this->failures >= $this->failureThreshold) {\n                    $this->state = 'open';\n                    $this->openedAt = $now;\n                }\n            }\n            throw $e;\n        }\n\n        $this->state = 'closed';\n        $this->failures = 0;\n        return $result;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_circuit_breaker_state_machine",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "difficulty": 3,
+  "check_command": "phpunit tests/CircuitBreakerTest.php",
+  "setup_files": {},
+  "test_setup_files": {
+    "tests/CircuitBreakerTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/CircuitBreaker.php';\n\nfinal class CircuitBreakerTest extends TestCase\n{\n    public function boom()\n    {\n        throw new \\RuntimeException(\"boom\");\n    }\n\n    public function testTripsOpenAfterConsecutiveFailures(): void\n    {\n        $b = new \\App\\CircuitBreaker(3, 10);\n        for ($i = 0; $i < 3; $i++) {\n            try {\n                $b->call([$this, 'boom'], 0);\n                $this->fail('expected exception');\n            } catch (\\RuntimeException $e) {\n                $this->assertSame('boom', $e->getMessage());\n            }\n        }\n        $this->expectException(\\App\\CircuitOpenException::class);\n        $b->call(fn() => 'should not run', 0);\n    }\n\n    public function testFailsFastWithoutCallingFnWhileOpen(): void\n    {\n        $b = new \\App\\CircuitBreaker(1, 100);\n        try {\n            $b->call([$this, 'boom'], 0);\n        } catch (\\RuntimeException $e) {\n        }\n        $called = false;\n        try {\n            $b->call(function () use (&$called) { $called = true; return 'x'; }, 1);\n            $this->fail('expected CircuitOpenException');\n        } catch (\\App\\CircuitOpenException $e) {\n        }\n        $this->assertFalse($called);\n    }\n\n    public function testHalfOpenTrialAfterTimeoutSuccessCloses(): void\n    {\n        $b = new \\App\\CircuitBreaker(1, 10);\n        try {\n            $b->call([$this, 'boom'], 0);\n        } catch (\\RuntimeException $e) {\n        }\n        $this->assertSame('ok', $b->call(fn() => 'ok', 10));\n        $this->assertSame('still-fine', $b->call(fn() => 'still-fine', 11));\n    }\n\n    public function testHalfOpenFailureReopensAndResetsClock(): void\n    {\n        $b = new \\App\\CircuitBreaker(1, 10);\n        try {\n            $b->call([$this, 'boom'], 0);\n        } catch (\\RuntimeException $e) {\n        }\n        try {\n            $b->call([$this, 'boom'], 10);\n            $this->fail('expected boom at half-open trial');\n        } catch (\\RuntimeException $e) {\n            $this->assertSame('boom', $e->getMessage());\n        }\n        try {\n            $b->call(fn() => 'too soon', 15);\n            $this->fail('expected CircuitOpenException at t=15');\n        } catch (\\App\\CircuitOpenException $e) {\n        }\n        $this->assertSame('ok now', $b->call(fn() => 'ok now', 20));\n    }\n}\n"
+  }
+}

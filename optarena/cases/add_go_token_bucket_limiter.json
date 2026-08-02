@@ -1,0 +1,49 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "limiter.go's TokenBucket.Allow always returns true. Implement it properly: NewTokenBucket(capacity float64, refillRate float64) - `refillRate` tokens are added per second, capped at `capacity` tokens (never above it, even after a long idle period). Allow(now float64) refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "setup_files": {
+    "go.mod": "module tokenbucket\n\ngo 1.21\n",
+    "limiter.go": "package main\n\ntype TokenBucket struct {\n\tcapacity   float64\n\trefillRate float64\n}\n\nfunc NewTokenBucket(capacity, refillRate float64) *TokenBucket {\n\treturn &TokenBucket{capacity: capacity, refillRate: refillRate}\n}\n\nfunc (b *TokenBucket) Allow(now float64) bool {\n\treturn true\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "limiter.go",
+      "content_patterns": [
+        "func NewTokenBucket"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "limiter_test.go": "package main\n\nimport \"testing\"\n\nfunc TestStartsFullAndDrains(t *testing.T) {\n\tb := NewTokenBucket(3, 1)\n\tfor i := 0; i < 3; i++ {\n\t\tif !b.Allow(0) {\n\t\t\tt.Fatalf(\"expected allow at i=%d\", i)\n\t\t}\n\t}\n\tif b.Allow(0) {\n\t\tt.Fatalf(\"expected deny once drained\")\n\t}\n}\n\nfunc TestRefillsOverTime(t *testing.T) {\n\tb := NewTokenBucket(3, 1)\n\tfor i := 0; i < 3; i++ {\n\t\tb.Allow(0)\n\t}\n\tif b.Allow(0.5) {\n\t\tt.Fatalf(\"expected deny at t=0.5\")\n\t}\n\tif !b.Allow(1.0) {\n\t\tt.Fatalf(\"expected allow at t=1.0\")\n\t}\n\tif b.Allow(1.0) {\n\t\tt.Fatalf(\"expected deny again immediately after\")\n\t}\n}\n\nfunc TestRefillCapsAtCapacity(t *testing.T) {\n\tb := NewTokenBucket(2, 1)\n\tb.Allow(0)\n\tb.Allow(0)\n\tif !b.Allow(1000) || !b.Allow(1000) {\n\t\tt.Fatalf(\"expected 2 tokens available after long idle\")\n\t}\n\tif b.Allow(1000) {\n\t\tt.Fatalf(\"expected refill capped at capacity\")\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module tokenbucket\n\ngo 1.21\n",
+    "limiter.go": "package main\n\ntype TokenBucket struct {\n\tcapacity   float64\n\trefillRate float64\n\ttokens     float64\n\thasLast    bool\n\tlast       float64\n}\n\nfunc NewTokenBucket(capacity, refillRate float64) *TokenBucket {\n\treturn &TokenBucket{capacity: capacity, refillRate: refillRate, tokens: capacity}\n}\n\nfunc (b *TokenBucket) Allow(now float64) bool {\n\tif b.hasLast {\n\t\telapsed := now - b.last\n\t\tb.tokens += elapsed * b.refillRate\n\t\tif b.tokens > b.capacity {\n\t\t\tb.tokens = b.capacity\n\t\t}\n\t}\n\tb.last = now\n\tb.hasLast = true\n\tif b.tokens >= 1 {\n\t\tb.tokens -= 1\n\t\treturn true\n\t}\n\treturn false\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "go.mod": "module tokenbucket\n\ngo 1.21\n",
+        "limiter.go": "package main\n\ntype TokenBucket struct {\n\tcapacity   float64\n\trefillRate float64\n\ttokens     float64\n\thasLast    bool\n\tlast       float64\n}\n\nfunc NewTokenBucket(capacity, refillRate float64) *TokenBucket {\n\treturn &TokenBucket{capacity: capacity, refillRate: refillRate, tokens: capacity}\n}\n\nfunc (b *TokenBucket) Allow(now float64) bool {\n\tif b.hasLast {\n\t\telapsed := now - b.last\n\t\tb.tokens += elapsed * b.refillRate\n\t}\n\tb.last = now\n\tb.hasLast = true\n\tif b.tokens >= 1 {\n\t\tb.tokens -= 1\n\t\treturn true\n\t}\n\treturn false\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_token_bucket_limiter",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

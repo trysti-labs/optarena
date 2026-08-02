@@ -1,0 +1,56 @@
+{
+  "description": "Repo-scale (sql-ecommerce): discounted_total_cents must apply the loyalty-tier discount to the SAME cancelled-order-excluded total as total_cents, not a separately-computed raw sum",
+  "tags": [
+    "sql",
+    "sqlite",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add a `cancelled` status to the `orders.status` CHECK constraint in schema.sql, and a `loyalty_tier` column to `customers` (TEXT NOT NULL DEFAULT 'bronze', CHECK constrained to 'bronze'/'silver'/'gold'). In views.sql: cancelled orders must not contribute to EITHER `customer_order_totals`'s `total_cents` or `product_sales_summary`'s `units_sold`. Add a `discounted_total_cents` column to `customer_order_totals`, applying a tier-based discount (gold 10% off, silver 5% off, bronze no discount, rounded to the nearest cent) - critically, the discount must apply to the SAME cancelled-order-excluded base that `total_cents` uses, not to a separately-computed sum over ALL order_items regardless of order status. A customer with a cancelled order must see it excluded from both columns consistently, not just from `total_cents`."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "cancelled",
+        "loyalty_tier"
+      ]
+    },
+    {
+      "path_pattern": "views.sql",
+      "content_patterns": [
+        "discounted_total_cents"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_discount_consistent.py": "import sqlite3\nfrom pathlib import Path\n\nschema = Path('schema.sql').read_text(encoding='utf-8')\nviews = Path('views.sql').read_text(encoding='utf-8')\n\ncon = sqlite3.connect(':memory:')\ncon.executescript(schema)\ncon.executescript(views)\ncon.executescript(\"\"\"\nINSERT INTO customers VALUES (1, 'Ada', 'ada@example.com', 'gold');\nINSERT INTO products VALUES (1, 'Widget', 1000);\nINSERT INTO orders VALUES (1, 1, 'paid', '2026-01-01');\nINSERT INTO orders VALUES (2, 1, 'cancelled', '2026-01-02');\nINSERT INTO order_items VALUES (1, 1, 1, 10, 1000);\nINSERT INTO order_items VALUES (2, 2, 1, 5, 1000);\n\"\"\")\n\nrow = con.execute(\n    'SELECT total_cents, discounted_total_cents FROM customer_order_totals WHERE customer_id = 1'\n).fetchone()\n\nassert row[0] == 10000, f'expected total_cents to exclude the cancelled order, got {row[0]}'\nassert row[1] == 9000, (\n    f'expected discounted_total_cents to be the gold-tier 10% discount applied to the SAME '\n    f'cancelled-order-excluded base as total_cents (10000 -> 9000), got {row[1]} - it must not be '\n    f'computed from a separate sum that forgets to exclude the cancelled order')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_discount_consistent.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE,\n    loyalty_tier TEXT NOT NULL DEFAULT 'bronze' CHECK (loyalty_tier IN ('bronze', 'silver', 'gold'))\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped', 'cancelled')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n",
+    "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN oi.quantity * oi.unit_price_cents ELSE 0 END), 0) AS total_cents,\n       CAST(ROUND(\n           COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN oi.quantity * oi.unit_price_cents ELSE 0 END), 0) *\n           CASE c.loyalty_tier WHEN 'gold' THEN 0.9 WHEN 'silver' THEN 0.95 ELSE 1.0 END\n       ) AS INTEGER) AS discounted_total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name, c.loyalty_tier;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN oi.quantity ELSE 0 END), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nLEFT JOIN orders o ON o.id = oi.order_id\nGROUP BY p.id, p.name;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "discount-computed-from-raw-sum-ignoring-cancelled",
+      "files": {
+        "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE,\n    loyalty_tier TEXT NOT NULL DEFAULT 'bronze' CHECK (loyalty_tier IN ('bronze', 'silver', 'gold'))\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped', 'cancelled')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n",
+        "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN oi.quantity * oi.unit_price_cents ELSE 0 END), 0) AS total_cents,\n       CAST(ROUND(\n           COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) *\n           CASE c.loyalty_tier WHEN 'gold' THEN 0.9 WHEN 'silver' THEN 0.95 ELSE 1.0 END\n       ) AS INTEGER) AS discounted_total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name, c.loyalty_tier;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN oi.quantity ELSE 0 END), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nLEFT JOIN orders o ON o.id = oi.order_id\nGROUP BY p.id, p.name;\n"
+      }
+    }
+  ],
+  "name": "add_sql_ecommerce_discount_excludes_cancelled",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "sql-ecommerce",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

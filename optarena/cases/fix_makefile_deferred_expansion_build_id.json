@@ -1,0 +1,47 @@
+{
+  "description": "Switch a BUILD_ID variable from deferred (=) to immediate (:=) expansion, so every recipe line that references it during a single make run sees the SAME value instead of re-running the shell command each time",
+  "task_type": "bug_fix",
+  "tags": [
+    "make",
+    "devops",
+    "variable-expansion",
+    "correctness"
+  ],
+  "prompts": [
+    "The Makefile defines `BUILD_ID = $(shell date +%s%N)` using `=` (recursively-expanded / deferred), which means $(shell ...) is re-invoked EVERY SINGLE TIME $(BUILD_ID) is referenced in a recipe - so the `stamp` target, which writes $(BUILD_ID) into build_id_a.txt and build_id_b.txt in two separate recipe lines, writes two DIFFERENT timestamps despite both lines running in the same `make` invocation. Fix it by changing `=` to `:=` (simply-expanded / immediate) so $(shell ...) runs ONCE when the Makefile is parsed, and every reference to $(BUILD_ID) afterward - across the whole `make` run - sees that same value."
+  ],
+  "setup_files": {
+    "Makefile": "BUILD_ID = $(shell date +%s%N)\n\n.PHONY: stamp\nstamp:\n\techo $(BUILD_ID) > build_id_a.txt\n\techo $(BUILD_ID) > build_id_b.txt\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "build_id :="
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_build_id.py": "import subprocess\nfrom pathlib import Path\n\nr = subprocess.run(['make', 'stamp'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'make stamp failed: {r.stderr}'\n\na = Path('build_id_a.txt').read_text(encoding='utf-8').strip()\nb = Path('build_id_b.txt').read_text(encoding='utf-8').strip()\nassert a == b, (\n    f'BUILD_ID differs between the two recipe lines within the SAME make run '\n    f'(a={a!r}, b={b!r}) - $(shell ...) is being re-run on every reference, which means '\n    f'BUILD_ID is still deferred (=) instead of immediate (:=)')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_build_id.py",
+  "reference_solution": {
+    "Makefile": "BUILD_ID := $(shell date +%s%N)\n\n.PHONY: stamp\nstamp:\n\techo $(BUILD_ID) > build_id_a.txt\n\techo $(BUILD_ID) > build_id_b.txt\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Makefile": "BUILD_ID = $(shell date +%s%N)\n\n.PHONY: stamp\nstamp:\n\techo $(BUILD_ID) > build_id_a.txt\n\techo $(BUILD_ID) > build_id_b.txt\n"
+      }
+    }
+  ],
+  "name": "fix_makefile_deferred_expansion_build_id",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "difficulty": 3
+}

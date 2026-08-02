@@ -1,0 +1,54 @@
+{
+  "description": "Declare clean/test/all as .PHONY, so make still runs them even when a same-named file exists in the directory (a stale artifact currently makes 'make clean' silently do nothing)",
+  "tags": [
+    "make",
+    "devops",
+    "phony",
+    "correctness"
+  ],
+  "prompts": [
+    "The Makefile's clean and test targets are not declared .PHONY - Make treats a target as a FILE to build by default, so if a file literally named `clean` or `test` ever exists in the directory (e.g. left over from an old build script, or created by a typo), `make clean` / `make test` will see that file already exists with no newer prerequisites and silently do NOTHING instead of running the recipe. Add a `.PHONY: all clean test` declaration covering all three non-file targets (all, clean, test). Keep every existing recipe and target behavior otherwise unchanged."
+  ],
+  "setup_files": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall\n\nall: app\n\napp: main.o\n\t$(CC) -o app main.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\ntest: app\n\t./app > test_output.txt\n\nclean:\n\trm -f app *.o test_output.txt\n",
+    "main.c": "#include <stdio.h>\n\nint main(void) {\n    printf(\"ok\\n\");\n    return 0;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        ".phony"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_phony.py": "import subprocess\nfrom pathlib import Path\n\nr = subprocess.run(['make', 'all'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'make all failed: {r.stderr}'\nassert Path('app').exists(), 'app was not built'\n\n# Simulate the exact failure mode: a stray file literally named 'clean'.\nPath('clean').write_text('stray leftover file, not a real target\\n', encoding='utf-8')\n\nr = subprocess.run(['make', 'clean'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'make clean failed: {r.stderr}'\nassert not Path('app').exists(), (\n    'make clean did not actually remove app - a stray file named \"clean\" fooled it into a no-op '\n    '(clean is not declared .PHONY)')\n\n# Rebuild, then check the same failure mode for 'test'.\nr = subprocess.run(['make', 'all'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'rebuild failed: {r.stderr}'\nPath('test').write_text('stray leftover file, not a real target\\n', encoding='utf-8')\nPath('test_output.txt').unlink(missing_ok=True)\n\nr = subprocess.run(['make', 'test'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'make test failed: {r.stderr}'\nassert Path('test_output.txt').exists(), (\n    'make test did not actually run - a stray file named \"test\" fooled it into a no-op '\n    '(test is not declared .PHONY)')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_phony.py",
+  "reference_solution": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall\n\n.PHONY: all clean test\n\nall: app\n\napp: main.o\n\t$(CC) -o app main.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\ntest: app\n\t./app > test_output.txt\n\nclean:\n\trm -f app *.o test_output.txt\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Makefile": "CC = gcc\nCFLAGS = -Wall\n\nall: app\n\napp: main.o\n\t$(CC) -o app main.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\ntest: app\n\t./app > test_output.txt\n\nclean:\n\trm -f app *.o test_output.txt\n"
+      }
+    },
+    {
+      "name": "only-clean-declared-phony",
+      "files": {
+        "Makefile": "CC = gcc\nCFLAGS = -Wall\n\n.PHONY: clean\n\nall: app\n\napp: main.o\n\t$(CC) -o app main.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\ntest: app\n\t./app > test_output.txt\n\nclean:\n\trm -f app *.o test_output.txt\n"
+      }
+    }
+  ],
+  "name": "add_makefile_phony_targets",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "difficulty": 3,
+  "task_type": "devops"
+}

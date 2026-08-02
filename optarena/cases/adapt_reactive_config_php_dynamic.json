@@ -1,0 +1,57 @@
+{
+  "name": "adapt_reactive_config_php_dynamic",
+  "language": "php",
+  "framework": "plain-php",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time Greeter.php's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then Config::NAME changes under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["php", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "src/Config.php declares App\\Config with a public const NAME. Create src/Greeter.php declaring App\\Greeter with a public static function greet(): string that returns \"Hello, \" . Config::NAME . \"!\", reading Config::NAME (do not copy or hardcode its value).",
+    "Config::NAME may have changed since you last checked it. Make sure Greeter::greet() still returns a string built from the CURRENT value of Config::NAME, not a stale or hardcoded one."
+  ],
+  "setup_files": {
+    "src/Config.php": "<?php\nnamespace App;\n\nclass Config\n{\n    const NAME = \"World\";\n}\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_contains": {"path": "src/Greeter.php", "pattern": "Hello"}},
+      "description": "Config::NAME changed World -> Universe, triggered reactively once Greeter.php's first draft appeared (not a fixed step count)",
+      "write_files": {
+        "src/Config.php": "<?php\nnamespace App;\n\nclass Config\n{\n    const NAME = \"Universe\";\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/Greeter.php",
+      "content_patterns": ["greet"]
+    }
+  ],
+  "test_setup_files": {
+    "tests/GreeterTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Config.php';\nrequire_once __DIR__ . '/../src/Greeter.php';\n\nfinal class GreeterTest extends TestCase\n{\n    public function testGreetsWithCurrentName(): void\n    {\n        $got = \\App\\Greeter::greet();\n        $want = \"Hello, \" . \\App\\Config::NAME . \"!\";\n        $this->assertSame($want, $got, \"Greeter::greet() must use the CURRENT Config::NAME, not a stale value\");\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/GreeterTest.php",
+  "reference_solution": {
+    "src/Greeter.php": "<?php\nnamespace App;\n\nclass Greeter\n{\n    public static function greet(): string\n    {\n        return \"Hello, \" . Config::NAME . \"!\";\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "src/Greeter.php": "<?php\nnamespace App;\n\nclass Greeter\n{\n    public static function greet(): string\n    {\n        return \"Hello, World!\";\n    }\n}\n"
+      }
+    },
+    {
+      "name": "copies-value-instead-of-reading-live",
+      "files": {
+        "src/Greeter.php": "<?php\nnamespace App;\n\nclass Greeter\n{\n    private const CACHED_NAME = \"World\";\n\n    public static function greet(): string\n    {\n        return \"Hello, \" . self::CACHED_NAME . \"!\";\n    }\n}\n"
+      }
+    }
+  ]
+}

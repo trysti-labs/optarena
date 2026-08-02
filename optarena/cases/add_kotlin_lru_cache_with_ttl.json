@@ -1,0 +1,47 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded cache",
+  "task_type": "feature",
+  "tags": [
+    "kotlin",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "Cache<K, V> in Cache.kt is an unbounded key-value store - put/get never evict anything. Turn it into an LRU cache with a TTL: the constructor takes (capacity: Int, ttlMillis: Long) - a max size and a time-to-live in milliseconds - plus an injectable Clock (fun interface with now(): Long) defaulting to System.currentTimeMillis() for deterministic testing. put(key: K, value: V) stores a value timestamped at clock.now(). get(key: K): V? returns the value if present AND not expired (clock.now() - storedAt < ttlMillis), else null - and an expired entry must be REMOVED the moment it's observed to be stale. Both get and put must refresh a key's recency. When put() would exceed capacity, evict the LEAST recently used entry (recency = most recent get OR put) before inserting the new one."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Cache.kt",
+      "content_patterns": [
+        "class Cache"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Cache.kt": "package com.optarena.app\n\nfun interface Clock {\n    fun now(): Long\n}\n\nclass Cache<K, V>(\n    private val capacity: Int,\n    private val ttlMillis: Long,\n    private val clock: Clock = Clock { System.currentTimeMillis() },\n) {\n    private data class Entry<V>(val value: V, val storedAt: Long)\n\n    private val store = LinkedHashMap<K, Entry<V>>(16, 0.75f, true)\n\n    fun put(key: K, value: V) {\n        store.remove(key)\n        if (store.size >= capacity) {\n            val oldest = store.keys.firstOrNull()\n            if (oldest != null) store.remove(oldest)\n        }\n        store[key] = Entry(value, clock.now())\n    }\n\n    fun get(key: K): V? {\n        val entry = store[key] ?: return null\n        if (clock.now() - entry.storedAt >= ttlMillis) {\n            store.remove(key)\n            return null\n        }\n        return store[key]?.value\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Cache.kt": "package com.optarena.app\n\nfun interface Clock {\n    fun now(): Long\n}\n\nclass Cache<K, V>(\n    private val capacity: Int,\n    private val ttlMillis: Long,\n    private val clock: Clock = Clock { System.currentTimeMillis() },\n) {\n    private data class Entry<V>(val value: V, val storedAt: Long)\n\n    private val store = LinkedHashMap<K, Entry<V>>()\n\n    fun put(key: K, value: V) {\n        store.remove(key)\n        if (store.size >= capacity) {\n            val oldest = store.keys.firstOrNull()\n            if (oldest != null) store.remove(oldest)\n        }\n        store[key] = Entry(value, clock.now())\n    }\n\n    fun get(key: K): V? {\n        val entry = store[key] ?: return null\n        if (clock.now() - entry.storedAt >= ttlMillis) {\n            store.remove(key)\n            return null\n        }\n        return entry.value\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_kotlin_lru_cache_with_ttl",
+  "language": "kotlin",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "difficulty": 3,
+  "check_command": "mvn -o -q test -Dtest=CacheTest",
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Cache.kt": "package com.optarena.app\n\nclass Cache<K, V>(private val capacity: Int, private val ttlMillis: Long) {\n    private val store = HashMap<K, V>()\n\n    fun put(key: K, value: V) {\n        store[key] = value\n    }\n\n    fun get(key: K): V? = store[key]\n}\n"
+  },
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/CacheTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertNull\nimport org.junit.jupiter.api.Test\n\nprivate class FakeClock(var time: Long = 0L) : Clock {\n    override fun now(): Long = time\n}\n\nclass CacheTest {\n    @Test\n    fun capacityEvictsLeastRecentlyUsed() {\n        val clock = FakeClock(0)\n        val c = Cache<String, Int>(2, 1000, clock)\n        c.put(\"a\", 1); clock.time = 1\n        c.put(\"b\", 2); clock.time = 2\n        c.get(\"a\"); clock.time = 3\n        c.put(\"c\", 3); clock.time = 4\n        assertEquals(1, c.get(\"a\"))\n        assertNull(c.get(\"b\"))\n        assertEquals(3, c.get(\"c\"))\n    }\n\n    @Test\n    fun getRefreshesRecency() {\n        val clock = FakeClock(0)\n        val c = Cache<String, Int>(2, 1000, clock)\n        c.put(\"a\", 1); clock.time = 1\n        c.put(\"b\", 2); clock.time = 2\n        c.get(\"a\"); clock.time = 3\n        c.get(\"b\"); clock.time = 4\n        c.put(\"c\", 3); clock.time = 5\n        assertNull(c.get(\"a\"))\n        assertEquals(2, c.get(\"b\"))\n    }\n\n    @Test\n    fun ttlExpiryIndependentOfCapacity() {\n        val clock = FakeClock(0)\n        val c = Cache<String, Int>(5, 10, clock)\n        c.put(\"a\", 1)\n        clock.time = 9\n        assertEquals(1, c.get(\"a\"))\n        clock.time = 10\n        assertNull(c.get(\"a\"))\n    }\n}\n"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends and is exact for any starting weekday",
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "Dates.java's addBusinessDays(LocalDate start, int n) just does start.plusDays(n) - it counts weekends as business days. Implement it properly: n=0 returns start unchanged (even if start itself falls on a weekend); for n>0, step forward day by day, skipping Saturday and Sunday, until n business days have been counted, then return that date. It must be exact for any starting weekday and correctly cross month/year boundaries - do not use an approximation formula like `n + 2*(n/5)` calendar-days shortcut, it gives the wrong answer depending on which weekday `start` falls on."
+  ],
+  "setup_files": {
+    "Dates.java": "import java.time.LocalDate;\n\npublic final class Dates {\n    public static LocalDate addBusinessDays(LocalDate start, int n) {\n        return start.plusDays(n);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dates.java",
+      "content_patterns": [
+        "addBusinessDays"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "Dates.java": "import java.time.DayOfWeek;\nimport java.time.LocalDate;\n\npublic final class Dates {\n    public static LocalDate addBusinessDays(LocalDate start, int n) {\n        if (n == 0) {\n            return start;\n        }\n        LocalDate current = start;\n        int counted = 0;\n        while (counted < n) {\n            current = current.plusDays(1);\n            DayOfWeek day = current.getDayOfWeek();\n            if (day != DayOfWeek.SATURDAY && day != DayOfWeek.SUNDAY) {\n                counted++;\n            }\n        }\n        return current;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "Dates.java": "import java.time.LocalDate;\n\npublic final class Dates {\n    public static LocalDate addBusinessDays(LocalDate start, int n) {\n        if (n == 0) {\n            return start;\n        }\n        int weeks = n / 5;\n        int remainder = n % 5;\n        int calendarDays = weeks * 7 + remainder;\n        return start.plusDays(calendarDays);\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_java_business_day_date_math",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "java CheckDatesTest.java",
+  "test_setup_files": {
+    "DatesTest.java": "import java.time.DayOfWeek;\nimport java.time.LocalDate;\n\npublic final class DatesTest {\n    public static void main(String[] args) {\n        checkZeroReturnsStartUnchanged();\n        checkFridayPlusOneSkipsWeekend();\n        checkMondayPlusFiveLandsNextMonday();\n        checkCrossesMonthAndYearBoundary();\n        checkStartingOnAWeekendStillCountsCorrectly();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkZeroReturnsStartUnchanged() {\n        LocalDate d = LocalDate.of(2024, 6, 1); // Saturday\n        if (!Dates.addBusinessDays(d, 0).equals(d)) throw new AssertionError(\"expected unchanged\");\n    }\n\n    static void checkFridayPlusOneSkipsWeekend() {\n        LocalDate friday = LocalDate.of(2024, 5, 31);\n        LocalDate got = Dates.addBusinessDays(friday, 1);\n        if (!got.equals(LocalDate.of(2024, 6, 3))) throw new AssertionError(\"got \" + got);\n    }\n\n    static void checkMondayPlusFiveLandsNextMonday() {\n        LocalDate monday = LocalDate.of(2024, 5, 27);\n        LocalDate got = Dates.addBusinessDays(monday, 5);\n        if (!got.equals(LocalDate.of(2024, 6, 3))) throw new AssertionError(\"got \" + got);\n    }\n\n    static void checkCrossesMonthAndYearBoundary() {\n        LocalDate friday = LocalDate.of(2024, 12, 27);\n        LocalDate got = Dates.addBusinessDays(friday, 3);\n        if (!got.equals(LocalDate.of(2025, 1, 1))) throw new AssertionError(\"got \" + got);\n    }\n\n    static void checkStartingOnAWeekendStillCountsCorrectly() {\n        LocalDate saturday = LocalDate.of(2024, 6, 1);\n        LocalDate got = Dates.addBusinessDays(saturday, 1);\n        if (!got.equals(LocalDate.of(2024, 6, 3))) throw new AssertionError(\"got \" + got);\n    }\n}\n",
+    "CheckDatesTest.java": "import java.io.IOException;\n\npublic final class CheckDatesTest {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Dates.java\", \"DatesTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"DatesTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  }
+}

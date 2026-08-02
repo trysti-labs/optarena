@@ -1,0 +1,53 @@
+{
+  "description": "Reject non-numeric or out-of-range worker counts instead of passing them straight through, which currently lets garbage input reach the downstream config unchecked",
+  "tags": [
+    "shell",
+    "bash",
+    "validation",
+    "correctness"
+  ],
+  "prompts": [
+    "scripts/set_workers.sh writes its single argument straight into workers.conf with no validation at all - a typo like 'abc', a negative number, or an absurdly large value all get written through unchecked. Validate the argument: it must be a plain non-negative integer (digits only, no leading '+', no decimals, no leading zeros other than the literal '0' itself) in the range 1-64 inclusive. On invalid input, print an error to stderr naming the problem and exit 1 WITHOUT touching workers.conf. On valid input, write exactly that number (no trailing newline manipulation beyond a single trailing newline) to workers.conf and exit 0."
+  ],
+  "setup_files": {
+    "scripts/set_workers.sh": "#!/bin/bash\nset -euo pipefail\n# BUG: no validation - any input is written straight through.\necho \"$1\" > workers.conf\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/set_workers.sh",
+      "content_patterns": [
+        "=~"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "scripts/set_workers.sh": "#!/bin/bash\nset -euo pipefail\n\nvalue=$1\n\nif ! [[ \"$value\" =~ ^(0|[1-9][0-9]*)$ ]]; then\n  echo \"error: '$value' is not a plain non-negative integer\" >&2\n  exit 1\nfi\n\nif (( value < 1 || value > 64 )); then\n  echo \"error: $value is out of range (must be 1-64)\" >&2\n  exit 1\nfi\n\necho \"$value\" > workers.conf\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "scripts/set_workers.sh": "#!/bin/bash\nset -euo pipefail\necho \"$1\" > workers.conf\n"
+      }
+    },
+    {
+      "name": "checks-format-but-not-range",
+      "files": {
+        "scripts/set_workers.sh": "#!/bin/bash\nset -euo pipefail\n\nvalue=$1\n\nif ! [[ \"$value\" =~ ^(0|[1-9][0-9]*)$ ]]; then\n  echo \"error: '$value' is not a plain non-negative integer\" >&2\n  exit 1\nfi\n\necho \"$value\" > workers.conf\n"
+      }
+    }
+  ],
+  "name": "add_shell_numeric_range_validation",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops",
+  "test_setup_files": {
+    "check_set_workers.py": "\"\"\"Behavioral checks for scripts/set_workers.sh, run with the real bash.\"\"\"\nimport subprocess\nfrom pathlib import Path\n\nSCRIPT = \"scripts/set_workers.sh\"\nCONF = Path(\"workers.conf\")\n\n\ndef run(arg, timeout=10):\n    return subprocess.run([\"bash\", SCRIPT, arg], capture_output=True, text=True, timeout=timeout)\n\n\n# 1. A valid value in range is accepted and written.\nCONF.unlink(missing_ok=True)\nproc = run(\"8\")\nassert proc.returncode == 0, f\"expected success: {proc.stdout}{proc.stderr}\"\nassert CONF.read_text(encoding=\"utf-8\") == \"8\\n\", f\"got {CONF.read_text()!r}\"\n\n# 2. Non-numeric input is rejected and must NOT touch the file.\nCONF.unlink(missing_ok=True)\nproc = run(\"abc\")\nassert proc.returncode != 0, \"non-numeric input must be rejected\"\nassert not CONF.exists(), \"invalid input must not create/modify workers.conf\"\n\n# 3. Negative numbers are rejected.\nproc = run(\"-5\")\nassert proc.returncode != 0, \"negative numbers must be rejected\"\nassert not CONF.exists()\n\n# 4. Zero is out of range (must be at least 1).\nproc = run(\"0\")\nassert proc.returncode != 0, \"zero must be rejected (range is 1-64)\"\nassert not CONF.exists()\n\n# 5. Above the max (64) is rejected.\nproc = run(\"65\")\nassert proc.returncode != 0, \"65 must be rejected (max is 64)\"\nassert not CONF.exists()\n\n# 6. The max itself (64) is accepted.\nproc = run(\"64\")\nassert proc.returncode == 0, f\"64 should be accepted: {proc.stdout}{proc.stderr}\"\nassert CONF.read_text(encoding=\"utf-8\") == \"64\\n\"\n\n# 7. A decimal is rejected.\nCONF.unlink(missing_ok=True)\nproc = run(\"4.5\")\nassert proc.returncode != 0, \"decimals must be rejected\"\nassert not CONF.exists()\n\nprint(\"PASS set_workers.sh validation checks\")\n"
+  },
+  "check_command": "python3 check_set_workers.py"
+}

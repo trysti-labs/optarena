@@ -1,0 +1,47 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "kotlin",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "HashRing.kt's getNode picks a node with `Math.floorMod(key.hashCode(), nodes.size)` - removing or adding any node reshuffles almost every key. Implement a real consistent-hash ring with virtual nodes: the constructor takes (nodes: List<String>, replicas: Int) and places `replicas` virtual points per physical node around a ring, hashed via java.security.MessageDigest.getInstance(\"MD5\") over \"$node:$i\" for each virtual point - not key.hashCode(), it's a weaker distribution. getNode(key: String): String hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). addNode(node: String) and removeNode(node: String) update the ring in place."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "HashRing.kt",
+      "content_patterns": [
+        "class HashRing"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/HashRing.kt": "package com.optarena.app\n\nimport java.security.MessageDigest\nimport java.util.TreeMap\n\nclass HashRing(nodes: List<String>, private val replicas: Int) {\n    private val ring = TreeMap<Long, String>()\n\n    init {\n        nodes.forEach { addNode(it) }\n    }\n\n    private fun hashOf(s: String): Long {\n        val digest = MessageDigest.getInstance(\"MD5\").digest(s.toByteArray())\n        var value = 0L\n        for (i in 0 until 8) {\n            value = (value shl 8) or (digest[i].toLong() and 0xFF)\n        }\n        return value and Long.MAX_VALUE\n    }\n\n    fun addNode(node: String) {\n        for (i in 0 until replicas) {\n            ring[hashOf(\"$node:$i\")] = node\n        }\n    }\n\n    fun removeNode(node: String) {\n        for (i in 0 until replicas) {\n            ring.remove(hashOf(\"$node:$i\"))\n        }\n    }\n\n    fun getNode(key: String): String {\n        val point = hashOf(key)\n        val entry = ring.ceilingEntry(point) ?: ring.firstEntry()\n        return entry.value\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "src/main/kotlin/com/optarena/app/HashRing.kt": "package com.optarena.app\n\nimport java.security.MessageDigest\n\nclass HashRing(nodes: List<String>, private val replicas: Int) {\n    private val nodeList = nodes.toMutableList()\n\n    private fun hashOf(s: String): Long {\n        val digest = MessageDigest.getInstance(\"MD5\").digest(s.toByteArray())\n        var value = 0L\n        for (i in 0 until 8) {\n            value = (value shl 8) or (digest[i].toLong() and 0xFF)\n        }\n        return value and Long.MAX_VALUE\n    }\n\n    fun getNode(key: String): String {\n        val idx = (hashOf(key) % nodeList.size).toInt()\n        return nodeList[idx]\n    }\n\n    fun addNode(node: String) {\n        nodeList.add(node)\n    }\n\n    fun removeNode(node: String) {\n        nodeList.remove(node)\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_kotlin_consistent_hash_ring",
+  "language": "kotlin",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "difficulty": 3,
+  "check_command": "mvn -o -q test -Dtest=HashRingTest",
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/HashRing.kt": "package com.optarena.app\n\nclass HashRing(nodes: List<String>, private val replicas: Int) {\n    private val nodeList = nodes.toMutableList()\n\n    fun getNode(key: String): String {\n        val idx = Math.floorMod(key.hashCode(), nodeList.size)\n        return nodeList[idx]\n    }\n\n    fun addNode(node: String) {\n        nodeList.add(node)\n    }\n\n    fun removeNode(node: String) {\n        nodeList.remove(node)\n    }\n}\n"
+  },
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/HashRingTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Assertions.assertNotEquals\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\n\nclass HashRingTest {\n    @Test\n    fun everyKeyMapsToACurrentNode() {\n        val ring = HashRing(listOf(\"a\", \"b\", \"c\"), 50)\n        for (i in 0 until 200) {\n            val node = ring.getNode(\"key-$i\")\n            assertTrue(node in listOf(\"a\", \"b\", \"c\"))\n        }\n    }\n\n    @Test\n    fun deterministic() {\n        val ring = HashRing(listOf(\"a\", \"b\", \"c\"), 50)\n        assertEquals(ring.getNode(\"stable-key\"), ring.getNode(\"stable-key\"))\n    }\n\n    @Test\n    fun removingANodeOnlyMovesThatNodesOwnKeys() {\n        val nodes = listOf(\"n0\", \"n1\", \"n2\", \"n3\", \"n4\")\n        val ring = HashRing(nodes, 100)\n        val keys = (0 until 1000).map { \"key-$it\" }\n        val before = keys.associateWith { ring.getNode(it) }\n\n        ring.removeNode(\"n2\")\n\n        var moved = 0\n        for (k in keys) {\n            val after = ring.getNode(k)\n            if (after != before[k]) {\n                moved++\n                assertEquals(\"n2\", before[k])\n            }\n            assertNotEquals(\"n2\", after)\n        }\n        assertTrue(moved > 0)\n    }\n}\n"
+  }
+}

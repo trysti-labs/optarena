@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 60,
   "timeout": 600,
-  "description": "L3 repo-scale devops: containerize the tasktracker app - production-shaped Dockerfile (slim base, no-cache pip, non-root user, uvicorn CMD) + .dockerignore",
+  "description": "Repo-scale devops: containerize the tasktracker app - production-shaped Dockerfile (slim base, no-cache pip, non-root user, uvicorn CMD) + .dockerignore",
   "difficulty": 2,
   "task_type": "devops",
   "tags": [

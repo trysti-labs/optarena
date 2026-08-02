@@ -114,8 +114,10 @@ def to_html(run: dict) -> str:
         status = _case_status(c)
         cls = "pass" if status == "pass" else "fail"
         label = "PASS" if status == "pass" else ("ERROR" if status == "error" else "FAIL")
+        # A-16: truncate THEN escape. The other order can cut an entity in
+        # half ("&lt;" -> "&l"), which renders as literal text in the report.
         detail = "" if status == "pass" else escape(
-            (c.get("error") or "; ".join(c.get("failures", [])[:1]) or ""))[:400]
+            (c.get("error") or "; ".join(c.get("failures", [])[:1]) or "")[:400])
         traj = (c.get("extra", {}).get("oracle", {}) or {}).get("trajectory", {}) or {}
         off = traj.get("off_target_count", 0)
         badge = f' <span class="badge">⚠ {off} off-target</span>' if off else ""
@@ -129,8 +131,8 @@ def to_html(run: dict) -> str:
     def tile(label, value):
         return f'<div class="tile"><div class="l">{label}</div><div class="v">{value}</div></div>'
 
-    clean = f'{s["clean_passes"]}/{s["cases"]}' if s.get("clean_passes") is not None else "—"
-    cost = f'${s["total_cost_usd"]:.2f}' if s.get("total_cost_usd") is not None else "—"
+    clean = f'{s["clean_passes"]}/{s["cases"]}' if s.get("clean_passes") is not None else "-"
+    cost = f'${s["total_cost_usd"]:.2f}' if s.get("total_cost_usd") is not None else "-"
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OptArena report - {escape(scenario.get('name', ''))}</title>

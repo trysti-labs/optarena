@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- tests/ has its own project; without this the SDK's default glob
+         compiles tests/*.cs into the app itself, where xunit isn't referenced -->
+    <Compile Remove="tests/**" />
+  </ItemGroup>
+
+</Project>

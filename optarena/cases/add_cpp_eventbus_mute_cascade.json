@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (cpp-eventbus): muting a topic must cascade across publish, subscribe, and replay",
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "repo-scale",
+    "difficulty-4",
+    "cascading-state"
+  ],
+  "prompts": [
+    "Add `void EventBus::muteTopic(const std::string& topic)` / `unmuteTopic(...)`. Add `int EventBus::replay(const std::string& topic)`: re-invokes every current subscriber of `topic` for each matching entry already in the EventLog's history (a late subscriber catching up), returning the total invocation count. Muting must cascade across THREE places: (1) `publish()` must still log the event but skip invoking subscribers for a muted topic (return 0); (2) `subscribe()` must reject (-1) subscribing to a muted topic; (3) `replay()` must ALSO return 0 without invoking anyone for a muted topic - all three places that deliver/register callbacks for a topic must respect muting, not just publish and subscribe."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "include/event_bus.hpp",
+      "content_patterns": [
+        "muteTopic",
+        "replay"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_mute_cascade.cpp": "#include \"event_bus.hpp\"\n\n#include <cassert>\n#include <iostream>\n\nint main() {\n    {\n        EventLog log(10);\n        EventBus bus(log);\n        int count = 0;\n        bus.subscribe(\"orders\", [&count](const Event&) { count++; });\n        bus.publish(\"orders\", \"o1\");\n        assert(count == 1);\n\n        bus.muteTopic(\"orders\");\n        int invoked = bus.publish(\"orders\", \"o2\");\n        assert(invoked == 0);\n        assert(count == 1);\n        assert(log.size() == 2); /* still logged despite muting */\n\n        int subResult = bus.subscribe(\"orders\", [](const Event&) {});\n        assert(subResult == -1);\n    }\n    {\n        EventLog log(10);\n        EventBus bus(log);\n        bus.publish(\"orders\", \"o1\");\n        bus.publish(\"orders\", \"o2\");\n\n        int count = 0;\n        bus.subscribe(\"orders\", [&count](const Event&) { count++; });\n\n        bus.muteTopic(\"orders\");\n        int replayed = bus.replay(\"orders\");\n        assert(replayed == 0);\n        assert(count == 0);\n    }\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  },
+  "reference_solution": {
+    "include/event_bus.hpp": "#pragma once\n\n#include <functional>\n#include <string>\n#include <unordered_map>\n#include <unordered_set>\n#include <utility>\n\n#include \"event.hpp\"\n#include \"event_log.hpp\"\n\nclass EventBus {\npublic:\n    using Callback = std::function<void(const Event&)>;\n\n    explicit EventBus(EventLog& log) : log_(log) {}\n\n    void muteTopic(const std::string& topic) { muted_.insert(topic); }\n    void unmuteTopic(const std::string& topic) { muted_.erase(topic); }\n\n    /* Rejects (-1) subscribing to a muted topic - there's no point\n     * registering a listener for a topic that won't fire. */\n    int subscribe(const std::string& topic, Callback cb) {\n        if (muted_.count(topic)) {\n            return -1;\n        }\n        int id = next_id_++;\n        subscribers_[id] = std::make_pair(topic, std::move(cb));\n        return id;\n    }\n\n    void unsubscribe(int subscription_id) { subscribers_.erase(subscription_id); }\n\n    /* Always logs the event (history is preserved even while muted),\n     * but does not invoke subscribers for a muted topic. */\n    int publish(const std::string& topic, const std::string& payload) {\n        Event event{next_seq_++, topic, payload};\n        log_.record(event);\n        if (muted_.count(topic)) {\n            return 0;\n        }\n        int invoked = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                entry.second.second(event);\n                invoked++;\n            }\n        }\n        return invoked;\n    }\n\n    /* Re-invokes every current subscriber of `topic` for every logged\n     * history entry on that topic (e.g. a late subscriber catching up).\n     * Must ALSO respect muting - returns 0 without invoking anyone if\n     * the topic is muted, same as publish(). */\n    int replay(const std::string& topic) {\n        if (muted_.count(topic)) {\n            return 0;\n        }\n        int invoked = 0;\n        for (const auto& event : log_.history()) {\n            if (event.topic != topic) {\n                continue;\n            }\n            for (const auto& entry : subscribers_) {\n                if (entry.second.first == topic) {\n                    entry.second.second(event);\n                    invoked++;\n                }\n            }\n        }\n        return invoked;\n    }\n\nprivate:\n    EventLog& log_;\n    std::unordered_map<int, std::pair<std::string, Callback>> subscribers_;\n    std::unordered_set<std::string> muted_;\n    int next_id_ = 1;\n    long next_seq_ = 1;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "replay-not-checked-for-muted-topic",
+      "files": {
+        "include/event_bus.hpp": "#pragma once\n\n#include <functional>\n#include <string>\n#include <unordered_map>\n#include <unordered_set>\n#include <utility>\n\n#include \"event.hpp\"\n#include \"event_log.hpp\"\n\nclass EventBus {\npublic:\n    using Callback = std::function<void(const Event&)>;\n\n    explicit EventBus(EventLog& log) : log_(log) {}\n\n    void muteTopic(const std::string& topic) { muted_.insert(topic); }\n    void unmuteTopic(const std::string& topic) { muted_.erase(topic); }\n\n    /* Rejects (-1) subscribing to a muted topic - there's no point\n     * registering a listener for a topic that won't fire. */\n    int subscribe(const std::string& topic, Callback cb) {\n        if (muted_.count(topic)) {\n            return -1;\n        }\n        int id = next_id_++;\n        subscribers_[id] = std::make_pair(topic, std::move(cb));\n        return id;\n    }\n\n    void unsubscribe(int subscription_id) { subscribers_.erase(subscription_id); }\n\n    /* Always logs the event (history is preserved even while muted),\n     * but does not invoke subscribers for a muted topic. */\n    int publish(const std::string& topic, const std::string& payload) {\n        Event event{next_seq_++, topic, payload};\n        log_.record(event);\n        if (muted_.count(topic)) {\n            return 0;\n        }\n        int invoked = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                entry.second.second(event);\n                invoked++;\n            }\n        }\n        return invoked;\n    }\n\n    /* Re-invokes every current subscriber of `topic` for every logged\n     * history entry on that topic (e.g. a late subscriber catching up).\n     * Must ALSO respect muting - returns 0 without invoking anyone if\n     * the topic is muted, same as publish(). */\n    int replay(const std::string& topic) {\n        int invoked = 0;\n        for (const auto& event : log_.history()) {\n            if (event.topic != topic) {\n                continue;\n            }\n            for (const auto& entry : subscribers_) {\n                if (entry.second.first == topic) {\n                    entry.second.second(event);\n                    invoked++;\n                }\n            }\n        }\n        return invoked;\n    }\n\nprivate:\n    EventLog& log_;\n    std::unordered_map<int, std::pair<std::string, Callback>> subscribers_;\n    std::unordered_set<std::string> muted_;\n    int next_id_ = 1;\n    long next_seq_ = 1;\n};\n"
+      }
+    }
+  ],
+  "name": "add_cpp_eventbus_mute_cascade",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester:latest",
+  "setup_repo": "cpp-eventbus",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "check_command": "g++ -std=c++17 -Iinclude tests/test_mute_cascade.cpp -o test_bin && ./test_bin"
+}

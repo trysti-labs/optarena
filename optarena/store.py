@@ -24,9 +24,36 @@ import uuid
 from pathlib import Path
 
 
+def _looks_like_source_checkout(root: Path) -> bool:
+    """Is `root` the repository this package was installed from in editable
+    mode, rather than a site-packages directory? The sibling directories that
+    are deliberately NOT packaged (see pyproject.toml) are the giveaway."""
+    return (root / "pyproject.toml").is_file() and (root / "docker").is_dir()
+
+
 def _default_results_dir() -> Path:
+    """
+    Where runs are stored when nothing overrides it.
+
+    A-30: a source checkout keeps using `<repo>/results` (unchanged - existing
+    checkouts, scripts and the dashboard's relative "../results" fetch all
+    depend on it). Anything else falls back to `~/.optarena/results`, next to
+    the packs and pricing files that already live there.
+
+    The old code was `Path(__file__).resolve().parents[1] / "results"`
+    unconditionally, which in a non-editable install resolves to
+    **site-packages/results** - so run history was written inside the
+    installed package, where `pip install -U optarena` is entitled to delete
+    it. Nothing in CI caught this because the wheel smoke test only ran
+    `--help` and `cases validate`, neither of which touches this path.
+    """
     override = os.environ.get("OPTARENA_RESULTS_DIR")
-    return Path(override) if override else Path(__file__).resolve().parents[1] / "results"
+    if override:
+        return Path(override)
+    root = Path(__file__).resolve().parents[1]
+    if _looks_like_source_checkout(root):
+        return root / "results"
+    return Path.home() / ".optarena" / "results"
 
 
 RESULTS_DIR = _default_results_dir()
@@ -71,6 +98,13 @@ class _IndexLock:
 
     def __init__(self, path: Path):
         self.path = path
+        # A-07: whether THIS instance actually created the lock file. On
+        # wait-deadline expiry __enter__ deliberately proceeds unlocked (a
+        # lost index update is recoverable, a hung run is not) - but it must
+        # then NOT delete the lock on the way out, or it removes the holder's
+        # still-valid lock and a third process acquires it while the holder is
+        # mid-update, causing exactly the lost update this lock prevents.
+        self.acquired = False
 
     def __enter__(self) -> "_IndexLock":
         deadline = time.monotonic() + self.WAIT_DEADLINE_S
@@ -78,20 +112,25 @@ class _IndexLock:
             try:
                 fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.close(fd)
+                self.acquired = True
                 return self
             except FileExistsError:
                 try:
                     if time.time() - self.path.stat().st_mtime > self.STALE_AFTER_S:
+                        # Breaking a stale lock is still safe: the holder is
+                        # assumed dead, and whoever wins the next O_EXCL race
+                        # owns it.
                         self.path.unlink(missing_ok=True)
                         continue
                 except OSError:
                     pass
                 if time.monotonic() > deadline:
-                    return self
+                    return self          # unlocked, and self.acquired stays False
                 time.sleep(0.05)
 
     def __exit__(self, *exc_info) -> None:
-        self.path.unlink(missing_ok=True)
+        if self.acquired:
+            self.path.unlink(missing_ok=True)
 
 
 def _index_entry(rec: dict, path: Path) -> dict:

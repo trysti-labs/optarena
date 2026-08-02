@@ -1,0 +1,56 @@
+{
+  "name": "adapt_reactive_config_c_dynamic",
+  "language": "c",
+  "domain": "systems",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time greeter.c's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then config.h's NAME macro changes under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["c", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "config.h defines a macro NAME (a string literal). Create greeter.c that #includes \"config.h\" and defines `const char *greet(void)` returning \"Hello, \" NAME \"!\" using string literal concatenation with the NAME macro - do not hardcode the greeting as a separate literal string.",
+    "config.h's NAME macro may have changed since you last checked it. Make sure greet() still returns a string built from the CURRENT value of NAME, not a stale or hardcoded one."
+  ],
+  "setup_files": {
+    "config.h": "#define NAME \"World\"\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_contains": {"path": "greeter.c", "pattern": "Hello"}},
+      "description": "config.h's NAME macro changed World -> Universe, triggered reactively once greeter.c's first draft appeared (not a fixed step count)",
+      "write_files": {
+        "config.h": "#define NAME \"Universe\"\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "greeter.c",
+      "content_patterns": ["greet"]
+    }
+  ],
+  "test_setup_files": {
+    "test_greeter.c": "#include <stdio.h>\n#include <string.h>\n#include \"config.h\"\n\nconst char *greet(void);\n\nint main(void) {\n    const char *got = greet();\n    const char *want = \"Hello, \" NAME \"!\";\n    if (strcmp(got, want) != 0) {\n        fprintf(stderr, \"greet() = \\\"%s\\\", want \\\"%s\\\" (the CURRENT NAME, not a stale value)\\n\", got, want);\n        return 1;\n    }\n    printf(\"PASS\\n\");\n    return 0;\n}\n",
+    "test_greeter.py": "import subprocess\nsubprocess.run(['gcc', 'greeter.c', 'test_greeter.c', '-o', 'greeter_bin'], check=True)\nproc = subprocess.run(['./greeter_bin'], capture_output=True, text=True, timeout=5)\nassert proc.returncode == 0, f'exit {proc.returncode}, stderr={proc.stderr!r}'\nassert 'PASS' in proc.stdout, f'unexpected output: {proc.stdout!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_greeter.py",
+  "reference_solution": {
+    "greeter.c": "#include \"config.h\"\n\nconst char *greet(void) {\n    return \"Hello, \" NAME \"!\";\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "greeter.c": "const char *greet(void) {\n    return \"Hello, World!\";\n}\n"
+      }
+    },
+    {
+      "name": "copies-value-instead-of-reading-live",
+      "files": {
+        "greeter.c": "#define CACHED_NAME \"World\"\n\nconst char *greet(void) {\n    return \"Hello, \" CACHED_NAME \"!\";\n}\n"
+      }
+    }
+  ]
+}

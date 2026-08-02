@@ -1,0 +1,58 @@
+{
+  "description": "Add a dedicated test stage to a multi-stage build (separate from the runtime stage), so test dependencies never end up in the production image",
+  "task_type": "devops",
+  "tags": [
+    "docker",
+    "devops",
+    "multi-stage",
+    "testing"
+  ],
+  "prompts": [
+    "The Dockerfile installs pytest directly alongside the app's real runtime dependencies and there is no way to run the test suite as part of the build without shipping pytest in the final image. Restructure it into three named stages: a `base` stage (python:3.12-slim, installs ONLY requirements.txt, copies app code), a `test` stage that starts `FROM base`, additionally installs pytest, copies the tests/ directory, and RUNs `pytest tests/` (so `docker build --target test` fails the build if tests fail), and a final (unnamed, last) stage that starts `FROM base` again and is the actual runtime image - it must NOT install pytest and must NOT copy tests/. The final stage keeps the original EXPOSE 8000 and CMD."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt pytest\nCOPY app ./app\nCOPY tests ./tests\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n",
+    "requirements.txt": "fastapi\nuvicorn\n",
+    "app/main.py": "from fastapi import FastAPI\n\napp = FastAPI()\n\n\n@app.get(\"/health\")\ndef health():\n    return {\"status\": \"ok\"}\n",
+    "tests/test_health.py": "def test_placeholder():\n    assert True\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "as base",
+        "as test",
+        "pytest tests"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_test_stage.py": "import re\nfrom pathlib import Path\n\nraw = Path(\"Dockerfile\").read_text(encoding=\"utf-8\")\njoined = re.sub(r\"\\\\\\s*\\n\", \" \", raw)\nlines = [l.strip() for l in joined.splitlines() if l.strip() and not l.strip().startswith(\"#\")]\n\nfrom_lines = [(i, l) for i, l in enumerate(lines) if l.upper().startswith(\"FROM \")]\nassert len(from_lines) >= 3, f\"expected at least 3 FROM stages (base/test/final), found {len(from_lines)}\"\n\nbase_idx = next((i for i, l in from_lines if re.search(r\"AS\\s+base\\b\", l, re.IGNORECASE)), None)\nassert base_idx is not None, \"no stage named 'base' found\"\n\ntest_idx = next((i for i, l in from_lines if re.search(r\"AS\\s+test\\b\", l, re.IGNORECASE)), None)\nassert test_idx is not None, \"no stage named 'test' found\"\ntest_from_line = lines[test_idx]\nassert re.search(r\"FROM\\s+base\\b\", test_from_line, re.IGNORECASE), (\n    f\"the test stage must be 'FROM base', got: {test_from_line}\")\n\nfinal_idx = from_lines[-1][0]\nassert final_idx != test_idx, \"the final (runtime) stage must not be the test stage itself\"\nfinal_from_line = lines[final_idx]\nassert re.search(r\"FROM\\s+base\\b\", final_from_line, re.IGNORECASE), (\n    f\"the final runtime stage must be 'FROM base', got: {final_from_line}\")\n\ntest_stage_lines = lines[test_idx:final_idx]\nassert any(\"pytest\" in l for l in test_stage_lines), \"test stage never installs pytest\"\nassert any(re.search(r\"RUN\\s+pytest\\s+tests\", l, re.IGNORECASE) for l in test_stage_lines), (\n    \"test stage never actually runs pytest tests/\")\n\nfinal_stage_lines = lines[final_idx:]\nassert not any(\"pytest\" in l for l in final_stage_lines), (\n    \"the runtime (final) stage must not install or reference pytest\")\nassert not any(\"tests\" in l and l.upper().startswith(\"COPY\") for l in final_stage_lines), (\n    \"the runtime (final) stage must not COPY the tests/ directory\")\n\nassert any(l.upper().startswith(\"EXPOSE\") and \"8000\" in l for l in final_stage_lines), (\n    \"EXPOSE 8000 missing from the final stage\")\ncmd_all = \" \".join(l for l in final_stage_lines if l.upper().startswith((\"CMD \", \"ENTRYPOINT \")))\nfor needle in (\"uvicorn\", \"app.main:app\", \"8000\"):\n    assert needle in cmd_all, f\"final stage CMD changed - missing {needle!r}\"\n\nprint(\"PASS multi-stage test-stage checks\")\n"
+  },
+  "check_command": "python3 check_test_stage.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.12-slim AS base\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY app ./app\n\nFROM base AS test\nRUN pip install --no-cache-dir pytest\nCOPY tests ./tests\nRUN pytest tests/\n\nFROM base\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt pytest\nCOPY app ./app\nCOPY tests ./tests\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n"
+      }
+    },
+    {
+      "name": "final-stage-still-copies-tests",
+      "files": {
+        "Dockerfile": "FROM python:3.12-slim AS base\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY app ./app\n\nFROM base AS test\nRUN pip install --no-cache-dir pytest\nCOPY tests ./tests\nRUN pytest tests/\n\nFROM base\nCOPY tests ./tests\nEXPOSE 8000\nCMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]\n"
+      }
+    }
+  ],
+  "name": "add_dockerfile_multistage_test_stage",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

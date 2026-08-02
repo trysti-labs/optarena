@@ -1,0 +1,64 @@
+{
+  "description": "Repo-scale (k8s-appstack): a new ResourceQuota must be sized against the HPA's maxReplicas (the true autoscaling peak), not the Deployment's current spec.replicas",
+  "tags": [
+    "yaml",
+    "kubernetes",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Bump the Deployment's `spec.replicas` from 3 to 4 (k8s/deployment.yaml), and increase the HPA's `maxReplicas` from 10 to 15 (k8s/hpa.yaml). Add a new `k8s/resourcequota.yaml` (a ResourceQuota named `webstore-quota` in the `webstore` namespace) capping the namespace's total `requests.cpu` and `requests.memory`. Critically, size `requests.cpu` against the Deployment's TRUE PEAK possible replica count - since the HPA can autoscale the deployment up to `maxReplicas` at any time, the quota must cover `maxReplicas` (not the lower current `spec.replicas`) times the per-pod CPU request. Sizing it against only the current replica count would silently block the deployment from ever reaching the peak the HPA is allowed to scale it to."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "k8s/deployment.yaml",
+      "content_patterns": [
+        "replicas: 4"
+      ]
+    },
+    {
+      "path_pattern": "k8s/hpa.yaml",
+      "content_patterns": [
+        "maxReplicas: 15"
+      ]
+    },
+    {
+      "path_pattern": "k8s/resourcequota.yaml",
+      "content_patterns": [
+        "webstore-quota",
+        "requests.cpu"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_quota_peak.py": "import yaml\n\n\ndef parse_millicpu(value):\n    value = str(value)\n    if value.endswith('m'):\n        return int(value[:-1])\n    return int(float(value) * 1000)\n\n\nwith open('k8s/deployment.yaml') as f:\n    dep = yaml.safe_load(f)\nwith open('k8s/hpa.yaml') as f:\n    hpa = yaml.safe_load(f)\nwith open('k8s/resourcequota.yaml') as f:\n    quota = yaml.safe_load(f)\n\nassert dep['spec']['replicas'] == 4, f\"expected replicas 4, got {dep['spec']['replicas']}\"\nassert hpa['spec']['maxReplicas'] == 15, f\"expected maxReplicas 15, got {hpa['spec']['maxReplicas']}\"\n\ncontainer = dep['spec']['template']['spec']['containers'][0]\nper_pod_cpu = parse_millicpu(container['resources']['requests']['cpu'])\npeak_replicas = hpa['spec']['maxReplicas']\nneeded = peak_replicas * per_pod_cpu\n\nquota_cpu = parse_millicpu(quota['spec']['hard']['requests.cpu'])\nassert quota_cpu >= needed, (\n    f\"ResourceQuota requests.cpu ({quota_cpu}m) is not enough for the HPA's true peak of \"\n    f\"{peak_replicas} replicas x {per_pod_cpu}m each = {needed}m - the autoscaler can push the \"\n    f\"deployment up to maxReplicas at any time, so sizing the quota against the current (lower) \"\n    f\"spec.replicas would silently block it from ever reaching that peak\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_quota_peak.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: webstore-api\n  namespace: webstore\n  labels:\n    app: webstore-api\nspec:\n  replicas: 4\n  selector:\n    matchLabels:\n      app: webstore-api\n  template:\n    metadata:\n      labels:\n        app: webstore-api\n    spec:\n      containers:\n        - name: api\n          image: webstore/api:1.0.0\n          ports:\n            - name: http\n              containerPort: 8080\n          envFrom:\n            - configMapRef:\n                name: webstore-config\n          resources:\n            requests:\n              cpu: \"250m\"\n              memory: \"256Mi\"\n            limits:\n              cpu: \"500m\"\n              memory: \"512Mi\"\n",
+    "k8s/hpa.yaml": "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: webstore-api\n  namespace: webstore\nspec:\n  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: webstore-api\n  minReplicas: 3\n  maxReplicas: 15\n  metrics:\n    - type: Resource\n      resource:\n        name: cpu\n        target:\n          type: Utilization\n          averageUtilization: 70\n",
+    "k8s/resourcequota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: webstore-quota\n  namespace: webstore\nspec:\n  hard:\n    requests.cpu: \"4000m\"\n    requests.memory: \"4Gi\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "quota-sized-for-current-replicas-not-peak",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: webstore-api\n  namespace: webstore\n  labels:\n    app: webstore-api\nspec:\n  replicas: 4\n  selector:\n    matchLabels:\n      app: webstore-api\n  template:\n    metadata:\n      labels:\n        app: webstore-api\n    spec:\n      containers:\n        - name: api\n          image: webstore/api:1.0.0\n          ports:\n            - name: http\n              containerPort: 8080\n          envFrom:\n            - configMapRef:\n                name: webstore-config\n          resources:\n            requests:\n              cpu: \"250m\"\n              memory: \"256Mi\"\n            limits:\n              cpu: \"500m\"\n              memory: \"512Mi\"\n",
+        "k8s/hpa.yaml": "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: webstore-api\n  namespace: webstore\nspec:\n  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: webstore-api\n  minReplicas: 3\n  maxReplicas: 15\n  metrics:\n    - type: Resource\n      resource:\n        name: cpu\n        target:\n          type: Utilization\n          averageUtilization: 70\n",
+        "k8s/resourcequota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: webstore-quota\n  namespace: webstore\nspec:\n  hard:\n    requests.cpu: \"1000m\"\n    requests.memory: \"1Gi\"\n"
+      }
+    }
+  ],
+  "name": "add_k8s_appstack_quota_sized_for_hpa_peak",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "k8s-appstack",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

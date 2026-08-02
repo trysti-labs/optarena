@@ -1,0 +1,49 @@
+{
+  "description": "Fix a container/heap priority queue that breaks ties by comparing payload fields directly (no FIFO guarantee) into an insertion-order-stable one",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "algorithms",
+    "container-heap"
+  ],
+  "prompts": [
+    "pq.go implements heap.Interface directly over Priority alone - Less(i, j) only compares Priority, so container/heap makes NO guarantee about the relative order of equal-priority items (heap operations can and do reorder them). Fix it so that: (1) items with a lower Priority number come out first, and (2) items with EQUAL Priority always come out in the order they were originally pushed (FIFO) - add an explicit monotonically increasing insertion-order field to Item and use it as the tiebreaker in Less."
+  ],
+  "setup_files": {
+    "go.mod": "module stablepq\n\ngo 1.21\n",
+    "pq.go": "package main\n\nimport \"container/heap\"\n\ntype Item struct {\n\tPriority int\n\tValue    string\n}\n\ntype priorityQueue []*Item\n\nfunc (pq priorityQueue) Len() int { return len(pq) }\nfunc (pq priorityQueue) Less(i, j int) bool { return pq[i].Priority < pq[j].Priority }\nfunc (pq priorityQueue) Swap(i, j int)      { pq[i], pq[j] = pq[j], pq[i] }\nfunc (pq *priorityQueue) Push(x any)        { *pq = append(*pq, x.(*Item)) }\nfunc (pq *priorityQueue) Pop() any {\n\told := *pq\n\tn := len(old)\n\titem := old[n-1]\n\t*pq = old[:n-1]\n\treturn item\n}\n\ntype StablePriorityQueue struct {\n\theap priorityQueue\n}\n\nfunc NewStablePriorityQueue() *StablePriorityQueue {\n\treturn &StablePriorityQueue{}\n}\n\nfunc (q *StablePriorityQueue) Push(priority int, value string) {\n\theap.Push(&q.heap, &Item{Priority: priority, Value: value})\n}\n\nfunc (q *StablePriorityQueue) Pop() string {\n\treturn heap.Pop(&q.heap).(*Item).Value\n}\n\nfunc (q *StablePriorityQueue) Len() int {\n\treturn q.heap.Len()\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pq.go",
+      "content_patterns": [
+        "StablePriorityQueue"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "pq_test.go": "package main\n\nimport \"testing\"\n\nfunc TestPriorityOrder(t *testing.T) {\n\tq := NewStablePriorityQueue()\n\tq.Push(5, \"low\")\n\tq.Push(1, \"high\")\n\tq.Push(3, \"mid\")\n\tgot := []string{q.Pop(), q.Pop(), q.Pop()}\n\twant := []string{\"high\", \"mid\", \"low\"}\n\tfor i := range want {\n\t\tif got[i] != want[i] {\n\t\t\tt.Fatalf(\"got %v, want %v\", got, want)\n\t\t}\n\t}\n}\n\nfunc TestEqualPriorityIsFifoAcrossManyItems(t *testing.T) {\n\tq := NewStablePriorityQueue()\n\tfor i := 0; i < 20; i++ {\n\t\tq.Push(1, string(rune('a'+i)))\n\t}\n\tfor i := 0; i < 20; i++ {\n\t\tgot := q.Pop()\n\t\twant := string(rune('a' + i))\n\t\tif got != want {\n\t\t\tt.Fatalf(\"pop %d: got %q, want %q\", i, got, want)\n\t\t}\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module stablepq\n\ngo 1.21\n",
+    "pq.go": "package main\n\nimport \"container/heap\"\n\ntype Item struct {\n\tPriority int\n\tOrder    int\n\tValue    string\n}\n\ntype priorityQueue []*Item\n\nfunc (pq priorityQueue) Len() int { return len(pq) }\nfunc (pq priorityQueue) Less(i, j int) bool {\n\tif pq[i].Priority != pq[j].Priority {\n\t\treturn pq[i].Priority < pq[j].Priority\n\t}\n\treturn pq[i].Order < pq[j].Order\n}\nfunc (pq priorityQueue) Swap(i, j int) { pq[i], pq[j] = pq[j], pq[i] }\nfunc (pq *priorityQueue) Push(x any)   { *pq = append(*pq, x.(*Item)) }\nfunc (pq *priorityQueue) Pop() any {\n\told := *pq\n\tn := len(old)\n\titem := old[n-1]\n\t*pq = old[:n-1]\n\treturn item\n}\n\ntype StablePriorityQueue struct {\n\theap    priorityQueue\n\tcounter int\n}\n\nfunc NewStablePriorityQueue() *StablePriorityQueue {\n\treturn &StablePriorityQueue{}\n}\n\nfunc (q *StablePriorityQueue) Push(priority int, value string) {\n\theap.Push(&q.heap, &Item{Priority: priority, Order: q.counter, Value: value})\n\tq.counter++\n}\n\nfunc (q *StablePriorityQueue) Pop() string {\n\treturn heap.Pop(&q.heap).(*Item).Value\n}\n\nfunc (q *StablePriorityQueue) Len() int {\n\treturn q.heap.Len()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-order-tiebreak",
+      "files": {
+        "go.mod": "module stablepq\n\ngo 1.21\n",
+        "pq.go": "package main\n\nimport \"container/heap\"\n\ntype Item struct {\n\tPriority int\n\tValue    string\n}\n\ntype priorityQueue []*Item\n\nfunc (pq priorityQueue) Len() int { return len(pq) }\nfunc (pq priorityQueue) Less(i, j int) bool { return pq[i].Priority < pq[j].Priority }\nfunc (pq priorityQueue) Swap(i, j int)      { pq[i], pq[j] = pq[j], pq[i] }\nfunc (pq *priorityQueue) Push(x any)        { *pq = append(*pq, x.(*Item)) }\nfunc (pq *priorityQueue) Pop() any {\n\told := *pq\n\tn := len(old)\n\titem := old[n-1]\n\t*pq = old[:n-1]\n\treturn item\n}\n\ntype StablePriorityQueue struct {\n\theap priorityQueue\n}\n\nfunc NewStablePriorityQueue() *StablePriorityQueue {\n\treturn &StablePriorityQueue{}\n}\n\nfunc (q *StablePriorityQueue) Push(priority int, value string) {\n\theap.Push(&q.heap, &Item{Priority: priority, Value: value})\n}\n\nfunc (q *StablePriorityQueue) Pop() string {\n\treturn heap.Pop(&q.heap).(*Item).Value\n}\n\nfunc (q *StablePriorityQueue) Len() int {\n\treturn q.heap.Len()\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_stable_priority_queue",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

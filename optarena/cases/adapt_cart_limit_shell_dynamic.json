@@ -1,0 +1,57 @@
+{
+  "name": "adapt_cart_limit_shell_dynamic",
+  "language": "shell",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: max_items.txt (a spec file the cart limit must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old limit into can_add.sh",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "shell",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a POSIX shell script called can_add.sh that takes one integer argument (a count) and exits 0 if the count is less than or equal to the integer in max_items.txt (currently 5), else exits 1. Read the limit from the file at run time - do not hardcode it.",
+    "max_items.txt has changed. Make sure can_add.sh enforces the CURRENT limit in the file."
+  ],
+  "setup_files": {
+    "max_items.txt": "5\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "max_items.txt tightened to a lower limit",
+      "write_files": {
+        "max_items.txt": "3\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "can_add.sh",
+      "content_patterns": [
+        "max_items.txt"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_can_add.py": "import subprocess\n\nwith open('max_items.txt', encoding='utf-8') as f:\n    limit = int(f.read().strip())\n\nok = subprocess.run(['sh', 'can_add.sh', str(limit)], timeout=10)\nassert ok.returncode == 0, f'can_add.sh {limit} should exit 0, got {ok.returncode}'\n\nbad = subprocess.run(['sh', 'can_add.sh', str(limit + 1)], timeout=10)\nassert bad.returncode != 0, f'can_add.sh {limit + 1} should exit nonzero (stale limit not updated)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_can_add.py",
+  "reference_solution": {
+    "can_add.sh": "#!/bin/sh\ncount=\"$1\"\nlimit=$(cat max_items.txt)\nif [ \"$count\" -le \"$limit\" ]; then\n    exit 0\nelse\n    exit 1\nfi\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-limit",
+      "files": {
+        "can_add.sh": "#!/bin/sh\ncount=\"$1\"\n# reads max_items.txt for documentation only, uses a hardcoded value below\nif [ \"$count\" -le 5 ]; then\n    exit 0\nelse\n    exit 1\nfi\n"
+      }
+    }
+  ]
+}

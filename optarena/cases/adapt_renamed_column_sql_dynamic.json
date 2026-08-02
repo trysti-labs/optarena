@@ -1,0 +1,58 @@
+{
+  "name": "adapt_renamed_column_sql_dynamic",
+  "language": "sql",
+  "domain": "data",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: column_name.txt (a spec file naming the products price column) is REWRITTEN between prompts (fixed after_prompt trigger, simulating a column rename); the agent's view definition must follow, not keep referencing the old column name",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "sql",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "renamed-column"
+  ],
+  "prompts": [
+    "The products table has an INTEGER price-in-cents column named according to column_name.txt (currently: price_cents). Write schema.sql containing a VIEW named cheap_products that selects id from products where that column's value is less than 1000 - use the column name from column_name.txt in your SQL.",
+    "column_name.txt has changed. Update the cheap_products view definition to use the CURRENT column name."
+  ],
+  "setup_files": {
+    "column_name.txt": "price_cents\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "products price column renamed",
+      "write_files": {
+        "column_name.txt": "unit_price_cents\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "cheap_products",
+        "products"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_view.py": "import sqlite3\n\nwith open('column_name.txt', encoding='utf-8') as f:\n    col = f.read().strip()\nassert col, 'column_name.txt is empty'\n\nconn = sqlite3.connect(':memory:')\nconn.execute(f'CREATE TABLE products (id INTEGER PRIMARY KEY, {col} INTEGER NOT NULL)')\nconn.execute(f'INSERT INTO products (id, {col}) VALUES (1, 500), (2, 1500)')\nconn.commit()\n\nwith open('schema.sql', encoding='utf-8') as f:\n    ddl = f.read()\ntry:\n    conn.executescript(ddl)\nexcept sqlite3.OperationalError as e:\n    raise AssertionError(f'schema.sql failed against the CURRENT column name {col!r} (likely still references the old name): {e}')\n\nrows = conn.execute('SELECT id FROM cheap_products').fetchall()\nassert rows == [(1,)], f'expected cheap_products to return only id=1, got {rows}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_view.py",
+  "reference_solution": {
+    "schema.sql": "CREATE VIEW cheap_products AS\nSELECT id FROM products WHERE unit_price_cents < 1000;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-column-name",
+      "files": {
+        "schema.sql": "CREATE VIEW cheap_products AS\nSELECT id FROM products WHERE price_cents < 1000;\n"
+      }
+    }
+  ]
+}

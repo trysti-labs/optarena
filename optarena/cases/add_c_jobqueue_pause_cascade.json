@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (c-jobqueue): pausing the scheduler must cascade across submit, run_next, and retry",
+  "task_type": "feature",
+  "tags": [
+    "c",
+    "repo-scale",
+    "difficulty-4",
+    "cascading-state"
+  ],
+  "prompts": [
+    "Add a `paused` field to Scheduler (default 0) plus `scheduler_pause`/`scheduler_resume`. Add `int scheduler_retry(Scheduler *s, int id)`: moves a FAILED history entry back into the pending queue (assigning it a fresh id) for another attempt, returning the new id, or -1 if the job isn't FAILED. Pausing must cascade across THREE places, all rejecting new work while paused: (1) `scheduler_submit` must return -1 while paused; (2) `scheduler_run_next` must return 0 while paused, even with jobs pending; (3) `scheduler_retry` must ALSO return -1 while paused - retries are a form of new work and must be held back too, not just the two original submission paths."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "include/scheduler.h",
+      "content_patterns": [
+        "paused",
+        "scheduler_retry"
+      ]
+    },
+    {
+      "path_pattern": "src/scheduler.c",
+      "content_patterns": [
+        "scheduler_retry"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_pause_cascade.c": "#include \"scheduler.h\"\n\n#include <assert.h>\n#include <stdio.h>\n\nstatic void test_paused_scheduler_rejects_submit_and_run_next(void) {\n    Scheduler s;\n    scheduler_init(&s);\n    scheduler_submit(&s, 1, \"a\");\n    scheduler_pause(&s);\n\n    assert(scheduler_submit(&s, 1, \"b\") == -1);\n\n    int id;\n    assert(scheduler_run_next(&s, &id) == 0);\n}\n\nstatic void test_paused_scheduler_rejects_retry(void) {\n    Scheduler s;\n    scheduler_init(&s);\n    int id = scheduler_submit(&s, 1, \"a\");\n    int running_id;\n    scheduler_run_next(&s, &running_id);\n    scheduler_fail(&s, id);\n\n    scheduler_pause(&s);\n    assert(scheduler_retry(&s, id) == -1);\n\n    scheduler_resume(&s);\n    assert(scheduler_retry(&s, id) != -1);\n}\n\nint main(void) {\n    test_paused_scheduler_rejects_submit_and_run_next();\n    test_paused_scheduler_rejects_retry();\n    printf(\"PASS\\n\");\n    return 0;\n}\n"
+  },
+  "reference_solution": {
+    "include/scheduler.h": "#pragma once\n\n#include \"job.h\"\n#include \"queue.h\"\n\n#define SCHEDULER_MAX_RUNNING 256\n#define SCHEDULER_MAX_HISTORY 256\n\ntypedef struct {\n    JobQueue pending;\n    Job running[SCHEDULER_MAX_RUNNING];\n    int running_count;\n    Job history[SCHEDULER_MAX_HISTORY];\n    int history_count;\n    int paused;\n} Scheduler;\n\nvoid scheduler_init(Scheduler *s);\nvoid scheduler_pause(Scheduler *s);\nvoid scheduler_resume(Scheduler *s);\n\n/* Rejects (-1) while paused. */\nint scheduler_submit(Scheduler *s, int priority, const char *payload);\n\n/* Rejects (0) while paused, even if jobs are pending. */\nint scheduler_run_next(Scheduler *s, int *out_id);\n\nint scheduler_complete(Scheduler *s, int id);\nint scheduler_fail(Scheduler *s, int id);\n\n/* Moves a FAILED job from history back into the pending queue for\n * another attempt (a fresh id is assigned). Rejects (-1) if the job\n * isn't FAILED, or if the scheduler is paused - retries are a form of\n * new work and must also be held back while paused. */\nint scheduler_retry(Scheduler *s, int id);\n\nint scheduler_find_state(const Scheduler *s, int id, JobState *out_state);\n",
+    "src/scheduler.c": "#include \"scheduler.h\"\n\nvoid scheduler_init(Scheduler *s) {\n    queue_init(&s->pending);\n    s->running_count = 0;\n    s->history_count = 0;\n    s->paused = 0;\n}\n\nvoid scheduler_pause(Scheduler *s) {\n    s->paused = 1;\n}\n\nvoid scheduler_resume(Scheduler *s) {\n    s->paused = 0;\n}\n\nint scheduler_submit(Scheduler *s, int priority, const char *payload) {\n    if (s->paused) {\n        return -1;\n    }\n    return queue_push(&s->pending, priority, payload);\n}\n\nint scheduler_run_next(Scheduler *s, int *out_id) {\n    if (s->paused || s->running_count >= SCHEDULER_MAX_RUNNING) {\n        return 0;\n    }\n    Job job;\n    if (!queue_pop(&s->pending, &job)) {\n        return 0;\n    }\n    job.state = JOB_RUNNING;\n    s->running[s->running_count++] = job;\n    *out_id = job.id;\n    return 1;\n}\n\nstatic int find_running_index(Scheduler *s, int id) {\n    for (int i = 0; i < s->running_count; i++) {\n        if (s->running[i].id == id) {\n            return i;\n        }\n    }\n    return -1;\n}\n\nstatic int finish_job(Scheduler *s, int id, JobState final_state) {\n    int idx = find_running_index(s, id);\n    if (idx < 0) {\n        return 0;\n    }\n    Job job = s->running[idx];\n    job.state = final_state;\n    for (int i = idx; i < s->running_count - 1; i++) {\n        s->running[i] = s->running[i + 1];\n    }\n    s->running_count--;\n    if (s->history_count < SCHEDULER_MAX_HISTORY) {\n        s->history[s->history_count++] = job;\n    }\n    return 1;\n}\n\nint scheduler_complete(Scheduler *s, int id) {\n    return finish_job(s, id, JOB_DONE);\n}\n\nint scheduler_fail(Scheduler *s, int id) {\n    return finish_job(s, id, JOB_FAILED);\n}\n\nint scheduler_retry(Scheduler *s, int id) {\n    if (s->paused) {\n        return -1;\n    }\n    for (int i = 0; i < s->history_count; i++) {\n        if (s->history[i].id == id && s->history[i].state == JOB_FAILED) {\n            int new_id = queue_push(&s->pending, s->history[i].priority, s->history[i].payload);\n            for (int j = i; j < s->history_count - 1; j++) {\n                s->history[j] = s->history[j + 1];\n            }\n            s->history_count--;\n            return new_id;\n        }\n    }\n    return -1;\n}\n\nint scheduler_find_state(const Scheduler *s, int id, JobState *out_state) {\n    for (int i = 0; i < s->pending.count; i++) {\n        if (s->pending.jobs[i].id == id) {\n            *out_state = s->pending.jobs[i].state;\n            return 1;\n        }\n    }\n    for (int i = 0; i < s->running_count; i++) {\n        if (s->running[i].id == id) {\n            *out_state = s->running[i].state;\n            return 1;\n        }\n    }\n    for (int i = 0; i < s->history_count; i++) {\n        if (s->history[i].id == id) {\n            *out_state = s->history[i].state;\n            return 1;\n        }\n    }\n    return 0;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "retry-not-checked-for-paused",
+      "files": {
+        "include/scheduler.h": "#pragma once\n\n#include \"job.h\"\n#include \"queue.h\"\n\n#define SCHEDULER_MAX_RUNNING 256\n#define SCHEDULER_MAX_HISTORY 256\n\ntypedef struct {\n    JobQueue pending;\n    Job running[SCHEDULER_MAX_RUNNING];\n    int running_count;\n    Job history[SCHEDULER_MAX_HISTORY];\n    int history_count;\n    int paused;\n} Scheduler;\n\nvoid scheduler_init(Scheduler *s);\nvoid scheduler_pause(Scheduler *s);\nvoid scheduler_resume(Scheduler *s);\n\n/* Rejects (-1) while paused. */\nint scheduler_submit(Scheduler *s, int priority, const char *payload);\n\n/* Rejects (0) while paused, even if jobs are pending. */\nint scheduler_run_next(Scheduler *s, int *out_id);\n\nint scheduler_complete(Scheduler *s, int id);\nint scheduler_fail(Scheduler *s, int id);\n\n/* Moves a FAILED job from history back into the pending queue for\n * another attempt (a fresh id is assigned). Rejects (-1) if the job\n * isn't FAILED, or if the scheduler is paused - retries are a form of\n * new work and must also be held back while paused. */\nint scheduler_retry(Scheduler *s, int id);\n\nint scheduler_find_state(const Scheduler *s, int id, JobState *out_state);\n",
+        "src/scheduler.c": "#include \"scheduler.h\"\n\nvoid scheduler_init(Scheduler *s) {\n    queue_init(&s->pending);\n    s->running_count = 0;\n    s->history_count = 0;\n    s->paused = 0;\n}\n\nvoid scheduler_pause(Scheduler *s) {\n    s->paused = 1;\n}\n\nvoid scheduler_resume(Scheduler *s) {\n    s->paused = 0;\n}\n\nint scheduler_submit(Scheduler *s, int priority, const char *payload) {\n    if (s->paused) {\n        return -1;\n    }\n    return queue_push(&s->pending, priority, payload);\n}\n\nint scheduler_run_next(Scheduler *s, int *out_id) {\n    if (s->paused || s->running_count >= SCHEDULER_MAX_RUNNING) {\n        return 0;\n    }\n    Job job;\n    if (!queue_pop(&s->pending, &job)) {\n        return 0;\n    }\n    job.state = JOB_RUNNING;\n    s->running[s->running_count++] = job;\n    *out_id = job.id;\n    return 1;\n}\n\nstatic int find_running_index(Scheduler *s, int id) {\n    for (int i = 0; i < s->running_count; i++) {\n        if (s->running[i].id == id) {\n            return i;\n        }\n    }\n    return -1;\n}\n\nstatic int finish_job(Scheduler *s, int id, JobState final_state) {\n    int idx = find_running_index(s, id);\n    if (idx < 0) {\n        return 0;\n    }\n    Job job = s->running[idx];\n    job.state = final_state;\n    for (int i = idx; i < s->running_count - 1; i++) {\n        s->running[i] = s->running[i + 1];\n    }\n    s->running_count--;\n    if (s->history_count < SCHEDULER_MAX_HISTORY) {\n        s->history[s->history_count++] = job;\n    }\n    return 1;\n}\n\nint scheduler_complete(Scheduler *s, int id) {\n    return finish_job(s, id, JOB_DONE);\n}\n\nint scheduler_fail(Scheduler *s, int id) {\n    return finish_job(s, id, JOB_FAILED);\n}\n\nint scheduler_retry(Scheduler *s, int id) {\n    for (int i = 0; i < s->history_count; i++) {\n        if (s->history[i].id == id && s->history[i].state == JOB_FAILED) {\n            int new_id = queue_push(&s->pending, s->history[i].priority, s->history[i].payload);\n            for (int j = i; j < s->history_count - 1; j++) {\n                s->history[j] = s->history[j + 1];\n            }\n            s->history_count--;\n            return new_id;\n        }\n    }\n    return -1;\n}\n\nint scheduler_find_state(const Scheduler *s, int id, JobState *out_state) {\n    for (int i = 0; i < s->pending.count; i++) {\n        if (s->pending.jobs[i].id == id) {\n            *out_state = s->pending.jobs[i].state;\n            return 1;\n        }\n    }\n    for (int i = 0; i < s->running_count; i++) {\n        if (s->running[i].id == id) {\n            *out_state = s->running[i].state;\n            return 1;\n        }\n    }\n    for (int i = 0; i < s->history_count; i++) {\n        if (s->history[i].id == id) {\n            *out_state = s->history[i].state;\n            return 1;\n        }\n    }\n    return 0;\n}\n"
+      }
+    }
+  ],
+  "name": "add_c_jobqueue_pause_cascade",
+  "language": "c",
+  "framework": "stdlib",
+  "domain": "backend",
+  "setup_repo": "c-jobqueue",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "check_command": "gcc -std=c11 -Wall -Iinclude src/*.c tests/test_pause_cascade.c -o test_bin && ./test_bin"
+}

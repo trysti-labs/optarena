@@ -1,0 +1,55 @@
+{
+  "description": "Repo-scale (docker-multiservice): a new db service wired into docker-compose.yml needs the api's own Python dependency added too",
+  "tags": [
+    "dockerfile",
+    "docker-compose",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a `db` service to docker-compose.yml: `image: postgres:16-alpine`, with `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` all set to `webapp`, and a named volume `db-data` mounted at `/var/lib/postgresql/data` (declare `db-data` under a top-level `volumes:` key). Give `api` a `DATABASE_URL=postgresql://webapp:webapp@db:5432/webapp` environment entry and add `db` to its `depends_on`. This infra-level wiring alone isn't enough - the Flask app itself has no way to actually connect to postgres without a driver library: add `psycopg2-binary==2.9.9` to api/requirements.txt too, otherwise the app would crash with an ImportError the moment it tried to use the new DATABASE_URL."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "postgres",
+        "DATABASE_URL"
+      ]
+    },
+    {
+      "path_pattern": "api/requirements.txt",
+      "content_patterns": [
+        "psycopg2"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_db_wiring.py": "import re\nfrom pathlib import Path\n\ncompose = Path('docker-compose.yml').read_text(encoding='utf-8')\nrequirements = Path('api/requirements.txt').read_text(encoding='utf-8')\n\nassert re.search(r'db:\\s*\\n\\s*image:\\s*postgres', compose), (\n    'a db service (image: postgres:...) is missing from docker-compose.yml')\nassert 'db-data:/var/lib/postgresql/data' in compose, 'db-data volume must be mounted for db'\nassert re.search(r'db-data:\\s*$', compose, re.MULTILINE), 'db-data must be declared as a top-level volume'\n\napi_block_match = re.search(r'  api:\\n((?:    .*\\n|\\n)+)', compose)\nassert api_block_match, 'api service block not found'\napi_block = api_block_match.group(1)\nassert 'DATABASE_URL=postgresql://' in api_block, 'api service is missing DATABASE_URL'\n\nassert re.search(r'psycopg2', requirements), (\n    \"api/requirements.txt is missing a postgres driver (psycopg2-binary) - the compose file \"\n    'now gives the api service a DATABASE_URL, but the Flask app has no library capable of '\n    'actually using it and would crash with an ImportError at runtime')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_db_wiring.py",
+  "reference_solution": {
+    "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"8000:8000\"\n    environment:\n      - LOG_LEVEL=info\n      - DATABASE_URL=postgresql://webapp:webapp@db:5432/webapp\n    depends_on:\n      - worker\n      - db\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n\n  db:\n    image: postgres:16-alpine\n    environment:\n      - POSTGRES_USER=webapp\n      - POSTGRES_PASSWORD=webapp\n      - POSTGRES_DB=webapp\n    volumes:\n      - db-data:/var/lib/postgresql/data\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n\nvolumes:\n  db-data:\n",
+    "api/requirements.txt": "flask==3.0.0\npsycopg2-binary==2.9.9\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "postgres-driver-missing-from-requirements",
+      "files": {
+        "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"8000:8000\"\n    environment:\n      - LOG_LEVEL=info\n      - DATABASE_URL=postgresql://webapp:webapp@db:5432/webapp\n    depends_on:\n      - worker\n      - db\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n\n  db:\n    image: postgres:16-alpine\n    environment:\n      - POSTGRES_USER=webapp\n      - POSTGRES_PASSWORD=webapp\n      - POSTGRES_DB=webapp\n    volumes:\n      - db-data:/var/lib/postgresql/data\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n\nvolumes:\n  db-data:\n",
+        "api/requirements.txt": "flask==3.0.0\n"
+      }
+    }
+  ],
+  "name": "add_docker_multiservice_db_wiring",
+  "language": "dockerfile",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "docker-multiservice",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

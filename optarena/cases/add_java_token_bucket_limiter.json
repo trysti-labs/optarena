@@ -1,0 +1,47 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "TokenBucket.java's allow always returns true. Implement it properly: the constructor takes (double capacity, double refillRate) - `refillRate` tokens are added per second, capped at `capacity` tokens (never above it, even after a long idle period). allow(double now) refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "setup_files": {
+    "TokenBucket.java": "public final class TokenBucket {\n    private final double capacity;\n    private final double refillRate;\n\n    public TokenBucket(double capacity, double refillRate) {\n        this.capacity = capacity;\n        this.refillRate = refillRate;\n    }\n\n    public boolean allow(double now) {\n        return true;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "TokenBucket.java",
+      "content_patterns": [
+        "class TokenBucket"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "TokenBucket.java": "public final class TokenBucket {\n    private final double capacity;\n    private final double refillRate;\n    private double tokens;\n    private boolean hasLast = false;\n    private double last;\n\n    public TokenBucket(double capacity, double refillRate) {\n        this.capacity = capacity;\n        this.refillRate = refillRate;\n        this.tokens = capacity;\n    }\n\n    public boolean allow(double now) {\n        if (hasLast) {\n            double elapsed = now - last;\n            tokens = Math.min(capacity, tokens + elapsed * refillRate);\n        }\n        last = now;\n        hasLast = true;\n        if (tokens >= 1) {\n            tokens -= 1;\n            return true;\n        }\n        return false;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "TokenBucket.java": "public final class TokenBucket {\n    private final double capacity;\n    private final double refillRate;\n    private double tokens;\n    private boolean hasLast = false;\n    private double last;\n\n    public TokenBucket(double capacity, double refillRate) {\n        this.capacity = capacity;\n        this.refillRate = refillRate;\n        this.tokens = capacity;\n    }\n\n    public boolean allow(double now) {\n        if (hasLast) {\n            double elapsed = now - last;\n            tokens = tokens + elapsed * refillRate;\n        }\n        last = now;\n        hasLast = true;\n        if (tokens >= 1) {\n            tokens -= 1;\n            return true;\n        }\n        return false;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_java_token_bucket_limiter",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "java CheckTokenBucketTest.java",
+  "test_setup_files": {
+    "TokenBucketTest.java": "public final class TokenBucketTest {\n    public static void main(String[] args) {\n        checkStartsFullAndDrains();\n        checkRefillsOverTime();\n        checkRefillCapsAtCapacity();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkStartsFullAndDrains() {\n        TokenBucket b = new TokenBucket(3, 1);\n        if (!b.allow(0) || !b.allow(0) || !b.allow(0)) throw new AssertionError(\"expected 3 allows\");\n        if (b.allow(0)) throw new AssertionError(\"expected deny once drained\");\n    }\n\n    static void checkRefillsOverTime() {\n        TokenBucket b = new TokenBucket(3, 1);\n        for (int i = 0; i < 3; i++) b.allow(0);\n        if (b.allow(0.5)) throw new AssertionError(\"expected deny at t=0.5\");\n        if (!b.allow(1.0)) throw new AssertionError(\"expected allow at t=1.0\");\n        if (b.allow(1.0)) throw new AssertionError(\"expected deny again immediately after\");\n    }\n\n    static void checkRefillCapsAtCapacity() {\n        TokenBucket b = new TokenBucket(2, 1);\n        b.allow(0);\n        b.allow(0);\n        if (!b.allow(1000) || !b.allow(1000)) throw new AssertionError(\"expected 2 tokens after long idle\");\n        if (b.allow(1000)) throw new AssertionError(\"expected refill capped at capacity\");\n    }\n}\n",
+    "CheckTokenBucketTest.java": "import java.io.IOException;\n\npublic final class CheckTokenBucketTest {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"TokenBucket.java\", \"TokenBucketTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"TokenBucketTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  }
+}

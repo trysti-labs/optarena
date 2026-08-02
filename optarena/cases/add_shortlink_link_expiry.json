@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 180,
   "timeout": 600,
-  "description": "L3 repo-scale (express-ts-shortlink): optional link expiry - schema field, POST validation, 410 Gone on the redirect path without recording the click",
+  "description": "Repo-scale (express-ts-shortlink): optional link expiry - schema field, POST validation, 410 Gone on the redirect path without recording the click",
   "difficulty": 3,
   "task_type": "feature",
   "tags": [

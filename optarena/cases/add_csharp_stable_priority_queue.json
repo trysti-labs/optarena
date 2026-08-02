@@ -1,0 +1,47 @@
+{
+  "description": "Fix a List.Sort-based priority queue that re-sorts by priority alone on every push (losing FIFO order across interleaved pops) into a genuinely stable one",
+  "task_type": "feature",
+  "tags": [
+    "csharp",
+    "algorithms"
+  ],
+  "prompts": [
+    "StablePriorityQueue.cs keeps a List and re-sorts it by priority alone on every Push using List<T>.Sort, which is an UNSTABLE sort in .NET (it does not preserve the relative order of equal elements) - ties between equal-priority items can come out in any order. Fix Push/Pop so that: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO) - add an explicit monotonically increasing insertion-order field and use it as the sort key's tiebreaker, or use a stable sort (OrderBy, which IS stable in LINQ) instead of List<T>.Sort."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "StablePriorityQueue.cs": "using System.Collections.Generic;\n\npublic class StablePriorityQueue\n{\n    private class Item\n    {\n        public int Priority;\n        public string Value = \"\";\n    }\n\n    private readonly List<Item> _items = new();\n\n    public void Push(int priority, string value)\n    {\n        _items.Add(new Item { Priority = priority, Value = value });\n        _items.Sort((a, b) => a.Priority.CompareTo(b.Priority));\n    }\n\n    public string Pop()\n    {\n        var item = _items[0];\n        _items.RemoveAt(0);\n        return item.Value;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "StablePriorityQueue.cs",
+      "content_patterns": [
+        "class StablePriorityQueue"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "StablePriorityQueue.cs": "using System.Collections.Generic;\nusing System.Linq;\n\npublic class StablePriorityQueue\n{\n    private class Item\n    {\n        public int Priority;\n        public long Order;\n        public string Value = \"\";\n    }\n\n    private readonly List<Item> _items = new();\n    private long _counter;\n\n    public void Push(int priority, string value)\n    {\n        _items.Add(new Item { Priority = priority, Order = _counter++, Value = value });\n        _items.Sort((a, b) =>\n        {\n            var cmp = a.Priority.CompareTo(b.Priority);\n            return cmp != 0 ? cmp : a.Order.CompareTo(b.Order);\n        });\n    }\n\n    public string Pop()\n    {\n        var item = _items[0];\n        _items.RemoveAt(0);\n        return item.Value;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "counter-decrements-reverses-fifo",
+      "files": {
+        "StablePriorityQueue.cs": "using System.Collections.Generic;\n\npublic class StablePriorityQueue\n{\n    private class Item\n    {\n        public int Priority;\n        public long Order;\n        public string Value = \"\";\n    }\n\n    private readonly List<Item> _items = new();\n    private long _counter;\n\n    public void Push(int priority, string value)\n    {\n        _items.Add(new Item { Priority = priority, Order = _counter, Value = value });\n        _counter -= 1;\n        _items.Sort((a, b) =>\n        {\n            var cmp = a.Priority.CompareTo(b.Priority);\n            return cmp != 0 ? cmp : a.Order.CompareTo(b.Order);\n        });\n    }\n\n    public string Pop()\n    {\n        var item = _items[0];\n        _items.RemoveAt(0);\n        return item.Value;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_csharp_stable_priority_queue",
+  "language": "csharp",
+  "framework": "xunit",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "dotnet test tests/tests.csproj",
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/StablePriorityQueueTests.cs": "using Xunit;\n\npublic class StablePriorityQueueTests\n{\n    [Fact]\n    public void PriorityOrder()\n    {\n        var q = new StablePriorityQueue();\n        q.Push(5, \"low\");\n        q.Push(1, \"high\");\n        q.Push(3, \"mid\");\n        Assert.Equal(\"high\", q.Pop());\n        Assert.Equal(\"mid\", q.Pop());\n        Assert.Equal(\"low\", q.Pop());\n    }\n\n    [Fact]\n    public void EqualPriorityIsFifoAcrossManyItems()\n    {\n        var q = new StablePriorityQueue();\n        for (int i = 0; i < 20; i++)\n        {\n            q.Push(1, ((char)('a' + i)).ToString());\n        }\n        for (int i = 0; i < 20; i++)\n        {\n            Assert.Equal(((char)('a' + i)).ToString(), q.Pop());\n        }\n    }\n}\n"
+  }
+}

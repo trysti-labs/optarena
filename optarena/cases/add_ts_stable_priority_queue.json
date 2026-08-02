@@ -1,0 +1,46 @@
+{
+  "description": "Fix an array-sort-based priority queue that re-sorts on push (losing FIFO order for equal priorities across interleaved pops) into a genuinely stable one",
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "algorithms"
+  ],
+  "prompts": [
+    "pq.ts's StablePriorityQueue keeps an array and re-sorts it on every push by priority alone. Array.prototype.sort is stable in modern engines, but re-sorting the WHOLE array on every push does not preserve original insertion order for equal-priority items once items have been popped and re-pushed in between (the relative array positions get scrambled by intervening sorts). Fix push/pop so that: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO) - track insertion order explicitly with a counter, don't rely on array position across separate sorts. The file must compile under tsc --strict."
+  ],
+  "setup_files": {
+    "pq.ts": "interface Item {\n  priority: number;\n  value: string;\n}\n\nexport class StablePriorityQueue {\n  private items: Item[] = [];\n\n  push(priority: number, value: string): void {\n    this.items.push({ priority, value });\n    this.items.sort((a, b) => a.priority - b.priority);\n  }\n\n  pop(): string | undefined {\n    return this.items.shift()?.value;\n  }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pq.ts",
+      "content_patterns": [
+        "class StablePriorityQueue"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "pq.ts": "interface Item {\n  priority: number;\n  order: number;\n  value: string;\n}\n\nexport class StablePriorityQueue {\n  private items: Item[] = [];\n  private counter = 0;\n\n  push(priority: number, value: string): void {\n    this.items.push({ priority, order: this.counter++, value });\n    this.items.sort((a, b) => a.priority - b.priority || a.order - b.order);\n  }\n\n  pop(): string | undefined {\n    return this.items.shift()?.value;\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "counter-decrements-reverses-fifo",
+      "files": {
+        "pq.ts": "interface Item {\n  priority: number;\n  order: number;\n  value: string;\n}\n\nexport class StablePriorityQueue {\n  private items: Item[] = [];\n  private counter = 0;\n\n  push(priority: number, value: string): void {\n    this.items.push({ priority, order: this.counter, value });\n    this.counter -= 1;\n    this.items.sort((a, b) => a.priority - b.priority || a.order - b.order);\n  }\n\n  pop(): string | undefined {\n    return this.items.shift()?.value;\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_ts_stable_priority_queue",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "sh run_checks.sh",
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit pq.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build pq.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { StablePriorityQueue } = require(\"./build/pq.js\");\n\n{\n  const q = new StablePriorityQueue();\n  q.push(5, \"low\");\n  q.push(1, \"high\");\n  q.push(3, \"mid\");\n  assert.deepStrictEqual([q.pop(), q.pop(), q.pop()], [\"high\", \"mid\", \"low\"]);\n}\n{\n  const q = new StablePriorityQueue();\n  q.push(1, \"first\");\n  q.push(2, \"other\");\n  q.push(1, \"second\");\n  assert.strictEqual(q.pop(), \"first\");\n  q.push(1, \"third\");\n  assert.deepStrictEqual([q.pop(), q.pop()], [\"second\", \"third\"]);\n}\nconsole.log(\"behavior OK\");\n"
+  }
+}

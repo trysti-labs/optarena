@@ -1,0 +1,48 @@
+{
+  "description": "Replace a naive MAX(id)-per-key dedup that silently assumes higher id means more recent with a ROW_NUMBER() dedup keyed on the actual timestamp",
+  "task_type": "feature",
+  "tags": [
+    "sql",
+    "sqlite",
+    "window-functions",
+    "dedup"
+  ],
+  "prompts": [
+    "dedupe.sql is supposed to return exactly one row per email from the contacts table - the MOST RECENTLY UPDATED one (by updated_at, not by id - a row can be updated long after it was inserted, so a higher id does NOT mean a more recent update). Rewrite it using ROW_NUMBER() OVER (PARTITION BY email ORDER BY updated_at DESC, id DESC) in a CTE, keeping only rn = 1. Ties on the exact same updated_at break by the higher id (the more recently inserted of the two). Return columns (id, email, name, updated_at) ordered by email."
+  ],
+  "setup_files": {
+    "dedupe.sql": "-- BUG: assumes the highest id per email is the most recently updated row,\n-- but a row can be updated long after it was inserted.\nSELECT id, email, name, updated_at\nFROM contacts\nWHERE id IN (SELECT MAX(id) FROM contacts GROUP BY email)\nORDER BY email;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dedupe.sql",
+      "content_patterns": [
+        "row_number",
+        "partition by"
+      ]
+    }
+  ],
+  "check_command": "python3 check_dedupe.py",
+  "reference_solution": {
+    "dedupe.sql": "WITH ranked AS (\n  SELECT\n    id, email, name, updated_at,\n    ROW_NUMBER() OVER (PARTITION BY email ORDER BY updated_at DESC, id DESC) AS rn\n  FROM contacts\n)\nSELECT id, email, name, updated_at\nFROM ranked\nWHERE rn = 1\nORDER BY email;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-max-id-based",
+      "files": {
+        "dedupe.sql": "SELECT id, email, name, updated_at\nFROM contacts\nWHERE id IN (SELECT MAX(id) FROM contacts GROUP BY email)\nORDER BY email;\n"
+      }
+    }
+  ],
+  "name": "add_sql_dedupe_keep_latest_row_number",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "test_setup_files": {
+    "check_dedupe.py": "import sqlite3\nfrom pathlib import Path\n\nsql = Path(\"dedupe.sql\").read_text(encoding=\"utf-8\")\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(\"\"\"\nCREATE TABLE contacts (\n  id INTEGER PRIMARY KEY,\n  email TEXT NOT NULL,\n  name TEXT NOT NULL,\n  updated_at TEXT NOT NULL\n);\nINSERT INTO contacts VALUES\n  (1, 'ada@example.com', 'Ada (old)', '2026-01-01'),\n  (2, 'grace@example.com', 'Grace', '2026-03-01'),\n  (3, 'ada@example.com', 'Ada (newer name, lower id would be wrong)', '2026-05-01');\n\"\"\")\n\ncur = con.execute(sql)\ncols = [d[0] for d in cur.description]\nrows = cur.fetchall()\n\nassert cols == [\"id\", \"email\", \"name\", \"updated_at\"], f\"column names/order changed: {cols}\"\n\nexpected = [\n    (3, \"ada@example.com\", \"Ada (newer name, lower id would be wrong)\", \"2026-05-01\"),\n    (2, \"grace@example.com\", \"Grace\", \"2026-03-01\"),\n]\nassert rows == expected, f\"expected: {expected}\\ngot: {rows}\"\n\nprint(\"PASS dedupe.sql behavior checks\")\n"
+  }
+}

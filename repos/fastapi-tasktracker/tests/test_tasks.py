@@ -20,7 +20,7 @@ def test_create_and_update_task(client):
 
 def test_list_tasks_filters_by_status(client):
     user, project = _setup(client)
-    t1 = client.post("/tasks", json={"title": "A", "project_id": project["id"]}).json()
+    client.post("/tasks", json={"title": "A", "project_id": project["id"]})
     t2 = client.post("/tasks", json={"title": "B", "project_id": project["id"]}).json()
     client.patch(f"/tasks/{t2['id']}", json={"status": "done"})
 

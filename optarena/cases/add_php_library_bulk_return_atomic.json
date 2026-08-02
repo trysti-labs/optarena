@@ -1,0 +1,46 @@
+{
+  "description": "Repo-scale (php-library): add an atomic all-or-nothing bulk loan-return method",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "repo-scale",
+    "difficulty-4",
+    "transactions"
+  ],
+  "prompts": [
+    "Add `LoanService::bulkReturn(array $loanIds): array`. It must validate the WHOLE batch before returning anything: throw LibraryException (and change NOTHING) if `$loanIds` is empty, or if ANY id in it does not reference an existing loan, or references one that isn't currently 'active' - even one bad id anywhere in the list must leave every loan's status (and every book's availableCopies) completely unchanged, not just the ones after the bad id. Only once every id is confirmed valid should the whole batch actually be returned (reusing the existing `returnLoan` logic). Returns the array of returned loans."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/LoanService.php",
+      "content_patterns": [
+        "bulkReturn"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/BulkReturnTest.php": "<?php\n\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/LoanService.php';\n\nfinal class BulkReturnTest extends TestCase\n{\n    public function testBulkReturnAppliesAllWhenEveryIdIsValid(): void\n    {\n        $books = new \\App\\BookRepository();\n        $members = new \\App\\MemberRepository();\n        $loans = new \\App\\LoanRepository();\n        $service = new \\App\\LoanService($books, $members, $loans);\n\n        $member = $members->create('Ada', 'a@example.com');\n        $b1 = $books->create('A', 'x', 1);\n        $b2 = $books->create('B', 'x', 1);\n        $l1 = $service->borrow($b1->id, $member->id);\n        $l2 = $service->borrow($b2->id, $member->id);\n\n        $returned = $service->bulkReturn([$l1->id, $l2->id]);\n        $this->assertCount(2, $returned);\n        $this->assertSame('returned', $loans->find($l1->id)->status);\n        $this->assertSame(1, $books->find($b1->id)->availableCopies);\n    }\n\n    public function testBulkReturnRejectsWholeBatchOnOneBadId(): void\n    {\n        $books = new \\App\\BookRepository();\n        $members = new \\App\\MemberRepository();\n        $loans = new \\App\\LoanRepository();\n        $service = new \\App\\LoanService($books, $members, $loans);\n\n        $member = $members->create('Ada', 'a@example.com');\n        $b1 = $books->create('A', 'x', 1);\n        $l1 = $service->borrow($b1->id, $member->id);\n\n        $this->expectException(\\App\\LibraryException::class);\n        try {\n            $service->bulkReturn([$l1->id, 999999]);\n        } finally {\n            $this->assertSame('active', $loans->find($l1->id)->status);\n            $this->assertSame(0, $books->find($b1->id)->availableCopies);\n        }\n    }\n}\n"
+  },
+  "reference_solution": {
+    "src/LoanService.php": "<?php\n\nnamespace App;\n\nrequire_once __DIR__ . '/BookRepository.php';\nrequire_once __DIR__ . '/MemberRepository.php';\nrequire_once __DIR__ . '/LoanRepository.php';\nrequire_once __DIR__ . '/LibraryException.php';\n\nclass LoanService\n{\n    private BookRepository $books;\n    private MemberRepository $members;\n    private LoanRepository $loans;\n\n    public function __construct(BookRepository $books, MemberRepository $members, LoanRepository $loans)\n    {\n        $this->books = $books;\n        $this->members = $members;\n        $this->loans = $loans;\n    }\n\n    public function borrow(int $bookId, int $memberId): Loan\n    {\n        $book = $this->books->find($bookId);\n        if ($book === null) {\n            throw new LibraryException('book not found');\n        }\n        $member = $this->members->find($memberId);\n        if ($member === null) {\n            throw new LibraryException('member not found');\n        }\n        if ($book->availableCopies <= 0) {\n            throw new LibraryException('no copies available');\n        }\n\n        $book->availableCopies--;\n        return $this->loans->create($bookId, $memberId, 'active');\n    }\n\n    public function returnLoan(int $loanId): Loan\n    {\n        $loan = $this->loans->find($loanId);\n        if ($loan === null) {\n            throw new LibraryException('loan not found');\n        }\n        if ($loan->status !== 'active') {\n            throw new LibraryException('loan already returned');\n        }\n\n        $loan->status = 'returned';\n        $book = $this->books->find($loan->bookId);\n        if ($book !== null) {\n            $book->availableCopies++;\n        }\n        return $loan;\n    }\n\n    /**\n     * Returns a batch of loans atomically: every id must exist and be\n     * 'active' BEFORE any of them are actually returned - one bad id\n     * anywhere in the batch leaves every loan untouched.\n     */\n    public function bulkReturn(array $loanIds): array\n    {\n        if (empty($loanIds)) {\n            throw new LibraryException('loanIds must be non-empty');\n        }\n        foreach ($loanIds as $id) {\n            $loan = $this->loans->find($id);\n            if ($loan === null || $loan->status !== 'active') {\n                throw new LibraryException('loanIds must all reference existing, active loans');\n            }\n        }\n\n        $returned = [];\n        foreach ($loanIds as $id) {\n            $returned[] = $this->returnLoan($id);\n        }\n        return $returned;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "not-atomic-partial-commit",
+      "files": {
+        "src/LoanService.php": "<?php\n\nnamespace App;\n\nrequire_once __DIR__ . '/BookRepository.php';\nrequire_once __DIR__ . '/MemberRepository.php';\nrequire_once __DIR__ . '/LoanRepository.php';\nrequire_once __DIR__ . '/LibraryException.php';\n\nclass LoanService\n{\n    private BookRepository $books;\n    private MemberRepository $members;\n    private LoanRepository $loans;\n\n    public function __construct(BookRepository $books, MemberRepository $members, LoanRepository $loans)\n    {\n        $this->books = $books;\n        $this->members = $members;\n        $this->loans = $loans;\n    }\n\n    public function borrow(int $bookId, int $memberId): Loan\n    {\n        $book = $this->books->find($bookId);\n        if ($book === null) {\n            throw new LibraryException('book not found');\n        }\n        $member = $this->members->find($memberId);\n        if ($member === null) {\n            throw new LibraryException('member not found');\n        }\n        if ($book->availableCopies <= 0) {\n            throw new LibraryException('no copies available');\n        }\n\n        $book->availableCopies--;\n        return $this->loans->create($bookId, $memberId, 'active');\n    }\n\n    public function returnLoan(int $loanId): Loan\n    {\n        $loan = $this->loans->find($loanId);\n        if ($loan === null) {\n            throw new LibraryException('loan not found');\n        }\n        if ($loan->status !== 'active') {\n            throw new LibraryException('loan already returned');\n        }\n\n        $loan->status = 'returned';\n        $book = $this->books->find($loan->bookId);\n        if ($book !== null) {\n            $book->availableCopies++;\n        }\n        return $loan;\n    }\n\n    /**\n     * Returns a batch of loans atomically: every id must exist and be\n     * 'active' BEFORE any of them are actually returned - one bad id\n     * anywhere in the batch leaves every loan untouched.\n     */\n    public function bulkReturn(array $loanIds): array\n    {\n        if (empty($loanIds)) {\n            throw new LibraryException('loanIds must be non-empty');\n        }\n        $returned = [];\n        foreach ($loanIds as $id) {\n            $returned[] = $this->returnLoan($id);\n        }\n        return $returned;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_library_bulk_return_atomic",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "setup_repo": "php-library",
+  "git_init": true,
+  "check_command_timeout": 300,
+  "timeout": 900,
+  "difficulty": 4,
+  "check_command": "phpunit tests"
+}

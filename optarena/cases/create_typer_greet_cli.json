@@ -36,5 +36,13 @@
   "timeout": 150,
   "reference_solution": {
     "cli.py": "import typer\n\napp = typer.Typer()\n\n\n@app.callback()\ndef main():\n    \"\"\"Greeting CLI.\"\"\"\n\n\n@app.command()\ndef greet(name: str, loud: bool = False):\n    if loud:\n        typer.echo(f'Hello, {name}!'.upper())\n    else:\n        typer.echo(f'Hello, {name}!')\n\n\nif __name__ == '__main__':\n    app()\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "loud-flag-ignored",
+      "files": {
+        "cli.py": "import typer\n\napp = typer.Typer()\n\n\n@app.callback()\ndef main():\n    \"\"\"Greeting CLI.\"\"\"\n\n\n@app.command()\ndef greet(name: str, loud: bool = False):\n    # BUG: --loud has no effect.\n    typer.echo(f'Hello, {name}!')\n\n\nif __name__ == '__main__':\n    app()\n"
+      }
+    }
+  ]
 }

@@ -1,0 +1,47 @@
+{
+  "description": "Replace a single-level manager join with a recursive CTE that computes every employee's depth in the FULL management chain, however deep",
+  "task_type": "feature",
+  "tags": [
+    "sql",
+    "sqlite",
+    "recursive-cte",
+    "hierarchy"
+  ],
+  "prompts": [
+    "hierarchy.sql only joins employees to their DIRECT manager, so it reports depth 0 for the CEO and depth 1 for literally everyone else, regardless of how deep the real chain goes. Rewrite it as a recursive CTE (WITH RECURSIVE) that walks the FULL manager_id chain: the root (manager_id IS NULL) is depth 0, and each employee's depth is their manager's depth + 1, for however many levels the chain actually has. Return columns (id, name, depth) ordered by depth then id."
+  ],
+  "setup_files": {
+    "hierarchy.sql": "-- BUG: only looks at the direct manager, not the full chain, so\n-- everyone below the CEO is reported as depth 1 regardless of chain length.\nSELECT\n  e.id,\n  e.name,\n  CASE WHEN e.manager_id IS NULL THEN 0 ELSE 1 END AS depth\nFROM employees e\nORDER BY depth, e.id;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "hierarchy.sql",
+      "content_patterns": [
+        "with recursive"
+      ]
+    }
+  ],
+  "check_command": "python3 check_hierarchy.py",
+  "reference_solution": {
+    "hierarchy.sql": "WITH RECURSIVE chain(id, name, manager_id, depth) AS (\n  SELECT id, name, manager_id, 0\n  FROM employees\n  WHERE manager_id IS NULL\n  UNION ALL\n  SELECT e.id, e.name, e.manager_id, chain.depth + 1\n  FROM employees e\n  JOIN chain ON e.manager_id = chain.id\n)\nSELECT id, name, depth\nFROM chain\nORDER BY depth, id;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "only-direct-manager-checked",
+      "files": {
+        "hierarchy.sql": "SELECT\n  e.id,\n  e.name,\n  CASE WHEN e.manager_id IS NULL THEN 0 ELSE 1 END AS depth\nFROM employees e\nORDER BY depth, e.id;\n"
+      }
+    }
+  ],
+  "name": "add_sql_recursive_cte_org_hierarchy",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "test_setup_files": {
+    "check_hierarchy.py": "import sqlite3\nfrom pathlib import Path\n\nsql = Path(\"hierarchy.sql\").read_text(encoding=\"utf-8\")\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(\"\"\"\nCREATE TABLE employees (\n  id INTEGER PRIMARY KEY,\n  name TEXT NOT NULL,\n  manager_id INTEGER REFERENCES employees(id)\n);\nINSERT INTO employees VALUES\n  (1, 'CEO', NULL),\n  (2, 'VP Eng', 1),\n  (3, 'Director', 2),\n  (4, 'Manager', 3),\n  (5, 'Engineer', 4);\n\"\"\")\n\ncur = con.execute(sql)\ncols = [d[0] for d in cur.description]\nrows = cur.fetchall()\n\nassert cols == [\"id\", \"name\", \"depth\"], f\"column names/order changed: {cols}\"\n\nexpected = [\n    (1, \"CEO\", 0),\n    (2, \"VP Eng\", 1),\n    (3, \"Director\", 2),\n    (4, \"Manager\", 3),\n    (5, \"Engineer\", 4),\n]\nassert rows == expected, f\"expected: {expected}\\ngot: {rows}\"\n\nprint(\"PASS hierarchy.sql behavior checks\")\n"
+  }
+}

@@ -204,9 +204,35 @@ function toggleTheme() {
 const $ = (sel, el) => (el || document).querySelector(sel);
 const app = $("#app");
 const tip = $("#tip");
-const fmtS = (v) => v == null ? "-" : (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + "s";
-const fmtPct = (v) => v == null ? "-" : Math.round(v * 100) + "%";
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// A-08: type-safe - a non-numeric value in a run record must render as escaped
+// text, not throw (v.toFixed is not a function) and take the whole view down.
+const fmtS = (v) => (typeof v === "number" && isFinite(v))
+  ? (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + "s" : (v == null ? "-" : esc(v));
+const fmtPct = (v) => (typeof v === "number" && isFinite(v))
+  ? Math.round(v * 100) + "%" : (v == null ? "-" : esc(v));
+const fmtNum = (v) => (typeof v === "number" && isFinite(v))
+  ? v.toLocaleString() : (v == null ? "-" : esc(v));
+const fmtUsd = (v) => (typeof v === "number" && isFinite(v)) ? "$" + v.toFixed(2) : "-";
+// A-08: a finite number for CSS width math, so a non-numeric field can never
+// produce `style="width:NaN%"` (or inject through the style attribute).
+const safeNum = (v) => (typeof v === "number" && isFinite(v)) ? v : 0;
+const safePct = (v) => Math.max(0, Math.min(1, safeNum(v)));
+// A-08: escapes `'` too. Tooltips are assembled into a single-quoted
+// data-tip attribute and then re-injected with innerHTML, so an unescaped
+// apostrophe could close the attribute early; call sites used to patch that
+// up with an ad-hoc .replace(/'/g,...) on the finished string, which is easy
+// to forget when adding a new tooltip. Escaping at the source removes the
+// footgun entirely.
+const esc = (s) => String(s).replace(/[&<>"']/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// A-08: every value interpolated into HTML goes through esc() - including
+// numbers. `st.i`, token counts and the summary counters are typed as numbers
+// by our own writers, but a run record is just JSON on disk (hand-edited, or
+// copied from another machine, or written by a future driver), so "it should
+// be a number" is not a guarantee the renderer can rely on. num() keeps the
+// numeric formatting for real numbers and escapes anything else.
+const num = (v, fallback = "-") => (v == null ? fallback
+  : (typeof v === "number" && isFinite(v) ? String(v) : esc(v)));
 
 // 95% Wilson CI on a run's pass rate, e.g. " [24%-76%]"; "" when absent.
 const ciStr = (s) => (s && s.pass_rate_ci)
@@ -304,26 +330,26 @@ function tilesHTML(run) {
   return `<div class="tiles">
     <div class="tile"><div class="label">Pass rate</div>
       <div class="value">${fmtPct(s.pass_rate)}</div>
-      <div class="delta">${s.passed}/${s.cases} cases${s.pass_rate_ci ? " · 95% CI" + ciStr(s) : ""}</div></div>
+      <div class="delta">${num(s.passed, "?")}/${num(s.cases, "?")} cases${s.pass_rate_ci ? " · 95% CI" + ciStr(s) : ""}</div></div>
     <div class="tile"><div class="label">Clean passes</div>
-      <div class="value">${s.clean_passes != null ? s.clean_passes + "/" + s.cases : "—"}</div>
+      <div class="value">${s.clean_passes != null ? num(s.clean_passes) + "/" + num(s.cases) : "-"}</div>
       <div class="delta">${s.clean_passes != null
-          ? (s.off_target_edits ? s.off_target_edits + " off-target edit(s)" : "no off-target edits")
-            + (s.mean_steps != null ? " · " + s.mean_steps + " steps/case" : "")
+          ? (s.off_target_edits ? num(s.off_target_edits) + " off-target edit(s)" : "no off-target edits")
+            + (s.mean_steps != null ? " · " + num(s.mean_steps) + " steps/case" : "")
           : "passed with no off-target edits / clean exit"}</div></div>
     <div class="tile"><div class="label">Mean case time</div>
       <div class="value">${fmtS(s.mean_duration_s)}</div>
       <div class="delta">total ${fmtS(s.total_duration_s)}</div></div>
     <div class="tile"><div class="label">Driver</div>
-      <div class="value" style="font-size:1.1rem">${esc(run.scenario.driver)}</div>
-      <div class="delta">${esc(b.model || "")} @ ${esc((b.base_url || "").replace(/^https?:\/\//, ""))}</div></div>
+      <div class="value" style="font-size:1.1rem">${esc((run.scenario || {}).driver || "")}</div>
+      <div class="delta">${esc(b.model || "")} @ ${esc(String(b.base_url || "").replace(/^https?:\/\//, ""))}</div></div>
     <div class="tile"><div class="label">Cost / efficiency</div>
-      <div class="value">${s.total_cost_usd != null ? "$" + s.total_cost_usd.toFixed(2) : "—"}</div>
+      <div class="value">${s.total_cost_usd != null ? fmtUsd(s.total_cost_usd) : "-"}</div>
       <div class="delta">${s.total_tokens
-          ? s.total_tokens.toLocaleString() + " tokens" + (s.tokens_per_pass ? " · " + s.tokens_per_pass.toLocaleString() + "/pass" : "")
+          ? fmtNum(s.total_tokens) + " tokens" + (s.tokens_per_pass ? " · " + fmtNum(s.tokens_per_pass) + "/pass" : "")
           : "no cost/token telemetry reported"}</div></div>
     <div class="tile"><div class="label">Files changed</div>
-      <div class="value">${s.mean_files_changed != null ? s.mean_files_changed : "-"}</div>
+      <div class="value">${num(s.mean_files_changed)}</div>
       <div class="delta">mean per case</div></div>
   </div>`;
 }
@@ -333,11 +359,12 @@ function passRateChartHTML() {
     const pct = (r.summary && r.summary.pass_rate || 0);
     const t = `<div class="t-title">${esc(r.scenario)}</div>
        <div class="t-line">driver ${esc(r.driver)} &middot; model ${esc((r.backend||{}).model||"")}</div>
-       <div class="t-line">${(r.summary||{}).passed}/${(r.summary||{}).cases} passed &middot; mean ${fmtS((r.summary||{}).mean_duration_s)}</div>`;
+       <div class="t-line">${num((r.summary||{}).passed, "?")}/${num((r.summary||{}).cases, "?")} passed &middot; mean ${fmtS((r.summary||{}).mean_duration_s)}</div>`;
+    // A-08: esc() now covers `'`, so no per-site quote patching is needed.
     return `<div class="hbar-row">
       <div class="hbar-name" title="${esc(r.run_id)}">${esc(r.scenario)}</div>
-      <div class="hbar-track"><div class="hbar" data-tip='${t.replace(/'/g, "&#39;")}'
-        style="width:${Math.max(1, pct * 100)}%"><span class="hbar-val">${fmtPct(pct)}</span></div></div>
+      <div class="hbar-track"><div class="hbar" data-tip='${t}'
+        style="width:${Math.max(1, safePct(pct) * 100)}%"><span class="hbar-val">${fmtPct(pct)}</span></div></div>
     </div>`;
   }).join("");
   return `<div class="hbar-chart">${rows}</div>`;
@@ -383,8 +410,8 @@ function compareHTML(runA, runB) {
     const offNote = traj.off_target_count ? ` &middot; off-target: ${traj.off_target_count}` : "";
     const stepLine = steps.length
       ? `<div class="t-line">${steps.length} step(s): ${steps.map((st) =>
-          `#${st.i} ${fmtS(st.duration_s)}${st.ok === false ? " &#10007;" : ""}${st.expected_ok === false ? " (unmet)" : ""}` +
-          (st.completion_tokens != null ? " " + st.completion_tokens + "t" : "")).join(" &middot; ")}</div>`
+          `#${num(st.i, "?")} ${fmtS(st.duration_s)}${st.ok === false ? " &#10007;" : ""}${st.expected_ok === false ? " (unmet)" : ""}` +
+          (st.completion_tokens != null ? " " + num(st.completion_tokens) + "t" : "")).join(" &middot; ")}</div>`
       : "";
     // Dynamic eval: note any mid-session disruptions that fired for this case.
     const fired = steps.flatMap((st) => st.disrupted || []);
@@ -393,10 +420,10 @@ function compareHTML(runA, runB) {
     const why = attributeFailure(c);
     const attribLine = why ? `<div class="t-line">↳ ${esc(why)}</div>` : "";
     const t = `<div class="t-title">${esc(c.name)} - ${esc(label)}</div>
-      <div class="t-line">${c.passed ? "&#10003; passed" : "&#10007; " + esc((c.failures[0] || c.error || "failed"))}</div>
-      <div class="t-line">${fmtS(c.duration_s)}${offNote} &middot; files: ${esc(c.files.join(", ") || "none")}</div>${stepLine}${disruptLine}${attribLine}`;
-    const tipAttr = t.replace(/'/g, "&#39;");
-    const wPct = Math.max(1, (c.duration_s || 0) / maxDur * 88);
+      <div class="t-line">${c.passed ? "&#10003; passed" : "&#10007; " + esc(((c.failures || [])[0] || c.error || "failed"))}</div>
+      <div class="t-line">${fmtS(c.duration_s)}${offNote} &middot; files: ${esc((c.files || []).join(", ") || "none")}</div>${stepLine}${disruptLine}${attribLine}`;
+    const tipAttr = t;   // A-08: esc() escapes `'`, so no patch-up pass here
+    const wPct = Math.max(1, safeNum(c.duration_s) / maxDur * 88);
     // Per-step timeline: split the bar into segments sized by each step's share
     // of the total step time (only when >1 step is recorded, i.e. a
     // multi-prompt case; a driver that caches results records no steps).
@@ -421,7 +448,7 @@ function compareHTML(runA, runB) {
   const res = (c) => c == null ? "<td>-</td>"
     : `<td class="res ${c.passed ? "pass" : "fail"}">${c.passed ? "&#10003; pass" : "&#10007; fail"}</td>`;
   const failNote = (c) => c && !c.passed
-    ? `<div class="fail-detail">${esc((c.failures[0] || c.error || ""))}</div>` : "";
+    ? `<div class="fail-detail">${esc(((c.failures || [])[0] || c.error || ""))}</div>` : "";
   // Off-target-edit badge: files the agent changed that the task never asked for
   // (a "did it stay on task" signal, flagged even when the case passed).
   const offBadge = (c, side) => {
@@ -470,7 +497,7 @@ function compareHTML(runA, runB) {
 
   // H-07: a missing total_cost_usd means "no cost data reported", which must
   // never be coerced to $0.00 and win. A verdict needs BOTH sides known.
-  const fmtCost = (v) => v == null ? "—" : "$" + v.toFixed(2);
+  const fmtCost = (v) => v == null ? "-" : "$" + v.toFixed(2);
   const bothCosts = sa.total_cost_usd != null && sb.total_cost_usd != null;
   const cheaperVal = suppressed ? "(suppressed)"
     : !bothCosts ? "unknown"
@@ -523,12 +550,12 @@ function trendHTML(scenarioName) {
     const s = r.summary || {};
     const pct = s.pass_rate || 0;
     const t = `<div class="t-title">${esc(r.run_id)}</div>
-       <div class="t-line">${s.passed}/${s.cases} passed &middot; mean ${fmtS(s.mean_duration_s)}</div>`;
+       <div class="t-line">${num(s.passed, "?")}/${num(s.cases, "?")} passed &middot; mean ${fmtS(s.mean_duration_s)}</div>`;
     const shortId = String(r.run_id).slice(0, 15);
     return `<div class="hbar-row">
       <div class="hbar-name" title="${esc(r.run_id)}">${esc(shortId)}</div>
-      <div class="hbar-track"><div class="hbar" data-tip='${t.replace(/'/g, "&#39;")}'
-        style="width:${Math.max(1, pct * 100)}%"><span class="hbar-val">${fmtPct(pct)} &middot; ${fmtS(s.mean_duration_s)}</span></div></div>
+      <div class="hbar-track"><div class="hbar" data-tip='${t}'
+        style="width:${Math.max(1, safePct(pct) * 100)}%"><span class="hbar-val">${fmtPct(pct)} &middot; ${fmtS(s.mean_duration_s)}</span></div></div>
     </div>`;
   }).join("");
   return `<div class="hbar-chart">${rows}</div>`;

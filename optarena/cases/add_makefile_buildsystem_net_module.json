@@ -1,0 +1,59 @@
+{
+  "description": "Repo-scale (makefile-buildsystem): a new src/net module needs BOTH its sources picked up AND its headers on the include path",
+  "tags": [
+    "makefile",
+    "make",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a new module `src/net/` (net.h/net.c) with `net_format_addr(char *buf, size_t bufsize, const char *host, int port)`, formatting `\"host:port\"` into `buf` via snprintf. Wire it into src/cli/main.c (call it and print the result). In the Makefile: (1) add `NET_SRCS := $(wildcard src/net/*.c)` and include it in `SRCS`, so the new module's sources actually get compiled - `$(wildcard src/core/*.c)`-style globs don't pick up a brand new directory on their own; (2) ALSO add `-Isrc/net` to `CFLAGS`, so `main.c`'s `#include \"net.h\"` can actually resolve - adding the sources without the include path (or vice versa) breaks the build."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "src/net",
+        "-Isrc/net"
+      ]
+    },
+    {
+      "path_pattern": "src/cli/main.c",
+      "content_patterns": [
+        "net_format_addr"
+      ]
+    }
+  ],
+  "check_command": "python3 check_net_module.py",
+  "test_setup_files": {
+    "check_net_module.py": "import subprocess\n\nr = subprocess.run(['make', 'all'], capture_output=True, text=True, timeout=60)\nassert r.returncode == 0, f'make all failed:\\n{r.stdout}\\n{r.stderr}'\n\nrun = subprocess.run(['./bin/app'], capture_output=True, text=True, timeout=15)\nassert run.returncode == 0, run.stdout + run.stderr\nassert 'addr: localhost:8080' in run.stdout, run.stdout\n\nprint('PASS')\n"
+  },
+  "reference_solution": {
+    "Makefile": "CC := gcc\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils -Isrc/net\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nNET_SRCS := $(wildcard src/net/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(NET_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nTEST_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_TARGET := $(BINDIR)/test_calc\n\n.PHONY: all clean test\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\ntest: $(TEST_TARGET)\n\t./$(TEST_TARGET)\n\n$(TEST_TARGET): $(TEST_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_SRCS) -o $(TEST_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n",
+    "src/net/net.h": "#pragma once\n\n#include <stddef.h>\n\n/* Formats a fictional \"host:port\" string into buf; returns buf. */\nchar *net_format_addr(char *buf, size_t bufsize, const char *host, int port);\n",
+    "src/net/net.c": "#include \"net.h\"\n\n#include <stdio.h>\n\nchar *net_format_addr(char *buf, size_t bufsize, const char *host, int port) {\n    snprintf(buf, bufsize, \"%s:%d\", host, port);\n    return buf;\n}\n",
+    "src/cli/main.c": "#include <stdio.h>\n\n#include \"calc.h\"\n#include \"net.h\"\n#include \"strutil.h\"\n\nint main(int argc, char **argv) {\n    (void)argv;\n    if (argc > 1) {\n        printf(\"unexpected arguments\\n\");\n        return 1;\n    }\n    printf(\"add: %d\\n\", calc_add(2, 3));\n    printf(\"multiply: %d\\n\", calc_multiply(2, 3));\n\n    char greeting[] = \"  hello  \";\n    printf(\"trimmed: '%s'\\n\", strutil_trim(greeting));\n\n    char addr[64];\n    printf(\"addr: %s\\n\", net_format_addr(addr, sizeof(addr), \"localhost\", 8080));\n    return 0;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "net-include-path-missing-from-cflags",
+      "files": {
+        "Makefile": "CC := gcc\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nNET_SRCS := $(wildcard src/net/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(NET_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nTEST_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_TARGET := $(BINDIR)/test_calc\n\n.PHONY: all clean test\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\ntest: $(TEST_TARGET)\n\t./$(TEST_TARGET)\n\n$(TEST_TARGET): $(TEST_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_SRCS) -o $(TEST_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n",
+        "src/net/net.h": "#pragma once\n\n#include <stddef.h>\n\n/* Formats a fictional \"host:port\" string into buf; returns buf. */\nchar *net_format_addr(char *buf, size_t bufsize, const char *host, int port);\n",
+        "src/net/net.c": "#include \"net.h\"\n\n#include <stdio.h>\n\nchar *net_format_addr(char *buf, size_t bufsize, const char *host, int port) {\n    snprintf(buf, bufsize, \"%s:%d\", host, port);\n    return buf;\n}\n",
+        "src/cli/main.c": "#include <stdio.h>\n\n#include \"calc.h\"\n#include \"net.h\"\n#include \"strutil.h\"\n\nint main(int argc, char **argv) {\n    (void)argv;\n    if (argc > 1) {\n        printf(\"unexpected arguments\\n\");\n        return 1;\n    }\n    printf(\"add: %d\\n\", calc_add(2, 3));\n    printf(\"multiply: %d\\n\", calc_multiply(2, 3));\n\n    char greeting[] = \"  hello  \";\n    printf(\"trimmed: '%s'\\n\", strutil_trim(greeting));\n\n    char addr[64];\n    printf(\"addr: %s\\n\", net_format_addr(addr, sizeof(addr), \"localhost\", 8080));\n    return 0;\n}\n"
+      }
+    }
+  ],
+  "name": "add_makefile_buildsystem_net_module",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "makefile-buildsystem",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

@@ -1,0 +1,49 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker in place of a stub that always calls through",
+  "task_type": "feature",
+  "tags": [
+    "rust",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "src/lib.rs's CircuitBreaker::call always just calls fn(). Implement the real 3-state machine: CircuitBreaker::new(failure_threshold: u32, reset_timeout: i64). Starts Closed. In Closed, call invokes fn(); if it returns Err, count consecutive failures, and once `failure_threshold` CONSECUTIVE failures have happened, trip to Open (recording when it opened) and return that Err. While Open, call must NOT invoke fn() at all and must instead return Err(CircuitError::Open) - UNLESS at least `reset_timeout` seconds have passed since it opened, in which case it moves to HalfOpen and allows exactly ONE trial call: if that call succeeds, go back to Closed (reset the failure count); if it errors, go back to Open and RESET the open-time to `now` (so the next trial is only allowed after another full reset_timeout, not immediately)."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"circuit_breaker\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "#[derive(Debug, PartialEq)]\npub enum CircuitError {\n    Open,\n    Inner(String),\n}\n\npub struct CircuitBreaker {\n    failure_threshold: u32,\n    reset_timeout: i64,\n}\n\nimpl CircuitBreaker {\n    pub fn new(failure_threshold: u32, reset_timeout: i64) -> Self {\n        CircuitBreaker { failure_threshold, reset_timeout }\n    }\n\n    pub fn call<F>(&mut self, f: F, _now: i64) -> Result<String, CircuitError>\n    where\n        F: FnOnce() -> Result<String, String>,\n    {\n        f().map_err(CircuitError::Inner)\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "struct CircuitBreaker"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/breaker_test.rs": "use circuit_breaker::{CircuitBreaker, CircuitError};\n\nfn boom() -> Result<String, String> {\n    Err(\"boom\".to_string())\n}\n\n#[test]\nfn trips_open_after_consecutive_failures() {\n    let mut b = CircuitBreaker::new(3, 10);\n    for _ in 0..3 {\n        assert_eq!(b.call(boom, 0), Err(CircuitError::Inner(\"boom\".to_string())));\n    }\n    assert_eq!(b.call(|| Ok(\"should not run\".to_string()), 0), Err(CircuitError::Open));\n}\n\n#[test]\nfn fails_fast_without_calling_fn_while_open() {\n    let mut b = CircuitBreaker::new(1, 100);\n    let _ = b.call(boom, 0);\n    let mut called = false;\n    let result = b.call(|| { called = true; Ok(\"x\".to_string()) }, 1);\n    assert_eq!(result, Err(CircuitError::Open));\n    assert!(!called);\n}\n\n#[test]\nfn half_open_trial_after_timeout_success_closes() {\n    let mut b = CircuitBreaker::new(1, 10);\n    let _ = b.call(boom, 0);\n    assert_eq!(b.call(|| Ok(\"ok\".to_string()), 10), Ok(\"ok\".to_string()));\n    assert_eq!(b.call(|| Ok(\"still-fine\".to_string()), 11), Ok(\"still-fine\".to_string()));\n}\n\n#[test]\nfn half_open_failure_reopens_and_resets_clock() {\n    let mut b = CircuitBreaker::new(1, 10);\n    let _ = b.call(boom, 0);\n    assert_eq!(b.call(boom, 10), Err(CircuitError::Inner(\"boom\".to_string())));\n    assert_eq!(b.call(|| Ok(\"too soon\".to_string()), 15), Err(CircuitError::Open));\n    assert_eq!(b.call(|| Ok(\"ok now\".to_string()), 20), Ok(\"ok now\".to_string()));\n}\n"
+  },
+  "reference_solution": {
+    "Cargo.toml": "[package]\nname = \"circuit_breaker\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "#[derive(Debug, PartialEq)]\npub enum CircuitError {\n    Open,\n    Inner(String),\n}\n\n#[derive(PartialEq)]\nenum State {\n    Closed,\n    Open,\n    HalfOpen,\n}\n\npub struct CircuitBreaker {\n    failure_threshold: u32,\n    reset_timeout: i64,\n    state: State,\n    failures: u32,\n    opened_at: i64,\n}\n\nimpl CircuitBreaker {\n    pub fn new(failure_threshold: u32, reset_timeout: i64) -> Self {\n        CircuitBreaker {\n            failure_threshold,\n            reset_timeout,\n            state: State::Closed,\n            failures: 0,\n            opened_at: 0,\n        }\n    }\n\n    pub fn call<F>(&mut self, f: F, now: i64) -> Result<String, CircuitError>\n    where\n        F: FnOnce() -> Result<String, String>,\n    {\n        if self.state == State::Open {\n            if now - self.opened_at < self.reset_timeout {\n                return Err(CircuitError::Open);\n            }\n            self.state = State::HalfOpen;\n        }\n\n        match f() {\n            Ok(v) => {\n                self.state = State::Closed;\n                self.failures = 0;\n                Ok(v)\n            }\n            Err(e) => {\n                if self.state == State::HalfOpen {\n                    self.state = State::Open;\n                    self.opened_at = now;\n                } else {\n                    self.failures += 1;\n                    if self.failures >= self.failure_threshold {\n                        self.state = State::Open;\n                        self.opened_at = now;\n                    }\n                }\n                Err(CircuitError::Inner(e))\n            }\n        }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"circuit_breaker\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n",
+        "src/lib.rs": "#[derive(Debug, PartialEq)]\npub enum CircuitError {\n    Open,\n    Inner(String),\n}\n\n#[derive(PartialEq)]\nenum State {\n    Closed,\n    Open,\n    HalfOpen,\n}\n\npub struct CircuitBreaker {\n    failure_threshold: u32,\n    reset_timeout: i64,\n    state: State,\n    failures: u32,\n    opened_at: i64,\n}\n\nimpl CircuitBreaker {\n    pub fn new(failure_threshold: u32, reset_timeout: i64) -> Self {\n        CircuitBreaker {\n            failure_threshold,\n            reset_timeout,\n            state: State::Closed,\n            failures: 0,\n            opened_at: 0,\n        }\n    }\n\n    pub fn call<F>(&mut self, f: F, now: i64) -> Result<String, CircuitError>\n    where\n        F: FnOnce() -> Result<String, String>,\n    {\n        if self.state == State::Open {\n            if now - self.opened_at < self.reset_timeout {\n                return Err(CircuitError::Open);\n            }\n            self.state = State::HalfOpen;\n        }\n\n        match f() {\n            Ok(v) => {\n                self.state = State::Closed;\n                self.failures = 0;\n                Ok(v)\n            }\n            Err(e) => {\n                if self.state == State::HalfOpen {\n                    self.state = State::Open;\n                } else {\n                    self.failures += 1;\n                    if self.failures >= self.failure_threshold {\n                        self.state = State::Open;\n                        self.opened_at = now;\n                    }\n                }\n                Err(CircuitError::Inner(e))\n            }\n        }\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_rust_circuit_breaker_state_machine",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "cargo test --offline"
+}

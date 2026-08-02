@@ -1,0 +1,66 @@
+{
+  "name": "adapt_renamed_symbol_go_dynamic",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time area.go's own text contains 'CircleArea' (i.e. once the agent has produced a first attempt), then square is RENAMED to sq under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "go",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "renamed-symbol",
+    "reactive"
+  ],
+  "prompts": [
+    "mathutils.go (package areacase) has an unexported function square(x float64) float64. Create area.go (same package) with a function CircleArea(r float64) float64 that returns 3.14159 * square(r).",
+    "mathutils.go's square function has just been renamed to sq. Update area.go to use the new name (do not keep a reference to the old name square)."
+  ],
+  "setup_files": {
+    "go.mod": "module areacase\n\ngo 1.22\n",
+    "mathutils.go": "package areacase\n\nfunc square(x float64) float64 {\n\treturn x * x\n}\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "area.go",
+          "pattern": "CircleArea"
+        }
+      },
+      "description": "square renamed to sq, triggered reactively once area.go's first draft appeared",
+      "write_files": {
+        "mathutils.go": "package areacase\n\nfunc sq(x float64) float64 {\n\treturn x * x\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "area.go",
+      "content_patterns": [
+        "CircleArea"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "area_test.go": "package areacase\n\nimport (\n\t\"math\"\n\t\"testing\"\n)\n\nfunc TestCircleArea(t *testing.T) {\n\tgot := CircleArea(2)\n\twant := 3.14159 * 4.0\n\tif math.Abs(got-want) > 1e-6 {\n\t\tt.Fatalf(\"CircleArea(2) = %v, want %v\", got, want)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "area.go": "package areacase\n\nfunc CircleArea(r float64) float64 {\n\treturn 3.14159 * sq(r)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-name",
+      "files": {
+        "area.go": "package areacase\n\nfunc CircleArea(r float64) float64 {\n\treturn 3.14159 * square(r)\n}\n"
+      }
+    }
+  ]
+}

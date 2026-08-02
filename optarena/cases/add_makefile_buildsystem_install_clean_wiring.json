@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (makefile-buildsystem): a new install target that stages the binary needs `clean` to also remove the staged copy",
+  "tags": [
+    "makefile",
+    "make",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add an `install` target that copies the built binary into a new `stage/` directory (`stage/app`) - it must depend on `all` (order-only is fine for the `stage` directory itself, but the binary must genuinely be built first) so `make install` alone still produces a working staged copy from a clean tree. This isn't self-contained: the existing `clean` target currently only removes `bin/` and the generated `.o`/`.d` files - update it to ALSO remove `stage/`, otherwise `make clean` leaves stale installed artifacts behind even though it's supposed to reset the tree to a pristine state."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "install",
+        "STAGEDIR"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_install_clean.py": "import subprocess\nfrom pathlib import Path\n\nr = subprocess.run(['make', 'install'], capture_output=True, text=True, timeout=60)\nassert r.returncode == 0, f'make install failed:\\n{r.stdout}\\n{r.stderr}'\nassert Path('stage/app').exists(), 'make install must produce stage/app'\n\nr2 = subprocess.run(['make', 'clean'], capture_output=True, text=True, timeout=60)\nassert r2.returncode == 0, f'make clean failed:\\n{r2.stdout}\\n{r2.stderr}'\n\nassert not Path('stage').exists(), (\n    \"stage/ still exists after 'make clean' - clean must remove the staged install \"\n    \"artifacts too, not just the original bin/ build output\")\nassert not Path('bin').exists(), 'bin/ should also be removed by clean'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_install_clean.py",
+  "reference_solution": {
+    "Makefile": "CC := gcc\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nSTAGEDIR := stage\nSTAGED_TARGET := $(STAGEDIR)/app\n\nTEST_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_TARGET := $(BINDIR)/test_calc\n\n.PHONY: all clean test install\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\n$(STAGEDIR):\n\tmkdir -p $(STAGEDIR)\n\ninstall: $(TARGET) | $(STAGEDIR)\n\tcp $(TARGET) $(STAGED_TARGET)\n\ntest: $(TEST_TARGET)\n\t./$(TEST_TARGET)\n\n$(TEST_TARGET): $(TEST_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_SRCS) -o $(TEST_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(STAGEDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "clean-leaves-stage-directory-behind",
+      "files": {
+        "Makefile": "CC := gcc\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nSTAGEDIR := stage\nSTAGED_TARGET := $(STAGEDIR)/app\n\nTEST_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_TARGET := $(BINDIR)/test_calc\n\n.PHONY: all clean test install\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\n$(STAGEDIR):\n\tmkdir -p $(STAGEDIR)\n\ninstall: $(TARGET) | $(STAGEDIR)\n\tcp $(TARGET) $(STAGED_TARGET)\n\ntest: $(TEST_TARGET)\n\t./$(TEST_TARGET)\n\n$(TEST_TARGET): $(TEST_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_SRCS) -o $(TEST_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+      }
+    }
+  ],
+  "name": "add_makefile_buildsystem_install_clean_wiring",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "makefile-buildsystem",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

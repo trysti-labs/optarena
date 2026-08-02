@@ -38,5 +38,13 @@
   "timeout": 120,
   "reference_solution": {
     "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    amount REAL NOT NULL\n);\n\nCREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       COUNT(o.id) AS total_orders,\n       COALESCE(SUM(o.amount), 0) AS total_amount\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nGROUP BY c.id;\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "inner-join-drops-zero-order-customers",
+      "files": {
+        "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    amount REAL NOT NULL\n);\n\nCREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       COUNT(o.id) AS total_orders,\n       COALESCE(SUM(o.amount), 0) AS total_amount\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nGROUP BY c.id;\n"
+      }
+    }
+  ]
 }

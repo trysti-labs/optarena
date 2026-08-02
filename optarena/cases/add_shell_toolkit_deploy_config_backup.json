@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (shell-toolkit): deploy.sh must back up config/app.conf via the existing backup_file helper AND abort if the backup fails",
+  "tags": [
+    "shell",
+    "bash",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Before deploying, `deploy.sh` must back up `config/app.conf` using the existing `backup_file` helper (lib/backup.sh already defines it, but nothing currently calls it), passing the deployed `$VERSION` as the backup suffix. It's not enough to just call it - deploy.sh must check the exit code and abort with a non-zero exit (without proceeding to the deploy log line) if the backup fails, e.g. because the config file is missing."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "deploy.sh",
+      "content_patterns": [
+        "backup_file",
+        "config/app.conf"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_backup.py": "import os\nimport subprocess\n\nr = subprocess.run(['bash', 'deploy.sh', '-v', '1.2.3'], capture_output=True, text=True, timeout=15)\nassert r.returncode == 0, (r.stdout, r.stderr)\nassert os.path.isfile('config/app.conf.bak.1.2.3'), (\n    'expected deploy.sh to back up config/app.conf before deploying')\n\nos.remove('config/app.conf')\nr2 = subprocess.run(['bash', 'deploy.sh', '-v', '1.2.3'], capture_output=True, text=True, timeout=15)\nassert r2.returncode != 0, (\n    f'expected deploy.sh to abort when the config backup fails, but it exited 0: {r2.stdout!r}')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_backup.py",
+  "reference_solution": {
+    "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\n\nVERSION=\"\"\nwhile getopts \"v:\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\n\nif ! backup_file \"config/app.conf\" \"$VERSION\"; then\n    log_error \"aborting: config backup failed\"\n    exit 1\nfi\n\nlog_info \"deploying version $VERSION\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "backup-result-ignored",
+      "files": {
+        "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\n\nVERSION=\"\"\nwhile getopts \"v:\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\n\nbackup_file \"config/app.conf\" \"$VERSION\" || true\n\nlog_info \"deploying version $VERSION\"\n"
+      }
+    }
+  ],
+  "name": "add_shell_toolkit_deploy_config_backup",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "shell-toolkit",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

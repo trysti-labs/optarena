@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (makefile-buildsystem): a new test suite needs the `test` target itself updated to actually run it",
+  "tags": [
+    "makefile",
+    "make",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add tests/test_strutil.c (assert-based, exercising strutil_trim on leading-only, trailing-only, and all-whitespace input, printing PASS at the end - same style as the existing tests/test_calc.c). In the Makefile, add a `TEST_STRUTIL_TARGET` build rule for it (mirroring the existing `TEST_CALC_TARGET` pattern). Adding the new test binary's own build rule isn't enough - the existing `test` target currently only builds and runs `test_calc`; update its prerequisites AND recipe so `make test` builds and runs BOTH test binaries, not just the original one."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "tests/test_strutil.c",
+      "content_patterns": [
+        "strutil_trim"
+      ]
+    },
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "TEST_STRUTIL_TARGET"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_second_test_suite.py": "import subprocess\nfrom pathlib import Path\n\nr = subprocess.run(['make', 'test'], capture_output=True, text=True, timeout=60)\nassert r.returncode == 0, f'make test failed:\\n{r.stdout}\\n{r.stderr}'\n\nassert Path('bin/test_strutil').exists(), (\n    \"bin/test_strutil was never built - the 'test' target must depend on it, not just \"\n    \"bin/test_calc\")\n\nassert r.stdout.count('PASS') >= 2, (\n    f\"expected 'make test' to run BOTH test binaries (2 PASS lines), got: {r.stdout!r} - \"\n    f\"adding test_strutil's own build rule isn't enough, the 'test' target's recipe must \"\n    f\"actually invoke it too\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_second_test_suite.py",
+  "reference_solution": {
+    "tests/test_strutil.c": "#include \"strutil.h\"\n\n#include <assert.h>\n#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char only_leading[] = \"   x\";\n    assert(strcmp(strutil_trim(only_leading), \"x\") == 0);\n\n    char only_trailing[] = \"x   \";\n    assert(strcmp(strutil_trim(only_trailing), \"x\") == 0);\n\n    char all_space[] = \"    \";\n    assert(strcmp(strutil_trim(all_space), \"\") == 0);\n\n    printf(\"PASS\\n\");\n    return 0;\n}\n",
+    "Makefile": "CC := gcc\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nTEST_CALC_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_CALC_TARGET := $(BINDIR)/test_calc\n\nTEST_STRUTIL_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_strutil.c\nTEST_STRUTIL_TARGET := $(BINDIR)/test_strutil\n\n.PHONY: all clean test\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\ntest: $(TEST_CALC_TARGET) $(TEST_STRUTIL_TARGET)\n\t./$(TEST_CALC_TARGET)\n\t./$(TEST_STRUTIL_TARGET)\n\n$(TEST_CALC_TARGET): $(TEST_CALC_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_CALC_SRCS) -o $(TEST_CALC_TARGET)\n\n$(TEST_STRUTIL_TARGET): $(TEST_STRUTIL_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_STRUTIL_SRCS) -o $(TEST_STRUTIL_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "test-target-not-updated-to-run-new-suite",
+      "files": {
+        "tests/test_strutil.c": "#include \"strutil.h\"\n\n#include <assert.h>\n#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char only_leading[] = \"   x\";\n    assert(strcmp(strutil_trim(only_leading), \"x\") == 0);\n\n    char only_trailing[] = \"x   \";\n    assert(strcmp(strutil_trim(only_trailing), \"x\") == 0);\n\n    char all_space[] = \"    \";\n    assert(strcmp(strutil_trim(all_space), \"\") == 0);\n\n    printf(\"PASS\\n\");\n    return 0;\n}\n",
+        "Makefile": "CC := gcc\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nTEST_CALC_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_CALC_TARGET := $(BINDIR)/test_calc\n\nTEST_STRUTIL_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_strutil.c\nTEST_STRUTIL_TARGET := $(BINDIR)/test_strutil\n\n.PHONY: all clean test\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\ntest: $(TEST_CALC_TARGET)\n\t./$(TEST_CALC_TARGET)\n\n$(TEST_CALC_TARGET): $(TEST_CALC_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_CALC_SRCS) -o $(TEST_CALC_TARGET)\n\n$(TEST_STRUTIL_TARGET): $(TEST_STRUTIL_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_STRUTIL_SRCS) -o $(TEST_STRUTIL_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+      }
+    }
+  ],
+  "name": "add_makefile_buildsystem_second_test_suite",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "makefile-buildsystem",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

@@ -38,5 +38,13 @@
   "timeout": 150,
   "reference_solution": {
     "server.js": "const express = require('express');\nconst app = express();\napp.use(express.json());\n\nlet todos = [];\nlet nextId = 1;\n\napp.get('/todos', (req, res) => res.json(todos));\n\napp.post('/todos', (req, res) => {\n  const todo = { id: nextId++, title: req.body.title, done: false };\n  todos.push(todo);\n  res.status(201).json(todo);\n});\n\napp.get('/todos/:id', (req, res) => {\n  const todo = todos.find((t) => t.id === parseInt(req.params.id, 10));\n  if (!todo) return res.status(404).json({ error: 'not found' });\n  res.json(todo);\n});\n\napp.put('/todos/:id', (req, res) => {\n  const todo = todos.find((t) => t.id === parseInt(req.params.id, 10));\n  if (!todo) return res.status(404).json({ error: 'not found' });\n  if (req.body.title !== undefined) todo.title = req.body.title;\n  if (req.body.done !== undefined) todo.done = req.body.done;\n  res.json(todo);\n});\n\napp.delete('/todos/:id', (req, res) => {\n  const idx = todos.findIndex((t) => t.id === parseInt(req.params.id, 10));\n  if (idx === -1) return res.status(404).json({ error: 'not found' });\n  todos.splice(idx, 1);\n  res.status(204).end();\n});\n\napp.listen(8020);\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "missing-done-field",
+      "files": {
+        "server.js": "const express = require('express');\nconst app = express();\napp.use(express.json());\n\nlet todos = [];\nlet nextId = 1;\n\napp.get('/todos', (req, res) => res.json(todos));\n\napp.post('/todos', (req, res) => {\n  // BUG: omits the required 'done' field entirely.\n  const todo = { id: nextId++, title: req.body.title };\n  todos.push(todo);\n  res.status(201).json(todo);\n});\n\napp.get('/todos/:id', (req, res) => {\n  const todo = todos.find((t) => t.id === parseInt(req.params.id, 10));\n  if (!todo) return res.status(404).json({ error: 'not found' });\n  res.json(todo);\n});\n\napp.put('/todos/:id', (req, res) => {\n  const todo = todos.find((t) => t.id === parseInt(req.params.id, 10));\n  if (!todo) return res.status(404).json({ error: 'not found' });\n  if (req.body.title !== undefined) todo.title = req.body.title;\n  if (req.body.done !== undefined) todo.done = req.body.done;\n  res.json(todo);\n});\n\napp.delete('/todos/:id', (req, res) => {\n  const idx = todos.findIndex((t) => t.id === parseInt(req.params.id, 10));\n  if (idx === -1) return res.status(404).json({ error: 'not found' });\n  todos.splice(idx, 1);\n  res.status(204).end();\n});\n\napp.listen(8020);\n"
+      }
+    }
+  ]
 }

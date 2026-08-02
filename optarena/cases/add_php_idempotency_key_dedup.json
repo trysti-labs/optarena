@@ -1,0 +1,44 @@
+{
+  "description": "Add idempotency-key deduplication with a TTL window to a processor that currently re-executes on every call",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "idempotency",
+    "algorithms"
+  ],
+  "prompts": [
+    "Create src/Processor.php defining namespace App and class Processor with a public array $effects = [] property and a constructor __construct(int $window). process(string $key, $payload, int $now): array runs the side effect (appends [key, payload] to $this->effects and returns a fresh result array ['key' => ..., 'payload' => ..., 'processedAt' => ...]) EVERY time it's called, even for a key it has already processed - make it idempotent: within $window seconds of the first call for a given key, a repeat call with that SAME key must return the ORIGINAL result array WITHOUT running the side effect again ($this->effects must not grow) - regardless of what payload is passed the second time. Once $window seconds have passed since the first call for that key, the NEXT call for that key must run for real again (a fresh execution, whose result becomes the new one remembered for that key)."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/Processor.php",
+      "content_patterns": [
+        "function process"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/Processor.php": "<?php\nnamespace App;\n\nclass Processor\n{\n    private int $window;\n    private array $seen = []; // key -> ['result' => ..., 'recordedAt' => ...]\n    public array $effects = [];\n\n    public function __construct(int $window)\n    {\n        $this->window = $window;\n    }\n\n    public function process(string $key, $payload, int $now): array\n    {\n        if (isset($this->seen[$key])) {\n            $cached = $this->seen[$key];\n            if ($now - $cached['recordedAt'] < $this->window) {\n                return $cached['result'];\n            }\n        }\n        $this->effects[] = [$key, $payload];\n        $result = ['key' => $key, 'payload' => $payload, 'processedAt' => $now];\n        $this->seen[$key] = ['result' => $result, 'recordedAt' => $now];\n        return $result;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedup-never-expires",
+      "files": {
+        "src/Processor.php": "<?php\nnamespace App;\n\nclass Processor\n{\n    private int $window;\n    private array $seen = [];\n    public array $effects = [];\n\n    public function __construct(int $window)\n    {\n        $this->window = $window;\n    }\n\n    public function process(string $key, $payload, int $now): array\n    {\n        if (isset($this->seen[$key])) {\n            return $this->seen[$key];\n        }\n        $this->effects[] = [$key, $payload];\n        $result = ['key' => $key, 'payload' => $payload, 'processedAt' => $now];\n        $this->seen[$key] = $result;\n        return $result;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_idempotency_key_dedup",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "difficulty": 3,
+  "check_command": "phpunit tests/ProcessorTest.php",
+  "setup_files": {},
+  "test_setup_files": {
+    "tests/ProcessorTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Processor.php';\n\nfinal class ProcessorTest extends TestCase\n{\n    public function testDuplicateKeyWithinWindowNotReexecuted(): void\n    {\n        $p = new \\App\\Processor(10);\n        $first = $p->process(\"order-1\", 5, 0);\n        $second = $p->process(\"order-1\", 999, 5);\n        $this->assertSame($first, $second);\n        $this->assertCount(1, $p->effects);\n    }\n\n    public function testDifferentKeysBothExecute(): void\n    {\n        $p = new \\App\\Processor(10);\n        $p->process(\"a\", 1, 0);\n        $p->process(\"b\", 2, 0);\n        $this->assertCount(2, $p->effects);\n    }\n\n    public function testReexecutesAfterWindowExpires(): void\n    {\n        $p = new \\App\\Processor(10);\n        $p->process(\"order-1\", 5, 0);\n        $p->process(\"order-1\", 5, 9);\n        $this->assertCount(1, $p->effects);\n        $p->process(\"order-1\", 7, 10);\n        $this->assertCount(2, $p->effects);\n        $this->assertSame(7, $p->effects[1][1]);\n    }\n}\n"
+  }
+}

@@ -38,5 +38,13 @@
   "timeout": 150,
   "reference_solution": {
     "main.go": "package main\n\nimport \"github.com/gofiber/fiber/v2\"\n\ntype Item struct {\n\tID   int    `json:\"id\"`\n\tName string `json:\"name\"`\n}\n\nfunc main() {\n\tapp := fiber.New()\n\titems := []Item{}\n\tnextID := 1\n\n\tapp.Get(\"/items\", func(c *fiber.Ctx) error {\n\t\treturn c.JSON(items)\n\t})\n\n\tapp.Post(\"/items\", func(c *fiber.Ctx) error {\n\t\tvar input struct {\n\t\t\tName string `json:\"name\"`\n\t\t}\n\t\tif err := c.BodyParser(&input); err != nil {\n\t\t\treturn c.Status(fiber.StatusBadRequest).JSON(fiber.Map{\"error\": \"invalid body\"})\n\t\t}\n\t\titem := Item{ID: nextID, Name: input.Name}\n\t\tnextID++\n\t\titems = append(items, item)\n\t\treturn c.Status(fiber.StatusCreated).JSON(item)\n\t})\n\n\tapp.Listen(\":8030\")\n}\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "id-never-increments",
+      "files": {
+        "main.go": "package main\n\nimport \"github.com/gofiber/fiber/v2\"\n\ntype Item struct {\n\tID   int    `json:\"id\"`\n\tName string `json:\"name\"`\n}\n\nfunc main() {\n\tapp := fiber.New()\n\titems := []Item{}\n\n\tapp.Get(\"/items\", func(c *fiber.Ctx) error {\n\t\treturn c.JSON(items)\n\t})\n\n\tapp.Post(\"/items\", func(c *fiber.Ctx) error {\n\t\tvar input struct {\n\t\t\tName string `json:\"name\"`\n\t\t}\n\t\tif err := c.BodyParser(&input); err != nil {\n\t\t\treturn c.Status(fiber.StatusBadRequest).JSON(fiber.Map{\"error\": \"invalid body\"})\n\t\t}\n\t\t// BUG: id is always 1, never incremented.\n\t\titem := Item{ID: 1, Name: input.Name}\n\t\titems = append(items, item)\n\t\treturn c.Status(fiber.StatusCreated).JSON(item)\n\t})\n\n\tapp.Listen(\":8030\")\n}\n"
+      }
+    }
+  ]
 }

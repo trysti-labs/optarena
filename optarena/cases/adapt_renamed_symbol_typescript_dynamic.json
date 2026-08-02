@@ -1,0 +1,64 @@
+{
+  "name": "adapt_renamed_symbol_typescript_dynamic",
+  "language": "typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time area.ts's own text contains 'circleArea' (i.e. once the agent has produced a first attempt), then mathutils.square is RENAMED to mathutils.sq under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "typescript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "renamed-symbol",
+    "reactive"
+  ],
+  "prompts": [
+    "mathutils.ts exports a function square(x: number): number. Create area.ts that exports a function circleArea(r: number): number returning 3.14159 * square(r), importing square from './mathutils'.",
+    "mathutils.ts's square function has just been renamed to sq. Update area.ts to use the new name (do not keep a reference to the old name square)."
+  ],
+  "setup_files": {
+    "mathutils.ts": "export function square(x: number): number {\n  return x * x;\n}\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "area.ts",
+          "pattern": "circleArea"
+        }
+      },
+      "description": "mathutils.square renamed to mathutils.sq, triggered reactively once area.ts's first draft appeared",
+      "write_files": {
+        "mathutils.ts": "export function sq(x: number): number {\n  return x * x;\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "area.ts",
+      "content_patterns": [
+        "circleArea"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_area.ts": "import { circleArea } from './area';\n\nconst got = circleArea(2);\nconst want = 3.14159 * 4;\nif (Math.abs(got - want) > 1e-6) { throw new Error(`circleArea(2) = ${got}, want ${want}`); }\nconsole.log('PASS');\n"
+  },
+  "check_command": "tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build mathutils.ts area.ts test_area.ts && node build/test_area.js",
+  "reference_solution": {
+    "area.ts": "import { sq } from './mathutils';\n\nexport function circleArea(r: number): number {\n  return 3.14159 * sq(r);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-name",
+      "files": {
+        "area.ts": "import { square } from './mathutils';\n\nexport function circleArea(r: number): number {\n  return 3.14159 * square(r);\n}\n"
+      }
+    }
+  ]
+}

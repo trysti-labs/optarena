@@ -1,0 +1,47 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends and is exact for any starting weekday",
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "dates.ts's addBusinessDays(start: Date, n: number): Date just adds n calendar days in milliseconds - it counts weekends as business days. Implement it properly: n=0 returns a Date equal to start unchanged (even if start itself falls on a weekend); for n>0, step forward day by day, skipping Saturdays (getUTCDay()===6) and Sundays (getUTCDay()===0), until n business days have been counted, then return that Date. It must be exact for any starting weekday and correctly cross month/year boundaries - do not use an approximation formula like `n + 2*Math.floor(n/5)` calendar-days shortcut, it gives the wrong answer depending on which weekday `start` falls on. Treat all dates as UTC to avoid timezone drift. The file must compile under tsc --strict."
+  ],
+  "setup_files": {
+    "dates.ts": "export function addBusinessDays(start: Date, n: number): Date {\n  const result = new Date(start.getTime());\n  result.setUTCDate(result.getUTCDate() + n);\n  return result;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dates.ts",
+      "content_patterns": [
+        "function addBusinessDays"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "dates.ts": "export function addBusinessDays(start: Date, n: number): Date {\n  const result = new Date(start.getTime());\n  if (n === 0) {\n    return result;\n  }\n  let counted = 0;\n  while (counted < n) {\n    result.setUTCDate(result.getUTCDate() + 1);\n    const day = result.getUTCDay();\n    if (day !== 0 && day !== 6) {\n      counted += 1;\n    }\n  }\n  return result;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "dates.ts": "export function addBusinessDays(start: Date, n: number): Date {\n  const result = new Date(start.getTime());\n  if (n === 0) {\n    return result;\n  }\n  const weeks = Math.floor(n / 5);\n  const remainder = n % 5;\n  const calendarDays = weeks * 7 + remainder;\n  result.setUTCDate(result.getUTCDate() + calendarDays);\n  return result;\n}\n"
+      }
+    }
+  ],
+  "name": "add_ts_business_day_date_math",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "sh run_checks.sh",
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit dates.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build dates.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { addBusinessDays } = require(\"./build/dates.js\");\n\nfunction iso(d) {\n  return d.toISOString().slice(0, 10);\n}\n\n{\n  const d = new Date(Date.UTC(2024, 5, 1)); // Saturday\n  assert.strictEqual(iso(addBusinessDays(d, 0)), iso(d));\n}\n{\n  const friday = new Date(Date.UTC(2024, 4, 31));\n  assert.strictEqual(iso(addBusinessDays(friday, 1)), \"2024-06-03\");\n}\n{\n  const monday = new Date(Date.UTC(2024, 4, 27));\n  assert.strictEqual(iso(addBusinessDays(monday, 5)), \"2024-06-03\");\n}\n{\n  const friday = new Date(Date.UTC(2024, 11, 27));\n  assert.strictEqual(iso(addBusinessDays(friday, 3)), \"2025-01-01\");\n}\n{\n  const saturday = new Date(Date.UTC(2024, 5, 1));\n  assert.strictEqual(iso(addBusinessDays(saturday, 1)), \"2024-06-03\");\n}\nconsole.log(\"behavior OK\");\n"
+  }
+}

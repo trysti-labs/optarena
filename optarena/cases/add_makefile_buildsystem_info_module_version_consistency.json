@@ -1,0 +1,69 @@
+{
+  "description": "Repo-scale (makefile-buildsystem): a new src/info/ module must both be correctly wired into the build (SRCS + include path) AND print the SAME version as the VERSION file, not a hardcoded string of its own",
+  "tags": [
+    "makefile",
+    "make",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add a plain-text `VERSION` file at the repo root containing `2.0.0`. In the Makefile, read it once via `APP_VERSION := $(shell cat VERSION)` and embed it into the build via `-DAPP_VERSION=\\\"$(APP_VERSION)\\\"` in CFLAGS. Add a new module `src/info/` (info.h/info.c) with `void info_build_string(char *buf, size_t bufsize)`, which formats `\"build <version>\"` into `buf` via snprintf using the `APP_VERSION` macro (with a standalone-compile fallback `#ifndef APP_VERSION #define APP_VERSION \"unknown\" #endif`) - it must NOT hardcode its own version string, since that would silently drift from VERSION the next time it's bumped. Wire the new module into src/cli/main.c (call it and print the result) and into the Makefile: add its sources to `SRCS` (a brand new directory needs its own `$(wildcard ...)` line) AND add `-Isrc/info` to CFLAGS so `main.c`'s `#include \"info.h\"` can resolve - both the sources and the include path are needed, and forgetting either one breaks the build."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "VERSION",
+      "content_patterns": [
+        "2.0.0"
+      ]
+    },
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "APP_VERSION",
+        "INFO_SRCS",
+        "-Isrc/info"
+      ]
+    },
+    {
+      "path_pattern": "src/info/info.c",
+      "content_patterns": [
+        "APP_VERSION"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_info_version.py": "import subprocess\nfrom pathlib import Path\n\nr = subprocess.run(['make', 'clean'], capture_output=True, text=True, timeout=60)\nassert r.returncode == 0, f'make clean failed:\\n{r.stdout}\\n{r.stderr}'\n\nr = subprocess.run(['make', 'all'], capture_output=True, text=True, timeout=60)\nassert r.returncode == 0, f'make all failed (is src/info wired into SRCS and -Isrc/info?):\\n{r.stdout}\\n{r.stderr}'\n\nrun = subprocess.run(['./bin/app'], capture_output=True, text=True, timeout=10)\nassert run.returncode == 0, f'./bin/app failed:\\n{run.stdout}\\n{run.stderr}'\n\nversion = Path('VERSION').read_text(encoding='utf-8').strip()\nexpected = f'build {version}'\nassert expected in run.stdout, (\n    f'expected ./bin/app output to contain {expected!r} (matching the VERSION file), got: '\n    f'{run.stdout!r} - info_build_string must read the SAME APP_VERSION the Makefile embeds from '\n    f'VERSION, not a hardcoded string of its own that can drift out of sync')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_info_version.py",
+  "reference_solution": {
+    "VERSION": "2.0.0\n",
+    "src/info/info.h": "#pragma once\n\n#include <stddef.h>\n\n/* Formats \"build <version>\" into buf via snprintf. */\nvoid info_build_string(char *buf, size_t bufsize);\n",
+    "src/info/info.c": "#include \"info.h\"\n\n#include <stdio.h>\n\n#ifndef APP_VERSION\n#define APP_VERSION \"unknown\"\n#endif\n\nvoid info_build_string(char *buf, size_t bufsize) {\n    snprintf(buf, bufsize, \"build %s\", APP_VERSION);\n}\n",
+    "src/cli/main.c": "#include <stdio.h>\n\n#include \"calc.h\"\n#include \"info.h\"\n#include \"strutil.h\"\n\nint main(int argc, char **argv) {\n    (void)argv;\n    if (argc > 1) {\n        printf(\"unexpected arguments\\n\");\n        return 1;\n    }\n    printf(\"add: %d\\n\", calc_add(2, 3));\n    printf(\"multiply: %d\\n\", calc_multiply(2, 3));\n\n    char greeting[] = \"  hello  \";\n    printf(\"trimmed: '%s'\\n\", strutil_trim(greeting));\n\n    char info[64];\n    info_build_string(info, sizeof(info));\n    printf(\"%s\\n\", info);\n    return 0;\n}\n",
+    "Makefile": "CC := gcc\nAPP_VERSION := $(shell cat VERSION)\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils -Isrc/info -DAPP_VERSION=\\\"$(APP_VERSION)\\\"\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nINFO_SRCS := $(wildcard src/info/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(INFO_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nTEST_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_TARGET := $(BINDIR)/test_calc\n\n.PHONY: all clean test\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\ntest: $(TEST_TARGET)\n\t./$(TEST_TARGET)\n\n$(TEST_TARGET): $(TEST_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_SRCS) -o $(TEST_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "info-hardcodes-stale-version",
+      "files": {
+        "VERSION": "2.0.0\n",
+        "src/info/info.h": "#pragma once\n\n#include <stddef.h>\n\n/* Formats \"build <version>\" into buf via snprintf. */\nvoid info_build_string(char *buf, size_t bufsize);\n",
+        "src/info/info.c": "#include \"info.h\"\n\n#include <stdio.h>\n\nvoid info_build_string(char *buf, size_t bufsize) {\n    snprintf(buf, bufsize, \"build %s\", \"1.0.0\");\n}\n",
+        "src/cli/main.c": "#include <stdio.h>\n\n#include \"calc.h\"\n#include \"info.h\"\n#include \"strutil.h\"\n\nint main(int argc, char **argv) {\n    (void)argv;\n    if (argc > 1) {\n        printf(\"unexpected arguments\\n\");\n        return 1;\n    }\n    printf(\"add: %d\\n\", calc_add(2, 3));\n    printf(\"multiply: %d\\n\", calc_multiply(2, 3));\n\n    char greeting[] = \"  hello  \";\n    printf(\"trimmed: '%s'\\n\", strutil_trim(greeting));\n\n    char info[64];\n    info_build_string(info, sizeof(info));\n    printf(\"%s\\n\", info);\n    return 0;\n}\n",
+        "Makefile": "CC := gcc\nAPP_VERSION := $(shell cat VERSION)\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils -Isrc/info -DAPP_VERSION=\\\"$(APP_VERSION)\\\"\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nINFO_SRCS := $(wildcard src/info/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(INFO_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nTEST_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_TARGET := $(BINDIR)/test_calc\n\n.PHONY: all clean test\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\ntest: $(TEST_TARGET)\n\t./$(TEST_TARGET)\n\n$(TEST_TARGET): $(TEST_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_SRCS) -o $(TEST_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+      }
+    }
+  ],
+  "name": "add_makefile_buildsystem_info_module_version_consistency",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "systems",
+  "image": "optarena-tester:latest",
+  "setup_repo": "makefile-buildsystem",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

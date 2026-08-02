@@ -1,0 +1,46 @@
+{
+  "description": "Fix a java.util.PriorityQueue that compares by priority alone (no FIFO guarantee for ties) into an insertion-order-stable one",
+  "task_type": "feature",
+  "tags": [
+    "kotlin",
+    "algorithms"
+  ],
+  "prompts": [
+    "StablePriorityQueue.kt wraps java.util.PriorityQueue with a comparator that only compares Item.priority - PriorityQueue makes NO ordering guarantee among equal elements (it's a binary heap, not a stable structure). Fix it so that: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO) - add an explicit monotonically increasing insertion-order field to Item and use it as the comparator's tiebreaker."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "StablePriorityQueue.kt",
+      "content_patterns": [
+        "class StablePriorityQueue"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/StablePriorityQueue.kt": "package com.optarena.app\n\nimport java.util.PriorityQueue\n\nprivate data class Item(val priority: Int, val order: Long, val value: String)\n\nclass StablePriorityQueue {\n    private val heap = PriorityQueue<Item>(\n        compareBy<Item> { it.priority }.thenBy { it.order },\n    )\n    private var counter = 0L\n\n    fun push(priority: Int, value: String) {\n        heap.add(Item(priority, counter++, value))\n    }\n\n    fun pop(): String = heap.poll().value\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-order-tiebreak",
+      "files": {
+        "src/main/kotlin/com/optarena/app/StablePriorityQueue.kt": "package com.optarena.app\n\nimport java.util.PriorityQueue\n\nprivate data class Item(val priority: Int, val value: String)\n\nclass StablePriorityQueue {\n    private val heap = PriorityQueue<Item>(compareBy { it.priority })\n\n    fun push(priority: Int, value: String) {\n        heap.add(Item(priority, value))\n    }\n\n    fun pop(): String = heap.poll().value\n}\n"
+      }
+    }
+  ],
+  "name": "add_kotlin_stable_priority_queue",
+  "language": "kotlin",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "difficulty": 3,
+  "check_command": "mvn -o -q test -Dtest=StablePriorityQueueTest",
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/StablePriorityQueue.kt": "package com.optarena.app\n\nimport java.util.PriorityQueue\n\nprivate data class Item(val priority: Int, val value: String)\n\nclass StablePriorityQueue {\n    private val heap = PriorityQueue<Item>(compareBy { it.priority })\n\n    fun push(priority: Int, value: String) {\n        heap.add(Item(priority, value))\n    }\n\n    fun pop(): String = heap.poll().value\n}\n"
+  },
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/StablePriorityQueueTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass StablePriorityQueueTest {\n    @Test\n    fun priorityOrder() {\n        val q = StablePriorityQueue()\n        q.push(5, \"low\")\n        q.push(1, \"high\")\n        q.push(3, \"mid\")\n        assertEquals(\"high\", q.pop())\n        assertEquals(\"mid\", q.pop())\n        assertEquals(\"low\", q.pop())\n    }\n\n    @Test\n    fun equalPriorityIsFifoAcrossManyItems() {\n        val q = StablePriorityQueue()\n        for (i in 0 until 20) {\n            q.push(1, ('a' + i).toString())\n        }\n        for (i in 0 until 20) {\n            assertEquals(('a' + i).toString(), q.pop())\n        }\n    }\n}\n"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "name": "adapt_role_list_php_dynamic",
+  "language": "php",
+  "framework": "plain-php",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: allowed_roles.txt (a spec file the role check must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old list into Roles.php",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "php",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create src/Roles.php declaring App\\Roles with a public static function isAllowed(string $role): bool returning true if $role is in the comma-separated list in allowed_roles.txt (currently: admin, editor), else false. Read the list from the file (file_get_contents) at call time - do not hardcode it.",
+    "allowed_roles.txt has changed. Make sure isAllowed() reflects the CURRENT list in the file."
+  ],
+  "setup_files": {
+    "allowed_roles.txt": "admin,editor\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "allowed_roles.txt rewritten to add a new role",
+      "write_files": {
+        "allowed_roles.txt": "admin,editor,viewer\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/Roles.php",
+      "content_patterns": [
+        "isAllowed"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/RolesTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Roles.php';\n\nfinal class RolesTest extends TestCase\n{\n    public function testReflectsCurrentRoleList(): void\n    {\n        $allowed = array_map('trim', explode(',', trim(file_get_contents(__DIR__ . '/../allowed_roles.txt'))));\n        foreach ($allowed as $role) {\n            $this->assertTrue(\\App\\Roles::isAllowed($role), \"isAllowed($role) should be true\");\n        }\n        $this->assertFalse(\\App\\Roles::isAllowed(\"not_a_real_role\"));\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/RolesTest.php",
+  "reference_solution": {
+    "src/Roles.php": "<?php\nnamespace App;\n\nclass Roles\n{\n    public static function isAllowed(string $role): bool\n    {\n        $allowed = array_map('trim', explode(',', trim(file_get_contents(__DIR__ . '/../allowed_roles.txt'))));\n        return in_array($role, $allowed, true);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-role-list",
+      "files": {
+        "src/Roles.php": "<?php\nnamespace App;\n\nclass Roles\n{\n    public static function isAllowed(string $role): bool\n    {\n        return in_array($role, [\"admin\", \"editor\"], true);\n    }\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "adapt_instance_policy_hcl_dynamic",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: policy.txt (a spec file the Terraform variable's default must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the default, not leave the stale value in place",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["hcl", "terraform", "dynamic", "disruption", "adaptation", "requirements-drift"],
+  "prompts": [
+    "Create a Terraform file called instance.tf declaring a variable named `instance_type` (type string) whose default value matches EXACTLY the single line of text in policy.txt (currently: t3.micro), plus an output named `selected_instance_type` whose value is var.instance_type (do not hardcode the output value).",
+    "policy.txt has changed. Update instance.tf so variable instance_type's default matches the CURRENT contents of policy.txt exactly."
+  ],
+  "setup_files": {
+    "policy.txt": "t3.micro\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "policy.txt rewritten to a new required default instance type",
+      "write_files": {
+        "policy.txt": "t3.small\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "instance.tf",
+      "content_patterns": ["variable", "instance_type", "output", "selected_instance_type"],
+      "regex_patterns": [
+        "variable\\s+\"instance_type\"\\s*\\{",
+        "output\\s+\"selected_instance_type\"\\s*\\{"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_policy.py": "import re\nimport json\nimport subprocess\n\nwith open('policy.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'policy.txt is empty'\n\nproc = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(proc.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {proc.stdout}\\n{proc.stderr}'\n\nwith open('instance.tf', encoding='utf-8') as f:\n    content = f.read()\n\nm = re.search(r'variable\\s+\"instance_type\"\\s*\\{(.*?)\\n\\}', content, re.DOTALL)\nassert m, 'could not locate the instance_type variable block'\nblock = m.group(1)\n\ndm = re.search(r'default\\s*=\\s*\"([^\"]*)\"', block)\nassert dm, f'variable block has no default value: {block!r}'\ngot = dm.group(1)\nassert got == current, f'variable default is {got!r}, want the CURRENT policy.txt value {current!r} (stale default not updated)'\n\nassert re.search(r'output\\s+\"selected_instance_type\"\\s*\\{[^}]*var\\.instance_type', content, re.DOTALL), \\\n    'output selected_instance_type must reference var.instance_type, not a hardcoded value'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_policy.py",
+  "reference_solution": {
+    "instance.tf": "variable \"instance_type\" {\n  type    = string\n  default = \"t3.small\"\n}\n\noutput \"selected_instance_type\" {\n  value = var.instance_type\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-default-value",
+      "files": {
+        "instance.tf": "variable \"instance_type\" {\n  type    = string\n  default = \"t3.micro\"\n}\n\noutput \"selected_instance_type\" {\n  value = var.instance_type\n}\n"
+      }
+    },
+    {
+      "name": "output-hardcoded-not-referenced",
+      "files": {
+        "instance.tf": "variable \"instance_type\" {\n  type    = string\n  default = \"t3.small\"\n}\n\noutput \"selected_instance_type\" {\n  value = \"t3.small\"\n}\n"
+      }
+    }
+  ]
+}

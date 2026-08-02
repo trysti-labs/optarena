@@ -36,5 +36,13 @@
   "timeout": 120,
   "reference_solution": {
     "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL,\n    amount REAL NOT NULL,\n    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE\n);\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "no-cascade",
+      "files": {
+        "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL,\n    amount REAL NOT NULL,\n    FOREIGN KEY (customer_id) REFERENCES customers(id)\n);\n"
+      }
+    }
+  ]
 }

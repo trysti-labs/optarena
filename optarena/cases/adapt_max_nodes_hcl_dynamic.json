@@ -1,0 +1,66 @@
+{
+  "name": "adapt_max_nodes_hcl_dynamic",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: max_nodes.txt (a spec file the Terraform variable's default must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the default, not leave the stale value in place",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "hcl",
+    "terraform",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create a Terraform file called autoscale.tf declaring a variable named `max_nodes` (type number) whose default value matches EXACTLY the integer in max_nodes.txt (currently: 10), plus an output named `configured_max_nodes` whose value is var.max_nodes (do not hardcode the output value).",
+    "max_nodes.txt has changed. Update autoscale.tf so variable max_nodes's default matches the CURRENT contents of max_nodes.txt exactly."
+  ],
+  "setup_files": {
+    "max_nodes.txt": "10\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "max_nodes.txt rewritten to a new required default",
+      "write_files": {
+        "max_nodes.txt": "5\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "autoscale.tf",
+      "content_patterns": [
+        "variable",
+        "max_nodes",
+        "output",
+        "configured_max_nodes"
+      ],
+      "regex_patterns": [
+        "variable\\s+\"max_nodes\"\\s*\\{",
+        "output\\s+\"configured_max_nodes\"\\s*\\{"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_max_nodes.py": "import re\nimport json\nimport subprocess\n\nwith open('max_nodes.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'max_nodes.txt is empty'\n\nproc = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(proc.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {proc.stdout}\\n{proc.stderr}'\n\nwith open('autoscale.tf', encoding='utf-8') as f:\n    content = f.read()\n\nm = re.search(r'variable\\s+\"max_nodes\"\\s*\\{(.*?)\\n\\}', content, re.DOTALL)\nassert m, 'could not locate the max_nodes variable block'\nblock = m.group(1)\n\ndm = re.search(r'default\\s*=\\s*(\\d+)', block)\nassert dm, f'variable block has no numeric default: {block!r}'\ngot = dm.group(1)\nassert got == current, f'variable default is {got!r}, want the CURRENT max_nodes.txt value {current!r} (stale default not updated)'\n\nassert re.search(r'output\\s+\"configured_max_nodes\"\\s*\\{[^}]*var\\.max_nodes', content, re.DOTALL), \\\n    'output configured_max_nodes must reference var.max_nodes, not a hardcoded value'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_max_nodes.py",
+  "reference_solution": {
+    "autoscale.tf": "variable \"max_nodes\" {\n  type    = number\n  default = 5\n}\n\noutput \"configured_max_nodes\" {\n  value = var.max_nodes\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-default-value",
+      "files": {
+        "autoscale.tf": "variable \"max_nodes\" {\n  type    = number\n  default = 10\n}\n\noutput \"configured_max_nodes\" {\n  value = var.max_nodes\n}\n"
+      }
+    }
+  ]
+}

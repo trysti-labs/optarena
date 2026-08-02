@@ -36,7 +36,7 @@ from pathlib import Path
 
 from .cases import (
     DOCKER_IMAGE_DEFAULT, DockerSandbox, apply_all_disruptions, evaluate_case,
-    prepare_workspace, write_setup_files,
+    prepare_workspace, relax_workspace_permissions, resolve_image, write_setup_files,
 )
 
 # Task types where an unmodified workspace must FAIL the oracle even without
@@ -63,6 +63,7 @@ def variants_for(case: dict) -> list[tuple[str, dict | None, bool]]:
 def _run_variant(case: dict, files: dict | None, ws: Path) -> list[str]:
     """One variant through the real oracle; returns its failure strings."""
     ws.mkdir(parents=True, exist_ok=True)
+    relax_workspace_permissions(ws)   # A-36: no-op unless OPTARENA_SANDBOX_USER is set
     prepare_workspace(ws, case)
     # Dynamic cases: apply every disruption to reach the fully-perturbed final
     # world, THEN lay the variant's solution over it - so a reference solution is
@@ -80,6 +81,27 @@ def _run_variant(case: dict, files: dict | None, ws: Path) -> list[str]:
         created = sorted(files.keys())
     failures, _info = evaluate_case(case, created, ws)
     return failures
+
+
+def cases_without_failing_variant(cases: list[dict]) -> list[str]:
+    """
+    A-31: cases whose verification can only ever prove the oracle can PASS.
+
+    A case with a `reference_solution` but no `broken_solutions` - and no
+    implicit "unmodified" variant, which only applies to the
+    MUST_FAIL_UNMODIFIED task types - has nothing that must FAIL. Verifying it
+    therefore cannot detect the failure mode this whole module exists for: an
+    oracle that accepts everything (a glob that never matches, a check_command
+    that exits 0 regardless, a vacuous test). `optarena cases verify --strict`
+    turns this into a hard error so new cases can't be added without a
+    discriminating variant.
+    """
+    weak = []
+    for case in cases:
+        variants = variants_for(case)
+        if variants and not any(not expect_pass for _n, _f, expect_pass in variants):
+            weak.append(case["name"])
+    return weak
 
 
 def verify_cases(cases: list[dict], root: Path | None = None) -> tuple[list[str], int, int]:
@@ -114,9 +136,14 @@ def verify_cases(cases: list[dict], root: Path | None = None) -> tuple[list[str]
     import os
 
     def _image_for(case: dict) -> "str | None":
+        # A-15: through resolve_image, like every other image-resolution site
+        # (runner.build_manifest, runner.run_scenario, run_check_command) -
+        # this was the one path that read the fields directly, so it saw
+        # neither F-15 image_overrides nor A-05's reference validation.
         if not case.get("check_command"):
             return None
-        return case.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT)
+        return resolve_image(
+            case.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT))
 
     grouped: dict[str, list] = {}
     ungrouped: list = []

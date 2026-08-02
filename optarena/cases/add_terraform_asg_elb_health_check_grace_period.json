@@ -1,0 +1,55 @@
+{
+  "description": "Switch an Auto Scaling Group from EC2-only health checks to ELB health checks with a grace period long enough for the app to actually finish booting before it's judged unhealthy",
+  "tags": [
+    "terraform",
+    "hcl",
+    "devops",
+    "autoscaling",
+    "availability"
+  ],
+  "prompts": [
+    "main.tf's aws_autoscaling_group.web only checks EC2 instance status (health_check_type = \"EC2\"), which considers an instance healthy the moment the VM boots - even if the application inside is still starting up and failing every request, or is failing its target group health check entirely. Change health_check_type to \"ELB\" (so ASG health is driven by the actual application-level health check reported by its target group, not just \"the VM is running\") and set health_check_grace_period to 120 seconds (long enough for the app to finish its ~90 second startup sequence before ELB health results start counting against it - a 0 or too-short grace period would terminate slow-starting instances in an endless replace loop). Keep every other existing attribute unchanged."
+  ],
+  "setup_files": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_autoscaling_group\" \"web\" {\n  name                = \"web-asg\"\n  min_size            = 2\n  max_size            = 6\n  desired_capacity    = 2\n  vpc_zone_identifier = [\"subnet-aaaa\", \"subnet-bbbb\"]\n  health_check_type   = \"EC2\"\n\n  launch_template {\n    id      = \"lt-0123456789abcdef0\"\n    version = \"$Latest\"\n  }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": [
+        "health_check_type",
+        "health_check_grace_period"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_asg.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\ncontent = open('main.tf', encoding='utf-8').read()\n\nasg = re.search(r'resource\\s+\"aws_autoscaling_group\"\\s+\"web\"\\s*\\{(.*?)\\n\\}', content, re.DOTALL)\nassert asg, 'aws_autoscaling_group.web not found'\nblock = asg.group(1)\n\nm = re.search(r'health_check_type\\s*=\\s*\"(\\w+)\"', block)\nassert m, 'health_check_type missing'\nassert m.group(1) == 'ELB', f'health_check_type must be ELB, got {m.group(1)}'\n\nm = re.search(r'health_check_grace_period\\s*=\\s*(\\d+)', block)\nassert m, 'health_check_grace_period missing'\ngrace = int(m.group(1))\nassert grace >= 120, f'health_check_grace_period is {grace} - too short for a ~90s app boot'\n\nassert re.search(r'min_size\\s*=\\s*2', block), 'min_size changed'\nassert re.search(r'max_size\\s*=\\s*6', block), 'max_size changed'\n\nprint('PASS ASG health check checks')\n"
+  },
+  "check_command": "python3 check_asg.py",
+  "reference_solution": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_autoscaling_group\" \"web\" {\n  name                      = \"web-asg\"\n  min_size                  = 2\n  max_size                  = 6\n  desired_capacity          = 2\n  vpc_zone_identifier       = [\"subnet-aaaa\", \"subnet-bbbb\"]\n  health_check_type         = \"ELB\"\n  health_check_grace_period = 120\n\n  launch_template {\n    id      = \"lt-0123456789abcdef0\"\n    version = \"$Latest\"\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_autoscaling_group\" \"web\" {\n  name                = \"web-asg\"\n  min_size            = 2\n  max_size            = 6\n  desired_capacity    = 2\n  vpc_zone_identifier = [\"subnet-aaaa\", \"subnet-bbbb\"]\n  health_check_type   = \"EC2\"\n\n  launch_template {\n    id      = \"lt-0123456789abcdef0\"\n    version = \"$Latest\"\n  }\n}\n"
+      }
+    },
+    {
+      "name": "elb-health-check-but-grace-period-too-short",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_autoscaling_group\" \"web\" {\n  name                      = \"web-asg\"\n  min_size                  = 2\n  max_size                  = 6\n  desired_capacity          = 2\n  vpc_zone_identifier       = [\"subnet-aaaa\", \"subnet-bbbb\"]\n  health_check_type         = \"ELB\"\n  health_check_grace_period = 30\n\n  launch_template {\n    id      = \"lt-0123456789abcdef0\"\n    version = \"$Latest\"\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_asg_elb_health_check_grace_period",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 150,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

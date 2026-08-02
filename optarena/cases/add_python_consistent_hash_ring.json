@@ -1,0 +1,46 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "ring.py's HashRing picks a node with `hash(key) % len(nodes)` - removing or adding any node reshuffles almost every key, which is exactly the problem consistent hashing exists to avoid. Implement a real consistent-hash ring with virtual nodes: __init__(self, nodes, replicas=100) places `replicas` virtual points per physical node around a ring (use hashlib.md5 or sha256 of f'{node}:{i}' for each virtual point, not Python's built-in hash() - it's randomized per-process by default and won't be stable). get_node(key) hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). add_node(node) and remove_node(node) update the ring in place."
+  ],
+  "setup_files": {
+    "ring.py": "class HashRing:\n    def __init__(self, nodes, replicas=100):\n        self.nodes = list(nodes)\n        self.replicas = replicas\n\n    def get_node(self, key):\n        if not self.nodes:\n            raise ValueError('no nodes')\n        return self.nodes[hash(key) % len(self.nodes)]\n\n    def add_node(self, node):\n        self.nodes.append(node)\n\n    def remove_node(self, node):\n        self.nodes.remove(node)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ring.py",
+      "content_patterns": [
+        "class HashRing"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_ring_hidden.py": "import hashlib\n\nfrom ring import HashRing\n\n\ndef test_every_key_maps_to_a_current_node():\n    ring = HashRing(['a', 'b', 'c'], replicas=50)\n    for i in range(200):\n        node = ring.get_node(f'key-{i}')\n        assert node in ('a', 'b', 'c')\n\n\ndef test_deterministic():\n    ring = HashRing(['a', 'b', 'c'], replicas=50)\n    assert ring.get_node('stable-key') == ring.get_node('stable-key')\n\n\ndef test_removing_a_node_only_moves_that_nodes_own_keys():\n    nodes = ['n0', 'n1', 'n2', 'n3', 'n4']\n    ring = HashRing(nodes, replicas=100)\n    keys = [f'key-{i}' for i in range(1000)]\n    before = {k: ring.get_node(k) for k in keys}\n\n    ring.remove_node('n2')\n    after = {k: ring.get_node(k) for k in keys}\n\n    moved = [k for k in keys if before[k] != after[k]]\n    assert moved, 'removing a node should move at least some keys'\n    assert all(before[k] == 'n2' for k in moved), (\n        'only keys that were on the removed node may move - '\n        'a real consistent-hash ring must not reshuffle keys that were on other nodes'\n    )\n    assert all(after[k] != 'n2' for k in keys)\n"
+  },
+  "check_command": "python3 -m pytest -q test_ring_hidden.py",
+  "reference_solution": {
+    "ring.py": "import bisect\nimport hashlib\n\n\ndef _hash(s):\n    return int(hashlib.md5(s.encode('utf-8')).hexdigest(), 16)\n\n\nclass HashRing:\n    def __init__(self, nodes, replicas=100):\n        self.replicas = replicas\n        self._ring = {}\n        self._sorted_points = []\n        for node in nodes:\n            self.add_node(node)\n\n    def add_node(self, node):\n        for i in range(self.replicas):\n            point = _hash(f'{node}:{i}')\n            self._ring[point] = node\n        self._sorted_points = sorted(self._ring)\n\n    def remove_node(self, node):\n        for i in range(self.replicas):\n            point = _hash(f'{node}:{i}')\n            self._ring.pop(point, None)\n        self._sorted_points = sorted(self._ring)\n\n    def get_node(self, key):\n        if not self._ring:\n            raise ValueError('no nodes')\n        point = _hash(key)\n        idx = bisect.bisect(self._sorted_points, point)\n        if idx == len(self._sorted_points):\n            idx = 0\n        return self._ring[self._sorted_points[idx]]\n\n    @property\n    def nodes(self):\n        return sorted(set(self._ring.values()))\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "ring.py": "import hashlib\n\n\ndef _hash(s):\n    return int(hashlib.md5(s.encode('utf-8')).hexdigest(), 16)\n\n\nclass HashRing:\n    def __init__(self, nodes, replicas=100):\n        self.replicas = replicas\n        self.nodes = list(nodes)\n\n    def add_node(self, node):\n        self.nodes.append(node)\n\n    def remove_node(self, node):\n        self.nodes.remove(node)\n\n    def get_node(self, key):\n        if not self.nodes:\n            raise ValueError('no nodes')\n        return self.nodes[_hash(key) % len(self.nodes)]\n"
+      }
+    }
+  ],
+  "name": "add_python_consistent_hash_ring",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

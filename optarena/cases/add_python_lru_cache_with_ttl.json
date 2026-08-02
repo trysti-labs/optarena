@@ -1,0 +1,46 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded cache",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "cache.py's Cache is an unbounded dict wrapper - get/put never evict anything. Turn it into an LRU cache with a TTL: __init__(self, capacity, ttl) takes a max size and a time-to-live in seconds. put(key, value, now) stores a value timestamped at `now`. get(key, now) returns the value if present AND not expired (now - stored_at < ttl), else None - and an expired entry must be REMOVED from the cache the moment it's observed to be stale, not just hidden from the caller. Both get and put must refresh a key's recency. When put() would exceed `capacity`, evict the LEAST recently used entry (recency = most recent get OR put) before inserting the new one - not the oldest inserted, the least recently ACCESSED."
+  ],
+  "setup_files": {
+    "cache.py": "class Cache:\n    \"\"\"Unbounded cache: nothing is ever evicted, and there is no TTL.\"\"\"\n\n    def __init__(self, capacity, ttl):\n        self.capacity = capacity\n        self.ttl = ttl\n        self._store = {}\n\n    def put(self, key, value, now):\n        self._store[key] = value\n\n    def get(self, key, now):\n        return self._store.get(key)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "cache.py",
+      "content_patterns": [
+        "class Cache"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_cache_hidden.py": "from cache import Cache\n\n\ndef test_capacity_evicts_least_recently_used():\n    c = Cache(capacity=2, ttl=1000)\n    c.put('a', 1, now=0)\n    c.put('b', 2, now=1)\n    c.get('a', now=2)  # 'a' is now the most recently used\n    c.put('c', 3, now=3)  # must evict 'b', not 'a'\n    assert c.get('a', now=4) == 1\n    assert c.get('b', now=4) is None\n    assert c.get('c', now=4) == 3\n\n\ndef test_get_refreshes_recency():\n    c = Cache(capacity=2, ttl=1000)\n    c.put('a', 1, now=0)\n    c.put('b', 2, now=1)\n    c.get('a', now=2)\n    c.get('b', now=3)  # 'b' now most recent, 'a' next\n    c.put('c', 3, now=4)  # must evict 'a'\n    assert c.get('a', now=5) is None\n    assert c.get('b', now=5) == 2\n\n\ndef test_ttl_expiry_independent_of_capacity():\n    c = Cache(capacity=5, ttl=10)\n    c.put('a', 1, now=0)\n    assert c.get('a', now=9) == 1\n    assert c.get('a', now=10) is None\n    assert c.get('a', now=20) is None\n"
+  },
+  "check_command": "python3 -m pytest -q test_cache_hidden.py",
+  "reference_solution": {
+    "cache.py": "from collections import OrderedDict\n\n\nclass Cache:\n    \"\"\"LRU cache with a per-entry TTL.\"\"\"\n\n    def __init__(self, capacity, ttl):\n        self.capacity = capacity\n        self.ttl = ttl\n        self._store = OrderedDict()  # key -> (value, stored_at)\n\n    def put(self, key, value, now):\n        if key in self._store:\n            del self._store[key]\n        elif len(self._store) >= self.capacity:\n            self._store.popitem(last=False)\n        self._store[key] = (value, now)\n\n    def get(self, key, now):\n        if key not in self._store:\n            return None\n        value, stored_at = self._store[key]\n        if now - stored_at >= self.ttl:\n            del self._store[key]\n            return None\n        self._store.move_to_end(key)\n        return value\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "cache.py": "from collections import OrderedDict\n\n\nclass Cache:\n    \"\"\"LRU cache with a per-entry TTL.\"\"\"\n\n    def __init__(self, capacity, ttl):\n        self.capacity = capacity\n        self.ttl = ttl\n        self._store = OrderedDict()  # key -> (value, stored_at)\n\n    def put(self, key, value, now):\n        if key in self._store:\n            del self._store[key]\n        elif len(self._store) >= self.capacity:\n            self._store.popitem(last=False)\n        self._store[key] = (value, now)\n\n    def get(self, key, now):\n        if key not in self._store:\n            return None\n        value, stored_at = self._store[key]\n        if now - stored_at >= self.ttl:\n            del self._store[key]\n            return None\n        return value\n"
+      }
+    }
+  ],
+  "name": "add_python_lru_cache_with_ttl",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

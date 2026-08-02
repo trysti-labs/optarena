@@ -90,15 +90,36 @@ class AiderDriver(Driver):
         prepare_workspace(workspace, case)
         before = snapshot(workspace)
 
-        # Existing setup files must be added to aider's context so "modify" cases work.
-        setup_names = list((case.get("setup_files") or {}).keys())
+        # Existing files must be added to aider's context so "modify" cases
+        # work - and, critically, so does everything setup_repo copied in.
+        # `--no-git` below means aider has no repo map of its own to fall
+        # back on, so a case's `setup_repo` files (the whole point of a
+        # repo-scale case) were previously invisible to it entirely: only
+        # `case["setup_files"]`'s own small overlay was ever passed. `before`
+        # is the post-prepare_workspace snapshot (setup_repo + setup_files
+        # both already applied, hidden test_setup_files not written until
+        # after the agent's turn), so its keys are exactly "every file that
+        # legitimately exists before the model starts editing".
+        setup_names = sorted(before.keys())
 
         # C-03: an explicit allowlist, not a filtered copy of the whole host
         # environment - aider's job is to execute model-generated edits, so
         # it must not inherit unrelated host secrets just because they
-        # happened to be set in the parent shell. Its own API key/base URL
-        # are passed as CLI flags below, not via env, so no `extra` is needed.
-        env = subprocess_env()
+        # happened to be set in the parent shell.
+        #
+        # A-06: the backend's API key goes in the ENVIRONMENT, not in argv.
+        # Process arguments are readable by any local user (/proc/<pid>/cmdline
+        # on Linux, any session on Windows), so `--openai-api-key <secret>`
+        # leaked the scenario's key to every other user on the machine for the
+        # lifetime of the subprocess. This driver was the only place doing
+        # that, while cli.py's own --api-key help and SECURITY.md both tell
+        # users to prefer the environment for exactly this reason. aider reads
+        # OPENAI_API_KEY/OPENAI_API_BASE natively.
+        env = subprocess_env({
+            "OPENAI_API_KEY": backend.api_key,
+            "OPENAI_API_BASE": backend.openai_base,
+            "OPENAI_BASE_URL": backend.openai_base,
+        })
 
         t0 = time.monotonic()
         n_prompts = len(case.get("prompts", []))
@@ -114,9 +135,9 @@ class AiderDriver(Driver):
                     result.error = f"case deadline ({timeout}s) exceeded before prompt {i}/{n_prompts}"
                     break
                 cmd = [
+                    # A-06: no --openai-api-key/--openai-api-base here - both
+                    # travel via `env` above so the key never appears in argv.
                     self._aider,
-                    "--openai-api-base", backend.openai_base,
-                    "--openai-api-key", backend.api_key,
                     "--model", f"openai/{backend.model}",
                     "--no-git", "--yes", "--no-auto-commits",
                     "--no-show-model-warnings", "--no-check-update",

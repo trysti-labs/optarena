@@ -1,0 +1,60 @@
+{
+  "name": "adapt_removed_dependency_kotlin_dynamic",
+  "language": "kotlin",
+  "framework": "plain-kotlin",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "kotlin",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "src/main/kotlin/com/optarena/app/GreetingData.kt declares object GreetingData with a const val GREETING. Create src/main/kotlin/com/optarena/app/Message.kt declaring object Message with a fun get(): String returning GreetingData.GREETING.",
+    "GreetingData.kt has just been removed from the project. Update Message.kt so it still compiles with NO reference to GreetingData, and get() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/GreetingData.kt": "package com.optarena.app\n\nobject GreetingData {\n    const val GREETING = \"hola\"\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "GreetingData.kt deleted",
+      "delete_files": [
+        "src/main/kotlin/com/optarena/app/GreetingData.kt"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/Message.kt",
+      "content_patterns": [
+        "get"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/MessageTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass MessageTest {\n    @Test\n    fun greetsWithHola() {\n        assertEquals(\"hola\", Message.get())\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=MessageTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Message.kt": "package com.optarena.app\n\nobject Message {\n    fun get(): String = \"hola\"\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-value",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Message.kt": "package com.optarena.app\n\nobject Message {\n    fun get(): String = \"bonjour\"\n}\n"
+      }
+    }
+  ]
+}

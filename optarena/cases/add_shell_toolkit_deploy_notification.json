@@ -1,0 +1,55 @@
+{
+  "description": "Repo-scale (shell-toolkit): new lib/notify.sh must be both sourced AND actually invoked after a successful deploy",
+  "tags": [
+    "shell",
+    "bash",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a new `lib/notify.sh` defining `notify_deploy_complete(version)`, which prints `[NOTIFY] deploy of $version complete` (a stub - no real network call, keep it offline-safe). Update `deploy.sh` to source this new library and call `notify_deploy_complete` with the deployed version after a successful deploy - adding the file alone isn't enough, deploy.sh must actually invoke it."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "lib/notify.sh",
+      "content_patterns": [
+        "notify_deploy_complete"
+      ]
+    },
+    {
+      "path_pattern": "deploy.sh",
+      "content_patterns": [
+        "notify.sh",
+        "notify_deploy_complete"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_notify.py": "import subprocess\n\nr = subprocess.run(['bash', 'deploy.sh', '-v', '1.2.3'], capture_output=True, text=True, timeout=15)\nassert r.returncode == 0, (r.stdout, r.stderr)\nassert 'NOTIFY' in r.stdout and '1.2.3' in r.stdout, (\n    f'expected a NOTIFY message mentioning the version, got: {r.stdout!r}')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_notify.py",
+  "reference_solution": {
+    "lib/notify.sh": "# Builds a human-readable deploy-complete message. No real network\n# call - this is a stub that just prints, so tests stay offline.\nnotify_deploy_complete() {\n    local version=\"$1\"\n    echo \"[NOTIFY] deploy of $version complete\"\n}\n",
+    "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\nsource \"$SCRIPT_DIR/lib/notify.sh\"\n\nVERSION=\"\"\nwhile getopts \"v:\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\n\nlog_info \"deploying version $VERSION\"\nnotify_deploy_complete \"$VERSION\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "notify-lib-unused",
+      "files": {
+        "lib/notify.sh": "# Builds a human-readable deploy-complete message. No real network\n# call - this is a stub that just prints, so tests stay offline.\nnotify_deploy_complete() {\n    local version=\"$1\"\n    echo \"[NOTIFY] deploy of $version complete\"\n}\n",
+        "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\nsource \"$SCRIPT_DIR/lib/notify.sh\"\n\nVERSION=\"\"\nwhile getopts \"v:\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\n\nlog_info \"deploying version $VERSION\"\n"
+      }
+    }
+  ],
+  "name": "add_shell_toolkit_deploy_notification",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "shell-toolkit",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

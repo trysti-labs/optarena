@@ -1,0 +1,49 @@
+{
+  "description": "Add idempotency-key deduplication with a TTL window to a processor that currently re-executes on every call",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "idempotency",
+    "algorithms"
+  ],
+  "prompts": [
+    "processor.go's Processor.Process(key string, payload int, now int64) runs the side effect (appends to p.Effects and returns a fresh result) EVERY time it's called, even for a key it has already processed. Make it idempotent: within `window` seconds of the first call for a given key, a repeat call with that SAME key must return the ORIGINAL result WITHOUT running the side effect again (p.Effects must not grow) - regardless of what payload is passed the second time. Once `window` seconds have passed since the first call for that key, the NEXT call for that key must run for real again (a fresh execution, whose result becomes the new one remembered for that key)."
+  ],
+  "setup_files": {
+    "go.mod": "module idempotency\n\ngo 1.21\n",
+    "processor.go": "package main\n\ntype Result struct {\n\tKey         string\n\tPayload     int\n\tProcessedAt int64\n}\n\ntype effect struct {\n\tKey     string\n\tPayload int\n}\n\ntype Processor struct {\n\tWindow  int64\n\tEffects []effect\n}\n\nfunc NewProcessor(window int64) *Processor {\n\treturn &Processor{Window: window}\n}\n\nfunc (p *Processor) Process(key string, payload int, now int64) Result {\n\tp.Effects = append(p.Effects, effect{Key: key, Payload: payload})\n\treturn Result{Key: key, Payload: payload, ProcessedAt: now}\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "processor.go",
+      "content_patterns": [
+        "func NewProcessor"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "processor_test.go": "package main\n\nimport \"testing\"\n\nfunc TestDuplicateKeyWithinWindowNotReexecuted(t *testing.T) {\n\tp := NewProcessor(10)\n\tfirst := p.Process(\"order-1\", 5, 0)\n\tsecond := p.Process(\"order-1\", 999, 5)\n\tif second != first {\n\t\tt.Fatalf(\"expected duplicate call to return original result\")\n\t}\n\tif len(p.Effects) != 1 {\n\t\tt.Fatalf(\"expected 1 effect, got %d\", len(p.Effects))\n\t}\n}\n\nfunc TestDifferentKeysBothExecute(t *testing.T) {\n\tp := NewProcessor(10)\n\tp.Process(\"a\", 1, 0)\n\tp.Process(\"b\", 2, 0)\n\tif len(p.Effects) != 2 {\n\t\tt.Fatalf(\"expected 2 effects, got %d\", len(p.Effects))\n\t}\n}\n\nfunc TestReexecutesAfterWindowExpires(t *testing.T) {\n\tp := NewProcessor(10)\n\tp.Process(\"order-1\", 5, 0)\n\tp.Process(\"order-1\", 5, 9)\n\tif len(p.Effects) != 1 {\n\t\tt.Fatalf(\"expected 1 effect before window expiry, got %d\", len(p.Effects))\n\t}\n\tp.Process(\"order-1\", 7, 10)\n\tif len(p.Effects) != 2 {\n\t\tt.Fatalf(\"expected 2 effects after window expiry, got %d\", len(p.Effects))\n\t}\n\tif p.Effects[1].Payload != 7 {\n\t\tt.Fatalf(\"expected fresh payload 7, got %d\", p.Effects[1].Payload)\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module idempotency\n\ngo 1.21\n",
+    "processor.go": "package main\n\ntype Result struct {\n\tKey         string\n\tPayload     int\n\tProcessedAt int64\n}\n\ntype effect struct {\n\tKey     string\n\tPayload int\n}\n\ntype seen struct {\n\tresult     Result\n\trecordedAt int64\n}\n\ntype Processor struct {\n\tWindow  int64\n\tEffects []effect\n\tseen    map[string]seen\n}\n\nfunc NewProcessor(window int64) *Processor {\n\treturn &Processor{Window: window, seen: make(map[string]seen)}\n}\n\nfunc (p *Processor) Process(key string, payload int, now int64) Result {\n\tif cached, ok := p.seen[key]; ok {\n\t\tif now-cached.recordedAt < p.Window {\n\t\t\treturn cached.result\n\t\t}\n\t}\n\tp.Effects = append(p.Effects, effect{Key: key, Payload: payload})\n\tresult := Result{Key: key, Payload: payload, ProcessedAt: now}\n\tp.seen[key] = seen{result: result, recordedAt: now}\n\treturn result\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedup-never-expires",
+      "files": {
+        "go.mod": "module idempotency\n\ngo 1.21\n",
+        "processor.go": "package main\n\ntype Result struct {\n\tKey         string\n\tPayload     int\n\tProcessedAt int64\n}\n\ntype effect struct {\n\tKey     string\n\tPayload int\n}\n\ntype Processor struct {\n\tWindow  int64\n\tEffects []effect\n\tseen    map[string]Result\n}\n\nfunc NewProcessor(window int64) *Processor {\n\treturn &Processor{Window: window, seen: make(map[string]Result)}\n}\n\nfunc (p *Processor) Process(key string, payload int, now int64) Result {\n\tif cached, ok := p.seen[key]; ok {\n\t\treturn cached\n\t}\n\tp.Effects = append(p.Effects, effect{Key: key, Payload: payload})\n\tresult := Result{Key: key, Payload: payload, ProcessedAt: now}\n\tp.seen[key] = result\n\treturn result\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_idempotency_key_dedup",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

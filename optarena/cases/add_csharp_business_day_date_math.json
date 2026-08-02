@@ -1,0 +1,48 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends and is exact for any starting weekday",
+  "task_type": "feature",
+  "tags": [
+    "csharp",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "Dates.cs's AddBusinessDays(DateTime start, int n) just does start.AddDays(n) - it counts weekends as business days. Implement it properly: n=0 returns start unchanged (even if start itself falls on a weekend); for n>0, step forward day by day, skipping Saturday and Sunday, until n business days have been counted, then return that date. It must be exact for any starting weekday and correctly cross month/year boundaries - do not use an approximation formula like `n + 2*(n/5)` calendar-days shortcut, it gives the wrong answer depending on which weekday `start` falls on."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "Dates.cs": "using System;\n\npublic static class Dates\n{\n    public static DateTime AddBusinessDays(DateTime start, int n)\n    {\n        return start.AddDays(n);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dates.cs",
+      "content_patterns": [
+        "AddBusinessDays"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "Dates.cs": "using System;\n\npublic static class Dates\n{\n    public static DateTime AddBusinessDays(DateTime start, int n)\n    {\n        if (n == 0)\n        {\n            return start;\n        }\n        var current = start;\n        var counted = 0;\n        while (counted < n)\n        {\n            current = current.AddDays(1);\n            if (current.DayOfWeek != DayOfWeek.Saturday && current.DayOfWeek != DayOfWeek.Sunday)\n            {\n                counted++;\n            }\n        }\n        return current;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "Dates.cs": "using System;\n\npublic static class Dates\n{\n    public static DateTime AddBusinessDays(DateTime start, int n)\n    {\n        if (n == 0)\n        {\n            return start;\n        }\n        var weeks = n / 5;\n        var remainder = n % 5;\n        var calendarDays = weeks * 7 + remainder;\n        return start.AddDays(calendarDays);\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_csharp_business_day_date_math",
+  "language": "csharp",
+  "framework": "xunit",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "dotnet test tests/tests.csproj",
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/DatesTests.cs": "using System;\nusing Xunit;\n\npublic class DatesTests\n{\n    [Fact]\n    public void ZeroReturnsStartUnchanged()\n    {\n        var d = new DateTime(2024, 6, 1); // Saturday\n        Assert.Equal(d, Dates.AddBusinessDays(d, 0));\n    }\n\n    [Fact]\n    public void FridayPlusOneSkipsWeekend()\n    {\n        var friday = new DateTime(2024, 5, 31);\n        Assert.Equal(new DateTime(2024, 6, 3), Dates.AddBusinessDays(friday, 1));\n    }\n\n    [Fact]\n    public void MondayPlusFiveLandsNextMonday()\n    {\n        var monday = new DateTime(2024, 5, 27);\n        Assert.Equal(new DateTime(2024, 6, 3), Dates.AddBusinessDays(monday, 5));\n    }\n\n    [Fact]\n    public void CrossesMonthAndYearBoundary()\n    {\n        var friday = new DateTime(2024, 12, 27);\n        Assert.Equal(new DateTime(2025, 1, 1), Dates.AddBusinessDays(friday, 3));\n    }\n\n    [Fact]\n    public void StartingOnAWeekendStillCountsCorrectly()\n    {\n        var saturday = new DateTime(2024, 6, 1);\n        Assert.Equal(new DateTime(2024, 6, 3), Dates.AddBusinessDays(saturday, 1));\n    }\n}\n"
+  }
+}

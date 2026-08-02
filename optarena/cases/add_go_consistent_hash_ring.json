@@ -1,0 +1,49 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "ring.go's HashRing picks a node with `hash(key) % len(nodes)` - removing or adding any node reshuffles almost every key. Implement a real consistent-hash ring with virtual nodes: NewHashRing(nodes []string, replicas int) places `replicas` virtual points per physical node around a ring, hashed via crypto/md5 over fmt.Sprintf(\"%s:%d\", node, i) for each virtual point. GetNode(key string) hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). AddNode(node string) and RemoveNode(node string) update the ring in place."
+  ],
+  "setup_files": {
+    "go.mod": "module hashring\n\ngo 1.21\n",
+    "ring.go": "package main\n\nimport \"hash/fnv\"\n\nfunc hashInt(s string) uint32 {\n\th := fnv.New32a()\n\th.Write([]byte(s))\n\treturn h.Sum32()\n}\n\ntype HashRing struct {\n\tNodes []string\n}\n\nfunc NewHashRing(nodes []string, replicas int) *HashRing {\n\tcp := make([]string, len(nodes))\n\tcopy(cp, nodes)\n\treturn &HashRing{Nodes: cp}\n}\n\nfunc (r *HashRing) GetNode(key string) string {\n\treturn r.Nodes[hashInt(key)%uint32(len(r.Nodes))]\n}\n\nfunc (r *HashRing) AddNode(node string) {\n\tr.Nodes = append(r.Nodes, node)\n}\n\nfunc (r *HashRing) RemoveNode(node string) {\n\tout := r.Nodes[:0]\n\tfor _, n := range r.Nodes {\n\t\tif n != node {\n\t\t\tout = append(out, n)\n\t\t}\n\t}\n\tr.Nodes = out\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ring.go",
+      "content_patterns": [
+        "func NewHashRing"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "ring_test.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\nfunc TestEveryKeyMapsToACurrentNode(t *testing.T) {\n\tring := NewHashRing([]string{\"a\", \"b\", \"c\"}, 50)\n\tfor i := 0; i < 200; i++ {\n\t\tnode := ring.GetNode(fmt.Sprintf(\"key-%d\", i))\n\t\tif node != \"a\" && node != \"b\" && node != \"c\" {\n\t\t\tt.Fatalf(\"unexpected node %q\", node)\n\t\t}\n\t}\n}\n\nfunc TestDeterministic(t *testing.T) {\n\tring := NewHashRing([]string{\"a\", \"b\", \"c\"}, 50)\n\tif ring.GetNode(\"stable-key\") != ring.GetNode(\"stable-key\") {\n\t\tt.Fatalf(\"expected deterministic mapping\")\n\t}\n}\n\nfunc TestRemovingANodeOnlyMovesThatNodesOwnKeys(t *testing.T) {\n\tnodes := []string{\"n0\", \"n1\", \"n2\", \"n3\", \"n4\"}\n\tring := NewHashRing(nodes, 100)\n\tkeys := make([]string, 1000)\n\tfor i := range keys {\n\t\tkeys[i] = fmt.Sprintf(\"key-%d\", i)\n\t}\n\tbefore := make(map[string]string, len(keys))\n\tfor _, k := range keys {\n\t\tbefore[k] = ring.GetNode(k)\n\t}\n\n\tring.RemoveNode(\"n2\")\n\n\tmoved := 0\n\tfor _, k := range keys {\n\t\tafter := ring.GetNode(k)\n\t\tif after != before[k] {\n\t\t\tmoved++\n\t\t\tif before[k] != \"n2\" {\n\t\t\t\tt.Fatalf(\"key %q moved but was not on removed node n2 (was on %q)\", k, before[k])\n\t\t\t}\n\t\t}\n\t\tif after == \"n2\" {\n\t\t\tt.Fatalf(\"key %q still maps to removed node n2\", k)\n\t\t}\n\t}\n\tif moved == 0 {\n\t\tt.Fatalf(\"expected removing a node to move at least some keys\")\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module hashring\n\ngo 1.21\n",
+    "ring.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"hash/fnv\"\n\t\"sort\"\n)\n\nfunc hashInt(s string) uint32 {\n\th := fnv.New32a()\n\th.Write([]byte(s))\n\treturn h.Sum32()\n}\n\ntype HashRing struct {\n\treplicas int\n\tring     map[uint32]string\n\tsorted   []uint32\n}\n\nfunc NewHashRing(nodes []string, replicas int) *HashRing {\n\tr := &HashRing{replicas: replicas, ring: make(map[uint32]string)}\n\tfor _, n := range nodes {\n\t\tr.AddNode(n)\n\t}\n\treturn r\n}\n\nfunc (r *HashRing) rebuildSorted() {\n\tr.sorted = r.sorted[:0]\n\tfor point := range r.ring {\n\t\tr.sorted = append(r.sorted, point)\n\t}\n\tsort.Slice(r.sorted, func(i, j int) bool { return r.sorted[i] < r.sorted[j] })\n}\n\nfunc (r *HashRing) AddNode(node string) {\n\tfor i := 0; i < r.replicas; i++ {\n\t\tpoint := hashInt(fmt.Sprintf(\"%s:%d\", node, i))\n\t\tr.ring[point] = node\n\t}\n\tr.rebuildSorted()\n}\n\nfunc (r *HashRing) RemoveNode(node string) {\n\tfor i := 0; i < r.replicas; i++ {\n\t\tpoint := hashInt(fmt.Sprintf(\"%s:%d\", node, i))\n\t\tdelete(r.ring, point)\n\t}\n\tr.rebuildSorted()\n}\n\nfunc (r *HashRing) GetNode(key string) string {\n\tpoint := hashInt(key)\n\tidx := sort.Search(len(r.sorted), func(i int) bool { return r.sorted[i] >= point })\n\tif idx == len(r.sorted) {\n\t\tidx = 0\n\t}\n\treturn r.ring[r.sorted[idx]]\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "go.mod": "module hashring\n\ngo 1.21\n",
+        "ring.go": "package main\n\nimport \"hash/fnv\"\n\nfunc hashInt(s string) uint32 {\n\th := fnv.New32a()\n\th.Write([]byte(s))\n\treturn h.Sum32()\n}\n\ntype HashRing struct {\n\treplicas int\n\tNodes    []string\n}\n\nfunc NewHashRing(nodes []string, replicas int) *HashRing {\n\tcp := make([]string, len(nodes))\n\tcopy(cp, nodes)\n\treturn &HashRing{replicas: replicas, Nodes: cp}\n}\n\nfunc (r *HashRing) GetNode(key string) string {\n\treturn r.Nodes[hashInt(key)%uint32(len(r.Nodes))]\n}\n\nfunc (r *HashRing) AddNode(node string) {\n\tr.Nodes = append(r.Nodes, node)\n}\n\nfunc (r *HashRing) RemoveNode(node string) {\n\tout := r.Nodes[:0]\n\tfor _, n := range r.Nodes {\n\t\tif n != node {\n\t\t\tout = append(out, n)\n\t\t}\n\t}\n\tr.Nodes = out\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_consistent_hash_ring",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker in place of a stub that always calls through",
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "CircuitBreaker.java's call(fn, now) always just calls fn.get(). Implement the real 3-state machine: the constructor takes (int failureThreshold, long resetTimeout). Starts CLOSED. In CLOSED, call(fn, now) invokes fn.get(); if it throws a RuntimeException, count consecutive failures, and once `failureThreshold` CONSECUTIVE failures have happened, trip to OPEN (recording when it opened) and re-throw. While OPEN, call must NOT invoke fn.get() at all and must instead throw CircuitOpenException - UNLESS at least `resetTimeout` seconds have passed since it opened, in which case it moves to HALF_OPEN and allows exactly ONE trial call: if that call succeeds, go back to CLOSED (reset the failure count); if it throws, go back to OPEN and RESET the open-time to `now` (so the next trial is only allowed after another full resetTimeout, not immediately). Add a CircuitOpenException class (extends RuntimeException) in the same file."
+  ],
+  "setup_files": {
+    "CircuitBreaker.java": "import java.util.function.Supplier;\n\npublic final class CircuitBreaker {\n    public static final class CircuitOpenException extends RuntimeException {}\n\n    private final int failureThreshold;\n    private final long resetTimeout;\n\n    public CircuitBreaker(int failureThreshold, long resetTimeout) {\n        this.failureThreshold = failureThreshold;\n        this.resetTimeout = resetTimeout;\n    }\n\n    public <T> T call(Supplier<T> fn, long now) {\n        return fn.get();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "CircuitBreaker.java",
+      "content_patterns": [
+        "class CircuitBreaker"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "CircuitBreaker.java": "import java.util.function.Supplier;\n\npublic final class CircuitBreaker {\n    public static final class CircuitOpenException extends RuntimeException {}\n\n    private enum State { CLOSED, OPEN, HALF_OPEN }\n\n    private final int failureThreshold;\n    private final long resetTimeout;\n    private State state = State.CLOSED;\n    private int failures = 0;\n    private long openedAt;\n\n    public CircuitBreaker(int failureThreshold, long resetTimeout) {\n        this.failureThreshold = failureThreshold;\n        this.resetTimeout = resetTimeout;\n    }\n\n    public <T> T call(Supplier<T> fn, long now) {\n        if (state == State.OPEN) {\n            if (now - openedAt < resetTimeout) {\n                throw new CircuitOpenException();\n            }\n            state = State.HALF_OPEN;\n        }\n\n        T result;\n        try {\n            result = fn.get();\n        } catch (RuntimeException e) {\n            if (state == State.HALF_OPEN) {\n                state = State.OPEN;\n                openedAt = now;\n            } else {\n                failures++;\n                if (failures >= failureThreshold) {\n                    state = State.OPEN;\n                    openedAt = now;\n                }\n            }\n            throw e;\n        }\n\n        state = State.CLOSED;\n        failures = 0;\n        return result;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "CircuitBreaker.java": "import java.util.function.Supplier;\n\npublic final class CircuitBreaker {\n    public static final class CircuitOpenException extends RuntimeException {}\n\n    private enum State { CLOSED, OPEN, HALF_OPEN }\n\n    private final int failureThreshold;\n    private final long resetTimeout;\n    private State state = State.CLOSED;\n    private int failures = 0;\n    private long openedAt;\n\n    public CircuitBreaker(int failureThreshold, long resetTimeout) {\n        this.failureThreshold = failureThreshold;\n        this.resetTimeout = resetTimeout;\n    }\n\n    public <T> T call(Supplier<T> fn, long now) {\n        if (state == State.OPEN) {\n            if (now - openedAt < resetTimeout) {\n                throw new CircuitOpenException();\n            }\n            state = State.HALF_OPEN;\n        }\n\n        T result;\n        try {\n            result = fn.get();\n        } catch (RuntimeException e) {\n            if (state == State.HALF_OPEN) {\n                state = State.OPEN;\n            } else {\n                failures++;\n                if (failures >= failureThreshold) {\n                    state = State.OPEN;\n                    openedAt = now;\n                }\n            }\n            throw e;\n        }\n\n        state = State.CLOSED;\n        failures = 0;\n        return result;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_java_circuit_breaker_state_machine",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "java CheckCircuitBreakerTest.java",
+  "test_setup_files": {
+    "CircuitBreakerTest.java": "public final class CircuitBreakerTest {\n    static RuntimeException boomErr = new RuntimeException(\"boom\");\n\n    public static void main(String[] args) {\n        checkTripsOpenAfterConsecutiveFailures();\n        checkFailsFastWithoutCallingFnWhileOpen();\n        checkHalfOpenTrialAfterTimeoutSuccessCloses();\n        checkHalfOpenFailureReopensAndResetsClock();\n        System.out.println(\"all tests passed\");\n    }\n\n    static Object boom() {\n        throw boomErr;\n    }\n\n    static void checkTripsOpenAfterConsecutiveFailures() {\n        CircuitBreaker b = new CircuitBreaker(3, 10);\n        for (int i = 0; i < 3; i++) {\n            try {\n                b.call(CircuitBreakerTest::boom, 0);\n                throw new AssertionError(\"expected exception\");\n            } catch (RuntimeException e) {\n                if (e != boomErr) throw new AssertionError(\"unexpected exception: \" + e);\n            }\n        }\n        try {\n            b.call(() -> \"should not run\", 0);\n            throw new AssertionError(\"expected CircuitOpenException\");\n        } catch (CircuitBreaker.CircuitOpenException e) {\n            // expected\n        }\n    }\n\n    static void checkFailsFastWithoutCallingFnWhileOpen() {\n        CircuitBreaker b = new CircuitBreaker(1, 100);\n        try {\n            b.call(CircuitBreakerTest::boom, 0);\n        } catch (RuntimeException e) {\n            // expected\n        }\n        int[] calls = {0};\n        try {\n            b.call(() -> { calls[0]++; return 1; }, 1);\n            throw new AssertionError(\"expected CircuitOpenException\");\n        } catch (CircuitBreaker.CircuitOpenException e) {\n            // expected\n        }\n        if (calls[0] != 0) throw new AssertionError(\"fn must not be called while open\");\n    }\n\n    static void checkHalfOpenTrialAfterTimeoutSuccessCloses() {\n        CircuitBreaker b = new CircuitBreaker(1, 10);\n        try {\n            b.call(CircuitBreakerTest::boom, 0);\n        } catch (RuntimeException e) {\n            // expected\n        }\n        if (!\"ok\".equals(b.call(() -> \"ok\", 10))) throw new AssertionError(\"expected ok\");\n        if (!\"still-fine\".equals(b.call(() -> \"still-fine\", 11))) throw new AssertionError(\"expected still-fine\");\n    }\n\n    static void checkHalfOpenFailureReopensAndResetsClock() {\n        CircuitBreaker b = new CircuitBreaker(1, 10);\n        try {\n            b.call(CircuitBreakerTest::boom, 0);\n        } catch (RuntimeException e) {\n            // expected\n        }\n        try {\n            b.call(CircuitBreakerTest::boom, 10);\n            throw new AssertionError(\"expected boom at half-open trial\");\n        } catch (RuntimeException e) {\n            if (e != boomErr) throw new AssertionError(\"unexpected exception: \" + e);\n        }\n        try {\n            b.call(() -> \"too soon\", 15);\n            throw new AssertionError(\"expected CircuitOpenException at t=15\");\n        } catch (CircuitBreaker.CircuitOpenException e) {\n            // expected\n        }\n        if (!\"ok now\".equals(b.call(() -> \"ok now\", 20))) throw new AssertionError(\"expected ok now at t=20\");\n    }\n}\n",
+    "CheckCircuitBreakerTest.java": "import java.io.IOException;\n\npublic final class CheckCircuitBreakerTest {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"CircuitBreaker.java\", \"CircuitBreakerTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"CircuitBreakerTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  }
+}

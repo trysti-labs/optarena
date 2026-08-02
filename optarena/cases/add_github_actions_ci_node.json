@@ -44,5 +44,13 @@
   "timeout": 90,
   "reference_solution": {
     ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\n  pull_request:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"20\"\n      - run: npm ci\n      - run: npm test\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "missing-setup-node",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\n  pull_request:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm ci\n      - run: npm test\n"
+      }
+    }
+  ]
 }

@@ -1,0 +1,57 @@
+{
+  "name": "adapt_cart_limit_javascript_dynamic",
+  "language": "javascript",
+  "domain": "backend",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: maxItems.txt (a spec file the cart limit must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old limit into cart.js",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "javascript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create cart.js with a function canAdd(count) that returns true if count is less than or equal to the integer in maxItems.txt (currently 5), else false. Read the limit from the file (fs.readFileSync) at call time - do not hardcode it. Export it as module.exports = { canAdd }.",
+    "maxItems.txt has changed. Make sure canAdd() enforces the CURRENT limit in the file."
+  ],
+  "setup_files": {
+    "maxItems.txt": "5\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "maxItems.txt tightened to a lower limit",
+      "write_files": {
+        "maxItems.txt": "3\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "cart.js",
+      "content_patterns": [
+        "canAdd"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_cart.js": "const fs = require('fs');\nconst limit = parseInt(fs.readFileSync('maxItems.txt', 'utf8').trim(), 10);\nconst { canAdd } = require('./cart.js');\nif (canAdd(limit) !== true) throw new Error(`canAdd(${limit}) should be true`);\nif (canAdd(limit + 1) !== false) throw new Error(`canAdd(${limit + 1}) should be false (stale limit not updated)`);\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_cart.js",
+  "reference_solution": {
+    "cart.js": "const fs = require('fs');\n\nfunction canAdd(count) {\n  const limit = parseInt(fs.readFileSync('maxItems.txt', 'utf8').trim(), 10);\n  return count <= limit;\n}\n\nmodule.exports = { canAdd };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-limit",
+      "files": {
+        "cart.js": "function canAdd(count) {\n  return count <= 5;\n}\n\nmodule.exports = { canAdd };\n"
+      }
+    }
+  ]
+}

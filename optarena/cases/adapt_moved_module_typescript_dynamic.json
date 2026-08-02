@@ -1,0 +1,61 @@
+{
+  "name": "adapt_moved_module_typescript_dynamic",
+  "language": "typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval: the module the agent's first solution imports from is MOVED to a new path between prompts (fixed after_prompt trigger, old path deleted and new path created); the agent must update its import, not keep pointing at the old location",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "typescript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "moved-module"
+  ],
+  "prompts": [
+    "pricing/rules.ts exports DISCOUNT. Create checkout.ts that exports a function applyDiscount(price: number): number returning price * (1 - DISCOUNT), importing it from './pricing/rules'.",
+    "pricing/rules.ts has moved to config/rules.ts (same DISCOUNT value). Update checkout.ts's import to use the new location './config/rules' - do not keep importing the old path."
+  ],
+  "setup_files": {
+    "pricing/rules.ts": "export const DISCOUNT = 0.1;\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "pricing/rules.ts moved to config/rules.ts",
+      "delete_files": [
+        "pricing/rules.ts"
+      ],
+      "write_files": {
+        "config/rules.ts": "export const DISCOUNT = 0.1;\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "checkout.ts",
+      "content_patterns": [
+        "applyDiscount"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_checkout.ts": "import { applyDiscount } from './checkout';\n\nconst got = applyDiscount(100);\nif (Math.abs(got - 90) > 1e-6) { throw new Error(`applyDiscount(100) = ${got}`); }\nconsole.log('PASS');\n"
+  },
+  "check_command": "tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build config/rules.ts checkout.ts test_checkout.ts && node build/test_checkout.js",
+  "reference_solution": {
+    "checkout.ts": "import { DISCOUNT } from './config/rules';\n\nexport function applyDiscount(price: number): number {\n  return price * (1 - DISCOUNT);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-imports-old-path",
+      "files": {
+        "checkout.ts": "import { DISCOUNT } from './pricing/rules';\n\nexport function applyDiscount(price: number): number {\n  return price * (1 - DISCOUNT);\n}\n"
+      }
+    }
+  ]
+}

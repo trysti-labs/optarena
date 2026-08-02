@@ -1,0 +1,71 @@
+{
+  "name": "adapt_compounding_rate_python_dynamic",
+  "language": "python",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, COMPOUNDING: two disruptions fire at the SAME prompt boundary (after_prompt 1), applied in declaration order so the second's write is what sticks - pricing.RATE changes twice before the agent's second turn",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "compounding"
+  ],
+  "prompts": [
+    "pricing.py exports RATE. Create quote.py with a function quote(amount) that returns amount * (1 + RATE), reading RATE live from pricing.py.",
+    "pricing.py's RATE may have changed one or more times since you last checked. Make sure quote() reflects the CURRENT value of RATE, however many times it has changed."
+  ],
+  "setup_files": {
+    "pricing.py": "RATE = 0.05\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "RATE changed 0.05 -> 0.08 (first of two compounding changes)",
+      "write_files": {
+        "pricing.py": "RATE = 0.08\n"
+      }
+    },
+    {
+      "after_prompt": 1,
+      "description": "RATE changed 0.08 -> 0.12 (second of two compounding changes, this is the one that sticks)",
+      "write_files": {
+        "pricing.py": "RATE = 0.12\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "quote.py",
+      "content_patterns": [
+        "quote"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_quote.py": "import importlib.util\npricing_spec = importlib.util.spec_from_file_location('pricing_mod', 'pricing.py')\npricing_mod = importlib.util.module_from_spec(pricing_spec)\npricing_spec.loader.exec_module(pricing_mod)\nspec = importlib.util.spec_from_file_location('quote_mod', 'quote.py')\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nwant = 100 * (1 + pricing_mod.RATE)\ngot = mod.quote(100)\nassert abs(got - want) < 1e-6, f'quote(100) = {got}, want {want} (the CURRENT RATE after both compounding changes)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_quote.py",
+  "reference_solution": {
+    "quote.py": "from pricing import RATE\n\n\ndef quote(amount):\n    return amount * (1 + RATE)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-original-rate",
+      "files": {
+        "quote.py": "def quote(amount):\n    return amount * 1.05\n"
+      }
+    },
+    {
+      "name": "hardcoded-intermediate-rate",
+      "files": {
+        "quote.py": "def quote(amount):\n    return amount * 1.08\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "csharp",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "HashRing.cs's GetNode picks a node with a modulo of key.GetHashCode() - removing or adding any node reshuffles almost every key (and string.GetHashCode() isn't even stable across process runs in modern .NET, making it worse). Implement a real consistent-hash ring with virtual nodes: the constructor takes (IEnumerable<string> nodes, int replicas) and places `replicas` virtual points per physical node around a ring, hashed via System.Security.Cryptography.MD5 over $\"{node}:{i}\" for each virtual point. GetNode(string key) hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). AddNode(string node) and RemoveNode(string node) update the ring in place."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "HashRing.cs": "using System.Collections.Generic;\nusing System.Linq;\n\npublic class HashRing\n{\n    private List<string> _nodes;\n\n    public HashRing(IEnumerable<string> nodes, int replicas)\n    {\n        _nodes = nodes.ToList();\n    }\n\n    public string GetNode(string key)\n    {\n        var idx = ((key.GetHashCode() % _nodes.Count) + _nodes.Count) % _nodes.Count;\n        return _nodes[idx];\n    }\n\n    public void AddNode(string node)\n    {\n        _nodes.Add(node);\n    }\n\n    public void RemoveNode(string node)\n    {\n        _nodes.Remove(node);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "HashRing.cs",
+      "content_patterns": [
+        "class HashRing"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "HashRing.cs": "using System.Collections.Generic;\nusing System.Linq;\nusing System.Security.Cryptography;\nusing System.Text;\n\npublic class HashRing\n{\n    private readonly int _replicas;\n    private SortedDictionary<uint, string> _ring = new();\n\n    public HashRing(IEnumerable<string> nodes, int replicas)\n    {\n        _replicas = replicas;\n        foreach (var node in nodes)\n        {\n            AddNode(node);\n        }\n    }\n\n    private static uint HashOf(string s)\n    {\n        using var md5 = MD5.Create();\n        var digest = md5.ComputeHash(Encoding.UTF8.GetBytes(s));\n        return (uint)((digest[0] << 24) | (digest[1] << 16) | (digest[2] << 8) | digest[3]);\n    }\n\n    public void AddNode(string node)\n    {\n        for (int i = 0; i < _replicas; i++)\n        {\n            _ring[HashOf($\"{node}:{i}\")] = node;\n        }\n    }\n\n    public void RemoveNode(string node)\n    {\n        for (int i = 0; i < _replicas; i++)\n        {\n            _ring.Remove(HashOf($\"{node}:{i}\"));\n        }\n    }\n\n    public string GetNode(string key)\n    {\n        var point = HashOf(key);\n        foreach (var kv in _ring)\n        {\n            if (kv.Key >= point)\n            {\n                return kv.Value;\n            }\n        }\n        return _ring.First().Value;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "HashRing.cs": "using System.Collections.Generic;\nusing System.Linq;\nusing System.Security.Cryptography;\nusing System.Text;\n\npublic class HashRing\n{\n    private List<string> _nodes;\n\n    public HashRing(IEnumerable<string> nodes, int replicas)\n    {\n        _nodes = nodes.ToList();\n    }\n\n    private static uint HashOf(string s)\n    {\n        using var md5 = MD5.Create();\n        var digest = md5.ComputeHash(Encoding.UTF8.GetBytes(s));\n        return (uint)((digest[0] << 24) | (digest[1] << 16) | (digest[2] << 8) | digest[3]);\n    }\n\n    public string GetNode(string key)\n    {\n        var idx = (int)(HashOf(key) % (uint)_nodes.Count);\n        return _nodes[idx];\n    }\n\n    public void AddNode(string node)\n    {\n        _nodes.Add(node);\n    }\n\n    public void RemoveNode(string node)\n    {\n        _nodes.Remove(node);\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_csharp_consistent_hash_ring",
+  "language": "csharp",
+  "framework": "xunit",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "dotnet test tests/tests.csproj",
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/HashRingTests.cs": "using System.Collections.Generic;\nusing System.Linq;\nusing Xunit;\n\npublic class HashRingTests\n{\n    [Fact]\n    public void EveryKeyMapsToACurrentNode()\n    {\n        var ring = new HashRing(new[] { \"a\", \"b\", \"c\" }, 50);\n        for (int i = 0; i < 200; i++)\n        {\n            var node = ring.GetNode($\"key-{i}\");\n            Assert.Contains(node, new[] { \"a\", \"b\", \"c\" });\n        }\n    }\n\n    [Fact]\n    public void Deterministic()\n    {\n        var ring = new HashRing(new[] { \"a\", \"b\", \"c\" }, 50);\n        Assert.Equal(ring.GetNode(\"stable-key\"), ring.GetNode(\"stable-key\"));\n    }\n\n    [Fact]\n    public void RemovingANodeOnlyMovesThatNodesOwnKeys()\n    {\n        var nodes = new[] { \"n0\", \"n1\", \"n2\", \"n3\", \"n4\" };\n        var ring = new HashRing(nodes, 100);\n        var keys = Enumerable.Range(0, 1000).Select(i => $\"key-{i}\").ToList();\n        var before = keys.ToDictionary(k => k, k => ring.GetNode(k));\n\n        ring.RemoveNode(\"n2\");\n\n        int moved = 0;\n        foreach (var k in keys)\n        {\n            var after = ring.GetNode(k);\n            if (after != before[k])\n            {\n                moved++;\n                Assert.Equal(\"n2\", before[k]);\n            }\n            Assert.NotEqual(\"n2\", after);\n        }\n        Assert.True(moved > 0);\n    }\n}\n"
+  }
+}

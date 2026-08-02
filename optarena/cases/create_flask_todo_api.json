@@ -38,5 +38,13 @@
   "timeout": 150,
   "reference_solution": {
     "app.py": "from flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\ntodos = []\n_next_id = 1\n\n\n@app.route('/todos', methods=['GET'])\ndef list_todos():\n    return jsonify(todos)\n\n\n@app.route('/todos', methods=['POST'])\ndef create_todo():\n    global _next_id\n    data = request.get_json(silent=True) or {}\n    todo = {'id': _next_id, 'title': data.get('title')}\n    _next_id += 1\n    todos.append(todo)\n    return jsonify(todo), 201\n\n\n@app.route('/todos/<int:todo_id>', methods=['DELETE'])\ndef delete_todo(todo_id):\n    for i, t in enumerate(todos):\n        if t['id'] == todo_id:\n            todos.pop(i)\n            return '', 204\n    return jsonify({'error': 'not found'}), 404\n\n\nif __name__ == '__main__':\n    app.run(port=8011)\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "delete-ignores-missing-id",
+      "files": {
+        "app.py": "from flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\ntodos = []\n_next_id = 1\n\n\n@app.route('/todos', methods=['GET'])\ndef list_todos():\n    return jsonify(todos)\n\n\n@app.route('/todos', methods=['POST'])\ndef create_todo():\n    global _next_id\n    data = request.get_json(silent=True) or {}\n    todo = {'id': _next_id, 'title': data.get('title')}\n    _next_id += 1\n    todos.append(todo)\n    return jsonify(todo), 201\n\n\n@app.route('/todos/<int:todo_id>', methods=['DELETE'])\ndef delete_todo(todo_id):\n    # BUG: always reports success even if no todo had that id.\n    global todos\n    todos = [t for t in todos if t['id'] != todo_id]\n    return '', 204\n\n\nif __name__ == '__main__':\n    app.run(port=8011)\n"
+      }
+    }
+  ]
 }

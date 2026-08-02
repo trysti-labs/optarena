@@ -1,0 +1,58 @@
+{
+  "name": "adapt_reactive_config_kotlin_dynamic",
+  "language": "kotlin",
+  "framework": "plain-kotlin",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time Greeter.kt's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then Config.NAME changes under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["kotlin", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "src/main/kotlin/com/optarena/app/Config.kt declares object Config with a const val NAME. Create src/main/kotlin/com/optarena/app/Greeter.kt declaring object Greeter with a fun greet(): String that returns \"Hello, \" + Config.NAME + \"!\", reading Config.NAME (do not copy or hardcode its value).",
+    "Config.NAME may have changed since you last checked it. Make sure Greeter.greet() still returns a string built from the CURRENT value of Config.NAME, not a stale or hardcoded one."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Config.kt": "package com.optarena.app\n\nobject Config {\n    const val NAME = \"World\"\n}\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_contains": {"path": "src/main/kotlin/com/optarena/app/Greeter.kt", "pattern": "Hello"}},
+      "description": "Config.NAME changed World -> Universe, triggered reactively once Greeter.kt's first draft appeared (not a fixed step count)",
+      "write_files": {
+        "src/main/kotlin/com/optarena/app/Config.kt": "package com.optarena.app\n\nobject Config {\n    const val NAME = \"Universe\"\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/Greeter.kt",
+      "content_patterns": ["greet"]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/GreeterTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass GreeterTest {\n\n    @Test\n    fun greetsWithCurrentName() {\n        val got = Greeter.greet()\n        val want = \"Hello, \" + Config.NAME + \"!\"\n        assertEquals(want, got, \"Greeter.greet() must use the CURRENT Config.NAME, not a stale value\")\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=GreeterTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Greeter.kt": "package com.optarena.app\n\nobject Greeter {\n    fun greet(): String = \"Hello, \" + Config.NAME + \"!\"\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Greeter.kt": "package com.optarena.app\n\nobject Greeter {\n    fun greet(): String = \"Hello, World!\"\n}\n"
+      }
+    },
+    {
+      "name": "copies-value-instead-of-reading-live",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Greeter.kt": "package com.optarena.app\n\nobject Greeter {\n    private const val CACHED_NAME = \"World\"\n\n    fun greet(): String = \"Hello, \" + CACHED_NAME + \"!\"\n}\n"
+      }
+    }
+  ]
+}

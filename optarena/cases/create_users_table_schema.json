@@ -38,5 +38,13 @@
   "timeout": 120,
   "reference_solution": {
     "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    email TEXT NOT NULL UNIQUE,\n    created_at TEXT NOT NULL\n);\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "email-not-unique",
+      "files": {
+        "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    email TEXT NOT NULL,\n    created_at TEXT NOT NULL\n);\n"
+      }
+    }
+  ]
 }

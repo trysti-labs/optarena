@@ -34,5 +34,13 @@
   "timeout": 150,
   "reference_solution": {
     "backup.sh": "#!/bin/sh\nsrc=\"$1\"\npattern=\"$2\"\ndest=\"$3\"\n\nmkdir -p \"$dest\"\n\nset --\nfor f in \"$src\"/$pattern; do\n    [ -f \"$f\" ] && set -- \"$@\" \"$(basename \"$f\")\"\ndone\n\nif [ \"$#\" -eq 0 ]; then\n    echo \"error: no files matching '$pattern' in '$src'\" >&2\n    exit 1\nfi\n\narchive=\"$dest/backup_$(date +%Y%m%d%H%M%S).tar.gz\"\ntar -czf \"$archive\" -C \"$src\" \"$@\"\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "no-match-still-exits-zero",
+      "files": {
+        "backup.sh": "#!/bin/sh\nsrc=\"$1\"\npattern=\"$2\"\ndest=\"$3\"\n\nmkdir -p \"$dest\"\n\nset --\nfor f in \"$src\"/$pattern; do\n    [ -f \"$f\" ] && set -- \"$@\" \"$(basename \"$f\")\"\ndone\n\nif [ \"$#\" -eq 0 ]; then\n    echo \"error: no files matching '$pattern' in '$src'\" >&2\n    exit 0\nfi\n\narchive=\"$dest/backup_$(date +%Y%m%d%H%M%S).tar.gz\"\ntar -czf \"$archive\" -C \"$src\" \"$@\"\n"
+      }
+    }
+  ]
 }

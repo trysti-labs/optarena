@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 120,
   "timeout": 600,
-  "description": "L3 repo-scale data_engineering: CSV export endpoint for a project's tasks with RFC-4180 quoting; broken variant does a naive comma-join",
+  "description": "Repo-scale data_engineering: CSV export endpoint for a project's tasks with RFC-4180 quoting; broken variant does a naive comma-join",
   "difficulty": 2,
   "task_type": "data_engineering",
   "tags": [

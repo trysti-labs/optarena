@@ -1,0 +1,49 @@
+{
+  "name": "adapt_base_image_dockerfile_dynamic",
+  "language": "dockerfile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: python_version.txt (a spec file the Dockerfile's FROM line must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the pinned base image tag, not leave the stale version in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["dockerfile", "dynamic", "disruption", "adaptation", "requirements-drift"],
+  "prompts": [
+    "Write a Dockerfile at the repo root that starts with `FROM python:<version>-slim` where <version> is EXACTLY the version listed in python_version.txt (currently: 3.11), then sets WORKDIR /app and copies the current directory in with `COPY . .`.",
+    "python_version.txt has changed. Update the Dockerfile's FROM line so the pinned Python version matches the CURRENT contents of python_version.txt exactly."
+  ],
+  "setup_files": {
+    "python_version.txt": "3.11\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "python_version.txt rewritten to a new required Python version",
+      "write_files": {
+        "python_version.txt": "3.12\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": ["FROM", "WORKDIR"]
+    }
+  ],
+  "test_setup_files": {
+    "check_version.py": "import re\n\nwith open('python_version.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'python_version.txt is empty'\n\nwith open('Dockerfile', encoding='utf-8') as f:\n    content = f.read()\n\nm = re.search(r'(?im)^FROM\\s+python:([^\\s]+)', content)\nassert m, 'no FROM python:... line found in Dockerfile'\ntag = m.group(1)\nassert tag.startswith(current + '-') or tag == current, \\\n    f'Dockerfile pins python:{tag}, want a tag starting with the CURRENT python_version.txt value {current!r} (stale version not updated)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_version.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY . .\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-python-version",
+      "files": {
+        "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\n"
+      }
+    }
+  ]
+}

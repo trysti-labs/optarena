@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (k8s-appstack): scaling up replicas must keep the namespace ResourceQuota's CPU limit large enough for the new total request",
+  "tags": [
+    "yaml",
+    "kubernetes",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Scale the webstore-api Deployment from 3 to 5 replicas (change `spec.replicas` in k8s/deployment.yaml, leave the per-pod resource requests/limits alone). Add a new k8s/resourcequota.yaml (a ResourceQuota named `webstore-quota` in the `webstore` namespace) capping the namespace's total `requests.cpu` and `requests.memory` - critically, `requests.cpu` must be set large enough to actually accommodate ALL 5 replicas at the Deployment's per-pod CPU request (250m each = 1250m minimum total), not just some arbitrary round number - a quota that's too small would silently prevent the new replicas from ever scheduling."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "k8s/deployment.yaml",
+      "content_patterns": [
+        "replicas: 5"
+      ]
+    },
+    {
+      "path_pattern": "k8s/resourcequota.yaml",
+      "content_patterns": [
+        "requests.cpu"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_quota_consistency.py": "import re\nimport yaml\n\ndef parse_millicpu(value):\n    value = str(value)\n    if value.endswith('m'):\n        return int(value[:-1])\n    return int(float(value) * 1000)\n\nwith open('k8s/deployment.yaml') as f:\n    dep = yaml.safe_load(f)\nwith open('k8s/resourcequota.yaml') as f:\n    quota = yaml.safe_load(f)\n\nreplicas = dep['spec']['replicas']\nassert replicas == 5, f\"expected replicas 5, got {replicas}\"\n\ncontainer = dep['spec']['template']['spec']['containers'][0]\nper_pod_cpu = parse_millicpu(container['resources']['requests']['cpu'])\ntotal_needed = replicas * per_pod_cpu\n\nquota_cpu = parse_millicpu(quota['spec']['hard']['requests.cpu'])\nassert quota_cpu >= total_needed, (\n    f\"ResourceQuota requests.cpu ({quota_cpu}m) is not enough for {replicas} replicas x \"\n    f\"{per_pod_cpu}m each = {total_needed}m needed - new pods would fail to schedule once \"\n    f\"the namespace hits this quota\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_quota_consistency.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: webstore-api\n  namespace: webstore\n  labels:\n    app: webstore-api\nspec:\n  replicas: 5\n  selector:\n    matchLabels:\n      app: webstore-api\n  template:\n    metadata:\n      labels:\n        app: webstore-api\n    spec:\n      containers:\n        - name: api\n          image: webstore/api:1.0.0\n          ports:\n            - name: http\n              containerPort: 8080\n          envFrom:\n            - configMapRef:\n                name: webstore-config\n          resources:\n            requests:\n              cpu: \"250m\"\n              memory: \"256Mi\"\n            limits:\n              cpu: \"500m\"\n              memory: \"512Mi\"\n",
+    "k8s/resourcequota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: webstore-quota\n  namespace: webstore\nspec:\n  hard:\n    requests.cpu: \"1500m\"\n    requests.memory: \"2Gi\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "resourcequota-not-scaled-with-replicas",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: webstore-api\n  namespace: webstore\n  labels:\n    app: webstore-api\nspec:\n  replicas: 5\n  selector:\n    matchLabels:\n      app: webstore-api\n  template:\n    metadata:\n      labels:\n        app: webstore-api\n    spec:\n      containers:\n        - name: api\n          image: webstore/api:1.0.0\n          ports:\n            - name: http\n              containerPort: 8080\n          envFrom:\n            - configMapRef:\n                name: webstore-config\n          resources:\n            requests:\n              cpu: \"250m\"\n              memory: \"256Mi\"\n            limits:\n              cpu: \"500m\"\n              memory: \"512Mi\"\n",
+        "k8s/resourcequota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: webstore-quota\n  namespace: webstore\nspec:\n  hard:\n    requests.cpu: \"900m\"\n    requests.memory: \"2Gi\"\n"
+      }
+    }
+  ],
+  "name": "add_k8s_appstack_resourcequota_consistency",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "k8s-appstack",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

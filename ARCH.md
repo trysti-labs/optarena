@@ -665,11 +665,17 @@ Structural:
 
 The corpus stands at **510 cases** across 18 languages/frameworks (the
 original 120-case Phase 1 allocation has since been expanded through a
-Phase 2 band). Every case was hand-verified end-to-end before being counted: a correct reference
-solution passes, a broken/unfixed/unchanged one fails, run through the real
-oracle (`evaluate_case`/`DockerSandbox`), not just claimed. All 510 cases ship
-an explicit `reference_solution` (proven to PASS the real oracle); most also
-ship `broken_solutions` (proven to FAIL). `optarena cases verify` skips no case.
+Phase 2 band). Every case was verified end-to-end before being counted, run
+through the real oracle (`evaluate_case`/`DockerSandbox`), not just claimed.
+All 510 ship an explicit `reference_solution` (proven to PASS); 466 also ship
+something proven to FAIL - an explicit `broken_solutions` variant, or the
+implicit "unmodified workspace" check that bug_fix/refactoring/performance/
+security cases receive. `optarena cases verify` skips no case, but for the
+remaining 44 (mostly `create_*` scaffolding and `add_github_actions_ci_*`) it
+can only prove the oracle ACCEPTS a correct solution, not that it REJECTS a
+wrong one - which is the failure class verification exists to catch. Those 44
+are named by `cases verify` on every run and are a hard error under
+`cases verify --strict`; closing the gap is tracked corpus work.
 
 **Built:**
 - Case schema extended with `framework`/`domain`/`difficulty`/`task_type`/

@@ -30,5 +30,13 @@
     "c",
     "math",
     "cli"
+  ],
+  "broken_solutions": [
+    {
+      "name": "off-by-one-loop",
+      "files": {
+        "factorial.c": "#include <stdio.h>\n\nint main(void) {\n    long long n;\n    if (scanf(\"%lld\", &n) != 1) return 1;\n    long long result = 1;\n    for (long long i = 1; i < n; i++) result *= i;\n    printf(\"%lld\\n\", result);\n    return 0;\n}\n"
+      }
+    }
   ]
 }

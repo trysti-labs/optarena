@@ -1,0 +1,57 @@
+{
+  "name": "adapt_reactive_config_typescript_dynamic",
+  "language": "typescript",
+  "framework": "plain-typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time greeter.ts's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then config.ts's NAME changes under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["typescript", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "config.ts exports a const NAME. Create greeter.ts that exports a function greet(): string returning `Hello, ${NAME}!`, importing NAME from './config' (do not copy or hardcode its value).",
+    "config.ts's NAME may have changed since you last checked it. Make sure greet() still returns a string built from the CURRENT value of NAME, not a stale or hardcoded one."
+  ],
+  "setup_files": {
+    "config.ts": "export const NAME = \"World\";\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_contains": {"path": "greeter.ts", "pattern": "Hello"}},
+      "description": "config.ts's NAME changed World -> Universe, triggered reactively once greeter.ts's first draft appeared (not a fixed step count)",
+      "write_files": {
+        "config.ts": "export const NAME = \"Universe\";\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "greeter.ts",
+      "content_patterns": ["greet"]
+    }
+  ],
+  "test_setup_files": {
+    "test_greeter.ts": "import { greet } from './greeter';\nimport { NAME } from './config';\n\nconst got = greet();\nconst want = `Hello, ${NAME}!`;\nif (got !== want) {\n  throw new Error(`greet() = \"${got}\", want \"${want}\" (the CURRENT NAME, not a stale value)`);\n}\nconsole.log('PASS');\n"
+  },
+  "check_command": "tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build config.ts greeter.ts test_greeter.ts && node build/test_greeter.js",
+  "reference_solution": {
+    "greeter.ts": "import { NAME } from './config';\n\nexport function greet(): string {\n  return `Hello, ${NAME}!`;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "greeter.ts": "export function greet(): string {\n  return 'Hello, World!';\n}\n"
+      }
+    },
+    {
+      "name": "copies-value-instead-of-reading-live",
+      "files": {
+        "greeter.ts": "const CACHED_NAME = 'World';\n\nexport function greet(): string {\n  return `Hello, ${CACHED_NAME}!`;\n}\n"
+      }
+    }
+  ]
+}

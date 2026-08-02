@@ -1,0 +1,46 @@
+{
+  "description": "Repo-scale (cpp-eventbus): add pagination to EventLog::historyPage that must compose with the existing topic filter, not bypass it",
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "repo-scale",
+    "difficulty-4",
+    "pagination"
+  ],
+  "prompts": [
+    "Add `std::vector<Event> EventLog::historyPage(bool hasFilter, const std::string& topicFilter, int page, int pageSize, int* outTotal) const`. When `hasFilter` is true, restrict to entries whose topic exactly matches `topicFilter`. `page` (1-based) and `pageSize` must both be >= 1, else return an empty vector with `*outTotal` set to 0. Otherwise, write the count of ALL matching entries (not just the page) to `*outTotal`, and return just that page's slice. Pagination must be applied AFTER the topic filter, not before - `*outTotal` must reflect the filtered count, and the returned page must be the correct slice of the FILTERED result set, not a slice of the raw history filtered down afterward."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "include/event_log.hpp",
+      "content_patterns": [
+        "historyPage"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_pagination.cpp": "#include \"event_log.hpp\"\n\n#include <cassert>\n#include <iostream>\n\nint main() {\n    EventLog log(100);\n    for (int i = 0; i < 5; i++) {\n        log.record(Event{i, \"orders\", \"o\" + std::to_string(i)});\n    }\n    for (int i = 0; i < 3; i++) {\n        log.record(Event{100 + i, \"payments\", \"p\" + std::to_string(i)});\n    }\n\n    int total = 0;\n    auto page1 = log.historyPage(true, \"orders\", 1, 2, &total);\n    assert(total == 5);\n    assert(page1.size() == 2);\n    for (const auto& e : page1) assert(e.topic == \"orders\");\n\n    int total3 = 0;\n    auto page3 = log.historyPage(true, \"orders\", 3, 2, &total3);\n    assert(page3.size() == 1);\n\n    int totalBad = 0;\n    auto bad = log.historyPage(false, \"\", 0, 2, &totalBad);\n    assert(bad.empty());\n    assert(totalBad == 0);\n\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  },
+  "reference_solution": {
+    "include/event_log.hpp": "#pragma once\n\n#include <algorithm>\n#include <cstddef>\n#include <string>\n#include <vector>\n\n#include \"event.hpp\"\n\nclass EventLog {\npublic:\n    explicit EventLog(size_t capacity) : capacity_(capacity) {}\n\n    void record(const Event& event) {\n        if (entries_.size() >= capacity_) {\n            entries_.erase(entries_.begin());\n        }\n        entries_.push_back(event);\n    }\n\n    std::vector<Event> history() const { return entries_; }\n\n    size_t size() const { return entries_.size(); }\n\n    /*\n     * Returns a page of history entries, optionally filtered by topic,\n     * with pagination applied AFTER the filter. `outTotal` receives the\n     * count of ALL matching entries (not just the page). `page` is\n     * 1-based; both `page` and `pageSize` must be >= 1 or an empty\n     * vector is returned with `outTotal` set to 0.\n     */\n    std::vector<Event> historyPage(bool hasFilter, const std::string& topicFilter,\n                                   int page, int pageSize, int* outTotal) const {\n        *outTotal = 0;\n        if (page < 1 || pageSize < 1) {\n            return {};\n        }\n        std::vector<Event> matching;\n        for (const auto& e : entries_) {\n            if (!hasFilter || e.topic == topicFilter) {\n                matching.push_back(e);\n            }\n        }\n        *outTotal = static_cast<int>(matching.size());\n\n        int start = (page - 1) * pageSize;\n        if (start >= static_cast<int>(matching.size())) {\n            return {};\n        }\n        int end = std::min(start + pageSize, static_cast<int>(matching.size()));\n        return std::vector<Event>(matching.begin() + start, matching.begin() + end);\n    }\n\nprivate:\n    std::vector<Event> entries_;\n    size_t capacity_;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "paginates-before-filtering",
+      "files": {
+        "include/event_log.hpp": "#pragma once\n\n#include <algorithm>\n#include <cstddef>\n#include <string>\n#include <vector>\n\n#include \"event.hpp\"\n\nclass EventLog {\npublic:\n    explicit EventLog(size_t capacity) : capacity_(capacity) {}\n\n    void record(const Event& event) {\n        if (entries_.size() >= capacity_) {\n            entries_.erase(entries_.begin());\n        }\n        entries_.push_back(event);\n    }\n\n    std::vector<Event> history() const { return entries_; }\n\n    size_t size() const { return entries_.size(); }\n\n    /*\n     * Returns a page of history entries, optionally filtered by topic,\n     * with pagination applied AFTER the filter. `outTotal` receives the\n     * count of ALL matching entries (not just the page). `page` is\n     * 1-based; both `page` and `pageSize` must be >= 1 or an empty\n     * vector is returned with `outTotal` set to 0.\n     */\n    std::vector<Event> historyPage(bool hasFilter, const std::string& topicFilter,\n                                   int page, int pageSize, int* outTotal) const {\n        *outTotal = static_cast<int>(entries_.size());\n        if (page < 1 || pageSize < 1) {\n            *outTotal = 0;\n            return {};\n        }\n        int start = (page - 1) * pageSize;\n        if (start >= static_cast<int>(entries_.size())) {\n            return {};\n        }\n        int end = std::min(start + pageSize, static_cast<int>(entries_.size()));\n        std::vector<Event> pageSlice(entries_.begin() + start, entries_.begin() + end);\n        if (!hasFilter) {\n            return pageSlice;\n        }\n        std::vector<Event> filtered;\n        for (const auto& e : pageSlice) {\n            if (e.topic == topicFilter) {\n                filtered.push_back(e);\n            }\n        }\n        return filtered;\n    }\n\nprivate:\n    std::vector<Event> entries_;\n    size_t capacity_;\n};\n"
+      }
+    }
+  ],
+  "name": "add_cpp_eventbus_history_pagination",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester:latest",
+  "setup_repo": "cpp-eventbus",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "check_command": "g++ -std=c++17 -Iinclude tests/test_pagination.cpp -o test_bin && ./test_bin"
+}

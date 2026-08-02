@@ -1,0 +1,47 @@
+{
+  "description": "Add idempotency-key deduplication with a TTL window to a processor that currently re-executes on every call",
+  "task_type": "feature",
+  "tags": [
+    "javascript",
+    "node",
+    "idempotency",
+    "algorithms"
+  ],
+  "prompts": [
+    "processor.js's Processor.process(key, payload, now) runs the side effect (pushes onto this.effects and returns a fresh result) EVERY time it's called, even for a key it has already processed. Make it idempotent: within `window` seconds of the first call for a given key, a repeat call with that SAME key must return the ORIGINAL result WITHOUT running the side effect again (this.effects must not grow) - regardless of what payload is passed the second time. Once `window` seconds have passed since the first call for that key, the NEXT call for that key must run for real again (a fresh execution, whose result becomes the new one remembered for that key)."
+  ],
+  "setup_files": {
+    "processor.js": "class Processor {\n  constructor(window) {\n    this.window = window;\n    this.effects = [];\n  }\n\n  process(key, payload, now) {\n    this.effects.push([key, payload]);\n    return { key, payload, processedAt: now };\n  }\n}\n\nmodule.exports = { Processor };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "processor.js",
+      "content_patterns": [
+        "class Processor"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_processor_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { Processor } = require(\"./processor\");\n\ntest(\"duplicate key within window is not re-executed\", () => {\n  const p = new Processor(10);\n  const first = p.process(\"order-1\", { amount: 5 }, 0);\n  const second = p.process(\"order-1\", { amount: 999 }, 5);\n  assert.deepStrictEqual(second, first);\n  assert.strictEqual(p.effects.length, 1);\n});\n\ntest(\"different keys both execute\", () => {\n  const p = new Processor(10);\n  p.process(\"a\", 1, 0);\n  p.process(\"b\", 2, 0);\n  assert.strictEqual(p.effects.length, 2);\n});\n\ntest(\"re-executes after window expires\", () => {\n  const p = new Processor(10);\n  p.process(\"order-1\", { amount: 5 }, 0);\n  p.process(\"order-1\", { amount: 5 }, 9);\n  assert.strictEqual(p.effects.length, 1);\n  p.process(\"order-1\", { amount: 7 }, 10);\n  assert.strictEqual(p.effects.length, 2);\n  assert.deepStrictEqual(p.effects[1], [\"order-1\", { amount: 7 }]);\n});\n"
+  },
+  "check_command": "node --test test_processor_hidden.test.js",
+  "reference_solution": {
+    "processor.js": "class Processor {\n  constructor(window) {\n    this.window = window;\n    this.effects = [];\n    this.seen = new Map(); // key -> [result, recordedAt]\n  }\n\n  process(key, payload, now) {\n    const cached = this.seen.get(key);\n    if (cached !== undefined) {\n      const [result, recordedAt] = cached;\n      if (now - recordedAt < this.window) {\n        return result;\n      }\n    }\n    this.effects.push([key, payload]);\n    const result = { key, payload, processedAt: now };\n    this.seen.set(key, [result, now]);\n    return result;\n  }\n}\n\nmodule.exports = { Processor };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedup-never-expires",
+      "files": {
+        "processor.js": "class Processor {\n  constructor(window) {\n    this.window = window;\n    this.effects = [];\n    this.seen = new Map(); // key -> result\n  }\n\n  process(key, payload, now) {\n    if (this.seen.has(key)) {\n      return this.seen.get(key);\n    }\n    this.effects.push([key, payload]);\n    const result = { key, payload, processedAt: now };\n    this.seen.set(key, result);\n    return result;\n  }\n}\n\nmodule.exports = { Processor };\n"
+      }
+    }
+  ],
+  "name": "add_js_idempotency_key_dedup",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3
+}

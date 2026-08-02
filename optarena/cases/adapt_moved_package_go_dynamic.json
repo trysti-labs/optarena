@@ -1,0 +1,63 @@
+{
+  "name": "adapt_moved_package_go_dynamic",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: the package the agent's first solution imports is MOVED to a new path between prompts (fixed after_prompt trigger, old package deleted, new one created); the agent must update its import, not keep pointing at the old location",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "go",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "moved-package"
+  ],
+  "prompts": [
+    "pricing/rules.go (package pricing) exports a const Discount. Create checkout.go (package checkout) with a function ApplyDiscount(price float64) float64 that returns price * (1 - pricing.Discount), importing \"movedpkgcase/pricing\".",
+    "pricing/rules.go has moved to config/rules.go (package config, same Discount value, import path \"movedpkgcase/config\"). Update checkout.go's import to use the new location - do not keep importing the old pricing package."
+  ],
+  "setup_files": {
+    "go.mod": "module movedpkgcase\n\ngo 1.22\n",
+    "pricing/rules.go": "package pricing\n\nconst Discount = 0.1\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "pricing package moved to config package",
+      "delete_files": [
+        "pricing/rules.go"
+      ],
+      "write_files": {
+        "config/rules.go": "package config\n\nconst Discount = 0.1\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "checkout.go",
+      "content_patterns": [
+        "ApplyDiscount"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "checkout_test.go": "package checkout\n\nimport \"testing\"\n\nfunc TestApplyDiscount(t *testing.T) {\n\tgot := ApplyDiscount(100)\n\tif got != 90 {\n\t\tt.Fatalf(\"ApplyDiscount(100) = %v, want 90\", got)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "checkout.go": "package checkout\n\nimport \"movedpkgcase/config\"\n\nfunc ApplyDiscount(price float64) float64 {\n\treturn price * (1 - config.Discount)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-imports-old-package",
+      "files": {
+        "checkout.go": "package checkout\n\nimport \"movedpkgcase/pricing\"\n\nfunc ApplyDiscount(price float64) float64 {\n\treturn price * (1 - pricing.Discount)\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (cpp-eventbus): enforce a per-topic subscriber cap from BOTH subscribe and resubscribe",
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "repo-scale",
+    "difficulty-4",
+    "invariant"
+  ],
+  "prompts": [
+    "Add an optional `maxSubscribersPerTopic` constructor argument to EventBus (default -1, meaning unlimited). Add `int EventBus::resubscribe(int oldId, const std::string& newTopic)`: moves an existing subscription to a different topic (returns 1 on success, 0 if `oldId` doesn't exist). The invariant: a topic's subscriber count must never exceed `maxSubscribersPerTopic` (when set). This must be enforced from BOTH places that can add a subscriber to a topic: (1) `subscribe()` (already returns -1 when it can't add - keep that), and (2) `resubscribe()` - must ALSO reject (return 0, leaving the subscription unchanged) when the target topic is already at capacity."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "include/event_bus.hpp",
+      "content_patterns": [
+        "maxSubscribersPerTopic",
+        "resubscribe"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_subscriber_cap.cpp": "#include \"event_bus.hpp\"\n\n#include <cassert>\n#include <iostream>\n\nint main() {\n    {\n        EventLog log(10);\n        EventBus bus(log, 1);\n        int id1 = bus.subscribe(\"a\", [](const Event&) {});\n        assert(id1 != -1);\n        int id2 = bus.subscribe(\"a\", [](const Event&) {});\n        assert(id2 == -1);\n    }\n    {\n        EventLog log(10);\n        EventBus bus(log, 1);\n        bus.subscribe(\"full\", [](const Event&) {});\n        int movable = bus.subscribe(\"other\", [](const Event&) {});\n\n        int result = bus.resubscribe(movable, \"full\");\n        assert(result == 0);\n    }\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  },
+  "reference_solution": {
+    "include/event_bus.hpp": "#pragma once\n\n#include <functional>\n#include <string>\n#include <unordered_map>\n#include <utility>\n\n#include \"event.hpp\"\n#include \"event_log.hpp\"\n\nclass EventBus {\npublic:\n    using Callback = std::function<void(const Event&)>;\n\n    explicit EventBus(EventLog& log, int maxSubscribersPerTopic = -1)\n        : log_(log), max_subscribers_per_topic_(maxSubscribersPerTopic) {}\n\n    int subscribe(const std::string& topic, Callback cb) {\n        if (capReached(topic)) {\n            return -1;\n        }\n        int id = next_id_++;\n        subscribers_[id] = std::make_pair(topic, std::move(cb));\n        return id;\n    }\n\n    void unsubscribe(int subscription_id) { subscribers_.erase(subscription_id); }\n\n    /*\n     * Changes an existing subscription's topic. Must ALSO respect the\n     * per-topic subscriber cap for the new topic, same as subscribe().\n     * Returns 1 on success, 0 if oldId doesn't exist or the new topic\n     * is already at capacity (nothing changed in that case).\n     */\n    int resubscribe(int oldId, const std::string& newTopic) {\n        auto it = subscribers_.find(oldId);\n        if (it == subscribers_.end()) {\n            return 0;\n        }\n        Callback cb = it->second.second;\n        std::string oldTopic = it->second.first;\n        subscribers_.erase(it);\n        if (capReached(newTopic)) {\n            subscribers_[oldId] = std::make_pair(oldTopic, std::move(cb));\n            return 0;\n        }\n        subscribers_[oldId] = std::make_pair(newTopic, std::move(cb));\n        return 1;\n    }\n\n    int publish(const std::string& topic, const std::string& payload) {\n        Event event{next_seq_++, topic, payload};\n        log_.record(event);\n        int invoked = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                entry.second.second(event);\n                invoked++;\n            }\n        }\n        return invoked;\n    }\n\nprivate:\n    bool capReached(const std::string& topic) const {\n        if (max_subscribers_per_topic_ < 0) {\n            return false;\n        }\n        int count = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                count++;\n            }\n        }\n        return count >= max_subscribers_per_topic_;\n    }\n\n    EventLog& log_;\n    std::unordered_map<int, std::pair<std::string, Callback>> subscribers_;\n    int next_id_ = 1;\n    long next_seq_ = 1;\n    int max_subscribers_per_topic_;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "cap-not-checked-on-resubscribe",
+      "files": {
+        "include/event_bus.hpp": "#pragma once\n\n#include <functional>\n#include <string>\n#include <unordered_map>\n#include <utility>\n\n#include \"event.hpp\"\n#include \"event_log.hpp\"\n\nclass EventBus {\npublic:\n    using Callback = std::function<void(const Event&)>;\n\n    explicit EventBus(EventLog& log, int maxSubscribersPerTopic = -1)\n        : log_(log), max_subscribers_per_topic_(maxSubscribersPerTopic) {}\n\n    int subscribe(const std::string& topic, Callback cb) {\n        if (capReached(topic)) {\n            return -1;\n        }\n        int id = next_id_++;\n        subscribers_[id] = std::make_pair(topic, std::move(cb));\n        return id;\n    }\n\n    void unsubscribe(int subscription_id) { subscribers_.erase(subscription_id); }\n\n    /*\n     * Changes an existing subscription's topic. Must ALSO respect the\n     * per-topic subscriber cap for the new topic, same as subscribe().\n     * Returns 1 on success, 0 if oldId doesn't exist or the new topic\n     * is already at capacity (nothing changed in that case).\n     */\n    int resubscribe(int oldId, const std::string& newTopic) {\n        auto it = subscribers_.find(oldId);\n        if (it == subscribers_.end()) {\n            return 0;\n        }\n        Callback cb = it->second.second;\n        subscribers_.erase(it);\n        subscribers_[oldId] = std::make_pair(newTopic, std::move(cb));\n        return 1;\n    }\n\n    int publish(const std::string& topic, const std::string& payload) {\n        Event event{next_seq_++, topic, payload};\n        log_.record(event);\n        int invoked = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                entry.second.second(event);\n                invoked++;\n            }\n        }\n        return invoked;\n    }\n\nprivate:\n    bool capReached(const std::string& topic) const {\n        if (max_subscribers_per_topic_ < 0) {\n            return false;\n        }\n        int count = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                count++;\n            }\n        }\n        return count >= max_subscribers_per_topic_;\n    }\n\n    EventLog& log_;\n    std::unordered_map<int, std::pair<std::string, Callback>> subscribers_;\n    int next_id_ = 1;\n    long next_seq_ = 1;\n    int max_subscribers_per_topic_;\n};\n"
+      }
+    }
+  ],
+  "name": "add_cpp_eventbus_subscriber_cap",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester:latest",
+  "setup_repo": "cpp-eventbus",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "check_command": "g++ -std=c++17 -Iinclude tests/test_subscriber_cap.cpp -o test_bin && ./test_bin"
+}

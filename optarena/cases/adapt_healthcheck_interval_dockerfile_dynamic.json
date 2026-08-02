@@ -1,0 +1,58 @@
+{
+  "name": "adapt_healthcheck_interval_dockerfile_dynamic",
+  "language": "dockerfile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: interval.txt (a spec file the Dockerfile's HEALTHCHECK interval must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the interval, not leave the stale value in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "dockerfile",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a Dockerfile at the repo root FROM python:3.11-slim that sets WORKDIR /app, copies the current directory in, and declares a HEALTHCHECK with `--interval=<seconds>s` where <seconds> is EXACTLY the integer in interval.txt (currently: 30), running `curl -f http://localhost:8000/health || exit 1`.",
+    "interval.txt has changed. Update the Dockerfile's HEALTHCHECK interval to match the CURRENT contents of interval.txt exactly."
+  ],
+  "setup_files": {
+    "interval.txt": "30\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "interval.txt rewritten to a new required interval",
+      "write_files": {
+        "interval.txt": "15\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "FROM",
+        "HEALTHCHECK"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_interval.py": "import re\n\nwith open('interval.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'interval.txt is empty'\n\nwith open('Dockerfile', encoding='utf-8') as f:\n    content = f.read()\n\nm = re.search(r'--interval=(\\d+)s', content)\nassert m, 'no --interval=Ns found on the HEALTHCHECK line'\nseconds = m.group(1)\nassert seconds == current, f'HEALTHCHECK interval is {seconds!r}s, want the CURRENT interval.txt value {current!r}s (stale interval not updated)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_interval.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nHEALTHCHECK --interval=15s CMD curl -f http://localhost:8000/health || exit 1\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-interval",
+      "files": {
+        "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nHEALTHCHECK --interval=30s CMD curl -f http://localhost:8000/health || exit 1\n"
+      }
+    }
+  ]
+}

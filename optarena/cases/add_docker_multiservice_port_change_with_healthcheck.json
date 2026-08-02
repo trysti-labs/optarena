@@ -1,0 +1,65 @@
+{
+  "description": "Repo-scale (docker-multiservice): a port change (8000 -> 9090) AND a new HEALTHCHECK/health-routing feature must consistently use the SAME new port - not leave the healthcheck wired to the old port",
+  "tags": [
+    "dockerfile",
+    "docker-compose",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Move the `api` service from port 8000 to port 9090: update `EXPOSE` in api/Dockerfile and the port mapping (`\"9090:9090\"`) in docker-compose.yml. Propagate this to nginx/nginx.conf's existing `proxy_pass` too. On top of the port move, add health-check support: a `HEALTHCHECK` instruction in api/Dockerfile (every 30s, timeout 3s, running `curl -f http://localhost:PORT/health || exit 1`) and a matching `location /health` block in nginx.conf proxying to `http://api:PORT/health`, alongside the existing catch-all `location /` block. Critically, PORT must be the SAME everywhere - the new 9090, not the old 8000 the service used to listen on. Since the healthcheck is being added in the same change as the port move, it's easy to accidentally leave it wired to the port being replaced instead of the one being moved to."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "api/Dockerfile",
+      "content_patterns": [
+        "EXPOSE 9090",
+        "HEALTHCHECK"
+      ]
+    },
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "9090:9090"
+      ]
+    },
+    {
+      "path_pattern": "nginx/nginx.conf",
+      "content_patterns": [
+        "location /health",
+        "9090"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_port_and_healthcheck.py": "import re\nfrom pathlib import Path\n\napi_dockerfile = Path('api/Dockerfile').read_text(encoding='utf-8')\ncompose = Path('docker-compose.yml').read_text(encoding='utf-8')\nnginx_conf = Path('nginx/nginx.conf').read_text(encoding='utf-8')\n\nassert re.search(r'EXPOSE\\s+9090', api_dockerfile), 'api/Dockerfile must EXPOSE 9090'\nassert '\"9090:9090\"' in compose, 'docker-compose.yml must map 9090:9090 for api'\n\nhc = re.search(r'HEALTHCHECK\\b.*CMD.*curl.*http://localhost:(\\d+)/health', api_dockerfile)\nassert hc, 'api/Dockerfile is missing a HEALTHCHECK that curls /health'\nassert hc.group(1) == '9090', (\n    f'the HEALTHCHECK still curls port {hc.group(1)} - the api service moved to port 9090, '\n    f'so the healthcheck added alongside that move must target the SAME new port, not the old one')\n\nmain_proxy = re.search(r'location\\s+/\\s*\\{[^}]*proxy_pass\\s+http://api:(\\d+)', nginx_conf, re.DOTALL)\nassert main_proxy, 'nginx.conf is missing the main proxy_pass to the api service'\nassert main_proxy.group(1) == '9090', f'main proxy_pass still targets port {main_proxy.group(1)}'\n\nhealth_location = re.search(\n    r'location\\s+/health\\s*\\{[^}]*proxy_pass\\s+http://api:(\\d+)/health', nginx_conf, re.DOTALL)\nassert health_location, \"nginx.conf is missing a '/health' location proxying to the api service\"\nassert health_location.group(1) == '9090', (\n    f'the /health location still proxies to port {health_location.group(1)} - it must use the SAME '\n    f'new port (9090) as the main location block, not a stale leftover from before the port change')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_port_and_healthcheck.py",
+  "reference_solution": {
+    "api/Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nRUN useradd --create-home appuser\nUSER appuser\n\nEXPOSE 9090\n\nHEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:9090/health || exit 1\n\nCMD [\"python\", \"main.py\"]\n",
+    "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"9090:9090\"\n    environment:\n      - LOG_LEVEL=info\n    depends_on:\n      - worker\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n",
+    "nginx/nginx.conf": "server {\n    listen 80;\n\n    location /health {\n        proxy_pass http://api:9090/health;\n    }\n\n    location / {\n        proxy_pass http://api:9090;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "healthcheck-and-health-route-stuck-on-old-port",
+      "files": {
+        "api/Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nRUN useradd --create-home appuser\nUSER appuser\n\nEXPOSE 9090\n\nHEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:8000/health || exit 1\n\nCMD [\"python\", \"main.py\"]\n",
+        "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"9090:9090\"\n    environment:\n      - LOG_LEVEL=info\n    depends_on:\n      - worker\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n",
+        "nginx/nginx.conf": "server {\n    listen 80;\n\n    location /health {\n        proxy_pass http://api:8000/health;\n    }\n\n    location / {\n        proxy_pass http://api:9090;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_docker_multiservice_port_change_with_healthcheck",
+  "language": "dockerfile",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "docker-multiservice",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

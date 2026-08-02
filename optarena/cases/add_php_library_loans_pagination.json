@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (php-library): add pagination to LoanService::listLoansForMember that must compose with the existing status filter, not bypass it",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "repo-scale",
+    "difficulty-4",
+    "pagination"
+  ],
+  "prompts": [
+    "Add `LoanService::listLoansForMember(int $memberId, ?string $status = null, int $page = 1, int $pageSize = 20): array`. `$status`, when given, filters to loans with that status (\"active\"/\"returned\"). `$page` (1-based) and `$pageSize` (max 100) must both be positive integers - throw LibraryException otherwise. It returns `['loans' => ..., 'total' => ..., 'page' => ..., 'pageSize' => ...]`, where `loans` is just that page's slice and `total` is the count of ALL matching loans (not just the page). Pagination must be applied AFTER the status filter, not before - `total` must reflect the filtered count, and the returned `loans` must be the correct page of the FILTERED result set."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/LoanService.php",
+      "content_patterns": [
+        "listLoansForMember",
+        "pageSize"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/LoanPaginationTest.php": "<?php\n\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/LoanService.php';\n\nfinal class LoanPaginationTest extends TestCase\n{\n    public function testPaginationComposesWithStatusFilter(): void\n    {\n        $books = new \\App\\BookRepository();\n        $members = new \\App\\MemberRepository();\n        $loans = new \\App\\LoanRepository();\n        $service = new \\App\\LoanService($books, $members, $loans);\n\n        $member = $members->create('Ada', 'a@example.com');\n\n        // 5 active, 3 returned loans for this member.\n        $active = [];\n        for ($i = 0; $i < 5; $i++) {\n            $book = $books->create(\"Book $i\", 'x', 1);\n            $active[] = $service->borrow($book->id, $member->id);\n        }\n        for ($i = 0; $i < 3; $i++) {\n            $book = $books->create(\"Returned $i\", 'x', 1);\n            $loan = $service->borrow($book->id, $member->id);\n            $service->returnLoan($loan->id);\n        }\n\n        $page1 = $service->listLoansForMember($member->id, 'active', 1, 2);\n        $this->assertSame(5, $page1['total']);\n        $this->assertCount(2, $page1['loans']);\n        foreach ($page1['loans'] as $loan) {\n            $this->assertSame('active', $loan->status);\n        }\n\n        $page3 = $service->listLoansForMember($member->id, 'active', 3, 2);\n        $this->assertCount(1, $page3['loans']);\n\n        $this->expectException(\\App\\LibraryException::class);\n        $service->listLoansForMember($member->id, null, 0);\n    }\n}\n"
+  },
+  "reference_solution": {
+    "src/LoanService.php": "<?php\n\nnamespace App;\n\nrequire_once __DIR__ . '/BookRepository.php';\nrequire_once __DIR__ . '/MemberRepository.php';\nrequire_once __DIR__ . '/LoanRepository.php';\nrequire_once __DIR__ . '/LibraryException.php';\n\nclass LoanService\n{\n    private BookRepository $books;\n    private MemberRepository $members;\n    private LoanRepository $loans;\n\n    public function __construct(BookRepository $books, MemberRepository $members, LoanRepository $loans)\n    {\n        $this->books = $books;\n        $this->members = $members;\n        $this->loans = $loans;\n    }\n\n    public function borrow(int $bookId, int $memberId): Loan\n    {\n        $book = $this->books->find($bookId);\n        if ($book === null) {\n            throw new LibraryException('book not found');\n        }\n        $member = $this->members->find($memberId);\n        if ($member === null) {\n            throw new LibraryException('member not found');\n        }\n        if ($book->availableCopies <= 0) {\n            throw new LibraryException('no copies available');\n        }\n\n        $book->availableCopies--;\n        return $this->loans->create($bookId, $memberId, 'active');\n    }\n\n    public function returnLoan(int $loanId): Loan\n    {\n        $loan = $this->loans->find($loanId);\n        if ($loan === null) {\n            throw new LibraryException('loan not found');\n        }\n        if ($loan->status !== 'active') {\n            throw new LibraryException('loan already returned');\n        }\n\n        $loan->status = 'returned';\n        $book = $this->books->find($loan->bookId);\n        if ($book !== null) {\n            $book->availableCopies++;\n        }\n        return $loan;\n    }\n\n    /**\n     * Lists a member's loans, optionally filtered by status, with\n     * pagination applied AFTER the filter. Returns an array with\n     * 'loans' (this page's slice), 'total' (count of ALL matching\n     * loans), 'page', 'pageSize'.\n     */\n    public function listLoansForMember(int $memberId, ?string $status = null, int $page = 1, int $pageSize = 20): array\n    {\n        if ($page < 1) {\n            throw new LibraryException('page must be a positive integer');\n        }\n        if ($pageSize < 1 || $pageSize > 100) {\n            throw new LibraryException('pageSize must be between 1 and 100');\n        }\n\n        $matching = $this->loans->forMember($memberId);\n        if ($status !== null) {\n            $matching = array_values(array_filter($matching, fn(Loan $l) => $l->status === $status));\n        }\n\n        $total = count($matching);\n        $pageLoans = array_slice($matching, ($page - 1) * $pageSize, $pageSize);\n\n        return ['loans' => $pageLoans, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize];\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "paginates-before-filtering",
+      "files": {
+        "src/LoanService.php": "<?php\n\nnamespace App;\n\nrequire_once __DIR__ . '/BookRepository.php';\nrequire_once __DIR__ . '/MemberRepository.php';\nrequire_once __DIR__ . '/LoanRepository.php';\nrequire_once __DIR__ . '/LibraryException.php';\n\nclass LoanService\n{\n    private BookRepository $books;\n    private MemberRepository $members;\n    private LoanRepository $loans;\n\n    public function __construct(BookRepository $books, MemberRepository $members, LoanRepository $loans)\n    {\n        $this->books = $books;\n        $this->members = $members;\n        $this->loans = $loans;\n    }\n\n    public function borrow(int $bookId, int $memberId): Loan\n    {\n        $book = $this->books->find($bookId);\n        if ($book === null) {\n            throw new LibraryException('book not found');\n        }\n        $member = $this->members->find($memberId);\n        if ($member === null) {\n            throw new LibraryException('member not found');\n        }\n        if ($book->availableCopies <= 0) {\n            throw new LibraryException('no copies available');\n        }\n\n        $book->availableCopies--;\n        return $this->loans->create($bookId, $memberId, 'active');\n    }\n\n    public function returnLoan(int $loanId): Loan\n    {\n        $loan = $this->loans->find($loanId);\n        if ($loan === null) {\n            throw new LibraryException('loan not found');\n        }\n        if ($loan->status !== 'active') {\n            throw new LibraryException('loan already returned');\n        }\n\n        $loan->status = 'returned';\n        $book = $this->books->find($loan->bookId);\n        if ($book !== null) {\n            $book->availableCopies++;\n        }\n        return $loan;\n    }\n\n    /**\n     * Lists a member's loans, optionally filtered by status, with\n     * pagination applied AFTER the filter. Returns an array with\n     * 'loans' (this page's slice), 'total' (count of ALL matching\n     * loans), 'page', 'pageSize'.\n     */\n    public function listLoansForMember(int $memberId, ?string $status = null, int $page = 1, int $pageSize = 20): array\n    {\n        if ($page < 1) {\n            throw new LibraryException('page must be a positive integer');\n        }\n        if ($pageSize < 1 || $pageSize > 100) {\n            throw new LibraryException('pageSize must be between 1 and 100');\n        }\n\n        $all = $this->loans->forMember($memberId);\n        $total = count($all);\n        $pageSlice = array_slice($all, ($page - 1) * $pageSize, $pageSize);\n        $pageLoans = $status !== null\n            ? array_values(array_filter($pageSlice, fn(Loan $l) => $l->status === $status))\n            : $pageSlice;\n\n        return ['loans' => $pageLoans, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize];\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_library_loans_pagination",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "setup_repo": "php-library",
+  "git_init": true,
+  "check_command_timeout": 300,
+  "timeout": 900,
+  "difficulty": 4,
+  "check_command": "phpunit tests"
+}

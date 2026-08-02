@@ -1,0 +1,46 @@
+{
+  "description": "Add RFC4180-style field quoting/escaping to a CSV row builder that currently joins fields with no escaping at all",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "csv",
+    "correctness"
+  ],
+  "prompts": [
+    "csvutil.rb's to_csv_row(fields) just does fields.join(\",\") - a field containing a comma, a double quote, or a newline corrupts the row. Fix it: a field must be wrapped in double quotes if it contains a comma, a double quote, or a newline (\\n); any double quote INSIDE such a field must be escaped by doubling it (\" becomes \"\"); a field with none of those characters stays bare (unquoted). Fields are still joined with commas between them. Do NOT use Ruby's built-in CSV library - implement the escaping directly."
+  ],
+  "setup_files": {
+    "csvutil.rb": "def to_csv_row(fields)\n  fields.join(\",\")\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "csvutil.rb",
+      "content_patterns": [
+        "def to_csv_row"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "csvutil.rb": "def escape_field(field)\n  needs_quoting = field.include?(\",\") || field.include?('\"') || field.include?(\"\\n\")\n  return field unless needs_quoting\n\n  escaped = field.gsub('\"', '\"\"')\n  \"\\\"#{escaped}\\\"\"\nend\n\ndef to_csv_row(fields)\n  fields.map { |f| escape_field(f) }.join(\",\")\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "newline-not-checked",
+      "files": {
+        "csvutil.rb": "def escape_field(field)\n  needs_quoting = field.include?(\",\") || field.include?('\"')\n  return field unless needs_quoting\n\n  escaped = field.gsub('\"', '\"\"')\n  \"\\\"#{escaped}\\\"\"\nend\n\ndef to_csv_row(fields)\n  fields.map { |f| escape_field(f) }.join(\",\")\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_csv_safe_writer",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "ruby csvutil_hidden_test.rb",
+  "test_setup_files": {
+    "csvutil_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"csvutil\"\n\nclass CsvUtilTest < Minitest::Test\n  def test_plain_fields_stay_bare\n    assert_equal \"a,b,c\", to_csv_row([\"a\", \"b\", \"c\"])\n  end\n\n  def test_comma_triggers_quoting\n    assert_equal '\"a,b\",c', to_csv_row([\"a,b\", \"c\"])\n  end\n\n  def test_embedded_quote_is_doubled_and_quoted\n    assert_equal '\"say \"\"hi\"\"\"', to_csv_row(['say \"hi\"'])\n  end\n\n  def test_newline_triggers_quoting\n    assert_equal \"\\\"line1\\nline2\\\"\", to_csv_row([\"line1\\nline2\"])\n  end\n\n  def test_mixed_row\n    row = to_csv_row([\"plain\", \"has,comma\", 'has\"quote'])\n    assert_equal 'plain,\"has,comma\",\"has\"\"quote\"', row\n  end\nend\n"
+  }
+}

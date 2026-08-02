@@ -1,0 +1,46 @@
+{
+  "description": "Repo-scale (cpp-eventbus): add an atomic all-or-nothing batch-publish method",
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "repo-scale",
+    "difficulty-4",
+    "transactions"
+  ],
+  "prompts": [
+    "Add `int EventBus::publishBatch(const std::vector<std::pair<std::string, std::string>>& items)` (topic, payload pairs). It must validate the WHOLE batch before publishing anything: return -1 (and log/deliver NOTHING) if `items` is empty, or if ANY topic in the batch is empty - even one bad topic anywhere in the batch must leave the EventLog and all subscribers completely untouched, not just the items after the bad one. Only once every topic is confirmed non-empty should the whole batch actually be published (reusing the existing `publish` method for each item in order). Returns the total number of subscriber callbacks invoked across the batch."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "include/event_bus.hpp",
+      "content_patterns": [
+        "publishBatch"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_batch.cpp": "#include \"event_bus.hpp\"\n\n#include <cassert>\n#include <iostream>\n\nint main() {\n    {\n        EventLog log(100);\n        EventBus bus(log);\n        std::vector<std::pair<std::string, std::string>> items = {\n            {\"orders\", \"o1\"}, {\"payments\", \"p1\"}\n        };\n        int result = bus.publishBatch(items);\n        assert(result == 0); /* no subscribers, but the batch is valid */\n        assert(log.size() == 2);\n    }\n    {\n        EventLog log(100);\n        EventBus bus(log);\n        std::vector<std::pair<std::string, std::string>> items = {\n            {\"orders\", \"o1\"}, {\"\", \"bad\"}\n        };\n        int result = bus.publishBatch(items);\n        assert(result == -1);\n        assert(log.size() == 0);\n    }\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  },
+  "reference_solution": {
+    "include/event_bus.hpp": "#pragma once\n\n#include <functional>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n#include \"event.hpp\"\n#include \"event_log.hpp\"\n\nclass EventBus {\npublic:\n    using Callback = std::function<void(const Event&)>;\n\n    explicit EventBus(EventLog& log) : log_(log) {}\n\n    int subscribe(const std::string& topic, Callback cb) {\n        int id = next_id_++;\n        subscribers_[id] = std::make_pair(topic, std::move(cb));\n        return id;\n    }\n\n    void unsubscribe(int subscription_id) { subscribers_.erase(subscription_id); }\n\n    int publish(const std::string& topic, const std::string& payload) {\n        if (topic.empty()) {\n            return -1;\n        }\n        Event event{next_seq_++, topic, payload};\n        log_.record(event);\n        int invoked = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                entry.second.second(event);\n                invoked++;\n            }\n        }\n        return invoked;\n    }\n\n    /*\n     * Publishes a batch of (topic, payload) pairs atomically: every\n     * topic in the batch must be non-empty BEFORE any of them are\n     * published - one bad (empty) topic anywhere in the batch means\n     * NOTHING in the batch gets logged or delivered. Returns the total\n     * number of subscriber callbacks invoked across the whole batch on\n     * success, or -1 if the batch was rejected.\n     */\n    int publishBatch(const std::vector<std::pair<std::string, std::string>>& items) {\n        if (items.empty()) {\n            return -1;\n        }\n        for (const auto& item : items) {\n            if (item.first.empty()) {\n                return -1;\n            }\n        }\n        int total = 0;\n        for (const auto& item : items) {\n            int invoked = publish(item.first, item.second);\n            total += invoked;\n        }\n        return total;\n    }\n\nprivate:\n    EventLog& log_;\n    std::unordered_map<int, std::pair<std::string, Callback>> subscribers_;\n    int next_id_ = 1;\n    long next_seq_ = 1;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "not-atomic-partial-commit",
+      "files": {
+        "include/event_bus.hpp": "#pragma once\n\n#include <functional>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n#include \"event.hpp\"\n#include \"event_log.hpp\"\n\nclass EventBus {\npublic:\n    using Callback = std::function<void(const Event&)>;\n\n    explicit EventBus(EventLog& log) : log_(log) {}\n\n    int subscribe(const std::string& topic, Callback cb) {\n        int id = next_id_++;\n        subscribers_[id] = std::make_pair(topic, std::move(cb));\n        return id;\n    }\n\n    void unsubscribe(int subscription_id) { subscribers_.erase(subscription_id); }\n\n    int publish(const std::string& topic, const std::string& payload) {\n        if (topic.empty()) {\n            return -1;\n        }\n        Event event{next_seq_++, topic, payload};\n        log_.record(event);\n        int invoked = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                entry.second.second(event);\n                invoked++;\n            }\n        }\n        return invoked;\n    }\n\n    /*\n     * Publishes a batch of (topic, payload) pairs atomically: every\n     * topic in the batch must be non-empty BEFORE any of them are\n     * published - one bad (empty) topic anywhere in the batch means\n     * NOTHING in the batch gets logged or delivered. Returns the total\n     * number of subscriber callbacks invoked across the whole batch on\n     * success, or -1 if the batch was rejected.\n     */\n    int publishBatch(const std::vector<std::pair<std::string, std::string>>& items) {\n        if (items.empty()) {\n            return -1;\n        }\n        int total = 0;\n        for (const auto& item : items) {\n            if (item.first.empty()) {\n                return -1;\n            }\n            int invoked = publish(item.first, item.second);\n            total += invoked;\n        }\n        return total;\n    }\n\nprivate:\n    EventLog& log_;\n    std::unordered_map<int, std::pair<std::string, Callback>> subscribers_;\n    int next_id_ = 1;\n    long next_seq_ = 1;\n};\n"
+      }
+    }
+  ],
+  "name": "add_cpp_eventbus_publish_batch_atomic",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester:latest",
+  "setup_repo": "cpp-eventbus",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "check_command": "g++ -std=c++17 -Iinclude tests/test_batch.cpp -o test_bin && ./test_bin"
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Add idempotency-key deduplication with a TTL window to a processor that currently re-executes on every call",
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "idempotency",
+    "algorithms"
+  ],
+  "prompts": [
+    "Processor.java's process(key, payload, now) runs the side effect (appends to effects and returns a fresh result) EVERY time it's called, even for a key it has already processed. Make it idempotent: within `window` seconds of the first call for a given key, a repeat call with that SAME key must return the ORIGINAL result WITHOUT running the side effect again (effects must not grow) - regardless of what payload is passed the second time. Once `window` seconds have passed since the first call for that key, the NEXT call for that key must run for real again (a fresh execution, whose result becomes the new one remembered for that key). Keep the effects list and Result record as-is."
+  ],
+  "setup_files": {
+    "Processor.java": "import java.util.ArrayList;\nimport java.util.List;\n\npublic final class Processor {\n    public record Result(String key, int payload, long processedAt) {}\n    public record Effect(String key, int payload) {}\n\n    private final long window;\n    public final List<Effect> effects = new ArrayList<>();\n\n    public Processor(long window) {\n        this.window = window;\n    }\n\n    public Result process(String key, int payload, long now) {\n        effects.add(new Effect(key, payload));\n        return new Result(key, payload, now);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Processor.java",
+      "content_patterns": [
+        "class Processor"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "Processor.java": "import java.util.ArrayList;\nimport java.util.HashMap;\nimport java.util.List;\nimport java.util.Map;\n\npublic final class Processor {\n    public record Result(String key, int payload, long processedAt) {}\n    public record Effect(String key, int payload) {}\n    private record Seen(Result result, long recordedAt) {}\n\n    private final long window;\n    public final List<Effect> effects = new ArrayList<>();\n    private final Map<String, Seen> seen = new HashMap<>();\n\n    public Processor(long window) {\n        this.window = window;\n    }\n\n    public Result process(String key, int payload, long now) {\n        Seen cached = seen.get(key);\n        if (cached != null && now - cached.recordedAt() < window) {\n            return cached.result();\n        }\n        effects.add(new Effect(key, payload));\n        Result result = new Result(key, payload, now);\n        seen.put(key, new Seen(result, now));\n        return result;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedup-never-expires",
+      "files": {
+        "Processor.java": "import java.util.ArrayList;\nimport java.util.HashMap;\nimport java.util.List;\nimport java.util.Map;\n\npublic final class Processor {\n    public record Result(String key, int payload, long processedAt) {}\n    public record Effect(String key, int payload) {}\n\n    private final long window;\n    public final List<Effect> effects = new ArrayList<>();\n    private final Map<String, Result> seen = new HashMap<>();\n\n    public Processor(long window) {\n        this.window = window;\n    }\n\n    public Result process(String key, int payload, long now) {\n        Result cached = seen.get(key);\n        if (cached != null) {\n            return cached;\n        }\n        effects.add(new Effect(key, payload));\n        Result result = new Result(key, payload, now);\n        seen.put(key, result);\n        return result;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_java_idempotency_key_dedup",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "java CheckProcessorTest.java",
+  "test_setup_files": {
+    "ProcessorTest.java": "public final class ProcessorTest {\n    public static void main(String[] args) {\n        checkDuplicateKeyWithinWindowNotReexecuted();\n        checkDifferentKeysBothExecute();\n        checkReexecutesAfterWindowExpires();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkDuplicateKeyWithinWindowNotReexecuted() {\n        Processor p = new Processor(10);\n        Processor.Result first = p.process(\"order-1\", 5, 0);\n        Processor.Result second = p.process(\"order-1\", 999, 5);\n        if (!second.equals(first)) throw new AssertionError(\"expected same result\");\n        if (p.effects.size() != 1) throw new AssertionError(\"expected 1 effect, got \" + p.effects.size());\n    }\n\n    static void checkDifferentKeysBothExecute() {\n        Processor p = new Processor(10);\n        p.process(\"a\", 1, 0);\n        p.process(\"b\", 2, 0);\n        if (p.effects.size() != 2) throw new AssertionError(\"expected 2 effects, got \" + p.effects.size());\n    }\n\n    static void checkReexecutesAfterWindowExpires() {\n        Processor p = new Processor(10);\n        p.process(\"order-1\", 5, 0);\n        p.process(\"order-1\", 5, 9);\n        if (p.effects.size() != 1) throw new AssertionError(\"expected 1 effect before expiry\");\n        p.process(\"order-1\", 7, 10);\n        if (p.effects.size() != 2) throw new AssertionError(\"expected 2 effects after expiry\");\n        if (p.effects.get(1).payload() != 7) throw new AssertionError(\"expected fresh payload 7\");\n    }\n}\n",
+    "CheckProcessorTest.java": "import java.io.IOException;\n\npublic final class CheckProcessorTest {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Processor.java\", \"ProcessorTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"ProcessorTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  }
+}

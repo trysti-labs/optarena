@@ -31,5 +31,13 @@
     "javascript",
     "string",
     "node"
+  ],
+  "broken_solutions": [
+    {
+      "name": "identity-not-reverse",
+      "files": {
+        "reverse.js": "function reverseString(str) {\n  return str;\n}\n\nmodule.exports = { reverseString };\n"
+      }
+    }
   ]
 }

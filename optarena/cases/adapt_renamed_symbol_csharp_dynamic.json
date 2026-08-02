@@ -1,0 +1,66 @@
+{
+  "name": "adapt_renamed_symbol_csharp_dynamic",
+  "language": "csharp",
+  "framework": "plain-csharp",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time Area.cs's own text contains 'CircleArea' (i.e. once the agent has produced a first attempt), then MathUtils.Square is RENAMED to MathUtils.Sq under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "csharp",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "renamed-symbol",
+    "reactive"
+  ],
+  "prompts": [
+    "MathUtils.cs declares a public static class MathUtils with a static method Square(double x). Create Area.cs with a public static class Area containing a static method CircleArea(double r) that returns 3.14159 * MathUtils.Square(r).",
+    "MathUtils.Square has just been renamed to MathUtils.Sq. Update Area.cs to use the new name (do not keep a reference to the old name Square)."
+  ],
+  "setup_files": {
+    "MathUtils.cs": "public static class MathUtils\n{\n    public static double Square(double x) => x * x;\n}\n",
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "Area.cs",
+          "pattern": "CircleArea"
+        }
+      },
+      "description": "MathUtils.Square renamed to MathUtils.Sq, triggered reactively once Area.cs's first draft appeared",
+      "write_files": {
+        "MathUtils.cs": "public static class MathUtils\n{\n    public static double Sq(double x) => x * x;\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Area.cs",
+      "content_patterns": [
+        "CircleArea"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "double got = Area.CircleArea(2);\ndouble want = 3.14159 * 4;\nif (Math.Abs(got - want) > 1e-6) { Console.Error.WriteLine($\"CircleArea(2) = {got}, want {want}\"); Environment.Exit(1); return; }\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Area.cs": "public static class Area\n{\n    public static double CircleArea(double r) => 3.14159 * MathUtils.Sq(r);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-name",
+      "files": {
+        "Area.cs": "public static class Area\n{\n    public static double CircleArea(double r) => 3.14159 * MathUtils.Square(r);\n}\n"
+      }
+    }
+  ]
+}

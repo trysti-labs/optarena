@@ -1,0 +1,46 @@
+{
+  "description": "Add RFC4180-style field quoting/escaping to a CSV row builder that currently joins fields with no escaping at all",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "csv",
+    "correctness"
+  ],
+  "prompts": [
+    "csvutil.py's to_csv_row(fields) just does ','.join(fields) - a field containing a comma, a double quote, or a newline corrupts the row. Fix it: a field must be wrapped in double quotes if it contains a comma, a double quote, or a newline (\\n); any double quote INSIDE such a field must be escaped by doubling it (\" becomes \"\"); a field with none of those characters stays bare (unquoted). Fields are still joined with commas between them."
+  ],
+  "setup_files": {
+    "csvutil.py": "def to_csv_row(fields):\n    return ','.join(fields)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "csvutil.py",
+      "content_patterns": [
+        "def to_csv_row"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_csvutil_hidden.py": "from csvutil import to_csv_row\n\n\ndef test_plain_fields_stay_bare():\n    assert to_csv_row(['a', 'b', 'c']) == 'a,b,c'\n\n\ndef test_comma_triggers_quoting():\n    assert to_csv_row(['a,b', 'c']) == '\"a,b\",c'\n\n\ndef test_embedded_quote_is_doubled_and_quoted():\n    assert to_csv_row(['say \"hi\"']) == '\"say \"\"hi\"\"\"'\n\n\ndef test_newline_triggers_quoting():\n    assert to_csv_row(['line1\\nline2']) == '\"line1\\nline2\"'\n\n\ndef test_mixed_row():\n    row = to_csv_row(['plain', 'has,comma', 'has\"quote'])\n    assert row == 'plain,\"has,comma\",\"has\"\"quote\"'\n"
+  },
+  "check_command": "python3 -m pytest -q test_csvutil_hidden.py",
+  "reference_solution": {
+    "csvutil.py": "def _escape_field(field):\n    needs_quoting = ',' in field or '\"' in field or '\\n' in field\n    if not needs_quoting:\n        return field\n    escaped = field.replace('\"', '\"\"')\n    return f'\"{escaped}\"'\n\n\ndef to_csv_row(fields):\n    return ','.join(_escape_field(f) for f in fields)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "newline-not-checked",
+      "files": {
+        "csvutil.py": "def _escape_field(field):\n    needs_quoting = ',' in field or '\"' in field\n    if not needs_quoting:\n        return field\n    escaped = field.replace('\"', '\"\"')\n    return f'\"{escaped}\"'\n\n\ndef to_csv_row(fields):\n    return ','.join(_escape_field(f) for f in fields)\n"
+      }
+    }
+  ],
+  "name": "add_python_csv_safe_writer",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

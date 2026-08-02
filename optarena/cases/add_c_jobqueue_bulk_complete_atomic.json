@@ -1,0 +1,53 @@
+{
+  "description": "Repo-scale (c-jobqueue): add an atomic all-or-nothing bulk job-completion function",
+  "task_type": "feature",
+  "tags": [
+    "c",
+    "repo-scale",
+    "difficulty-4",
+    "transactions"
+  ],
+  "prompts": [
+    "Add `int scheduler_complete_bulk(Scheduler *s, const int *ids, int count)` to scheduler.h/scheduler.c. It must validate the WHOLE batch before completing anything: return 0 (changing NOTHING) if `count` isn't positive, or if ANY id in `ids` does not currently reference a RUNNING job - even one bad id anywhere in the batch must leave every job's state completely untouched, not just the ones after the bad id. Only once every id is confirmed running should the whole batch actually be completed (reusing the existing scheduler_complete logic). Returns 1 on success."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "include/scheduler.h",
+      "content_patterns": [
+        "scheduler_complete_bulk"
+      ]
+    },
+    {
+      "path_pattern": "src/scheduler.c",
+      "content_patterns": [
+        "scheduler_complete_bulk"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_bulk_complete.c": "#include \"scheduler.h\"\n\n#include <assert.h>\n#include <stdio.h>\n\nstatic void test_bulk_complete_applies_all_when_every_id_is_running(void) {\n    Scheduler s;\n    scheduler_init(&s);\n    int id1 = scheduler_submit(&s, 1, \"a\");\n    int id2 = scheduler_submit(&s, 1, \"b\");\n    int r;\n    scheduler_run_next(&s, &r);\n    scheduler_run_next(&s, &r);\n\n    int ids[2] = { id1, id2 };\n    assert(scheduler_complete_bulk(&s, ids, 2) == 1);\n\n    JobState st;\n    scheduler_find_state(&s, id1, &st);\n    assert(st == JOB_DONE);\n    scheduler_find_state(&s, id2, &st);\n    assert(st == JOB_DONE);\n}\n\nstatic void test_bulk_complete_rejects_whole_batch_on_one_bad_id(void) {\n    Scheduler s;\n    scheduler_init(&s);\n    int id1 = scheduler_submit(&s, 1, \"a\");\n    int r;\n    scheduler_run_next(&s, &r);\n\n    int ids[2] = { id1, 999999 };\n    assert(scheduler_complete_bulk(&s, ids, 2) == 0);\n\n    JobState st;\n    scheduler_find_state(&s, id1, &st);\n    assert(st == JOB_RUNNING);\n}\n\nint main(void) {\n    test_bulk_complete_applies_all_when_every_id_is_running();\n    test_bulk_complete_rejects_whole_batch_on_one_bad_id();\n    printf(\"PASS\\n\");\n    return 0;\n}\n"
+  },
+  "reference_solution": {
+    "include/scheduler.h": "#pragma once\n\n#include \"job.h\"\n#include \"queue.h\"\n\n#define SCHEDULER_MAX_RUNNING 256\n#define SCHEDULER_MAX_HISTORY 256\n\ntypedef struct {\n    JobQueue pending;\n    Job running[SCHEDULER_MAX_RUNNING];\n    int running_count;\n    Job history[SCHEDULER_MAX_HISTORY];\n    int history_count;\n} Scheduler;\n\nvoid scheduler_init(Scheduler *s);\nint scheduler_submit(Scheduler *s, int priority, const char *payload);\nint scheduler_run_next(Scheduler *s, int *out_id);\nint scheduler_complete(Scheduler *s, int id);\nint scheduler_fail(Scheduler *s, int id);\nint scheduler_find_state(const Scheduler *s, int id, JobState *out_state);\n\n/*\n * Completes a batch of running jobs atomically: every id in `ids`\n * (length `count`) must currently be RUNNING before ANY of them are\n * marked DONE - one bad id anywhere in the batch leaves every job's\n * state untouched. Returns 1 if the whole batch was completed, 0 if\n * it was rejected (and nothing changed).\n */\nint scheduler_complete_bulk(Scheduler *s, const int *ids, int count);\n",
+    "src/scheduler.c": "#include \"scheduler.h\"\n\nvoid scheduler_init(Scheduler *s) {\n    queue_init(&s->pending);\n    s->running_count = 0;\n    s->history_count = 0;\n}\n\nint scheduler_submit(Scheduler *s, int priority, const char *payload) {\n    return queue_push(&s->pending, priority, payload);\n}\n\nint scheduler_run_next(Scheduler *s, int *out_id) {\n    if (s->running_count >= SCHEDULER_MAX_RUNNING) {\n        return 0;\n    }\n    Job job;\n    if (!queue_pop(&s->pending, &job)) {\n        return 0;\n    }\n    job.state = JOB_RUNNING;\n    s->running[s->running_count++] = job;\n    *out_id = job.id;\n    return 1;\n}\n\nstatic int find_running_index(Scheduler *s, int id) {\n    for (int i = 0; i < s->running_count; i++) {\n        if (s->running[i].id == id) {\n            return i;\n        }\n    }\n    return -1;\n}\n\nstatic int finish_job(Scheduler *s, int id, JobState final_state) {\n    int idx = find_running_index(s, id);\n    if (idx < 0) {\n        return 0;\n    }\n    Job job = s->running[idx];\n    job.state = final_state;\n    for (int i = idx; i < s->running_count - 1; i++) {\n        s->running[i] = s->running[i + 1];\n    }\n    s->running_count--;\n    if (s->history_count < SCHEDULER_MAX_HISTORY) {\n        s->history[s->history_count++] = job;\n    }\n    return 1;\n}\n\nint scheduler_complete(Scheduler *s, int id) {\n    return finish_job(s, id, JOB_DONE);\n}\n\nint scheduler_fail(Scheduler *s, int id) {\n    return finish_job(s, id, JOB_FAILED);\n}\n\nint scheduler_find_state(const Scheduler *s, int id, JobState *out_state) {\n    for (int i = 0; i < s->pending.count; i++) {\n        if (s->pending.jobs[i].id == id) {\n            *out_state = s->pending.jobs[i].state;\n            return 1;\n        }\n    }\n    for (int i = 0; i < s->running_count; i++) {\n        if (s->running[i].id == id) {\n            *out_state = s->running[i].state;\n            return 1;\n        }\n    }\n    for (int i = 0; i < s->history_count; i++) {\n        if (s->history[i].id == id) {\n            *out_state = s->history[i].state;\n            return 1;\n        }\n    }\n    return 0;\n}\n\nint scheduler_complete_bulk(Scheduler *s, const int *ids, int count) {\n    if (count <= 0) {\n        return 0;\n    }\n    for (int i = 0; i < count; i++) {\n        if (find_running_index(s, ids[i]) < 0) {\n            return 0;\n        }\n    }\n    for (int i = 0; i < count; i++) {\n        scheduler_complete(s, ids[i]);\n    }\n    return 1;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "not-atomic-partial-commit",
+      "files": {
+        "include/scheduler.h": "#pragma once\n\n#include \"job.h\"\n#include \"queue.h\"\n\n#define SCHEDULER_MAX_RUNNING 256\n#define SCHEDULER_MAX_HISTORY 256\n\ntypedef struct {\n    JobQueue pending;\n    Job running[SCHEDULER_MAX_RUNNING];\n    int running_count;\n    Job history[SCHEDULER_MAX_HISTORY];\n    int history_count;\n} Scheduler;\n\nvoid scheduler_init(Scheduler *s);\nint scheduler_submit(Scheduler *s, int priority, const char *payload);\nint scheduler_run_next(Scheduler *s, int *out_id);\nint scheduler_complete(Scheduler *s, int id);\nint scheduler_fail(Scheduler *s, int id);\nint scheduler_find_state(const Scheduler *s, int id, JobState *out_state);\n\n/*\n * Completes a batch of running jobs atomically: every id in `ids`\n * (length `count`) must currently be RUNNING before ANY of them are\n * marked DONE - one bad id anywhere in the batch leaves every job's\n * state untouched. Returns 1 if the whole batch was completed, 0 if\n * it was rejected (and nothing changed).\n */\nint scheduler_complete_bulk(Scheduler *s, const int *ids, int count);\n",
+        "src/scheduler.c": "#include \"scheduler.h\"\n\nvoid scheduler_init(Scheduler *s) {\n    queue_init(&s->pending);\n    s->running_count = 0;\n    s->history_count = 0;\n}\n\nint scheduler_submit(Scheduler *s, int priority, const char *payload) {\n    return queue_push(&s->pending, priority, payload);\n}\n\nint scheduler_run_next(Scheduler *s, int *out_id) {\n    if (s->running_count >= SCHEDULER_MAX_RUNNING) {\n        return 0;\n    }\n    Job job;\n    if (!queue_pop(&s->pending, &job)) {\n        return 0;\n    }\n    job.state = JOB_RUNNING;\n    s->running[s->running_count++] = job;\n    *out_id = job.id;\n    return 1;\n}\n\nstatic int find_running_index(Scheduler *s, int id) {\n    for (int i = 0; i < s->running_count; i++) {\n        if (s->running[i].id == id) {\n            return i;\n        }\n    }\n    return -1;\n}\n\nstatic int finish_job(Scheduler *s, int id, JobState final_state) {\n    int idx = find_running_index(s, id);\n    if (idx < 0) {\n        return 0;\n    }\n    Job job = s->running[idx];\n    job.state = final_state;\n    for (int i = idx; i < s->running_count - 1; i++) {\n        s->running[i] = s->running[i + 1];\n    }\n    s->running_count--;\n    if (s->history_count < SCHEDULER_MAX_HISTORY) {\n        s->history[s->history_count++] = job;\n    }\n    return 1;\n}\n\nint scheduler_complete(Scheduler *s, int id) {\n    return finish_job(s, id, JOB_DONE);\n}\n\nint scheduler_fail(Scheduler *s, int id) {\n    return finish_job(s, id, JOB_FAILED);\n}\n\nint scheduler_find_state(const Scheduler *s, int id, JobState *out_state) {\n    for (int i = 0; i < s->pending.count; i++) {\n        if (s->pending.jobs[i].id == id) {\n            *out_state = s->pending.jobs[i].state;\n            return 1;\n        }\n    }\n    for (int i = 0; i < s->running_count; i++) {\n        if (s->running[i].id == id) {\n            *out_state = s->running[i].state;\n            return 1;\n        }\n    }\n    for (int i = 0; i < s->history_count; i++) {\n        if (s->history[i].id == id) {\n            *out_state = s->history[i].state;\n            return 1;\n        }\n    }\n    return 0;\n}\n\nint scheduler_complete_bulk(Scheduler *s, const int *ids, int count) {\n    if (count <= 0) {\n        return 0;\n    }\n    for (int i = 0; i < count; i++) {\n        if (!scheduler_complete(s, ids[i])) {\n            return 0;\n        }\n    }\n    return 1;\n}\n"
+      }
+    }
+  ],
+  "name": "add_c_jobqueue_bulk_complete_atomic",
+  "language": "c",
+  "framework": "stdlib",
+  "domain": "backend",
+  "setup_repo": "c-jobqueue",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "check_command": "gcc -std=c11 -Wall -Iinclude src/*.c tests/test_bulk_complete.c -o test_bin && ./test_bin"
+}

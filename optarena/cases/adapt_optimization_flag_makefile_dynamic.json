@@ -1,0 +1,58 @@
+{
+  "name": "adapt_optimization_flag_makefile_dynamic",
+  "language": "makefile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: opt_level.txt (a spec file a build target's compiler flag must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it AT BUILD TIME, not bake the old flag into the Makefile",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "makefile",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a Makefile with a target `flags` that reads the current optimization level from opt_level.txt AT BUILD TIME (e.g. via `$(shell cat opt_level.txt)`, not by copying the value into the Makefile) and writes a file named cflags.txt containing exactly `-O<level>` (e.g. -O2).",
+    "opt_level.txt may have changed since you last checked. Make sure `make flags` still writes the CURRENT optimization level into cflags.txt, not a stale hardcoded one."
+  ],
+  "setup_files": {
+    "opt_level.txt": "2\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "opt_level.txt rewritten to a new optimization level",
+      "write_files": {
+        "opt_level.txt": "3\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "flags",
+        "opt_level.txt"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_make.py": "import subprocess\nfrom pathlib import Path\n\nwith open('opt_level.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'opt_level.txt is empty'\n\nPath('cflags.txt').unlink(missing_ok=True)\nproc = subprocess.run(['make', 'flags'], capture_output=True, text=True, timeout=15)\nassert proc.returncode == 0, f'make flags failed: exit {proc.returncode}, stderr={proc.stderr!r}'\n\ngot = Path('cflags.txt').read_text(encoding='utf-8').strip()\nwant = f'-O{current}'\nassert got == want, f'cflags.txt = {got!r}, want {want!r} (the CURRENT opt_level.txt value, stale flag not updated)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_make.py",
+  "reference_solution": {
+    "Makefile": "flags:\n\techo -O$(shell cat opt_level.txt) > cflags.txt\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-flag",
+      "files": {
+        "Makefile": "flags:\n\techo -O2 > cflags.txt\n"
+      }
+    }
+  ]
+}

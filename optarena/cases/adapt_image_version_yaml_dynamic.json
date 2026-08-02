@@ -1,0 +1,50 @@
+{
+  "name": "adapt_image_version_yaml_dynamic",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: app_version.txt (a spec file the compose service's image tag must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the pinned image tag, not leave the stale version in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["yaml", "docker-compose", "dynamic", "disruption", "adaptation", "requirements-drift"],
+  "prompts": [
+    "Write a docker-compose.yml at the repo root defining one service named 'app' using image `myorg/webapp:<version>` where <version> is EXACTLY the value in app_version.txt (currently: 1.4.0), and publish host port 8080 to container port 80.",
+    "app_version.txt has changed. Update docker-compose.yml so the app service's image tag matches the CURRENT contents of app_version.txt exactly."
+  ],
+  "setup_files": {
+    "app_version.txt": "1.4.0\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "app_version.txt rewritten to a new required image version",
+      "write_files": {
+        "app_version.txt": "1.5.0\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": ["services", "app", "image"]
+    }
+  ],
+  "test_setup_files": {
+    "test_compose.py": "import yaml\n\nwith open('app_version.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'app_version.txt is empty'\n\nwith open('docker-compose.yml') as f:\n    data = yaml.safe_load(f)\n\nservices = data.get('services') or {}\nassert 'app' in services, f'app service missing, got {list(services)}'\nimage = str(services['app'].get('image', ''))\nassert image.endswith(':' + current), \\\n    f'app service image is {image!r}, want a tag ending with the CURRENT app_version.txt value \\':{current}\\' (stale version not updated)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_compose.py",
+  "reference_solution": {
+    "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:1.5.0\n    ports:\n      - \"8080:80\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-image-version",
+      "files": {
+        "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:1.4.0\n    ports:\n      - \"8080:80\"\n"
+      }
+    }
+  ]
+}

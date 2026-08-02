@@ -1,0 +1,46 @@
+{
+  "description": "Add idempotency-key deduplication with a TTL window to a processor that currently re-executes on every call",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "idempotency",
+    "algorithms"
+  ],
+  "prompts": [
+    "processor.rb's Processor#process(key, payload, now) runs the side effect (appends to effects and returns a fresh result) EVERY time it's called, even for a key it has already processed. Make it idempotent: within `window` seconds of the first call for a given key, a repeat call with that SAME key must return the ORIGINAL result WITHOUT running the side effect again (effects must not grow) - regardless of what payload is passed the second time. Once `window` seconds have passed since the first call for that key, the NEXT call for that key must run for real again (a fresh execution, whose result becomes the new one remembered for that key)."
+  ],
+  "setup_files": {
+    "processor.rb": "class Processor\n  attr_reader :effects\n\n  def initialize(window)\n    @window = window\n    @effects = []\n  end\n\n  def process(key, payload, now)\n    @effects << [key, payload]\n    { key: key, payload: payload, processed_at: now }\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "processor.rb",
+      "content_patterns": [
+        "class Processor"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "processor.rb": "class Processor\n  Seen = Struct.new(:result, :recorded_at)\n\n  attr_reader :effects\n\n  def initialize(window)\n    @window = window\n    @effects = []\n    @seen = {}\n  end\n\n  def process(key, payload, now)\n    cached = @seen[key]\n    if cached && now - cached.recorded_at < @window\n      return cached.result\n    end\n    @effects << [key, payload]\n    result = { key: key, payload: payload, processed_at: now }\n    @seen[key] = Seen.new(result, now)\n    result\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedup-never-expires",
+      "files": {
+        "processor.rb": "class Processor\n  attr_reader :effects\n\n  def initialize(window)\n    @window = window\n    @effects = []\n    @seen = {}\n  end\n\n  def process(key, payload, now)\n    return @seen[key] if @seen.key?(key)\n    @effects << [key, payload]\n    result = { key: key, payload: payload, processed_at: now }\n    @seen[key] = result\n    result\n  end\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_idempotency_key_dedup",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "ruby processor_hidden_test.rb",
+  "test_setup_files": {
+    "processor_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"processor\"\n\nclass ProcessorTest < Minitest::Test\n  def test_duplicate_key_within_window_not_reexecuted\n    p = Processor.new(10)\n    first = p.process(\"order-1\", 5, 0)\n    second = p.process(\"order-1\", 999, 5)\n    assert_equal first, second\n    assert_equal 1, p.effects.size\n  end\n\n  def test_different_keys_both_execute\n    p = Processor.new(10)\n    p.process(\"a\", 1, 0)\n    p.process(\"b\", 2, 0)\n    assert_equal 2, p.effects.size\n  end\n\n  def test_reexecutes_after_window_expires\n    p = Processor.new(10)\n    p.process(\"order-1\", 5, 0)\n    p.process(\"order-1\", 5, 9)\n    assert_equal 1, p.effects.size\n    p.process(\"order-1\", 7, 10)\n    assert_equal 2, p.effects.size\n    assert_equal 7, p.effects[1][1]\n  end\nend\n"
+  }
+}

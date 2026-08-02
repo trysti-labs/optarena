@@ -1,0 +1,58 @@
+{
+  "name": "adapt_cart_limit_typescript_dynamic",
+  "language": "typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval: maxItems.txt (a spec file the cart limit must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old limit into cart.ts",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "typescript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create cart.ts that exports a function canAdd(count: number): boolean returning true if count is less than or equal to the integer in maxItems.txt (currently 5), else false. Read the limit from the file (fs.readFileSync) at call time - do not hardcode it.",
+    "maxItems.txt has changed. Make sure canAdd() enforces the CURRENT limit in the file."
+  ],
+  "setup_files": {
+    "maxItems.txt": "5\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "maxItems.txt tightened to a lower limit",
+      "write_files": {
+        "maxItems.txt": "3\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "cart.ts",
+      "content_patterns": [
+        "canAdd"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_cart.ts": "declare function require(id: string): any;\nconst fs = require('fs');\nimport { canAdd } from './cart';\n\nconst limit = parseInt(fs.readFileSync('maxItems.txt', 'utf8').trim(), 10);\nif (canAdd(limit) !== true) { throw new Error(`canAdd(${limit}) should be true`); }\nif (canAdd(limit + 1) !== false) { throw new Error(`canAdd(${limit + 1}) should be false (stale limit not updated)`); }\nconsole.log('PASS');\n"
+  },
+  "check_command": "tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build cart.ts test_cart.ts && node build/test_cart.js",
+  "reference_solution": {
+    "cart.ts": "declare function require(id: string): any;\nconst fs = require('fs');\n\nexport function canAdd(count: number): boolean {\n  const limit = parseInt(fs.readFileSync('maxItems.txt', 'utf8').trim(), 10);\n  return count <= limit;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-limit",
+      "files": {
+        "cart.ts": "export function canAdd(count: number): boolean {\n  return count <= 5;\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "ring.ts's HashRing picks a node with `hashInt(key) % nodes.length` - removing or adding any node reshuffles almost every key. Implement a real consistent-hash ring with virtual nodes: the constructor takes (nodes: string[], replicas: number) and places `replicas` virtual points per physical node around a ring, hashed via node's crypto.createHash('md5') over `${node}:${i}` for each virtual point (use `declare function require(id: string): any;` to get an untyped crypto module - @types/node is not installed in this sandbox). getNode(key: string): string hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). addNode(node: string): void and removeNode(node: string): void update the ring in place. The file must compile under tsc --strict."
+  ],
+  "setup_files": {
+    "ring.ts": "declare function require(id: string): any;\nconst crypto = require(\"crypto\");\n\nfunction hashInt(s: string): number {\n  return parseInt(crypto.createHash(\"md5\").update(s).digest(\"hex\").slice(0, 8), 16);\n}\n\nexport class HashRing {\n  private nodes: string[];\n\n  constructor(nodes: string[], private replicas: number) {\n    this.nodes = [...nodes];\n  }\n\n  getNode(key: string): string {\n    if (this.nodes.length === 0) {\n      throw new Error(\"no nodes\");\n    }\n    return this.nodes[hashInt(key) % this.nodes.length];\n  }\n\n  addNode(node: string): void {\n    this.nodes.push(node);\n  }\n\n  removeNode(node: string): void {\n    this.nodes = this.nodes.filter((n) => n !== node);\n  }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "ring.ts",
+      "content_patterns": [
+        "class HashRing"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "ring.ts": "declare function require(id: string): any;\nconst crypto = require(\"crypto\");\n\nfunction hashInt(s: string): number {\n  return parseInt(crypto.createHash(\"md5\").update(s).digest(\"hex\").slice(0, 8), 16);\n}\n\nexport class HashRing {\n  private ring = new Map<number, string>();\n  private sortedPoints: number[] = [];\n\n  constructor(nodes: string[], private replicas: number) {\n    for (const node of nodes) {\n      this.addNode(node);\n    }\n  }\n\n  addNode(node: string): void {\n    for (let i = 0; i < this.replicas; i++) {\n      this.ring.set(hashInt(`${node}:${i}`), node);\n    }\n    this.sortedPoints = [...this.ring.keys()].sort((a, b) => a - b);\n  }\n\n  removeNode(node: string): void {\n    for (let i = 0; i < this.replicas; i++) {\n      this.ring.delete(hashInt(`${node}:${i}`));\n    }\n    this.sortedPoints = [...this.ring.keys()].sort((a, b) => a - b);\n  }\n\n  getNode(key: string): string {\n    if (this.ring.size === 0) {\n      throw new Error(\"no nodes\");\n    }\n    const point = hashInt(key);\n    for (const p of this.sortedPoints) {\n      if (p >= point) {\n        return this.ring.get(p) as string;\n      }\n    }\n    return this.ring.get(this.sortedPoints[0]) as string;\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "ring.ts": "declare function require(id: string): any;\nconst crypto = require(\"crypto\");\n\nfunction hashInt(s: string): number {\n  return parseInt(crypto.createHash(\"md5\").update(s).digest(\"hex\").slice(0, 8), 16);\n}\n\nexport class HashRing {\n  private nodes: string[];\n\n  constructor(nodes: string[], private replicas: number) {\n    this.nodes = [...nodes];\n  }\n\n  getNode(key: string): string {\n    if (this.nodes.length === 0) {\n      throw new Error(\"no nodes\");\n    }\n    return this.nodes[hashInt(key) % this.nodes.length];\n  }\n\n  addNode(node: string): void {\n    this.nodes.push(node);\n  }\n\n  removeNode(node: string): void {\n    this.nodes = this.nodes.filter((n) => n !== node);\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_ts_consistent_hash_ring",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "sh run_checks.sh",
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit ring.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build ring.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { HashRing } = require(\"./build/ring.js\");\n\n{\n  const ring = new HashRing([\"a\", \"b\", \"c\"], 50);\n  for (let i = 0; i < 200; i++) {\n    const node = ring.getNode(`key-${i}`);\n    assert.ok([\"a\", \"b\", \"c\"].includes(node));\n  }\n}\n{\n  const ring = new HashRing([\"a\", \"b\", \"c\"], 50);\n  assert.strictEqual(ring.getNode(\"stable-key\"), ring.getNode(\"stable-key\"));\n}\n{\n  const nodes = [\"n0\", \"n1\", \"n2\", \"n3\", \"n4\"];\n  const ring = new HashRing(nodes, 100);\n  const keys = Array.from({ length: 1000 }, (_, i) => `key-${i}`);\n  const before = new Map(keys.map((k) => [k, ring.getNode(k)]));\n  ring.removeNode(\"n2\");\n  const after = new Map(keys.map((k) => [k, ring.getNode(k)]));\n  const moved = keys.filter((k) => before.get(k) !== after.get(k));\n  assert.ok(moved.length > 0, \"removing a node should move at least some keys\");\n  for (const k of moved) {\n    assert.strictEqual(before.get(k), \"n2\", \"only keys that were on the removed node may move\");\n  }\n  for (const k of keys) {\n    assert.notStrictEqual(after.get(k), \"n2\");\n  }\n}\nconsole.log(\"behavior OK\");\n"
+  }
+}

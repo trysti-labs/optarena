@@ -1,0 +1,63 @@
+{
+  "name": "adapt_moved_package_java_dynamic",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval: the package the agent's first solution imports is MOVED between prompts (fixed after_prompt trigger, old package deleted, new one created); the agent must update its import, not keep pointing at the old package",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "java",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "moved-package"
+  ],
+  "prompts": [
+    "com/optarena/pricing/Rules.java (package com.optarena.pricing) declares a public static final double DISCOUNT. Create com/optarena/checkout/Checkout.java (package com.optarena.checkout) with a public static double applyDiscount(double price) that returns price * (1 - Rules.DISCOUNT), importing com.optarena.pricing.Rules.",
+    "com/optarena/pricing/Rules.java has moved to com/optarena/config/Rules.java (package com.optarena.config, same DISCOUNT value). Update Checkout.java's import to use com.optarena.config.Rules - do not keep importing the old pricing package."
+  ],
+  "setup_files": {
+    "com/optarena/pricing/Rules.java": "package com.optarena.pricing;\n\npublic final class Rules {\n    public static final double DISCOUNT = 0.1;\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "com.optarena.pricing.Rules moved to com.optarena.config.Rules",
+      "delete_files": [
+        "com/optarena/pricing/Rules.java"
+      ],
+      "write_files": {
+        "com/optarena/config/Rules.java": "package com.optarena.config;\n\npublic final class Rules {\n    public static final double DISCOUNT = 0.1;\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/Checkout.java",
+      "content_patterns": [
+        "applyDiscount"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "com/optarena/checkout/CheckoutTest.java": "package com.optarena.checkout;\n\npublic final class CheckoutTest {\n    public static void main(String[] args) {\n        double got = Checkout.applyDiscount(100);\n        if (Math.abs(got - 90) > 1e-6) throw new AssertionError(\"applyDiscount(100) = \" + got);\n        System.out.println(\"all tests passed\");\n    }\n}\n",
+    "CheckCheckout.java": "import java.io.IOException;\n\npublic final class CheckCheckout {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"com/optarena/checkout/Checkout.java\", \"com/optarena/checkout/CheckoutTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"com.optarena.checkout.CheckoutTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckCheckout.java",
+  "reference_solution": {
+    "com/optarena/checkout/Checkout.java": "package com.optarena.checkout;\n\nimport com.optarena.config.Rules;\n\npublic final class Checkout {\n    public static double applyDiscount(double price) {\n        return price * (1 - Rules.DISCOUNT);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-imports-old-package",
+      "files": {
+        "com/optarena/checkout/Checkout.java": "package com.optarena.checkout;\n\nimport com.optarena.pricing.Rules;\n\npublic final class Checkout {\n    public static double applyDiscount(double price) {\n        return price * (1 - Rules.DISCOUNT);\n    }\n}\n"
+      }
+    }
+  ]
+}

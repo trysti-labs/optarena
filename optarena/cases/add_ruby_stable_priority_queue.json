@@ -1,0 +1,45 @@
+{
+  "description": "Fix a sort_by-based priority queue that re-sorts by priority alone on every push, losing FIFO order across interleaved pushes and pops",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "algorithms"
+  ],
+  "prompts": [
+    "pq.rb's StablePriorityQueue keeps an array and re-sorts it by priority alone on every push. Ruby's sort_by IS stable, but re-sorting the WHOLE array on every push does not preserve original insertion order for equal-priority items once items have been popped and re-pushed in between (the relative array positions get scrambled across separate sort calls). Fix push/pop so that: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO) - track insertion order explicitly with a counter, don't rely on array position across separate sorts."
+  ],
+  "setup_files": {
+    "pq.rb": "class StablePriorityQueue\n  def initialize\n    @items = []\n  end\n\n  def push(priority, item)\n    @items << { priority: priority, item: item }\n    @items = @items.sort_by { |i| i[:priority] }\n  end\n\n  def pop\n    @items.shift[:item]\n  end\n\n  def size\n    @items.size\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pq.rb",
+      "content_patterns": [
+        "class StablePriorityQueue"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "pq.rb": "class StablePriorityQueue\n  def initialize\n    @items = []\n    @counter = 0\n  end\n\n  def push(priority, item)\n    @items << { priority: priority, order: @counter, item: item }\n    @counter += 1\n    @items = @items.sort_by { |i| [i[:priority], i[:order]] }\n  end\n\n  def pop\n    @items.shift[:item]\n  end\n\n  def size\n    @items.size\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "counter-decrements-reverses-fifo",
+      "files": {
+        "pq.rb": "class StablePriorityQueue\n  def initialize\n    @items = []\n    @counter = 0\n  end\n\n  def push(priority, item)\n    @items << { priority: priority, order: @counter, item: item }\n    @counter -= 1\n    @items = @items.sort_by { |i| [i[:priority], i[:order]] }\n  end\n\n  def pop\n    @items.shift[:item]\n  end\n\n  def size\n    @items.size\n  end\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_stable_priority_queue",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "ruby pq_hidden_test.rb",
+  "test_setup_files": {
+    "pq_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"pq\"\n\nclass StablePriorityQueueTest < Minitest::Test\n  def test_priority_order\n    q = StablePriorityQueue.new\n    q.push(5, \"low\")\n    q.push(1, \"high\")\n    q.push(3, \"mid\")\n    assert_equal [\"high\", \"mid\", \"low\"], [q.pop, q.pop, q.pop]\n  end\n\n  def test_equal_priority_is_fifo_across_interleaved_pushes_and_pops\n    q = StablePriorityQueue.new\n    q.push(1, \"first\")\n    q.push(2, \"other\")\n    q.push(1, \"second\")\n    assert_equal \"first\", q.pop\n    q.push(1, \"third\")\n    assert_equal [\"second\", \"third\"], [q.pop, q.pop]\n  end\nend\n"
+  }
+}

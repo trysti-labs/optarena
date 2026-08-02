@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 120,
   "timeout": 600,
-  "description": "L3 repo-scale: extract the seven duplicated lookup-or-404 blocks across three routers into shared fetch_*_or_404 helpers; broken variant drifts the 404 details",
+  "description": "Repo-scale: extract the seven duplicated lookup-or-404 blocks across three routers into shared fetch_*_or_404 helpers; broken variant drifts the 404 details",
   "difficulty": 3,
   "task_type": "refactoring",
   "tags": [

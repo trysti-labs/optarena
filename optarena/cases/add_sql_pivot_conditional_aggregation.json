@@ -1,0 +1,48 @@
+{
+  "description": "Pivot per-category monthly totals from long rows into one column per category, using conditional aggregation - a category with zero orders in a month must show 0, not be missing or NULL",
+  "task_type": "feature",
+  "tags": [
+    "sql",
+    "sqlite",
+    "pivot",
+    "aggregation"
+  ],
+  "prompts": [
+    "pivot.sql returns one row per (month, category) with a total - a 'long' format. Rewrite it to PIVOT into a wide format: one row per month, with separate columns total_books, total_food, total_toys (conditional SUM: SUM(CASE WHEN category = 'books' THEN amount ELSE 0 END), and so on for the other two categories) so a month with zero orders in some category shows 0 in that column, not a missing row or NULL. Group by month, order by month."
+  ],
+  "setup_files": {
+    "pivot.sql": "-- Long format: one row per (month, category). Needs pivoting to wide.\nSELECT month, category, SUM(amount) AS total\nFROM orders\nGROUP BY month, category\nORDER BY month, category;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pivot.sql",
+      "content_patterns": [
+        "case when",
+        "total_books"
+      ]
+    }
+  ],
+  "check_command": "python3 check_pivot.py",
+  "reference_solution": {
+    "pivot.sql": "SELECT\n  month,\n  SUM(CASE WHEN category = 'books' THEN amount ELSE 0 END) AS total_books,\n  SUM(CASE WHEN category = 'food' THEN amount ELSE 0 END) AS total_food,\n  SUM(CASE WHEN category = 'toys' THEN amount ELSE 0 END) AS total_toys\nFROM orders\nGROUP BY month\nORDER BY month;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-long-format",
+      "files": {
+        "pivot.sql": "SELECT month, category, SUM(amount) AS total\nFROM orders\nGROUP BY month, category\nORDER BY month, category;\n"
+      }
+    }
+  ],
+  "name": "add_sql_pivot_conditional_aggregation",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "test_setup_files": {
+    "check_pivot.py": "import sqlite3\nfrom pathlib import Path\n\nsql = Path(\"pivot.sql\").read_text(encoding=\"utf-8\")\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(\"\"\"\nCREATE TABLE orders (month TEXT NOT NULL, category TEXT NOT NULL, amount REAL NOT NULL);\nINSERT INTO orders VALUES\n  ('2026-01', 'books', 50.0),\n  ('2026-01', 'books', 25.0),\n  ('2026-01', 'food', 10.0),\n  ('2026-02', 'toys', 30.0);\n\"\"\")\n\ncur = con.execute(sql)\ncols = [d[0] for d in cur.description]\nrows = cur.fetchall()\n\nassert cols == [\"month\", \"total_books\", \"total_food\", \"total_toys\"], (\n    f\"column names/order changed: {cols}\")\n\nexpected = [\n    (\"2026-01\", 75.0, 10.0, 0),\n    (\"2026-02\", 0, 0, 30.0),\n]\nassert rows == expected, f\"expected: {expected}\\ngot: {rows}\"\n\nprint(\"PASS pivot.sql behavior checks\")\n"
+  }
+}

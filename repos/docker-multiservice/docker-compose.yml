@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=info
+    depends_on:
+      - worker
+
+  worker:
+    build:
+      context: ./worker
+    environment:
+      - LOG_LEVEL=info
+
+  nginx:
+    build:
+      context: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - api

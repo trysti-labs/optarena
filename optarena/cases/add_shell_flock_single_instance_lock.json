@@ -1,0 +1,53 @@
+{
+  "description": "Add a flock-based single-instance lock so a second concurrent invocation exits immediately instead of running alongside the first",
+  "tags": [
+    "shell",
+    "bash",
+    "flock",
+    "concurrency"
+  ],
+  "prompts": [
+    "scripts/job.sh has no locking at all - if it's invoked twice concurrently (e.g. a slow cron job still running when the next one fires), both copies run at once and race on shared state. Add a flock-based single-instance lock: acquire an EXCLUSIVE, NON-BLOCKING lock on a lock file at /tmp/job.lock using `flock -n`, and if the lock can't be acquired (another instance already holds it), print 'already running' to stderr and exit 1 WITHOUT doing any work. The lock must be released automatically when the script exits (normally or on error) - use flock's fd-based locking (exec on a file descriptor) rather than a manual PID-file check, and keep the script's actual work (appending a line to output.txt) unchanged for the instance that DOES get the lock."
+  ],
+  "setup_files": {
+    "scripts/job.sh": "#!/bin/bash\nset -euo pipefail\n# No locking - two concurrent invocations both do the work.\necho \"ran at $(date +%s%N)\" >> output.txt\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/job.sh",
+      "content_patterns": [
+        "flock"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "scripts/job.sh": "#!/bin/bash\nset -euo pipefail\n\nLOCK_FILE=/tmp/job.lock\nexec 9>\"$LOCK_FILE\"\nif ! flock -n 9; then\n  echo \"already running\" >&2\n  exit 1\nfi\n\necho \"ran at $(date +%s%N)\" >> output.txt\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "scripts/job.sh": "#!/bin/bash\nset -euo pipefail\necho \"ran at $(date +%s%N)\" >> output.txt\n"
+      }
+    },
+    {
+      "name": "blocking-flock-hangs-instead-of-failing-fast",
+      "files": {
+        "scripts/job.sh": "#!/bin/bash\nset -euo pipefail\n\nLOCK_FILE=/tmp/job.lock\nexec 9>\"$LOCK_FILE\"\nflock 9\necho \"ran at $(date +%s%N)\" >> output.txt\n"
+      }
+    }
+  ],
+  "name": "add_shell_flock_single_instance_lock",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops",
+  "test_setup_files": {
+    "check_job.py": "\"\"\"Behavioral checks for scripts/job.sh, run with the real bash.\"\"\"\nimport subprocess\nimport time\nfrom pathlib import Path\n\nSCRIPT = \"scripts/job.sh\"\nLOCK = \"/tmp/job.lock\"\n\n\ndef run():\n    return subprocess.run([\"bash\", SCRIPT], capture_output=True, text=True, timeout=15)\n\n\nPath(\"output.txt\").unlink(missing_ok=True)\nPath(LOCK).unlink(missing_ok=True)\n\n# 1. A solo run must succeed and do the work.\nproc = run()\nassert proc.returncode == 0, f\"solo run should succeed: {proc.stdout}{proc.stderr}\"\nassert Path(\"output.txt\").exists(), \"solo run should have done its work\"\nlines_after_first = len(Path(\"output.txt\").read_text(encoding=\"utf-8\").splitlines())\nassert lines_after_first == 1, f\"expected exactly 1 line, got {lines_after_first}\"\n\n# 2. Simulate a concurrent second instance by holding the lock ourselves,\n#    then running the script - it must refuse to run and exit non-zero.\nholder = subprocess.Popen(\n    [\"bash\", \"-c\", f'exec 9>{LOCK}; flock -n 9 || exit 1; sleep 5'],\n)\ntime.sleep(1)  # let the holder actually acquire the lock\ntry:\n    proc = run()\n    assert proc.returncode != 0, \"a second concurrent instance must fail while the lock is held\"\n    assert \"already running\" in proc.stderr, f\"expected an 'already running' message, got: {proc.stderr!r}\"\n    lines_after_second = len(Path(\"output.txt\").read_text(encoding=\"utf-8\").splitlines())\n    assert lines_after_second == 1, (\n        f\"the blocked instance must not have done any work - expected 1 line, got {lines_after_second}\")\nfinally:\n    holder.wait(timeout=10)\n\n# 3. After the holder releases the lock, a new run must succeed again.\nproc = run()\nassert proc.returncode == 0, f\"run after lock release should succeed: {proc.stdout}{proc.stderr}\"\nlines_after_third = len(Path(\"output.txt\").read_text(encoding=\"utf-8\").splitlines())\nassert lines_after_third == 2, f\"expected 2 lines total, got {lines_after_third}\"\n\nprint(\"PASS job.sh lock checks\")\n"
+  },
+  "check_command": "python3 check_job.py"
+}

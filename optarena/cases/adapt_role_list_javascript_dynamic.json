@@ -1,0 +1,57 @@
+{
+  "name": "adapt_role_list_javascript_dynamic",
+  "language": "javascript",
+  "domain": "backend",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: allowedRoles.txt (a spec file the role check must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old list into roles.js",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "javascript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create roles.js with a function isAllowed(role) that returns true if role is in the comma-separated list in allowedRoles.txt (currently: admin, editor), else false. Read the list from the file (fs.readFileSync) at call time - do not hardcode it. Export it as module.exports = { isAllowed }.",
+    "allowedRoles.txt has changed. Make sure isAllowed() reflects the CURRENT list in the file."
+  ],
+  "setup_files": {
+    "allowedRoles.txt": "admin,editor\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "allowedRoles.txt rewritten to add a new role",
+      "write_files": {
+        "allowedRoles.txt": "admin,editor,viewer\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "roles.js",
+      "content_patterns": [
+        "isAllowed"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_roles.js": "const fs = require('fs');\nconst allowed = fs.readFileSync('allowedRoles.txt', 'utf8').trim().split(',').map(s => s.trim()).filter(Boolean);\nconst { isAllowed } = require('./roles.js');\nfor (const role of allowed) {\n  if (isAllowed(role) !== true) throw new Error(`isAllowed(${role}) should be true`);\n}\nif (isAllowed('not_a_real_role') !== false) throw new Error('isAllowed should reject an unknown role');\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_roles.js",
+  "reference_solution": {
+    "roles.js": "const fs = require('fs');\n\nfunction isAllowed(role) {\n  const allowed = fs.readFileSync('allowedRoles.txt', 'utf8').trim().split(',').map(s => s.trim());\n  return allowed.includes(role);\n}\n\nmodule.exports = { isAllowed };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-role-list",
+      "files": {
+        "roles.js": "function isAllowed(role) {\n  return ['admin', 'editor'].includes(role);\n}\n\nmodule.exports = { isAllowed };\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "description": "Replace a plain == token comparison with a constant-time comparison to remove a timing side-channel",
+  "task_type": "security",
+  "tags": [
+    "python",
+    "security",
+    "timing-attack"
+  ],
+  "prompts": [
+    "auth.py's verify_token(expected, provided) compares tokens with plain `==`, which short-circuits on the first mismatched character - an attacker who can measure response time can recover a valid token one character at a time. Fix it to use a constant-time comparison (hmac.compare_digest), while keeping the same True/False result for matching, mismatched-same-length, and different-length inputs."
+  ],
+  "setup_files": {
+    "auth.py": "def verify_token(expected, provided):\n    return expected == provided\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "auth.py",
+      "content_patterns": [
+        "compare_digest"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_auth_hidden.py": "from auth import verify_token\n\n\ndef test_matching_tokens():\n    assert verify_token('secret-token-123', 'secret-token-123') is True\n\n\ndef test_mismatched_same_length():\n    assert verify_token('secret-token-123', 'secret-token-124') is False\n\n\ndef test_different_length_tokens():\n    assert verify_token('secret-token-123', 'short') is False\n    assert verify_token('short', 'secret-token-123') is False\n\n\ndef test_empty_strings():\n    assert verify_token('', '') is True\n    assert verify_token('x', '') is False\n"
+  },
+  "check_command": "python3 -m pytest -q test_auth_hidden.py",
+  "reference_solution": {
+    "auth.py": "import hmac\n\n\ndef verify_token(expected, provided):\n    return hmac.compare_digest(expected, provided)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-plain-equality",
+      "files": {
+        "auth.py": "def verify_token(expected, provided):\n    return expected == provided\n"
+      }
+    }
+  ],
+  "name": "fix_python_timing_safe_token_compare",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

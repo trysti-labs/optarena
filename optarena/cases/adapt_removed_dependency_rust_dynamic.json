@@ -1,0 +1,69 @@
+{
+  "name": "adapt_removed_dependency_rust_dynamic",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "rust",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "src/greeting_data.rs exports a const GREETING; src/lib.rs already has `mod greeting_data;`. Add a function `pub fn message() -> String` to src/lib.rs that returns the value of greeting_data::GREETING.",
+    "src/greeting_data.rs has just been removed from the project. Update src/lib.rs so it still compiles with NO reference to greeting_data (remove the `mod greeting_data;` line too), and message() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"dep_removed_rust_case\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/greeting_data.rs": "pub const GREETING: &str = \"hola\";\n",
+    "src/lib.rs": "mod greeting_data;\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "src/greeting_data.rs deleted",
+      "delete_files": [
+        "src/greeting_data.rs"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "message"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/message_test.rs": "use dep_removed_rust_case::message;\n\n#[test]\nfn test_message() {\n    assert_eq!(message(), \"hola\");\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "pub fn message() -> String {\n    \"hola\".to_string()\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-references-deleted-module",
+      "files": {
+        "src/lib.rs": "mod greeting_data;\n\npub fn message() -> String {\n    greeting_data::GREETING.to_string()\n}\n",
+        "Cargo.toml": "[package]\nname = \"dep_removed_rust_case\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n"
+      }
+    },
+    {
+      "name": "wrong-value",
+      "files": {
+        "src/lib.rs": "pub fn message() -> String {\n    \"bonjour\".to_string()\n}\n",
+        "Cargo.toml": "[package]\nname = \"dep_removed_rust_case\"\nversion = \"0.1.2\"\nedition = \"2021\"\n\n[dependencies]\n"
+      }
+    }
+  ]
+}

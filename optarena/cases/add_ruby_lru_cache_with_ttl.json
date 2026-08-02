@@ -1,0 +1,46 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded cache",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "cache.rb's Cache is an unbounded Hash wrapper - get/put never evict anything. Turn it into an LRU cache with a TTL: Cache.new(capacity, ttl) takes a max size and a time-to-live in seconds. put(key, value, now) stores a value timestamped at `now`. get(key, now) returns the value if present AND not expired (now - stored_at < ttl), else nil - and an expired entry must be REMOVED the moment it's observed to be stale. Both get and put must refresh a key's recency. When put() would exceed `capacity`, evict the LEAST recently used entry (recency = most recent get OR put) before inserting the new one."
+  ],
+  "setup_files": {
+    "cache.rb": "class Cache\n  def initialize(capacity, ttl)\n    @capacity = capacity\n    @ttl = ttl\n    @store = {}\n  end\n\n  def put(key, value, now)\n    @store[key] = value\n  end\n\n  def get(key, now)\n    @store[key]\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "cache.rb",
+      "content_patterns": [
+        "class Cache"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "cache.rb": "class Cache\n  Entry = Struct.new(:value, :stored_at)\n\n  def initialize(capacity, ttl)\n    @capacity = capacity\n    @ttl = ttl\n    @store = {}\n  end\n\n  def put(key, value, now)\n    @store.delete(key)\n    if @store.size >= @capacity\n      oldest_key = @store.keys.first\n      @store.delete(oldest_key)\n    end\n    @store[key] = Entry.new(value, now)\n  end\n\n  def get(key, now)\n    entry = @store[key]\n    return nil if entry.nil?\n    if now - entry.stored_at >= @ttl\n      @store.delete(key)\n      return nil\n    end\n    @store.delete(key)\n    @store[key] = entry\n    entry.value\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "cache.rb": "class Cache\n  Entry = Struct.new(:value, :stored_at)\n\n  def initialize(capacity, ttl)\n    @capacity = capacity\n    @ttl = ttl\n    @store = {}\n  end\n\n  def put(key, value, now)\n    @store.delete(key)\n    if @store.size >= @capacity\n      oldest_key = @store.keys.first\n      @store.delete(oldest_key)\n    end\n    @store[key] = Entry.new(value, now)\n  end\n\n  def get(key, now)\n    entry = @store[key]\n    return nil if entry.nil?\n    if now - entry.stored_at >= @ttl\n      @store.delete(key)\n      return nil\n    end\n    entry.value\n  end\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_lru_cache_with_ttl",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "ruby cache_hidden_test.rb",
+  "test_setup_files": {
+    "cache_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"cache\"\n\nclass CacheTest < Minitest::Test\n  def test_capacity_evicts_least_recently_used\n    c = Cache.new(2, 1000)\n    c.put(\"a\", 1, 0)\n    c.put(\"b\", 2, 1)\n    c.get(\"a\", 2)\n    c.put(\"c\", 3, 3)\n    assert_equal 1, c.get(\"a\", 4)\n    assert_nil c.get(\"b\", 4)\n    assert_equal 3, c.get(\"c\", 4)\n  end\n\n  def test_get_refreshes_recency\n    c = Cache.new(2, 1000)\n    c.put(\"a\", 1, 0)\n    c.put(\"b\", 2, 1)\n    c.get(\"a\", 2)\n    c.get(\"b\", 3)\n    c.put(\"c\", 3, 4)\n    assert_nil c.get(\"a\", 5)\n    assert_equal 2, c.get(\"b\", 5)\n  end\n\n  def test_ttl_expiry_independent_of_capacity\n    c = Cache.new(5, 10)\n    c.put(\"a\", 1, 0)\n    assert_equal 1, c.get(\"a\", 9)\n    assert_nil c.get(\"a\", 10)\n  end\nend\n"
+  }
+}

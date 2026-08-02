@@ -1,0 +1,63 @@
+{
+  "name": "adapt_moved_namespace_csharp_dynamic",
+  "language": "csharp",
+  "framework": "plain-csharp",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dynamic eval: the namespace the agent's first solution uses is MOVED between prompts (fixed after_prompt trigger, old file/namespace deleted, new one created); the agent must update its using directive, not keep pointing at the old namespace",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "csharp",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "moved-namespace"
+  ],
+  "prompts": [
+    "PricingRules.cs declares namespace Pricing with a static class Rules containing a public const double Discount. Create Checkout.cs with `using Pricing;` and a public static class Checkout containing a static method ApplyDiscount(double price) that returns price * (1 - Rules.Discount).",
+    "PricingRules.cs has moved: the Rules class now lives in ConfigRules.cs under namespace Config (same Discount value). Update Checkout.cs to `using Config;` instead - do not keep referencing the old Pricing namespace."
+  ],
+  "setup_files": {
+    "PricingRules.cs": "namespace Pricing\n{\n    public static class Rules\n    {\n        public const double Discount = 0.1;\n    }\n}\n",
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "PricingRules.cs (namespace Pricing) moved to ConfigRules.cs (namespace Config)",
+      "delete_files": [
+        "PricingRules.cs"
+      ],
+      "write_files": {
+        "ConfigRules.cs": "namespace Config\n{\n    public static class Rules\n    {\n        public const double Discount = 0.1;\n    }\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Checkout.cs",
+      "content_patterns": [
+        "ApplyDiscount"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "double got = Checkout.ApplyDiscount(100);\nif (Math.Abs(got - 90) > 1e-6) { Console.Error.WriteLine($\"ApplyDiscount(100) = {got}\"); Environment.Exit(1); return; }\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Checkout.cs": "using Config;\n\npublic static class Checkout\n{\n    public static double ApplyDiscount(double price) => price * (1 - Rules.Discount);\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-namespace",
+      "files": {
+        "Checkout.cs": "using Pricing;\n\npublic static class Checkout\n{\n    public static double ApplyDiscount(double price) => price * (1 - Rules.Discount);\n}\n"
+      }
+    }
+  ]
+}

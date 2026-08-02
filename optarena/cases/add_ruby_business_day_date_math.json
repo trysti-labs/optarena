@@ -1,0 +1,46 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends and is exact for any starting weekday",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "dates.rb's add_business_days(start, n) just does `start + n` - it counts weekends as business days (Date#+ adds calendar days). Implement it properly: n=0 returns start unchanged (even if start itself falls on a weekend); for n>0, step forward day by day, skipping Saturday and Sunday, until n business days have been counted, then return that date. It must be exact for any starting weekday and correctly cross month/year boundaries - do not use an approximation formula like `n + 2*(n/5)` calendar-days shortcut, it gives the wrong answer depending on which weekday `start` falls on."
+  ],
+  "setup_files": {
+    "dates.rb": "require \"date\"\n\ndef add_business_days(start, n)\n  start + n\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "dates.rb",
+      "content_patterns": [
+        "def add_business_days"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "dates.rb": "require \"date\"\n\ndef add_business_days(start, n)\n  return start if n == 0\n\n  current = start\n  counted = 0\n  while counted < n\n    current += 1\n    counted += 1 unless current.saturday? || current.sunday?\n  end\n  current\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "dates.rb": "require \"date\"\n\ndef add_business_days(start, n)\n  return start if n == 0\n\n  weeks, remainder = n.divmod(5)\n  calendar_days = weeks * 7 + remainder\n  start + calendar_days\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_business_day_date_math",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "ruby dates_hidden_test.rb",
+  "test_setup_files": {
+    "dates_hidden_test.rb": "require \"minitest/autorun\"\nrequire \"date\"\nrequire_relative \"dates\"\n\nclass DatesTest < Minitest::Test\n  def test_zero_returns_start_unchanged\n    d = Date.new(2024, 6, 1) # Saturday\n    assert_equal d, add_business_days(d, 0)\n  end\n\n  def test_friday_plus_one_skips_weekend\n    friday = Date.new(2024, 5, 31)\n    assert_equal Date.new(2024, 6, 3), add_business_days(friday, 1)\n  end\n\n  def test_monday_plus_five_lands_next_monday\n    monday = Date.new(2024, 5, 27)\n    assert_equal Date.new(2024, 6, 3), add_business_days(monday, 5)\n  end\n\n  def test_crosses_month_and_year_boundary\n    friday = Date.new(2024, 12, 27)\n    assert_equal Date.new(2025, 1, 1), add_business_days(friday, 3)\n  end\n\n  def test_starting_on_a_weekend_still_counts_correctly\n    saturday = Date.new(2024, 6, 1)\n    assert_equal Date.new(2024, 6, 3), add_business_days(saturday, 1)\n  end\nend\n"
+  }
+}
