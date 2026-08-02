@@ -10,7 +10,7 @@
 # silently replaced upstream, changing oracle behavior between identical
 # OptArena commits). The tag stays for readability; the digest is what's
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
-FROM golang:1.22-bookworm@sha256:3d699e4d15d0f8f13c9195c0632a16702b8cbdece2955af1c23b37ae5d55a253
+FROM golang:1.26-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
