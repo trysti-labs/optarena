@@ -1,0 +1,42 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends and is exact for any starting weekday, using struct tm and timegm/gmtime for calendar-correct day arithmetic",
+  "task_type": "feature",
+  "tags": [
+    "c",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "Create a C program in dates.c that reads commands from stdin (one per line) until EOF: `add YYYY MM DD N` computes YYYY-MM-DD plus N BUSINESS days (skipping Saturday and Sunday) and prints the result as `YYYY-MM-DD` on its own line. N=0 must print the input date unchanged (even if it falls on a weekend). For N>0, step forward one calendar day at a time, skipping weekends, until N business days have been counted. Use struct tm with timegm() (to get a UTC time_t and avoid local-timezone drift) and gmtime() to step days and read the weekday - do not implement your own calendar/leap-year arithmetic by hand, and do not use an approximation formula like `N + 2*(N/5)` calendar-days, it gives the wrong answer depending on which weekday the start date falls on."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "dates.c",
+      "content_patterns": [
+        "int main"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "dates.c": "#include <stdio.h>\n#include <string.h>\n#include <time.h>\n\nint main(void) {\n    char cmd[16];\n    int y, m, d, n;\n    while (scanf(\"%15s\", cmd) == 1) {\n        if (strcmp(cmd, \"add\") != 0) continue;\n        if (scanf(\"%d %d %d %d\", &y, &m, &d, &n) != 4) continue;\n\n        struct tm tmv;\n        memset(&tmv, 0, sizeof(tmv));\n        tmv.tm_year = y - 1900;\n        tmv.tm_mon = m - 1;\n        tmv.tm_mday = d;\n        tmv.tm_hour = 12;\n        time_t t = timegm(&tmv);\n\n        int counted = 0;\n        while (counted < n) {\n            t += 86400;\n            struct tm *cur = gmtime(&t);\n            if (cur->tm_wday != 0 && cur->tm_wday != 6) {\n                counted++;\n            }\n        }\n\n        struct tm *result = gmtime(&t);\n        printf(\"%04d-%02d-%02d\\n\", result->tm_year + 1900, result->tm_mon + 1, result->tm_mday);\n    }\n    return 0;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "dates.c": "#include <stdio.h>\n#include <string.h>\n#include <time.h>\n\nint main(void) {\n    char cmd[16];\n    int y, m, d, n;\n    while (scanf(\"%15s\", cmd) == 1) {\n        if (strcmp(cmd, \"add\") != 0) continue;\n        if (scanf(\"%d %d %d %d\", &y, &m, &d, &n) != 4) continue;\n\n        struct tm tmv;\n        memset(&tmv, 0, sizeof(tmv));\n        tmv.tm_year = y - 1900;\n        tmv.tm_mon = m - 1;\n        tmv.tm_mday = d;\n        tmv.tm_hour = 12;\n        time_t t = timegm(&tmv);\n\n        int weeks = n / 5;\n        int remainder = n % 5;\n        int calendar_days = weeks * 7 + remainder;\n        t += (time_t)calendar_days * 86400;\n\n        struct tm *result = gmtime(&t);\n        printf(\"%04d-%02d-%02d\\n\", result->tm_year + 1900, result->tm_mon + 1, result->tm_mday);\n    }\n    return 0;\n}\n"
+      }
+    }
+  ],
+  "name": "add_c_business_day_date_math",
+  "language": "c",
+  "domain": "systems",
+  "check_command_timeout": 60,
+  "timeout": 120,
+  "difficulty": 3,
+  "setup_files": {},
+  "test_setup_files": {
+    "test_dates.py": "import subprocess\nsubprocess.run(['gcc', '-std=c11', '-Wall', 'dates.c', '-o', 'dates_bin'], check=True)\n\ndef run(commands):\n    text = '\\n'.join(commands) + '\\n'\n    proc = subprocess.run(['./dates_bin'], input=text, capture_output=True, text=True, timeout=10)\n    assert proc.returncode == 0, f'nonzero exit: {proc.returncode}, stderr={proc.stderr[-400:]}'\n    return [l.strip() for l in proc.stdout.strip('\\n').split('\\n') if proc.stdout.strip('\\n')]\n\nout = run([\n    'add 2024 6 1 0',    # Saturday, unchanged\n    'add 2024 5 31 1',   # Friday + 1 business day -> Monday\n    'add 2024 5 27 5',   # Monday + 5 business days -> next Monday\n    'add 2024 12 27 3',  # Friday + 3 business days, crosses year boundary\n    'add 2024 6 1 1',    # Saturday + 1 business day -> Monday\n])\nexpected = ['2024-06-01', '2024-06-03', '2024-06-03', '2025-01-01', '2024-06-03']\nassert out == expected, f'got {out}, want {expected}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_dates.py"
+}

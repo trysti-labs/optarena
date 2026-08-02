@@ -1,0 +1,49 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker in place of a stub that always calls through",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "breaker.go's CircuitBreaker.Call(fn func() (string, error), now int64) always just calls fn(). Implement the real 3-state machine: NewCircuitBreaker(failureThreshold int, resetTimeout int64). Starts closed. In closed, Call invokes fn(); if it returns an error, count consecutive failures, and once `failureThreshold` CONSECUTIVE failures have happened, trip to open (recording when it opened) and return that error. While open, Call must NOT invoke fn() at all and must instead return ErrCircuitOpen - UNLESS at least `resetTimeout` seconds have passed since it opened, in which case it moves to half-open and allows exactly ONE trial call: if that call succeeds, go back to closed (reset the failure count); if it errors, go back to open and RESET the open-time to `now` (so the next trial is only allowed after another full resetTimeout, not immediately)."
+  ],
+  "setup_files": {
+    "go.mod": "module circuitbreaker\n\ngo 1.21\n",
+    "breaker.go": "package main\n\nimport \"errors\"\n\nvar ErrCircuitOpen = errors.New(\"circuit open\")\n\ntype CircuitBreaker struct {\n\tFailureThreshold int\n\tResetTimeout     int64\n}\n\nfunc NewCircuitBreaker(failureThreshold int, resetTimeout int64) *CircuitBreaker {\n\treturn &CircuitBreaker{FailureThreshold: failureThreshold, ResetTimeout: resetTimeout}\n}\n\nfunc (b *CircuitBreaker) Call(fn func() (string, error), now int64) (string, error) {\n\treturn fn()\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "breaker.go",
+      "content_patterns": [
+        "func NewCircuitBreaker"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "breaker_test.go": "package main\n\nimport (\n\t\"errors\"\n\t\"testing\"\n)\n\nvar errBoom = errors.New(\"boom\")\n\nfunc boom() (string, error) {\n\treturn \"\", errBoom\n}\n\nfunc TestTripsOpenAfterConsecutiveFailures(t *testing.T) {\n\tb := NewCircuitBreaker(3, 10)\n\tfor i := 0; i < 3; i++ {\n\t\tif _, err := b.Call(boom, 0); err != errBoom {\n\t\t\tt.Fatalf(\"expected errBoom, got %v\", err)\n\t\t}\n\t}\n\tif _, err := b.Call(func() (string, error) { return \"should not run\", nil }, 0); err != ErrCircuitOpen {\n\t\tt.Fatalf(\"expected ErrCircuitOpen, got %v\", err)\n\t}\n}\n\nfunc TestFailsFastWithoutCallingFnWhileOpen(t *testing.T) {\n\tb := NewCircuitBreaker(1, 100)\n\tb.Call(boom, 0)\n\tcalled := false\n\t_, err := b.Call(func() (string, error) { called = true; return \"x\", nil }, 1)\n\tif err != ErrCircuitOpen {\n\t\tt.Fatalf(\"expected ErrCircuitOpen, got %v\", err)\n\t}\n\tif called {\n\t\tt.Fatalf(\"fn must not be called while open\")\n\t}\n}\n\nfunc TestHalfOpenTrialAfterTimeoutSuccessCloses(t *testing.T) {\n\tb := NewCircuitBreaker(1, 10)\n\tb.Call(boom, 0)\n\tif v, err := b.Call(func() (string, error) { return \"ok\", nil }, 10); err != nil || v != \"ok\" {\n\t\tt.Fatalf(\"expected ok, got %v %v\", v, err)\n\t}\n\tif v, err := b.Call(func() (string, error) { return \"still-fine\", nil }, 11); err != nil || v != \"still-fine\" {\n\t\tt.Fatalf(\"expected still-fine, got %v %v\", v, err)\n\t}\n}\n\nfunc TestHalfOpenFailureReopensAndResetsClock(t *testing.T) {\n\tb := NewCircuitBreaker(1, 10)\n\tb.Call(boom, 0)\n\tif _, err := b.Call(boom, 10); err != errBoom {\n\t\tt.Fatalf(\"expected errBoom at half-open trial, got %v\", err)\n\t}\n\tif _, err := b.Call(func() (string, error) { return \"too soon\", nil }, 15); err != ErrCircuitOpen {\n\t\tt.Fatalf(\"expected ErrCircuitOpen at t=15, got %v\", err)\n\t}\n\tif v, err := b.Call(func() (string, error) { return \"ok now\", nil }, 20); err != nil || v != \"ok now\" {\n\t\tt.Fatalf(\"expected ok now at t=20, got %v %v\", v, err)\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module circuitbreaker\n\ngo 1.21\n",
+    "breaker.go": "package main\n\nimport \"errors\"\n\nvar ErrCircuitOpen = errors.New(\"circuit open\")\n\ntype state int\n\nconst (\n\tclosed state = iota\n\topen\n\thalfOpen\n)\n\ntype CircuitBreaker struct {\n\tFailureThreshold int\n\tResetTimeout     int64\n\tstate            state\n\tfailures         int\n\topenedAt         int64\n}\n\nfunc NewCircuitBreaker(failureThreshold int, resetTimeout int64) *CircuitBreaker {\n\treturn &CircuitBreaker{FailureThreshold: failureThreshold, ResetTimeout: resetTimeout, state: closed}\n}\n\nfunc (b *CircuitBreaker) Call(fn func() (string, error), now int64) (string, error) {\n\tif b.state == open {\n\t\tif now-b.openedAt < b.ResetTimeout {\n\t\t\treturn \"\", ErrCircuitOpen\n\t\t}\n\t\tb.state = halfOpen\n\t}\n\n\tresult, err := fn()\n\tif err != nil {\n\t\tif b.state == halfOpen {\n\t\t\tb.state = open\n\t\t\tb.openedAt = now\n\t\t} else {\n\t\t\tb.failures++\n\t\t\tif b.failures >= b.FailureThreshold {\n\t\t\t\tb.state = open\n\t\t\t\tb.openedAt = now\n\t\t\t}\n\t\t}\n\t\treturn \"\", err\n\t}\n\n\tb.state = closed\n\tb.failures = 0\n\treturn result, nil\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "go.mod": "module circuitbreaker\n\ngo 1.21\n",
+        "breaker.go": "package main\n\nimport \"errors\"\n\nvar ErrCircuitOpen = errors.New(\"circuit open\")\n\ntype state int\n\nconst (\n\tclosed state = iota\n\topen\n\thalfOpen\n)\n\ntype CircuitBreaker struct {\n\tFailureThreshold int\n\tResetTimeout     int64\n\tstate            state\n\tfailures         int\n\topenedAt         int64\n}\n\nfunc NewCircuitBreaker(failureThreshold int, resetTimeout int64) *CircuitBreaker {\n\treturn &CircuitBreaker{FailureThreshold: failureThreshold, ResetTimeout: resetTimeout, state: closed}\n}\n\nfunc (b *CircuitBreaker) Call(fn func() (string, error), now int64) (string, error) {\n\tif b.state == open {\n\t\tif now-b.openedAt < b.ResetTimeout {\n\t\t\treturn \"\", ErrCircuitOpen\n\t\t}\n\t\tb.state = halfOpen\n\t}\n\n\tresult, err := fn()\n\tif err != nil {\n\t\tif b.state == halfOpen {\n\t\t\tb.state = open\n\t\t} else {\n\t\t\tb.failures++\n\t\t\tif b.failures >= b.FailureThreshold {\n\t\t\t\tb.state = open\n\t\t\t\tb.openedAt = now\n\t\t\t}\n\t\t}\n\t\treturn \"\", err\n\t}\n\n\tb.state = closed\n\tb.failures = 0\n\treturn result, nil\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_circuit_breaker_state_machine",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

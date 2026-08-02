@@ -1,0 +1,57 @@
+{
+  "name": "adapt_required_columns_sql_dynamic",
+  "language": "sql",
+  "domain": "data",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: required_columns.txt (a spec file listing columns the items table must have) is REWRITTEN between prompts (fixed after_prompt trigger, a new column added to the requirement); the agent must add it, not leave the stale schema in place",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "sql",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write schema.sql creating a table items with, at minimum, every column listed in required_columns.txt (currently: id, name) - id as an integer primary key, all other listed columns as text.",
+    "required_columns.txt has changed. Make sure the items table has EVERY column currently listed in the file."
+  ],
+  "setup_files": {
+    "required_columns.txt": "id,name\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "required_columns.txt rewritten to add a new required column",
+      "write_files": {
+        "required_columns.txt": "id,name,category\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "items"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_schema.py": "import sqlite3\n\nwith open('required_columns.txt', encoding='utf-8') as f:\n    required = [c.strip() for c in f.read().strip().split(',') if c.strip()]\nassert required, 'required_columns.txt is empty'\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\ncols = {row[1] for row in conn.execute('PRAGMA table_info(items)').fetchall()}\nmissing = [c for c in required if c not in cols]\nassert not missing, f'items table is missing required column(s) {missing} (stale schema not updated), has: {cols}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_schema.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE items (\n    id INTEGER PRIMARY KEY,\n    name TEXT,\n    category TEXT\n);\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "missing-new-column",
+      "files": {
+        "schema.sql": "CREATE TABLE items (\n    id INTEGER PRIMARY KEY,\n    name TEXT\n);\n"
+      }
+    }
+  ]
+}

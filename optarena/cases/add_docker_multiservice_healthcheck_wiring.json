@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (docker-multiservice): a new container HEALTHCHECK needs a matching nginx location so it's reachable through the reverse proxy",
+  "tags": [
+    "dockerfile",
+    "docker-compose",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a `HEALTHCHECK` instruction to api/Dockerfile: every 30s, timeout 3s, running `curl -f http://localhost:8000/health || exit 1`. This only covers checks issued from inside the container - add a matching `location /health` block to nginx/nginx.conf, proxying to `http://api:8000/health`, so external health probes hitting nginx (the only public entrypoint) can also reach it, alongside the existing catch-all `location /` block."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "api/Dockerfile",
+      "content_patterns": [
+        "HEALTHCHECK"
+      ]
+    },
+    {
+      "path_pattern": "nginx/nginx.conf",
+      "content_patterns": [
+        "/health"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_healthcheck_wiring.py": "import re\nfrom pathlib import Path\n\napi_dockerfile = Path('api/Dockerfile').read_text(encoding='utf-8')\nnginx_conf = Path('nginx/nginx.conf').read_text(encoding='utf-8')\n\nassert re.search(r'HEALTHCHECK\\b.*CMD.*curl.*http://localhost:8000/health', api_dockerfile), (\n    'api/Dockerfile is missing a HEALTHCHECK that curls /health')\n\nhealth_location = re.search(\n    r'location\\s+/health\\s*\\{[^}]*proxy_pass\\s+http://api:8000/health', nginx_conf, re.DOTALL)\nassert health_location, (\n    \"nginx.conf is missing a '/health' location proxying to the api service - the \"\n    'container has an internal HEALTHCHECK now, but nothing routes external health probes '\n    'through the reverse proxy to reach it')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_healthcheck_wiring.py",
+  "reference_solution": {
+    "api/Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nRUN useradd --create-home appuser\nUSER appuser\n\nEXPOSE 8000\n\nHEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:8000/health || exit 1\n\nCMD [\"python\", \"main.py\"]\n",
+    "nginx/nginx.conf": "server {\n    listen 80;\n\n    location /health {\n        proxy_pass http://api:8000/health;\n    }\n\n    location / {\n        proxy_pass http://api:8000;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "nginx-missing-health-location",
+      "files": {
+        "api/Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nRUN useradd --create-home appuser\nUSER appuser\n\nEXPOSE 8000\n\nHEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:8000/health || exit 1\n\nCMD [\"python\", \"main.py\"]\n",
+        "nginx/nginx.conf": "server {\n    listen 80;\n\n    location / {\n        proxy_pass http://api:8000;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_docker_multiservice_healthcheck_wiring",
+  "language": "dockerfile",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "docker-multiservice",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

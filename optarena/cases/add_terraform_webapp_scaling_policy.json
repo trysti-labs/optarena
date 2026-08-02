@@ -1,0 +1,55 @@
+{
+  "description": "Repo-scale (terraform-webapp): a new target-tracking scaling policy needs the ALB target group's deregistration_delay shortened too",
+  "tags": [
+    "hcl",
+    "terraform",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Increase the ASG's `max_size` in asg.tf from 6 to 10, and add a new `aws_autoscaling_policy.cpu_target_tracking` (TargetTrackingScaling, predefined metric ASGAverageCPUUtilization, target_value 60) referencing `aws_autoscaling_group.app.name`. Because the ASG will now scale in and out much faster, the ALB target group's `deregistration_delay` in alb.tf must ALSO be reduced from the 300-second AWS default to 30 seconds or less - otherwise in-flight connections would be dropped and old instances would linger far longer than the new scaling cadence intends."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "asg.tf",
+      "content_patterns": [
+        "aws_autoscaling_policy",
+        "max_size"
+      ]
+    },
+    {
+      "path_pattern": "alb.tf",
+      "content_patterns": [
+        "deregistration_delay"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_scaling_policy.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\nasg = open('asg.tf', encoding='utf-8').read()\nassert re.search(r'max_size\\s*=\\s*10', asg), 'max_size must be increased to 10'\nassert 'aws_autoscaling_policy' in asg, 'a target-tracking aws_autoscaling_policy is missing'\nassert re.search(r'autoscaling_group_name\\s*=\\s*aws_autoscaling_group\\.app\\.name', asg), (\n    'the scaling policy must reference aws_autoscaling_group.app.name')\n\nalb = open('alb.tf', encoding='utf-8').read()\ntg = re.search(r'resource\\s+\"aws_lb_target_group\"\\s+\"app\"\\s*\\{(.*?)\\n\\s*health_check\\s*\\{', alb, re.DOTALL)\nassert tg, 'aws_lb_target_group.app not found'\nblock = tg.group(1)\nm = re.search(r'deregistration_delay\\s*=\\s*(\\d+)', block)\nassert m, (\n    'aws_lb_target_group.app is missing deregistration_delay - with faster ASG scaling now in '\n    'place, leaving it at the 300s AWS default cycles instances out much faster than '\n    'connections actually drain')\ndelay = int(m.group(1))\nassert delay <= 60, f'deregistration_delay {delay}s is still too slow for the new scaling cadence'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_scaling_policy.py",
+  "reference_solution": {
+    "asg.tf": "resource \"aws_launch_template\" \"app\" {\n  name_prefix   = \"webapp-\"\n  image_id      = \"ami-0123456789abcdef0\"\n  instance_type = \"t3.micro\"\n\n  vpc_security_group_ids = [aws_security_group.app.id]\n}\n\nresource \"aws_autoscaling_group\" \"app\" {\n  name                = \"webapp-asg\"\n  min_size            = 2\n  max_size            = 10\n  desired_capacity    = 2\n  vpc_zone_identifier = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n  health_check_type   = \"EC2\"\n\n  launch_template {\n    id      = aws_launch_template.app.id\n    version = \"$Latest\"\n  }\n}\n\nresource \"aws_autoscaling_policy\" \"cpu_target_tracking\" {\n  name                   = \"webapp-cpu-target-tracking\"\n  autoscaling_group_name = aws_autoscaling_group.app.name\n  policy_type            = \"TargetTrackingScaling\"\n\n  target_tracking_configuration {\n    predefined_metric_specification {\n      predefined_metric_type = \"ASGAverageCPUUtilization\"\n    }\n    target_value = 60\n  }\n}\n",
+    "alb.tf": "resource \"aws_lb\" \"app\" {\n  name               = \"webapp-alb\"\n  internal           = false\n  load_balancer_type = \"application\"\n  security_groups    = [aws_security_group.alb.id]\n  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n}\n\nresource \"aws_lb_target_group\" \"app\" {\n  name                 = \"webapp-tg\"\n  port                 = 8080\n  protocol             = \"HTTP\"\n  vpc_id               = aws_vpc.main.id\n  deregistration_delay = 30\n\n  health_check {\n    path                = \"/health\"\n    interval            = 30\n    timeout             = 5\n    healthy_threshold   = 2\n    unhealthy_threshold = 3\n  }\n}\n\nresource \"aws_lb_listener\" \"http\" {\n  load_balancer_arn = aws_lb.app.arn\n  port              = 80\n  protocol          = \"HTTP\"\n\n  default_action {\n    type             = \"forward\"\n    target_group_arn = aws_lb_target_group.app.arn\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "deregistration-delay-not-tuned-with-scaling-policy",
+      "files": {
+        "asg.tf": "resource \"aws_launch_template\" \"app\" {\n  name_prefix   = \"webapp-\"\n  image_id      = \"ami-0123456789abcdef0\"\n  instance_type = \"t3.micro\"\n\n  vpc_security_group_ids = [aws_security_group.app.id]\n}\n\nresource \"aws_autoscaling_group\" \"app\" {\n  name                = \"webapp-asg\"\n  min_size            = 2\n  max_size            = 10\n  desired_capacity    = 2\n  vpc_zone_identifier = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n  health_check_type   = \"EC2\"\n\n  launch_template {\n    id      = aws_launch_template.app.id\n    version = \"$Latest\"\n  }\n}\n\nresource \"aws_autoscaling_policy\" \"cpu_target_tracking\" {\n  name                   = \"webapp-cpu-target-tracking\"\n  autoscaling_group_name = aws_autoscaling_group.app.name\n  policy_type            = \"TargetTrackingScaling\"\n\n  target_tracking_configuration {\n    predefined_metric_specification {\n      predefined_metric_type = \"ASGAverageCPUUtilization\"\n    }\n    target_value = 60\n  }\n}\n",
+        "alb.tf": "resource \"aws_lb\" \"app\" {\n  name               = \"webapp-alb\"\n  internal           = false\n  load_balancer_type = \"application\"\n  security_groups    = [aws_security_group.alb.id]\n  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n}\n\nresource \"aws_lb_target_group\" \"app\" {\n  name     = \"webapp-tg\"\n  port     = 8080\n  protocol = \"HTTP\"\n  vpc_id   = aws_vpc.main.id\n\n  health_check {\n    path                = \"/health\"\n    interval            = 30\n    timeout             = 5\n    healthy_threshold   = 2\n    unhealthy_threshold = 3\n  }\n}\n\nresource \"aws_lb_listener\" \"http\" {\n  load_balancer_arn = aws_lb.app.arn\n  port              = 80\n  protocol          = \"HTTP\"\n\n  default_action {\n    type             = \"forward\"\n    target_group_arn = aws_lb_target_group.app.arn\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_webapp_scaling_policy",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "terraform-webapp",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

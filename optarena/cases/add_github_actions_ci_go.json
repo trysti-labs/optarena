@@ -46,5 +46,13 @@
   "timeout": 60,
   "reference_solution": {
     ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\n  pull_request:\n    branches: [main]\njobs:\n  build-test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-go@v5\n        with:\n          go-version: '1.22'\n      - run: go build ./...\n      - run: go test ./...\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "missing-test-step",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n    branches: [main]\n  pull_request:\n    branches: [main]\njobs:\n  build-test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-go@v5\n        with:\n          go-version: '1.22'\n      - run: go build ./...\n"
+      }
+    }
+  ]
 }

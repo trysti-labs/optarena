@@ -34,5 +34,13 @@
   "timeout": 150,
   "reference_solution": {
     "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"8080:80\"\n    environment:\n      - DATABASE_URL=postgresql://appuser:apppass@db:5432/appdb\n    depends_on:\n      - db\n  db:\n    image: postgres:15\n    ports:\n      - \"5432:5432\"\n    environment:\n      - POSTGRES_USER=appuser\n      - POSTGRES_PASSWORD=apppass\n      - POSTGRES_DB=appdb\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "missing-depends-on",
+      "files": {
+        "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"8080:80\"\n    environment:\n      - DATABASE_URL=postgresql://appuser:apppass@db:5432/appdb\n  db:\n    image: postgres:15\n    ports:\n      - \"5432:5432\"\n    environment:\n      - POSTGRES_USER=appuser\n      - POSTGRES_PASSWORD=apppass\n      - POSTGRES_DB=appdb\n"
+      }
+    }
+  ]
 }

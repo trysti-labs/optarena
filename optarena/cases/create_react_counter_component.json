@@ -37,5 +37,13 @@
   "timeout": 120,
   "reference_solution": {
     "counter.js": "const React = require('react');\n\nfunction Counter(props) {\n  return React.createElement('div', null, `Count: ${props.count}`);\n}\n\nmodule.exports = { Counter };\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "ignores-count-prop",
+      "files": {
+        "counter.js": "const React = require('react');\n\nfunction Counter(props) {\n  return React.createElement('div', null, 'Count: 0');\n}\n\nmodule.exports = { Counter };\n"
+      }
+    }
+  ]
 }

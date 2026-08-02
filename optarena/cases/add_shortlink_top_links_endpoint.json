@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 180,
   "timeout": 600,
-  "description": "L3 repo-scale (express-ts-shortlink): GET /api/links/top aggregation with deterministic ordering and limit clamping; route-shadowing broken registers it after /:slug",
+  "description": "Repo-scale (express-ts-shortlink): GET /api/links/top aggregation with deterministic ordering and limit clamping; route-shadowing broken registers it after /:slug",
   "difficulty": 3,
   "task_type": "data_engineering",
   "tags": [

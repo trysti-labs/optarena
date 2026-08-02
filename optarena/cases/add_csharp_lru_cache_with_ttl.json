@@ -1,0 +1,48 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded cache",
+  "task_type": "feature",
+  "tags": [
+    "csharp",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "Cache.cs's Cache is an unbounded Dictionary wrapper - Get/Put never evict anything. Turn it into an LRU cache with a TTL: the constructor takes (int capacity, long ttl) - a max size and a time-to-live in seconds. Put(string key, int value, long now) stores a value timestamped at `now`. Get(string key, long now) returns the value if present AND not expired (now - storedAt < ttl), else null - and an expired entry must be REMOVED the moment it's observed to be stale. Both Get and Put must refresh a key's recency. When Put would exceed `capacity`, evict the LEAST recently used entry (recency = most recent Get OR Put) before inserting the new one."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "Cache.cs": "using System.Collections.Generic;\n\npublic class Cache\n{\n    private readonly int _capacity;\n    private readonly long _ttl;\n    private readonly Dictionary<string, int> _store = new();\n\n    public Cache(int capacity, long ttl)\n    {\n        _capacity = capacity;\n        _ttl = ttl;\n    }\n\n    public void Put(string key, int value, long now)\n    {\n        _store[key] = value;\n    }\n\n    public int? Get(string key, long now)\n    {\n        return _store.TryGetValue(key, out var v) ? v : null;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Cache.cs",
+      "content_patterns": [
+        "class Cache"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "Cache.cs": "using System.Collections.Generic;\nusing System.Linq;\n\npublic class Cache\n{\n    private class Entry\n    {\n        public int Value;\n        public long StoredAt;\n    }\n\n    private readonly int _capacity;\n    private readonly long _ttl;\n    private readonly Dictionary<string, Entry> _store = new();\n    private readonly List<string> _order = new(); // front = most recently used\n\n    public Cache(int capacity, long ttl)\n    {\n        _capacity = capacity;\n        _ttl = ttl;\n    }\n\n    private void Touch(string key)\n    {\n        _order.Remove(key);\n        _order.Insert(0, key);\n    }\n\n    public void Put(string key, int value, long now)\n    {\n        if (!_store.ContainsKey(key) && _store.Count >= _capacity)\n        {\n            var oldest = _order[^1];\n            _order.RemoveAt(_order.Count - 1);\n            _store.Remove(oldest);\n        }\n        _store[key] = new Entry { Value = value, StoredAt = now };\n        Touch(key);\n    }\n\n    public int? Get(string key, long now)\n    {\n        if (!_store.TryGetValue(key, out var entry))\n        {\n            return null;\n        }\n        if (now - entry.StoredAt >= _ttl)\n        {\n            _store.Remove(key);\n            _order.Remove(key);\n            return null;\n        }\n        Touch(key);\n        return entry.Value;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "Cache.cs": "using System.Collections.Generic;\nusing System.Linq;\n\npublic class Cache\n{\n    private class Entry\n    {\n        public int Value;\n        public long StoredAt;\n    }\n\n    private readonly int _capacity;\n    private readonly long _ttl;\n    private readonly Dictionary<string, Entry> _store = new();\n    private readonly List<string> _order = new();\n\n    public Cache(int capacity, long ttl)\n    {\n        _capacity = capacity;\n        _ttl = ttl;\n    }\n\n    private void Touch(string key)\n    {\n        _order.Remove(key);\n        _order.Insert(0, key);\n    }\n\n    public void Put(string key, int value, long now)\n    {\n        if (!_store.ContainsKey(key) && _store.Count >= _capacity)\n        {\n            var oldest = _order[^1];\n            _order.RemoveAt(_order.Count - 1);\n            _store.Remove(oldest);\n        }\n        _store[key] = new Entry { Value = value, StoredAt = now };\n        Touch(key);\n    }\n\n    public int? Get(string key, long now)\n    {\n        if (!_store.TryGetValue(key, out var entry))\n        {\n            return null;\n        }\n        if (now - entry.StoredAt >= _ttl)\n        {\n            _store.Remove(key);\n            _order.Remove(key);\n            return null;\n        }\n        return entry.Value;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_csharp_lru_cache_with_ttl",
+  "language": "csharp",
+  "framework": "xunit",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "dotnet test tests/tests.csproj",
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/CacheTests.cs": "using Xunit;\n\npublic class CacheTests\n{\n    [Fact]\n    public void CapacityEvictsLeastRecentlyUsed()\n    {\n        var c = new Cache(2, 1000);\n        c.Put(\"a\", 1, 0);\n        c.Put(\"b\", 2, 1);\n        c.Get(\"a\", 2);\n        c.Put(\"c\", 3, 3);\n        Assert.Equal(1, c.Get(\"a\", 4));\n        Assert.Null(c.Get(\"b\", 4));\n        Assert.Equal(3, c.Get(\"c\", 4));\n    }\n\n    [Fact]\n    public void GetRefreshesRecency()\n    {\n        var c = new Cache(2, 1000);\n        c.Put(\"a\", 1, 0);\n        c.Put(\"b\", 2, 1);\n        c.Get(\"a\", 2);\n        c.Get(\"b\", 3);\n        c.Put(\"c\", 3, 4);\n        Assert.Null(c.Get(\"a\", 5));\n        Assert.Equal(2, c.Get(\"b\", 5));\n    }\n\n    [Fact]\n    public void TtlExpiryIndependentOfCapacity()\n    {\n        var c = new Cache(5, 10);\n        c.Put(\"a\", 1, 0);\n        Assert.Equal(1, c.Get(\"a\", 9));\n        Assert.Null(c.Get(\"a\", 10));\n    }\n}\n"
+  }
+}

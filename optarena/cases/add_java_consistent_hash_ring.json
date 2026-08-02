@@ -1,0 +1,47 @@
+{
+  "description": "Replace mod-based sharding with a consistent-hash ring (virtual nodes) so removing one node only remaps that node's own keys",
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "hashing",
+    "algorithms"
+  ],
+  "prompts": [
+    "HashRing.java's getNode picks a node with `Math.floorMod(key.hashCode(), nodes.size())` - removing or adding any node reshuffles almost every key. Implement a real consistent-hash ring with virtual nodes: the constructor takes (List<String> nodes, int replicas) and places `replicas` virtual points per physical node around a ring, hashed via MessageDigest.getInstance(\"MD5\") over (node + \":\" + i) for each virtual point - do not use String.hashCode(), it's a weaker distribution and the point is to use a real hash. getNode(String key) hashes the key onto the ring and returns the node owning the next virtual point clockwise (wrapping around). addNode(String node) and removeNode(String node) update the ring in place."
+  ],
+  "setup_files": {
+    "HashRing.java": "import java.util.ArrayList;\nimport java.util.List;\n\npublic final class HashRing {\n    private final List<String> nodes;\n\n    public HashRing(List<String> nodes, int replicas) {\n        this.nodes = new ArrayList<>(nodes);\n    }\n\n    public String getNode(String key) {\n        int idx = Math.floorMod(key.hashCode(), nodes.size());\n        return nodes.get(idx);\n    }\n\n    public void addNode(String node) {\n        nodes.add(node);\n    }\n\n    public void removeNode(String node) {\n        nodes.remove(node);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "HashRing.java",
+      "content_patterns": [
+        "class HashRing"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "HashRing.java": "import java.nio.charset.StandardCharsets;\nimport java.security.MessageDigest;\nimport java.security.NoSuchAlgorithmException;\nimport java.util.ArrayList;\nimport java.util.Collections;\nimport java.util.List;\nimport java.util.TreeMap;\n\npublic final class HashRing {\n    private final int replicas;\n    private final TreeMap<Long, String> ring = new TreeMap<>();\n\n    public HashRing(List<String> nodes, int replicas) {\n        this.replicas = replicas;\n        for (String node : nodes) {\n            addNode(node);\n        }\n    }\n\n    private static long hashPoint(String s) {\n        try {\n            MessageDigest md = MessageDigest.getInstance(\"MD5\");\n            byte[] digest = md.digest(s.getBytes(StandardCharsets.UTF_8));\n            long value = 0;\n            for (int i = 0; i < 8; i++) {\n                value = (value << 8) | (digest[i] & 0xFF);\n            }\n            return value & Long.MAX_VALUE;\n        } catch (NoSuchAlgorithmException e) {\n            throw new RuntimeException(e);\n        }\n    }\n\n    public void addNode(String node) {\n        for (int i = 0; i < replicas; i++) {\n            ring.put(hashPoint(node + \":\" + i), node);\n        }\n    }\n\n    public void removeNode(String node) {\n        for (int i = 0; i < replicas; i++) {\n            ring.remove(hashPoint(node + \":\" + i));\n        }\n    }\n\n    public String getNode(String key) {\n        long point = hashPoint(key);\n        var tail = ring.tailMap(point);\n        Long targetKey = tail.isEmpty() ? ring.firstKey() : tail.firstKey();\n        return ring.get(targetKey);\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-mod-based",
+      "files": {
+        "HashRing.java": "import java.util.ArrayList;\nimport java.util.List;\n\npublic final class HashRing {\n    private final List<String> nodes;\n\n    public HashRing(List<String> nodes, int replicas) {\n        this.nodes = new ArrayList<>(nodes);\n    }\n\n    public String getNode(String key) {\n        int idx = Math.floorMod(key.hashCode(), nodes.size());\n        return nodes.get(idx);\n    }\n\n    public void addNode(String node) {\n        nodes.add(node);\n    }\n\n    public void removeNode(String node) {\n        nodes.remove(node);\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_java_consistent_hash_ring",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "java CheckHashRingTest.java",
+  "test_setup_files": {
+    "HashRingTest.java": "import java.util.ArrayList;\nimport java.util.HashMap;\nimport java.util.List;\nimport java.util.Map;\n\npublic final class HashRingTest {\n    public static void main(String[] args) {\n        checkEveryKeyMapsToACurrentNode();\n        checkDeterministic();\n        checkRemovingANodeOnlyMovesThatNodesOwnKeys();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkEveryKeyMapsToACurrentNode() {\n        HashRing ring = new HashRing(List.of(\"a\", \"b\", \"c\"), 50);\n        for (int i = 0; i < 200; i++) {\n            String node = ring.getNode(\"key-\" + i);\n            if (!node.equals(\"a\") && !node.equals(\"b\") && !node.equals(\"c\")) {\n                throw new AssertionError(\"unexpected node \" + node);\n            }\n        }\n    }\n\n    static void checkDeterministic() {\n        HashRing ring = new HashRing(List.of(\"a\", \"b\", \"c\"), 50);\n        if (!ring.getNode(\"stable-key\").equals(ring.getNode(\"stable-key\"))) {\n            throw new AssertionError(\"expected deterministic mapping\");\n        }\n    }\n\n    static void checkRemovingANodeOnlyMovesThatNodesOwnKeys() {\n        List<String> nodes = List.of(\"n0\", \"n1\", \"n2\", \"n3\", \"n4\");\n        HashRing ring = new HashRing(nodes, 100);\n        List<String> keys = new ArrayList<>();\n        for (int i = 0; i < 1000; i++) keys.add(\"key-\" + i);\n        Map<String, String> before = new HashMap<>();\n        for (String k : keys) before.put(k, ring.getNode(k));\n\n        ring.removeNode(\"n2\");\n\n        int moved = 0;\n        for (String k : keys) {\n            String after = ring.getNode(k);\n            if (!after.equals(before.get(k))) {\n                moved++;\n                if (!before.get(k).equals(\"n2\")) {\n                    throw new AssertionError(\"key \" + k + \" moved but was not on removed node n2\");\n                }\n            }\n            if (after.equals(\"n2\")) {\n                throw new AssertionError(\"key \" + k + \" still maps to removed node n2\");\n            }\n        }\n        if (moved == 0) {\n            throw new AssertionError(\"expected removing a node to move at least some keys\");\n        }\n    }\n}\n",
+    "CheckHashRingTest.java": "import java.io.IOException;\n\npublic final class CheckHashRingTest {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"HashRing.java\", \"HashRingTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"HashRingTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  }
+}

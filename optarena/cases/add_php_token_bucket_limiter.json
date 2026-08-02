@@ -1,0 +1,44 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "Create src/TokenBucket.php defining namespace App and class TokenBucket with a constructor __construct(float $capacity, float $refillRate) - $refillRate tokens are added per second, capped at $capacity tokens (never above it, even after a long idle period). allow(float $now): bool refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/TokenBucket.php",
+      "content_patterns": [
+        "function allow"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/TokenBucket.php": "<?php\nnamespace App;\n\nclass TokenBucket\n{\n    private float $capacity;\n    private float $refillRate;\n    private float $tokens;\n    private ?float $last = null;\n\n    public function __construct(float $capacity, float $refillRate)\n    {\n        $this->capacity = $capacity;\n        $this->refillRate = $refillRate;\n        $this->tokens = $capacity;\n    }\n\n    public function allow(float $now): bool\n    {\n        if ($this->last !== null) {\n            $elapsed = $now - $this->last;\n            $this->tokens = min($this->capacity, $this->tokens + $elapsed * $this->refillRate);\n        }\n        $this->last = $now;\n        if ($this->tokens >= 1) {\n            $this->tokens -= 1;\n            return true;\n        }\n        return false;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "src/TokenBucket.php": "<?php\nnamespace App;\n\nclass TokenBucket\n{\n    private float $capacity;\n    private float $refillRate;\n    private float $tokens;\n    private ?float $last = null;\n\n    public function __construct(float $capacity, float $refillRate)\n    {\n        $this->capacity = $capacity;\n        $this->refillRate = $refillRate;\n        $this->tokens = $capacity;\n    }\n\n    public function allow(float $now): bool\n    {\n        if ($this->last !== null) {\n            $elapsed = $now - $this->last;\n            $this->tokens = $this->tokens + $elapsed * $this->refillRate;\n        }\n        $this->last = $now;\n        if ($this->tokens >= 1) {\n            $this->tokens -= 1;\n            return true;\n        }\n        return false;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_token_bucket_limiter",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "difficulty": 3,
+  "check_command": "phpunit tests/TokenBucketTest.php",
+  "setup_files": {},
+  "test_setup_files": {
+    "tests/TokenBucketTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/TokenBucket.php';\n\nfinal class TokenBucketTest extends TestCase\n{\n    public function testStartsFullAndDrains(): void\n    {\n        $b = new \\App\\TokenBucket(3, 1);\n        $this->assertTrue($b->allow(0));\n        $this->assertTrue($b->allow(0));\n        $this->assertTrue($b->allow(0));\n        $this->assertFalse($b->allow(0));\n    }\n\n    public function testRefillsOverTime(): void\n    {\n        $b = new \\App\\TokenBucket(3, 1);\n        for ($i = 0; $i < 3; $i++) { $b->allow(0); }\n        $this->assertFalse($b->allow(0.5));\n        $this->assertTrue($b->allow(1.0));\n        $this->assertFalse($b->allow(1.0));\n    }\n\n    public function testRefillCapsAtCapacity(): void\n    {\n        $b = new \\App\\TokenBucket(2, 1);\n        $b->allow(0);\n        $b->allow(0);\n        $this->assertTrue($b->allow(1000));\n        $this->assertTrue($b->allow(1000));\n        $this->assertFalse($b->allow(1000));\n    }\n}\n"
+  }
+}

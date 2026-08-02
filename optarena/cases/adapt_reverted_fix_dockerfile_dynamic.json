@@ -1,0 +1,58 @@
+{
+  "name": "adapt_reverted_fix_dockerfile_dynamic",
+  "language": "dockerfile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: the agent's bug fix is REVERTED between prompts (fixed after_prompt trigger, Dockerfile rewritten back to the insecure version); the agent must notice and reapply the fix",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "test_kind": "unit",
+  "tags": [
+    "dockerfile",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "reverted-edit"
+  ],
+  "prompts": [
+    "This Dockerfile runs the container as root, which is a security bug. Fix it by creating a non-root user named appuser and switching to it with a USER instruction before the final CMD.",
+    "Your fix to the Dockerfile seems to have been reverted - it runs as root again. Please reapply the fix (create appuser, add a USER instruction)."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nCMD [\"python\", \"app.py\"]\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "Dockerfile reverted back to running as root",
+      "write_files": {
+        "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nCMD [\"python\", \"app.py\"]\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "USER",
+        "appuser"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_user.py": "import re\n\nwith open('Dockerfile', encoding='utf-8') as f:\n    content = f.read()\n\nassert re.search(r'(?im)^USER\\s+appuser', content), \\\n    'expected a USER appuser instruction (stale root-running Dockerfile not fixed)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_user.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nRUN useradd -m appuser\nUSER appuser\nCMD [\"python\", \"app.py\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fix-not-reapplied",
+      "files": {
+        "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nCMD [\"python\", \"app.py\"]\n"
+      }
+    }
+  ]
+}

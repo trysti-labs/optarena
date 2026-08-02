@@ -1,0 +1,46 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "token_bucket.h's TokenBucket::allow always returns true. Implement it properly: the constructor TokenBucket(double capacity, double refillRate) - refillRate tokens are added per second, capped at capacity tokens (never above it, even after a long idle period). allow(double now) refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "setup_files": {
+    "token_bucket.h": "#pragma once\n\nclass TokenBucket {\npublic:\n    TokenBucket(double capacity, double refillRate)\n        : capacity_(capacity), refillRate_(refillRate) {}\n\n    bool allow(double now) {\n        return true;\n    }\n\nprivate:\n    double capacity_;\n    double refillRate_;\n};\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "token_bucket.h",
+      "content_patterns": [
+        "class TokenBucket"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "token_bucket.h": "#pragma once\n#include <algorithm>\n#include <optional>\n\nclass TokenBucket {\npublic:\n    TokenBucket(double capacity, double refillRate)\n        : capacity_(capacity), refillRate_(refillRate), tokens_(capacity) {}\n\n    bool allow(double now) {\n        if (last_.has_value()) {\n            double elapsed = now - *last_;\n            tokens_ = std::min(capacity_, tokens_ + elapsed * refillRate_);\n        }\n        last_ = now;\n        if (tokens_ >= 1.0) {\n            tokens_ -= 1.0;\n            return true;\n        }\n        return false;\n    }\n\nprivate:\n    double capacity_;\n    double refillRate_;\n    double tokens_;\n    std::optional<double> last_;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "token_bucket.h": "#pragma once\n#include <optional>\n\nclass TokenBucket {\npublic:\n    TokenBucket(double capacity, double refillRate)\n        : capacity_(capacity), refillRate_(refillRate), tokens_(capacity) {}\n\n    bool allow(double now) {\n        if (last_.has_value()) {\n            double elapsed = now - *last_;\n            tokens_ = tokens_ + elapsed * refillRate_;\n        }\n        last_ = now;\n        if (tokens_ >= 1.0) {\n            tokens_ -= 1.0;\n            return true;\n        }\n        return false;\n    }\n\nprivate:\n    double capacity_;\n    double refillRate_;\n    double tokens_;\n    std::optional<double> last_;\n};\n"
+      }
+    }
+  ],
+  "name": "add_cpp_token_bucket_limiter",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "g++ -std=c++17 test_token_bucket.cpp -o test_token_bucket_bin && ./test_token_bucket_bin",
+  "test_setup_files": {
+    "test_token_bucket.cpp": "#include \"token_bucket.h\"\n#include <cassert>\n#include <iostream>\n\nint main() {\n    {\n        TokenBucket b(3, 1);\n        assert(b.allow(0));\n        assert(b.allow(0));\n        assert(b.allow(0));\n        assert(!b.allow(0));\n    }\n    {\n        TokenBucket b(3, 1);\n        for (int i = 0; i < 3; i++) b.allow(0);\n        assert(!b.allow(0.5));\n        assert(b.allow(1.0));\n        assert(!b.allow(1.0));\n    }\n    {\n        TokenBucket b(2, 1);\n        b.allow(0);\n        b.allow(0);\n        assert(b.allow(1000));\n        assert(b.allow(1000));\n        assert(!b.allow(1000));\n    }\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  }
+}

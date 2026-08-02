@@ -1,0 +1,56 @@
+{
+  "description": "Repo-scale (k8s-appstack): a new metrics port must be wired consistently across the Deployment's container AND the fronting Service",
+  "tags": [
+    "yaml",
+    "kubernetes",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a Prometheus metrics endpoint to the webstore-api app: a new named container port `metrics` on containerPort 9090 in k8s/deployment.yaml, alongside the existing `http` port. This must be wired all the way through to k8s/service.yaml too - add a matching named `metrics` port on the Service (port 9090, targetPort 9090) so the metrics endpoint is actually reachable, not just declared on the pod. The existing `http` port/targetPort 8080 on both files must be left intact."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "k8s/deployment.yaml",
+      "content_patterns": [
+        "metrics",
+        "9090"
+      ]
+    },
+    {
+      "path_pattern": "k8s/service.yaml",
+      "content_patterns": [
+        "metrics",
+        "9090"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_metrics_port.py": "import yaml\n\nwith open('k8s/deployment.yaml') as f:\n    dep = yaml.safe_load(f)\nwith open('k8s/service.yaml') as f:\n    svc = yaml.safe_load(f)\n\ncontainer = dep['spec']['template']['spec']['containers'][0]\ncontainer_ports = {p['name']: p['containerPort'] for p in container.get('ports', [])}\nassert 'metrics' in container_ports, \"Deployment container is missing a 'metrics' port\"\nassert container_ports['metrics'] == 9090, (\n    f\"expected metrics containerPort 9090, got {container_ports['metrics']}\")\n\nsvc_ports = {p['name']: p for p in svc['spec'].get('ports', [])}\nassert 'metrics' in svc_ports, (\n    \"Service is missing a 'metrics' port - the Deployment exposes a metrics port on the \"\n    \"container but nothing routes to it, which defeats the point of adding it\")\nassert svc_ports['metrics']['targetPort'] == container_ports['metrics'], (\n    f\"Service metrics targetPort {svc_ports['metrics']['targetPort']} must match the \"\n    f\"Deployment's metrics containerPort {container_ports['metrics']}\")\n\n# The original http port must still be intact too.\nassert container_ports.get('http') == 8080\nassert svc_ports['http']['targetPort'] == 8080\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_metrics_port.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: webstore-api\n  namespace: webstore\n  labels:\n    app: webstore-api\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: webstore-api\n  template:\n    metadata:\n      labels:\n        app: webstore-api\n    spec:\n      containers:\n        - name: api\n          image: webstore/api:1.0.0\n          ports:\n            - name: http\n              containerPort: 8080\n            - name: metrics\n              containerPort: 9090\n          envFrom:\n            - configMapRef:\n                name: webstore-config\n          resources:\n            requests:\n              cpu: \"250m\"\n              memory: \"256Mi\"\n            limits:\n              cpu: \"500m\"\n              memory: \"512Mi\"\n",
+    "k8s/service.yaml": "apiVersion: v1\nkind: Service\nmetadata:\n  name: webstore-api\n  namespace: webstore\nspec:\n  selector:\n    app: webstore-api\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n    - name: metrics\n      port: 9090\n      targetPort: 9090\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "service-not-updated-for-metrics-port",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: webstore-api\n  namespace: webstore\n  labels:\n    app: webstore-api\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: webstore-api\n  template:\n    metadata:\n      labels:\n        app: webstore-api\n    spec:\n      containers:\n        - name: api\n          image: webstore/api:1.0.0\n          ports:\n            - name: http\n              containerPort: 8080\n            - name: metrics\n              containerPort: 9090\n          envFrom:\n            - configMapRef:\n                name: webstore-config\n          resources:\n            requests:\n              cpu: \"250m\"\n              memory: \"256Mi\"\n            limits:\n              cpu: \"500m\"\n              memory: \"512Mi\"\n",
+        "k8s/service.yaml": "apiVersion: v1\nkind: Service\nmetadata:\n  name: webstore-api\n  namespace: webstore\nspec:\n  selector:\n    app: webstore-api\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n"
+      }
+    }
+  ],
+  "name": "add_k8s_appstack_metrics_port",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "k8s-appstack",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

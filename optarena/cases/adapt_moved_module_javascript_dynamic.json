@@ -1,0 +1,60 @@
+{
+  "name": "adapt_moved_module_javascript_dynamic",
+  "language": "javascript",
+  "domain": "backend",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: the module the agent's first solution requires is MOVED to a new path between prompts (fixed after_prompt trigger, old path deleted and new path created); the agent must update its require, not keep pointing at the old location",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "javascript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "moved-module"
+  ],
+  "prompts": [
+    "pricing/rules.js exports DISCOUNT via module.exports. Create checkout.js with a function applyDiscount(price) that returns price * (1 - DISCOUNT), requiring it from './pricing/rules'. Export as module.exports = { applyDiscount }.",
+    "pricing/rules.js has moved to config/rules.js (same DISCOUNT value). Update checkout.js's require to use the new location './config/rules' - do not keep requiring the old path."
+  ],
+  "setup_files": {
+    "pricing/rules.js": "module.exports = { DISCOUNT: 0.1 };\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "pricing/rules.js moved to config/rules.js",
+      "delete_files": [
+        "pricing/rules.js"
+      ],
+      "write_files": {
+        "config/rules.js": "module.exports = { DISCOUNT: 0.1 };\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "checkout.js",
+      "content_patterns": [
+        "applyDiscount"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_checkout.js": "let mod;\ntry {\n  mod = require('./checkout.js');\n} catch (e) {\n  throw new Error('checkout.js failed to load (likely still requires the old pricing/rules path): ' + e.message);\n}\nconst got = mod.applyDiscount(100);\nif (Math.abs(got - 90) > 1e-6) throw new Error(`applyDiscount(100) = ${got}`);\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_checkout.js",
+  "reference_solution": {
+    "checkout.js": "const { DISCOUNT } = require('./config/rules');\n\nfunction applyDiscount(price) {\n  return price * (1 - DISCOUNT);\n}\n\nmodule.exports = { applyDiscount };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-requires-old-path",
+      "files": {
+        "checkout.js": "const { DISCOUNT } = require('./pricing/rules');\n\nfunction applyDiscount(price) {\n  return price * (1 - DISCOUNT);\n}\n\nmodule.exports = { applyDiscount };\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "name": "adapt_backup_retention_sql_dynamic",
+  "language": "sql",
+  "domain": "data",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: retention_days.txt (a spec file the audit_logs CHECK constraint must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the constraint, not leave the stale cap in place",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "sql",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write schema.sql creating a table audit_logs (id integer primary key, retention_days integer not null) with a CHECK constraint restricting retention_days to be no greater than the integer in retention_days.txt (currently 30).",
+    "retention_days.txt has changed. Update schema.sql's CHECK constraint so it enforces the CURRENT cap in the file."
+  ],
+  "setup_files": {
+    "retention_days.txt": "30\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "retention_days.txt lowered to a stricter cap",
+      "write_files": {
+        "retention_days.txt": "14\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "audit_logs",
+        "check"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_schema.py": "import sqlite3\n\nwith open('retention_days.txt', encoding='utf-8') as f:\n    cap = int(f.read().strip())\n\nwith open('schema.sql', encoding='utf-8') as f:\n    ddl = f.read()\n\nconn = sqlite3.connect(':memory:')\nconn.executescript(ddl)\n\nconn.execute('INSERT INTO audit_logs (id, retention_days) VALUES (1, ?)', (cap,))\nconn.commit()\n\ntry:\n    conn.execute('INSERT INTO audit_logs (id, retention_days) VALUES (2, ?)', (cap + 5,))\n    conn.commit()\n    raise AssertionError(f'expected retention_days > {cap} to be rejected by the CHECK constraint (stale cap not updated)')\nexcept sqlite3.IntegrityError:\n    pass\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_schema.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE audit_logs (\n    id INTEGER PRIMARY KEY,\n    retention_days INTEGER NOT NULL CHECK (retention_days <= 14)\n);\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-retention-cap",
+      "files": {
+        "schema.sql": "CREATE TABLE audit_logs (\n    id INTEGER PRIMARY KEY,\n    retention_days INTEGER NOT NULL CHECK (retention_days <= 30)\n);\n"
+      }
+    }
+  ]
+}

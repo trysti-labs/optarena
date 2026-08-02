@@ -1,0 +1,61 @@
+{
+  "name": "adapt_replica_count_yaml_dynamic",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: replica_count.txt (a spec file the Deployment's replica count must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update replicas, not leave the stale count in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "yaml",
+    "kubernetes",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a Kubernetes Deployment manifest at deployment.yaml for a Deployment named web with exactly the number of replicas listed in replica_count.txt (currently 2), using image nginx:latest, with a matchLabels/template label app: web.",
+    "replica_count.txt has changed. Update deployment.yaml's replica count to match the CURRENT value in the file."
+  ],
+  "setup_files": {
+    "replica_count.txt": "2\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "replica_count.txt rewritten to a new required replica count",
+      "write_files": {
+        "replica_count.txt": "5\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "deployment.yaml",
+      "content_patterns": [
+        "Deployment",
+        "web",
+        "replicas"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_deployment.py": "import yaml\n\nwith open('replica_count.txt', encoding='utf-8') as f:\n    current = int(f.read().strip())\n\nwith open('deployment.yaml') as f:\n    data = yaml.safe_load(f)\n\ngot = data.get('spec', {}).get('replicas')\nassert got == current, f'replicas is {got!r}, want the CURRENT replica_count.txt value {current!r} (stale count not updated)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_deployment.py",
+  "reference_solution": {
+    "deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 5\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      containers:\n        - name: web\n          image: nginx:latest\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-replica-count",
+      "files": {
+        "deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      containers:\n        - name: web\n          image: nginx:latest\n"
+      }
+    }
+  ]
+}

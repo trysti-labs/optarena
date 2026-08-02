@@ -44,9 +44,13 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
-      # Node present so the cross-oracle conformance suite (tests/test_conformance.py)
-      # runs instead of skipping - it's the H-09 guarantee that the Python and
-      # JS oracles agree byte-for-byte.
+      # Node present so the cross-oracle conformance suite
+      # (tests/test_conformance.py) RUNS rather than skipping: the dashboard
+      # reimplements four algorithms in JS (mcnemar_exact_p,
+      # manifest_compatibility, case_trajectory, attribute_failure) and that
+      # suite asserts they still agree with the Python. A-35: this step used to
+      # claim the suite existed when the file did not - it does now, and it is
+      # mutation-checked (perturbing the JS makes it fail).
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
@@ -157,10 +161,77 @@ jobs:
         run: |
           python -m venv /tmp/wheel-venv
           /tmp/wheel-venv/bin/pip install dist/*.whl
+      # A-30: run from OUTSIDE the checkout, or the repo shadows the installed
+      # package on sys.path and this tests the source tree instead of the wheel.
       - name: Smoke-test the installed CLI
+        working-directory: /tmp
         run: |
           /tmp/wheel-venv/bin/optarena --help
+          /tmp/wheel-venv/bin/optarena --version
           /tmp/wheel-venv/bin/optarena cases validate
+          /tmp/wheel-venv/bin/optarena doctor --json > /tmp/doctor.json || true
+          python -c "import json; json.load(open('/tmp/doctor.json'))"
+      # A-30: the results directory must NOT land inside site-packages, where
+      # `pip install -U` would be entitled to delete a user's run history. The
+      # old smoke test only ran --help/cases validate, neither of which
+      # touches that path, so this went unnoticed.
+      - name: Results directory is outside site-packages
+        working-directory: /tmp
+        run: |
+          /tmp/wheel-venv/bin/python - <<'PY'
+          from optarena import store
+          location = str(store.RESULTS_DIR)
+          print("results dir:", location)
+          assert "site-packages" not in location, location
+          PY
+      # A-26: features that need the unpackaged directories must fail with a
+      # clear message, not a traceback or a silently degraded mode.
+      - name: Unpackaged assets fail cleanly
+        working-directory: /tmp
+        run: |
+          set +e
+          out=$(/tmp/wheel-venv/bin/optarena serve --port 8399 2>&1); code=$?
+          set -e
+          echo "$out"
+          test "$code" = "2"
+          echo "$out" | grep -q "no dashboard"
+
+  # A-36: the non-root sandbox opt-in (OPTARENA_SANDBOX_USER), exercised on
+  # real Linux - the only place it can actually be validated. On Windows and
+  # macOS the Docker Desktop bind-mount layer ignores Unix permission bits, so
+  # a local pass there proves nothing about whether an unprivileged uid can
+  # write the workspace; that is the same blind spot that hid the DAC_OVERRIDE
+  # failure for months. Scoped to the base image's shell track to stay fast:
+  # what this guards is that the account exists, its HOME is writable, the
+  # toolchain caches are readable, and the runner's workspace-permission
+  # relaxation is enough for a case to actually run and be graded.
+  sandbox-nonroot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.repository_owner == 'trysti-labs' || github.repository_owner == 'selfopt'
+    needs: unit-tests
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Built here rather than pulled: the published :latest predates the
+      # non-root account, so pulling it would test the old image.
+      - name: Build the base sandbox image
+        run: docker build -t optarena-tester:latest -f docker/Dockerfile docker
+      - name: Verify shell cases as a non-root sandbox user
+        env:
+          OPTARENA_SANDBOX_USER: "1000:1000"
+        run: python -m optarena cases verify --language shell
 
   # F-17/F-13: hadolint catches Dockerfile anti-patterns (missing pins,
   # unnecessary layers, shell-form footguns) that a human reviewer skims past;

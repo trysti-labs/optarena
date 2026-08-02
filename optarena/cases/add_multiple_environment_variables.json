@@ -42,5 +42,13 @@
   "timeout": 120,
   "reference_solution": {
     "environments.tf": "variable \"environment\" {\n  type        = string\n  default     = \"dev\"\n  description = \"Deployment environment: must be dev, staging, or prod\"\n}\n\nlocals {\n  environment_config = {\n    dev = {\n      instance_count = 1\n      instance_size  = \"small\"\n    }\n    staging = {\n      instance_count = 2\n      instance_size  = \"medium\"\n    }\n    prod = {\n      instance_count = 5\n      instance_size  = \"large\"\n    }\n  }\n\n  selected = lookup(local.environment_config, var.environment, local.environment_config[\"dev\"])\n}\n\noutput \"instance_count\" {\n  value = local.selected.instance_count\n}\n\noutput \"instance_size\" {\n  value = local.selected.instance_size\n}\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-not-looked-up",
+      "files": {
+        "environments.tf": "variable \"environment\" {\n  type        = string\n  default     = \"dev\"\n  description = \"Deployment environment: must be dev, staging, or prod\"\n}\n\nlocals {\n  environment_config = {\n    dev = {\n      instance_count = 1\n      instance_size  = \"small\"\n    }\n    staging = {\n      instance_count = 2\n      instance_size  = \"medium\"\n    }\n    prod = {\n      instance_count = 5\n      instance_size  = \"large\"\n    }\n  }\n}\n\noutput \"instance_count\" {\n  value = 1\n}\n\noutput \"instance_size\" {\n  value = \"small\"\n}\n"
+      }
+    }
+  ]
 }

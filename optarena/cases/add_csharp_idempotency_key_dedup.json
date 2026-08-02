@@ -1,0 +1,48 @@
+{
+  "description": "Add idempotency-key deduplication with a TTL window to a processor that currently re-executes on every call",
+  "task_type": "feature",
+  "tags": [
+    "csharp",
+    "idempotency",
+    "algorithms"
+  ],
+  "prompts": [
+    "Processor.cs's Process(key, payload, now) runs the side effect (appends to Effects and returns a fresh result) EVERY time it's called, even for a key it has already processed. Make it idempotent: within `window` seconds of the first call for a given key, a repeat call with that SAME key must return the ORIGINAL result WITHOUT running the side effect again (Effects must not grow) - regardless of what payload is passed the second time. Once `window` seconds have passed since the first call for that key, the NEXT call for that key must run for real again (a fresh execution, whose result becomes the new one remembered for that key). Keep the Effects list and ProcResult record as-is."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "Processor.cs": "using System.Collections.Generic;\n\npublic record ProcResult(string Key, int Payload, long ProcessedAt);\n\npublic class Processor\n{\n    private readonly long _window;\n    public List<(string Key, int Payload)> Effects { get; } = new();\n\n    public Processor(long window)\n    {\n        _window = window;\n    }\n\n    public ProcResult Process(string key, int payload, long now)\n    {\n        Effects.Add((key, payload));\n        return new ProcResult(key, payload, now);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Processor.cs",
+      "content_patterns": [
+        "class Processor"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "Processor.cs": "using System.Collections.Generic;\n\npublic record ProcResult(string Key, int Payload, long ProcessedAt);\n\npublic class Processor\n{\n    private readonly long _window;\n    private readonly Dictionary<string, (ProcResult Result, long RecordedAt)> _seen = new();\n    public List<(string Key, int Payload)> Effects { get; } = new();\n\n    public Processor(long window)\n    {\n        _window = window;\n    }\n\n    public ProcResult Process(string key, int payload, long now)\n    {\n        if (_seen.TryGetValue(key, out var cached) && now - cached.RecordedAt < _window)\n        {\n            return cached.Result;\n        }\n        Effects.Add((key, payload));\n        var result = new ProcResult(key, payload, now);\n        _seen[key] = (result, now);\n        return result;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedup-never-expires",
+      "files": {
+        "Processor.cs": "using System.Collections.Generic;\n\npublic record ProcResult(string Key, int Payload, long ProcessedAt);\n\npublic class Processor\n{\n    private readonly long _window;\n    private readonly Dictionary<string, ProcResult> _seen = new();\n    public List<(string Key, int Payload)> Effects { get; } = new();\n\n    public Processor(long window)\n    {\n        _window = window;\n    }\n\n    public ProcResult Process(string key, int payload, long now)\n    {\n        if (_seen.TryGetValue(key, out var cached))\n        {\n            return cached;\n        }\n        Effects.Add((key, payload));\n        var result = new ProcResult(key, payload, now);\n        _seen[key] = result;\n        return result;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_csharp_idempotency_key_dedup",
+  "language": "csharp",
+  "framework": "xunit",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "dotnet test tests/tests.csproj",
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/ProcessorTests.cs": "using Xunit;\n\npublic class ProcessorTests\n{\n    [Fact]\n    public void DuplicateKeyWithinWindowNotReexecuted()\n    {\n        var p = new Processor(10);\n        var first = p.Process(\"order-1\", 5, 0);\n        var second = p.Process(\"order-1\", 999, 5);\n        Assert.Equal(first, second);\n        Assert.Single(p.Effects);\n    }\n\n    [Fact]\n    public void DifferentKeysBothExecute()\n    {\n        var p = new Processor(10);\n        p.Process(\"a\", 1, 0);\n        p.Process(\"b\", 2, 0);\n        Assert.Equal(2, p.Effects.Count);\n    }\n\n    [Fact]\n    public void ReexecutesAfterWindowExpires()\n    {\n        var p = new Processor(10);\n        p.Process(\"order-1\", 5, 0);\n        p.Process(\"order-1\", 5, 9);\n        Assert.Single(p.Effects);\n        p.Process(\"order-1\", 7, 10);\n        Assert.Equal(2, p.Effects.Count);\n        Assert.Equal(7, p.Effects[1].Payload);\n    }\n}\n"
+  }
+}

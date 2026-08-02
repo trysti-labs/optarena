@@ -1,0 +1,58 @@
+{
+  "name": "adapt_exposed_port_dockerfile_dynamic",
+  "language": "dockerfile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: app_port.txt (a spec file the Dockerfile's EXPOSE port must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the exposed port, not leave the stale value in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "dockerfile",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a Dockerfile at the repo root FROM python:3.11-slim that sets WORKDIR /app, copies the current directory in, and EXPOSEs EXACTLY the port listed in app_port.txt (currently: 8000).",
+    "app_port.txt has changed. Update the Dockerfile's EXPOSE instruction to match the CURRENT contents of app_port.txt exactly."
+  ],
+  "setup_files": {
+    "app_port.txt": "8000\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "app_port.txt rewritten to a new required port",
+      "write_files": {
+        "app_port.txt": "9000\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "FROM",
+        "EXPOSE"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_port.py": "import re\n\nwith open('app_port.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'app_port.txt is empty'\n\nwith open('Dockerfile', encoding='utf-8') as f:\n    content = f.read()\n\nm = re.search(r'(?im)^EXPOSE\\s+(\\d+)', content)\nassert m, 'no EXPOSE line found in Dockerfile'\nport = m.group(1)\nassert port == current, f'Dockerfile EXPOSEs {port!r}, want the CURRENT app_port.txt value {current!r} (stale port not updated)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_port.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nEXPOSE 9000\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-exposed-port",
+      "files": {
+        "Dockerfile": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nEXPOSE 8000\n"
+      }
+    }
+  ]
+}

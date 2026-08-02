@@ -1,0 +1,46 @@
+{
+  "description": "Fix a heapq-based priority queue that breaks ties by comparing the payload itself (crashing on incomparable payloads) into a FIFO-stable one",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "algorithms",
+    "heapq"
+  ],
+  "prompts": [
+    "pq.py's StablePriorityQueue pushes plain (priority, item) tuples onto a heap. When two items share a priority, heapq falls back to comparing the ITEMS directly - which raises TypeError for items that aren't comparable (e.g. plain dicts), and even when it doesn't raise, it has nothing to do with insertion order. Fix push/pop so that: (1) items with a lower priority number come out first, (2) items with EQUAL priority come out in the order they were pushed (FIFO), and (3) items never need to be compared to each other directly - arbitrary non-comparable payloads (dicts, custom objects) must work."
+  ],
+  "setup_files": {
+    "pq.py": "import heapq\n\n\nclass StablePriorityQueue:\n    def __init__(self):\n        self._heap = []\n\n    def push(self, priority, item):\n        heapq.heappush(self._heap, (priority, item))\n\n    def pop(self):\n        priority, item = heapq.heappop(self._heap)\n        return item\n\n    def __len__(self):\n        return len(self._heap)\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "pq.py",
+      "content_patterns": [
+        "class StablePriorityQueue"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_pq_hidden.py": "from pq import StablePriorityQueue\n\n\ndef test_priority_order():\n    q = StablePriorityQueue()\n    q.push(5, 'low')\n    q.push(1, 'high')\n    q.push(3, 'mid')\n    assert [q.pop(), q.pop(), q.pop()] == ['high', 'mid', 'low']\n\n\ndef test_equal_priority_is_fifo():\n    q = StablePriorityQueue()\n    q.push(1, 'first')\n    q.push(1, 'second')\n    q.push(1, 'third')\n    assert [q.pop(), q.pop(), q.pop()] == ['first', 'second', 'third']\n\n\ndef test_incomparable_payloads_do_not_raise():\n    q = StablePriorityQueue()\n    q.push(1, {'id': 1})\n    q.push(1, {'id': 2})\n    assert q.pop() == {'id': 1}\n    assert q.pop() == {'id': 2}\n"
+  },
+  "check_command": "python3 -m pytest -q test_pq_hidden.py",
+  "reference_solution": {
+    "pq.py": "import heapq\nimport itertools\n\n\nclass StablePriorityQueue:\n    def __init__(self):\n        self._heap = []\n        self._counter = itertools.count()\n\n    def push(self, priority, item):\n        heapq.heappush(self._heap, (priority, next(self._counter), item))\n\n    def pop(self):\n        priority, order, item = heapq.heappop(self._heap)\n        return item\n\n    def __len__(self):\n        return len(self._heap)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "counter-decrements-reverses-fifo",
+      "files": {
+        "pq.py": "import heapq\n\n\nclass StablePriorityQueue:\n    def __init__(self):\n        self._heap = []\n        self._counter = 0\n\n    def push(self, priority, item):\n        heapq.heappush(self._heap, (priority, self._counter, item))\n        self._counter -= 1\n\n    def pop(self):\n        priority, order, item = heapq.heappop(self._heap)\n        return item\n\n    def __len__(self):\n        return len(self._heap)\n"
+      }
+    }
+  ],
+  "name": "add_python_stable_priority_queue",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

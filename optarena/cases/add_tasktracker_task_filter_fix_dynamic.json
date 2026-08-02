@@ -1,0 +1,65 @@
+{
+  "name": "add_tasktracker_task_filter_fix_dynamic",
+  "language": "python",
+  "framework": "fastapi",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "fastapi-tasktracker",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 900,
+  "description": "Repo-scale dynamic eval: GET /tasks silently drops filters when more than one is combined (elif chain instead of independent ifs); the fix is REVERTED after prompt 1 (fixed after_prompt trigger) and must be reapplied, this time covering all three filters combined at once",
+  "difficulty": 5,
+  "task_type": "bug_fix",
+  "tags": [
+    "fastapi",
+    "sqlalchemy",
+    "l3",
+    "repo-scale",
+    "multi-file",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "reverted-fix",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "GET /tasks ignores some of its filters when more than one is passed together - e.g. project_id=X&status=done currently returns ALL of project X's tasks regardless of status, instead of just the done ones. Find and fix the bug in app/crud/task.py; every combination of project_id/status/assignee_id filters must apply together (AND), not just whichever one happens to be checked first.",
+    "The filter fix from before seems to have been lost - GET /tasks is back to ignoring combined filters. Reapply the fix in app/crud/task.py. This time also make sure combining ALL THREE filters at once (project_id AND status AND assignee_id together) returns the correct intersection, not just pairs of them."
+  ],
+  "setup_files": {
+    "app/crud/task.py": "from __future__ import annotations\n\nfrom sqlalchemy import select\nfrom sqlalchemy.orm import Session\n\nfrom app.models.task import Task, TaskStatus\nfrom app.schemas.task import TaskCreate, TaskUpdate\n\n\ndef create_task(db: Session, data: TaskCreate) -> Task:\n    task = Task(\n        title=data.title,\n        description=data.description,\n        priority=data.priority,\n        project_id=data.project_id,\n        assignee_id=data.assignee_id,\n    )\n    db.add(task)\n    db.commit()\n    db.refresh(task)\n    return task\n\n\ndef get_task(db: Session, task_id: int) -> Task | None:\n    return db.get(Task, task_id)\n\n\ndef list_tasks(\n    db: Session,\n    project_id: int | None = None,\n    status: TaskStatus | None = None,\n    assignee_id: int | None = None,\n    skip: int = 0,\n    limit: int = 100,\n) -> list[Task]:\n    stmt = select(Task).order_by(Task.id)\n    if project_id is not None:\n        stmt = stmt.where(Task.project_id == project_id)\n    elif status is not None:\n        stmt = stmt.where(Task.status == status)\n    elif assignee_id is not None:\n        stmt = stmt.where(Task.assignee_id == assignee_id)\n    stmt = stmt.offset(skip).limit(limit)\n    return list(db.scalars(stmt))\n\n\ndef update_task(db: Session, task: Task, data: TaskUpdate) -> Task:\n    for field, value in data.model_dump(exclude_unset=True).items():\n        setattr(task, field, value)\n    db.add(task)\n    db.commit()\n    db.refresh(task)\n    return task\n\n\ndef delete_task(db: Session, task: Task) -> None:\n    db.delete(task)\n    db.commit()\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "app/crud/task.py reverted back to the elif-chain bug, undoing prompt 1's fix",
+      "write_files": {
+        "app/crud/task.py": "from __future__ import annotations\n\nfrom sqlalchemy import select\nfrom sqlalchemy.orm import Session\n\nfrom app.models.task import Task, TaskStatus\nfrom app.schemas.task import TaskCreate, TaskUpdate\n\n\ndef create_task(db: Session, data: TaskCreate) -> Task:\n    task = Task(\n        title=data.title,\n        description=data.description,\n        priority=data.priority,\n        project_id=data.project_id,\n        assignee_id=data.assignee_id,\n    )\n    db.add(task)\n    db.commit()\n    db.refresh(task)\n    return task\n\n\ndef get_task(db: Session, task_id: int) -> Task | None:\n    return db.get(Task, task_id)\n\n\ndef list_tasks(\n    db: Session,\n    project_id: int | None = None,\n    status: TaskStatus | None = None,\n    assignee_id: int | None = None,\n    skip: int = 0,\n    limit: int = 100,\n) -> list[Task]:\n    stmt = select(Task).order_by(Task.id)\n    if project_id is not None:\n        stmt = stmt.where(Task.project_id == project_id)\n    elif status is not None:\n        stmt = stmt.where(Task.status == status)\n    elif assignee_id is not None:\n        stmt = stmt.where(Task.assignee_id == assignee_id)\n    stmt = stmt.offset(skip).limit(limit)\n    return list(db.scalars(stmt))\n\n\ndef update_task(db: Session, task: Task, data: TaskUpdate) -> Task:\n    for field, value in data.model_dump(exclude_unset=True).items():\n        setattr(task, field, value)\n    db.add(task)\n    db.commit()\n    db.refresh(task)\n    return task\n\n\ndef delete_task(db: Session, task: Task) -> None:\n    db.delete(task)\n    db.commit()\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "*/crud/task.py",
+      "content_patterns": [
+        "project_id"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_task_filter_fix_hidden.py": "def _setup(client):\n    user = client.post(\"/users\", json={\"username\": \"dev\", \"email\": \"dev@example.com\"}).json()\n    project = client.post(\"/projects\", json={\"name\": \"Mercury\", \"owner_id\": user[\"id\"]}).json()\n    return user, project\n\n\ndef test_combined_project_and_status_filter(client):\n    user, project = _setup(client)\n    t1 = client.post(\"/tasks\", json={\"title\": \"A\", \"project_id\": project[\"id\"]}).json()\n    t2 = client.post(\"/tasks\", json={\"title\": \"B\", \"project_id\": project[\"id\"]}).json()\n    client.patch(f\"/tasks/{t2['id']}\", json={\"status\": \"done\"})\n\n    resp = client.get(\"/tasks\", params={\"project_id\": project[\"id\"], \"status\": \"done\"})\n    ids = [t[\"id\"] for t in resp.json()]\n    assert ids == [t2[\"id\"]], resp.json()\n\n\ndef test_combined_all_three_filters(client):\n    user, project = _setup(client)\n    dev2 = client.post(\"/users\", json={\"username\": \"dev2\", \"email\": \"dev2@example.com\"}).json()\n    t1 = client.post(\n        \"/tasks\", json={\"title\": \"A\", \"project_id\": project[\"id\"], \"assignee_id\": user[\"id\"]}\n    ).json()\n    t2 = client.post(\n        \"/tasks\", json={\"title\": \"B\", \"project_id\": project[\"id\"], \"assignee_id\": user[\"id\"]}\n    ).json()\n    t3 = client.post(\n        \"/tasks\", json={\"title\": \"C\", \"project_id\": project[\"id\"], \"assignee_id\": dev2[\"id\"]}\n    ).json()\n    client.patch(f\"/tasks/{t1['id']}\", json={\"status\": \"done\"})\n    client.patch(f\"/tasks/{t2['id']}\", json={\"status\": \"done\"})\n    client.patch(f\"/tasks/{t3['id']}\", json={\"status\": \"done\"})\n\n    resp = client.get(\n        \"/tasks\",\n        params={\"project_id\": project[\"id\"], \"status\": \"done\", \"assignee_id\": user[\"id\"]},\n    )\n    ids = sorted(t[\"id\"] for t in resp.json())\n    assert ids == sorted([t1[\"id\"], t2[\"id\"]]), resp.json()\n\n\nprint(\"PASS\")\n"
+  },
+  "check_command": "python -m pytest tests/ -q",
+  "reference_solution": {
+    "app/crud/task.py": "from __future__ import annotations\n\nfrom sqlalchemy import select\nfrom sqlalchemy.orm import Session\n\nfrom app.models.task import Task, TaskStatus\nfrom app.schemas.task import TaskCreate, TaskUpdate\n\n\ndef create_task(db: Session, data: TaskCreate) -> Task:\n    task = Task(\n        title=data.title,\n        description=data.description,\n        priority=data.priority,\n        project_id=data.project_id,\n        assignee_id=data.assignee_id,\n    )\n    db.add(task)\n    db.commit()\n    db.refresh(task)\n    return task\n\n\ndef get_task(db: Session, task_id: int) -> Task | None:\n    return db.get(Task, task_id)\n\n\ndef list_tasks(\n    db: Session,\n    project_id: int | None = None,\n    status: TaskStatus | None = None,\n    assignee_id: int | None = None,\n    skip: int = 0,\n    limit: int = 100,\n) -> list[Task]:\n    stmt = select(Task).order_by(Task.id)\n    if project_id is not None:\n        stmt = stmt.where(Task.project_id == project_id)\n    if status is not None:\n        stmt = stmt.where(Task.status == status)\n    if assignee_id is not None:\n        stmt = stmt.where(Task.assignee_id == assignee_id)\n    stmt = stmt.offset(skip).limit(limit)\n    return list(db.scalars(stmt))\n\n\ndef update_task(db: Session, task: Task, data: TaskUpdate) -> Task:\n    for field, value in data.model_dump(exclude_unset=True).items():\n        setattr(task, field, value)\n    db.add(task)\n    db.commit()\n    db.refresh(task)\n    return task\n\n\ndef delete_task(db: Session, task: Task) -> None:\n    db.delete(task)\n    db.commit()\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "or-logic-instead-of-and",
+      "files": {
+        "app/crud/task.py": "from __future__ import annotations\n\nfrom sqlalchemy import or_, select\nfrom sqlalchemy.orm import Session\n\nfrom app.models.task import Task, TaskStatus\nfrom app.schemas.task import TaskCreate, TaskUpdate\n\n\ndef create_task(db: Session, data: TaskCreate) -> Task:\n    task = Task(\n        title=data.title,\n        description=data.description,\n        priority=data.priority,\n        project_id=data.project_id,\n        assignee_id=data.assignee_id,\n    )\n    db.add(task)\n    db.commit()\n    db.refresh(task)\n    return task\n\n\ndef get_task(db: Session, task_id: int) -> Task | None:\n    return db.get(Task, task_id)\n\n\ndef list_tasks(\n    db: Session,\n    project_id: int | None = None,\n    status: TaskStatus | None = None,\n    assignee_id: int | None = None,\n    skip: int = 0,\n    limit: int = 100,\n) -> list[Task]:\n    stmt = select(Task).order_by(Task.id)\n    conditions = []\n    if project_id is not None:\n        conditions.append(Task.project_id == project_id)\n    if status is not None:\n        conditions.append(Task.status == status)\n    if assignee_id is not None:\n        conditions.append(Task.assignee_id == assignee_id)\n    if conditions:\n        stmt = stmt.where(or_(*conditions))\n    stmt = stmt.offset(skip).limit(limit)\n    return list(db.scalars(stmt))\n\n\ndef update_task(db: Session, task: Task, data: TaskUpdate) -> Task:\n    for field, value in data.model_dump(exclude_unset=True).items():\n        setattr(task, field, value)\n    db.add(task)\n    db.commit()\n    db.refresh(task)\n    return task\n\n\ndef delete_task(db: Session, task: Task) -> None:\n    db.delete(task)\n    db.commit()\n"
+      }
+    }
+  ]
+}

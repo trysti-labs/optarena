@@ -1,0 +1,48 @@
+{
+  "description": "Move apt-get cache cleanup into the SAME RUN instruction as apt-get install, since cleaning it up in a later layer does not shrink the image at all",
+  "task_type": "devops",
+  "tags": [
+    "docker",
+    "devops",
+    "image-size",
+    "apt"
+  ],
+  "prompts": [
+    "The Dockerfile installs curl with apt-get in one RUN instruction, then cleans up the apt cache (`rm -rf /var/lib/apt/lists/*`) in a SEPARATE, later RUN instruction. This does NOT shrink the final image at all - Docker layers are additive, so the cache files are already permanently baked into the earlier layer's history; deleting them in a later layer only hides them from that later layer's view, the earlier layer (and the space it uses) is still there. Fix it: merge the cleanup into the SAME RUN instruction as the apt-get install (chained with `&&`), so the cache never gets committed to a layer in the first place. The end result of a successful build (curl installed and usable) must be unchanged."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM debian:12-slim\nRUN apt-get update && apt-get install -y curl\nRUN rm -rf /var/lib/apt/lists/*\nCMD [\"curl\", \"--version\"]\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "apt-get install",
+        "rm -rf /var/lib/apt/lists"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_apt_cleanup.py": "import re\nfrom pathlib import Path\n\nraw = Path(\"Dockerfile\").read_text(encoding=\"utf-8\")\njoined = re.sub(r\"\\\\\\s*\\n\", \" \", raw)\nlines = [l.strip() for l in joined.splitlines() if l.strip() and not l.strip().startswith(\"#\")]\n\ninstall_lines = [l for l in lines if l.upper().startswith(\"RUN\") and \"apt-get install\" in l]\nassert install_lines, \"no apt-get install RUN instruction found\"\n\nmerged = [l for l in install_lines if \"rm -rf /var/lib/apt/lists\" in l]\nassert merged, (\n    \"apt-get install and the cache cleanup (rm -rf /var/lib/apt/lists/*) must be in the SAME \"\n    \"RUN instruction - cleaning it up in a separate later RUN does not reduce image size, \"\n    \"the cache is already permanently in the earlier layer's history\")\n\ncleanup_only_lines = [\n    l for l in lines\n    if l.upper().startswith(\"RUN\") and \"rm -rf /var/lib/apt/lists\" in l and \"apt-get install\" not in l\n]\nassert not cleanup_only_lines, (\n    f\"found a separate cleanup-only RUN instruction, which achieves nothing: {cleanup_only_lines}\")\n\nassert any(l.upper().startswith(\"CMD\") and \"curl\" in l for l in lines), \"CMD changed unexpectedly\"\n\nprint(\"PASS apt cache cleanup checks\")\n"
+  },
+  "check_command": "python3 check_apt_cleanup.py",
+  "reference_solution": {
+    "Dockerfile": "FROM debian:12-slim\nRUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*\nCMD [\"curl\", \"--version\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Dockerfile": "FROM debian:12-slim\nRUN apt-get update && apt-get install -y curl\nRUN rm -rf /var/lib/apt/lists/*\nCMD [\"curl\", \"--version\"]\n"
+      }
+    }
+  ],
+  "name": "add_dockerfile_apt_cache_cleanup_same_layer",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

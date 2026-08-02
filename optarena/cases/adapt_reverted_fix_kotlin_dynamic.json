@@ -1,0 +1,60 @@
+{
+  "name": "adapt_reverted_fix_kotlin_dynamic",
+  "language": "kotlin",
+  "framework": "plain-kotlin",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Dynamic eval: the agent's bug fix is REVERTED between prompts (fixed after_prompt trigger, Calc.kt rewritten back to the buggy version); the agent must notice and reapply the fix",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "test_kind": "unit",
+  "tags": [
+    "kotlin",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "reverted-edit"
+  ],
+  "prompts": [
+    "Calc.kt has a bug in add(a: Int, b: Int): Int - it currently subtracts instead of adding. Fix it so add(a, b) returns a + b.",
+    "Your fix to Calc.kt seems to have been reverted - the subtraction bug is back. Please reapply the fix so add(a, b) correctly returns a + b."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/Calc.kt": "package com.optarena.app\n\nobject Calc {\n    fun add(a: Int, b: Int): Int = a - b\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "Calc.kt reverted back to the buggy (subtraction) version",
+      "write_files": {
+        "src/main/kotlin/com/optarena/app/Calc.kt": "package com.optarena.app\n\nobject Calc {\n    fun add(a: Int, b: Int): Int = a - b\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/Calc.kt",
+      "content_patterns": [
+        "add"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/CalcTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertEquals\nimport org.junit.jupiter.api.Test\n\nclass CalcTest {\n    @Test\n    fun addsCorrectly() {\n        assertEquals(7, Calc.add(3, 4))\n        assertEquals(0, Calc.add(-1, 1))\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=CalcTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Calc.kt": "package com.optarena.app\n\nobject Calc {\n    fun add(a: Int, b: Int): Int = a + b\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fix-not-reapplied",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Calc.kt": "package com.optarena.app\n\nobject Calc {\n    fun add(a: Int, b: Int): Int = a - b\n}\n"
+      }
+    }
+  ]
+}

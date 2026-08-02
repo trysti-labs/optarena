@@ -40,5 +40,14 @@
   "timeout": 180,
   "reference_solution": {
     "src/main.rs": "use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};\nuse serde::{Deserialize, Serialize};\nuse std::sync::Mutex;\n\n#[derive(Clone, Serialize, Deserialize)]\nstruct Item {\n    name: String,\n}\n\nstruct AppState {\n    items: Mutex<Vec<Item>>,\n}\n\n#[get(\"/items\")]\nasync fn list_items(data: web::Data<AppState>) -> impl Responder {\n    let items = data.items.lock().unwrap();\n    HttpResponse::Ok().json(items.clone())\n}\n\n#[post(\"/items\")]\nasync fn create_item(data: web::Data<AppState>, item: web::Json<Item>) -> impl Responder {\n    let new_item = item.into_inner();\n    let mut items = data.items.lock().unwrap();\n    items.push(new_item.clone());\n    HttpResponse::Created().json(new_item)\n}\n\n#[actix_web::main]\nasync fn main() -> std::io::Result<()> {\n    let state = web::Data::new(AppState {\n        items: Mutex::new(Vec::new()),\n    });\n    HttpServer::new(move || {\n        App::new()\n            .app_data(state.clone())\n            .service(list_items)\n            .service(create_item)\n    })\n    .bind((\"0.0.0.0\", 8040))?\n    .run()\n    .await\n}\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "post-does-not-persist",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"items_endpoint\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\nactix-web = \"4\"\ntokio = { version = \"1\", features = [\"full\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\n",
+        "src/main.rs": "use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};\nuse serde::{Deserialize, Serialize};\nuse std::sync::Mutex;\n\n#[derive(Clone, Serialize, Deserialize)]\nstruct Item {\n    name: String,\n}\n\nstruct AppState {\n    items: Mutex<Vec<Item>>,\n}\n\n#[get(\"/items\")]\nasync fn list_items(data: web::Data<AppState>) -> impl Responder {\n    let items = data.items.lock().unwrap();\n    HttpResponse::Ok().json(items.clone())\n}\n\n#[post(\"/items\")]\nasync fn create_item(_data: web::Data<AppState>, item: web::Json<Item>) -> impl Responder {\n    // BUG: never pushes into the shared state, so items never persist.\n    let new_item = item.into_inner();\n    HttpResponse::Created().json(new_item)\n}\n\n#[actix_web::main]\nasync fn main() -> std::io::Result<()> {\n    let state = web::Data::new(AppState {\n        items: Mutex::new(Vec::new()),\n    });\n    HttpServer::new(move || {\n        App::new()\n            .app_data(state.clone())\n            .service(list_items)\n            .service(create_item)\n    })\n    .bind((\"0.0.0.0\", 8040))?\n    .run()\n    .await\n}\n"
+      }
+    }
+  ]
 }

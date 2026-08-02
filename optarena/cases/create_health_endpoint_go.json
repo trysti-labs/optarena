@@ -38,5 +38,13 @@
   "timeout": 150,
   "reference_solution": {
     "main.go": "package main\n\nimport (\n\t\"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/health\", func(c *gin.Context) {\n\t\tc.JSON(http.StatusOK, gin.H{\"status\": \"ok\"})\n\t})\n\tr.Run(\":8003\")\n}\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-port",
+      "files": {
+        "main.go": "package main\n\nimport (\n\t\"net/http\"\n\n\t\"github.com/gin-gonic/gin\"\n)\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/health\", func(c *gin.Context) {\n\t\tc.JSON(http.StatusOK, gin.H{\"status\": \"ok\"})\n\t})\n\tr.Run(\":8080\")\n}\n"
+      }
+    }
+  ]
 }

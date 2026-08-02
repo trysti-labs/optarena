@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (k8s-appstack): lowering HPA minReplicas must keep PDB minAvailable strictly below it",
+  "tags": [
+    "yaml",
+    "kubernetes",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "The team wants to run leaner at the low end - lower the HorizontalPodAutoscaler's `minReplicas` in k8s/hpa.yaml from 3 to 2 (leave `maxReplicas` and everything else alone). Because the PodDisruptionBudget's `minAvailable` (k8s/pdb.yaml) must always stay strictly LESS than the HPA's `minReplicas` - otherwise there would be zero headroom for a voluntary disruption (a node drain or rolling upgrade) without violating the budget - also update k8s/pdb.yaml's `minAvailable` down from 2 to 1 to preserve that invariant."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "k8s/hpa.yaml",
+      "content_patterns": [
+        "minReplicas: 2"
+      ]
+    },
+    {
+      "path_pattern": "k8s/pdb.yaml",
+      "content_patterns": [
+        "minAvailable: 1"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_hpa_pdb.py": "import yaml\n\nwith open('k8s/hpa.yaml') as f:\n    hpa = yaml.safe_load(f)\nwith open('k8s/pdb.yaml') as f:\n    pdb = yaml.safe_load(f)\n\nmin_replicas = hpa['spec']['minReplicas']\nmin_available = pdb['spec']['minAvailable']\n\nassert min_replicas == 2, f\"expected HPA minReplicas 2, got {min_replicas}\"\nassert min_available < min_replicas, (\n    f\"PDB minAvailable ({min_available}) must be strictly less than HPA minReplicas \"\n    f\"({min_replicas}) - otherwise there is no headroom for even a single voluntary \"\n    f\"disruption (node drain, rolling upgrade) without violating the budget\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_hpa_pdb.py",
+  "reference_solution": {
+    "k8s/hpa.yaml": "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: webstore-api\n  namespace: webstore\nspec:\n  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: webstore-api\n  minReplicas: 2\n  maxReplicas: 10\n  metrics:\n    - type: Resource\n      resource:\n        name: cpu\n        target:\n          type: Utilization\n          averageUtilization: 70\n",
+    "k8s/pdb.yaml": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: webstore-api\n  namespace: webstore\nspec:\n  minAvailable: 1\n  selector:\n    matchLabels:\n      app: webstore-api\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "pdb-not-adjusted-with-hpa",
+      "files": {
+        "k8s/hpa.yaml": "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: webstore-api\n  namespace: webstore\nspec:\n  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: webstore-api\n  minReplicas: 2\n  maxReplicas: 10\n  metrics:\n    - type: Resource\n      resource:\n        name: cpu\n        target:\n          type: Utilization\n          averageUtilization: 70\n",
+        "k8s/pdb.yaml": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: webstore-api\n  namespace: webstore\nspec:\n  minAvailable: 2\n  selector:\n    matchLabels:\n      app: webstore-api\n"
+      }
+    }
+  ],
+  "name": "add_k8s_appstack_hpa_pdb_consistency",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "k8s-appstack",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

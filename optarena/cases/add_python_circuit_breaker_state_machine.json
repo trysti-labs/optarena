@@ -1,0 +1,46 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker in place of a stub that always calls through",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "breaker.py's CircuitBreaker.call(fn, now) always just calls fn() - there is no breaking logic at all. Implement the real 3-state machine: __init__(self, failure_threshold, reset_timeout). Starts CLOSED. In CLOSED, call(fn, now) invokes fn(); if it raises, count consecutive failures, and once `failure_threshold` CONSECUTIVE failures have happened, trip to OPEN (recording when it opened) and re-raise the exception that caused the trip. While OPEN, call(fn, now) must NOT invoke fn() at all and must instead raise CircuitOpenError - UNLESS at least `reset_timeout` seconds have passed since it opened, in which case it moves to HALF_OPEN and allows exactly ONE trial call: if that call succeeds, go back to CLOSED (reset the failure count); if it raises, go back to OPEN and RESET the open-time to `now` (so the next trial is only allowed after another full reset_timeout, not immediately)."
+  ],
+  "setup_files": {
+    "breaker.py": "class CircuitOpenError(Exception):\n    pass\n\n\nclass CircuitBreaker:\n    def __init__(self, failure_threshold, reset_timeout):\n        self.failure_threshold = failure_threshold\n        self.reset_timeout = reset_timeout\n\n    def call(self, fn, now):\n        return fn()\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "breaker.py",
+      "content_patterns": [
+        "class CircuitBreaker"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_breaker_hidden.py": "import pytest\n\nfrom breaker import CircuitBreaker, CircuitOpenError\n\n\ndef _boom():\n    raise RuntimeError('boom')\n\n\ndef test_trips_open_after_consecutive_failures():\n    b = CircuitBreaker(failure_threshold=3, reset_timeout=10)\n    for _ in range(3):\n        with pytest.raises(RuntimeError):\n            b.call(_boom, now=0)\n    with pytest.raises(CircuitOpenError):\n        b.call(lambda: 'should not run', now=0)\n\n\ndef test_fails_fast_without_calling_fn_while_open():\n    b = CircuitBreaker(failure_threshold=1, reset_timeout=100)\n    with pytest.raises(RuntimeError):\n        b.call(_boom, now=0)\n    calls = []\n    with pytest.raises(CircuitOpenError):\n        b.call(lambda: calls.append(1), now=1)\n    assert calls == []\n\n\ndef test_half_open_trial_after_timeout_success_closes():\n    b = CircuitBreaker(failure_threshold=1, reset_timeout=10)\n    with pytest.raises(RuntimeError):\n        b.call(_boom, now=0)\n    assert b.call(lambda: 'ok', now=10) == 'ok'\n    # closed again: a fresh single failure must not trip it (threshold=1 but count reset)\n    assert b.call(lambda: 'still-fine', now=11) == 'still-fine'\n\n\ndef test_half_open_failure_reopens_and_resets_clock():\n    b = CircuitBreaker(failure_threshold=1, reset_timeout=10)\n    with pytest.raises(RuntimeError):\n        b.call(_boom, now=0)\n    with pytest.raises(RuntimeError):\n        b.call(_boom, now=10)  # half-open trial fails -> reopens, clock resets to 10\n    with pytest.raises(CircuitOpenError):\n        b.call(lambda: 'too soon', now=15)  # only 5s since the reopen at t=10\n    assert b.call(lambda: 'ok now', now=20) == 'ok now'\n"
+  },
+  "check_command": "python3 -m pytest -q test_breaker_hidden.py",
+  "reference_solution": {
+    "breaker.py": "class CircuitOpenError(Exception):\n    pass\n\n\nclass CircuitBreaker:\n    def __init__(self, failure_threshold, reset_timeout):\n        self.failure_threshold = failure_threshold\n        self.reset_timeout = reset_timeout\n        self._state = 'closed'\n        self._failures = 0\n        self._opened_at = None\n\n    def call(self, fn, now):\n        if self._state == 'open':\n            if now - self._opened_at < self.reset_timeout:\n                raise CircuitOpenError()\n            self._state = 'half_open'\n\n        try:\n            result = fn()\n        except Exception:\n            if self._state == 'half_open':\n                self._state = 'open'\n                self._opened_at = now\n            else:\n                self._failures += 1\n                if self._failures >= self.failure_threshold:\n                    self._state = 'open'\n                    self._opened_at = now\n            raise\n\n        self._state = 'closed'\n        self._failures = 0\n        return result\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "breaker.py": "class CircuitOpenError(Exception):\n    pass\n\n\nclass CircuitBreaker:\n    def __init__(self, failure_threshold, reset_timeout):\n        self.failure_threshold = failure_threshold\n        self.reset_timeout = reset_timeout\n        self._state = 'closed'\n        self._failures = 0\n        self._opened_at = None\n\n    def call(self, fn, now):\n        if self._state == 'open':\n            if now - self._opened_at < self.reset_timeout:\n                raise CircuitOpenError()\n            self._state = 'half_open'\n\n        try:\n            result = fn()\n        except Exception:\n            if self._state == 'half_open':\n                self._state = 'open'\n            else:\n                self._failures += 1\n                if self._failures >= self.failure_threshold:\n                    self._state = 'open'\n                    self._opened_at = now\n            raise\n\n        self._state = 'closed'\n        self._failures = 0\n        return result\n"
+      }
+    }
+  ],
+  "name": "add_python_circuit_breaker_state_machine",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

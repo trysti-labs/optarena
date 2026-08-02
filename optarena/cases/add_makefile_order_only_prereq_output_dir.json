@@ -1,0 +1,54 @@
+{
+  "description": "Make the build output directory an order-only prerequisite of every .o rule, so a parallel build (-j) doesn't race multiple mkdir calls or fail because the directory disappears mid-build",
+  "tags": [
+    "make",
+    "devops",
+    "parallel-build",
+    "order-only-prerequisites"
+  ],
+  "prompts": [
+    "The Makefile's %.o rule calls `mkdir -p build` as its FIRST recipe line, every single time it runs - under a parallel build (`make -j`), several .o rules can run mkdir -p concurrently, which is normally harmless, but the rule ALSO lists `build` as a normal (order-only-unaware) side effect with no formal dependency at all, so Make has no idea the directory needs to exist before the recipe runs and doesn't serialize or track it as a prerequisite - if the directory gets removed between the mkdir and the compile step (e.g. a concurrent `make clean`), the build breaks with no clear dependency to blame. Fix it properly: add `build` as an ORDER-ONLY prerequisite (after a `|` in the prerequisite list) of the pattern rule, with its own rule `build:` that does `mkdir -p build` - remove the `mkdir -p build` recipe line from inside %.o entirely, since Make itself now guarantees the directory exists (and is up to date) before the recipe runs, via the order-only prerequisite mechanism."
+  ],
+  "setup_files": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: build/main.o\n\t$(CC) -o app build/main.o\n\nbuild/%.o: %.c\n\tmkdir -p build\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n.PHONY: clean\nclean:\n\trm -rf app build\n",
+    "main.c": "#include <stdio.h>\n\nint main(void) {\n    printf(\"ok\\n\");\n    return 0;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "build/%.o: %.c | build"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_order_only.py": "import re\nimport subprocess\nfrom pathlib import Path\n\nsrc = Path('Makefile').read_text(encoding='utf-8')\n\npattern_rule = re.search(r'^build/%\\.o\\s*:\\s*%\\.c\\s*\\|\\s*build\\s*$', src, re.MULTILINE)\nassert pattern_rule, (\n    \"expected 'build/%.o: %.c | build' with build as an order-only prerequisite (after a '|')\")\n\nbuild_rule = re.search(r'^build\\s*:\\s*$', src, re.MULTILINE)\nassert build_rule, \"expected a standalone 'build:' rule that creates the directory\"\n\npattern_recipe_start = pattern_rule.end()\nnext_rule = re.search(r'^\\S', src[pattern_recipe_start + 1:], re.MULTILINE)\nrecipe_block = src[pattern_recipe_start:pattern_recipe_start + 1 + (next_rule.start() if next_rule else len(src))]\nassert 'mkdir -p build' not in recipe_block, (\n    \"the %.o recipe must not call 'mkdir -p build' itself anymore - the order-only \"\n    \"prerequisite on 'build' is what's supposed to guarantee the directory exists\")\n\nr = subprocess.run(['make', 'app'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'make app failed: {r.stdout}\\n{r.stderr}'\nassert Path('app').exists(), 'app was not built'\nout = subprocess.run(['./app'], capture_output=True, text=True, timeout=15).stdout.strip()\nassert out == 'ok', f'unexpected output: {out!r}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_order_only.py",
+  "reference_solution": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: build/main.o\n\t$(CC) -o app build/main.o\n\nbuild/%.o: %.c | build\n\t$(CC) $(CFLAGS) -c $< -o $@\n\nbuild:\n\tmkdir -p build\n\n.PHONY: clean\nclean:\n\trm -rf app build\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: build/main.o\n\t$(CC) -o app build/main.o\n\nbuild/%.o: %.c\n\tmkdir -p build\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n.PHONY: clean\nclean:\n\trm -rf app build\n"
+      }
+    },
+    {
+      "name": "order-only-prereq-but-mkdir-recipe-line-still-there",
+      "files": {
+        "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: build/main.o\n\t$(CC) -o app build/main.o\n\nbuild/%.o: %.c | build\n\tmkdir -p build\n\t$(CC) $(CFLAGS) -c $< -o $@\n\nbuild:\n\tmkdir -p build\n\n.PHONY: clean\nclean:\n\trm -rf app build\n"
+      }
+    }
+  ],
+  "name": "add_makefile_order_only_prereq_output_dir",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "difficulty": 3,
+  "task_type": "devops"
+}

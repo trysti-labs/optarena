@@ -1,0 +1,46 @@
+{
+  "description": "Fix a PriorityQueue-based queue that compares by priority alone (no FIFO guarantee for ties) into an insertion-order-stable one",
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "algorithms"
+  ],
+  "prompts": [
+    "StablePriorityQueue.java wraps java.util.PriorityQueue with a comparator that only compares Item.priority - PriorityQueue makes NO ordering guarantee among equal elements (it's a binary heap, not a stable structure). Fix it so that: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO) - add an explicit monotonically increasing insertion-order field to Item and use it as the comparator's tiebreaker."
+  ],
+  "setup_files": {
+    "StablePriorityQueue.java": "import java.util.Comparator;\nimport java.util.PriorityQueue;\n\npublic final class StablePriorityQueue {\n    private static final class Item {\n        final int priority;\n        final String value;\n\n        Item(int priority, String value) {\n            this.priority = priority;\n            this.value = value;\n        }\n    }\n\n    private final PriorityQueue<Item> heap =\n            new PriorityQueue<>(Comparator.comparingInt(i -> i.priority));\n\n    public void push(int priority, String value) {\n        heap.add(new Item(priority, value));\n    }\n\n    public String pop() {\n        return heap.poll().value;\n    }\n\n    public int size() {\n        return heap.size();\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "StablePriorityQueue.java",
+      "content_patterns": [
+        "class StablePriorityQueue"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "StablePriorityQueue.java": "import java.util.Comparator;\nimport java.util.PriorityQueue;\n\npublic final class StablePriorityQueue {\n    private static final class Item {\n        final int priority;\n        final long order;\n        final String value;\n\n        Item(int priority, long order, String value) {\n            this.priority = priority;\n            this.order = order;\n            this.value = value;\n        }\n    }\n\n    private final PriorityQueue<Item> heap = new PriorityQueue<>(\n            Comparator.<Item>comparingInt(i -> i.priority).thenComparingLong(i -> i.order));\n    private long counter = 0;\n\n    public void push(int priority, String value) {\n        heap.add(new Item(priority, counter++, value));\n    }\n\n    public String pop() {\n        return heap.poll().value;\n    }\n\n    public int size() {\n        return heap.size();\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-order-tiebreak",
+      "files": {
+        "StablePriorityQueue.java": "import java.util.Comparator;\nimport java.util.PriorityQueue;\n\npublic final class StablePriorityQueue {\n    private static final class Item {\n        final int priority;\n        final String value;\n\n        Item(int priority, String value) {\n            this.priority = priority;\n            this.value = value;\n        }\n    }\n\n    private final PriorityQueue<Item> heap =\n            new PriorityQueue<>(Comparator.comparingInt(i -> i.priority));\n\n    public void push(int priority, String value) {\n        heap.add(new Item(priority, value));\n    }\n\n    public String pop() {\n        return heap.poll().value;\n    }\n\n    public int size() {\n        return heap.size();\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_java_stable_priority_queue",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "java CheckStablePriorityQueueTest.java",
+  "test_setup_files": {
+    "StablePriorityQueueTest.java": "public final class StablePriorityQueueTest {\n    public static void main(String[] args) {\n        checkPriorityOrder();\n        checkEqualPriorityIsFifo();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkPriorityOrder() {\n        StablePriorityQueue q = new StablePriorityQueue();\n        q.push(5, \"low\");\n        q.push(1, \"high\");\n        q.push(3, \"mid\");\n        String[] got = {q.pop(), q.pop(), q.pop()};\n        String[] want = {\"high\", \"mid\", \"low\"};\n        for (int i = 0; i < 3; i++) {\n            if (!got[i].equals(want[i])) throw new AssertionError(\"got \" + got[i] + \" want \" + want[i]);\n        }\n    }\n\n    static void checkEqualPriorityIsFifo() {\n        StablePriorityQueue q = new StablePriorityQueue();\n        for (int i = 0; i < 20; i++) {\n            q.push(1, String.valueOf((char) ('a' + i)));\n        }\n        for (int i = 0; i < 20; i++) {\n            String got = q.pop();\n            String want = String.valueOf((char) ('a' + i));\n            if (!got.equals(want)) throw new AssertionError(\"pop \" + i + \": got \" + got + \" want \" + want);\n        }\n    }\n}\n",
+    "CheckStablePriorityQueueTest.java": "import java.io.IOException;\n\npublic final class CheckStablePriorityQueueTest {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"StablePriorityQueue.java\", \"StablePriorityQueueTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"StablePriorityQueueTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  }
+}

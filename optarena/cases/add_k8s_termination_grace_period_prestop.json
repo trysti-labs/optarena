@@ -1,0 +1,48 @@
+{
+  "description": "Add a preStop hook and a terminationGracePeriodSeconds long enough for it to run, so in-flight requests aren't dropped when a pod is terminated",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "graceful-shutdown",
+    "availability"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml's checkout-worker Deployment has no shutdown handling - Kubernetes sends SIGTERM and kills the pod after the default 30s grace period, but the pod is removed from Service endpoints AT THE SAME TIME SIGTERM is sent, and there's a real-world propagation delay before every kube-proxy/load balancer stops sending it new traffic - without a brief pause, in-flight requests get connection-refused. Add a preStop lifecycle hook that runs `sleep 5` (giving endpoint removal time to propagate before the app actually starts shutting down), and set terminationGracePeriodSeconds to at least 35 (comfortably longer than the preStop sleep PLUS whatever time the app itself needs to drain - 35 covers the 5s sleep with room to spare, whereas the default 30 would let Kubernetes SIGKILL the process while preStop is still sleeping)."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: checkout-worker\n  namespace: default\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: checkout-worker\n  template:\n    metadata:\n      labels:\n        app: checkout-worker\n    spec:\n      containers:\n        - name: checkout-worker\n          image: ghcr.io/example/checkout-worker:6.1.0\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/deployment.yaml",
+      "content_patterns": [
+        "prestop",
+        "terminationgraceperiodseconds"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_shutdown.py": "import yaml\n\nwith open(\"k8s/deployment.yaml\") as f:\n    dep = yaml.safe_load(f)\n\npod_spec = dep[\"spec\"][\"template\"][\"spec\"]\ngrace = pod_spec.get(\"terminationGracePeriodSeconds\")\nassert isinstance(grace, int) and grace >= 35, (\n    f\"terminationGracePeriodSeconds is {grace} - too short to cover a 5s preStop sleep plus \"\n    f\"drain time, Kubernetes will SIGKILL the process while preStop is still running\")\n\ncontainer = pod_spec[\"containers\"][0]\nlifecycle = container.get(\"lifecycle\") or {}\npre_stop = lifecycle.get(\"preStop\") or {}\nexec_cmd = (pre_stop.get(\"exec\") or {}).get(\"command\") or []\nassert exec_cmd, \"no preStop exec command found\"\nassert \"sleep\" in \" \".join(exec_cmd) and \"5\" in \" \".join(exec_cmd), (\n    f\"expected a preStop command that sleeps 5s, got {exec_cmd}\")\n\nprint(\"PASS graceful shutdown checks\")\n"
+  },
+  "check_command": "python3 check_shutdown.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: checkout-worker\n  namespace: default\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: checkout-worker\n  template:\n    metadata:\n      labels:\n        app: checkout-worker\n    spec:\n      terminationGracePeriodSeconds: 35\n      containers:\n        - name: checkout-worker\n          image: ghcr.io/example/checkout-worker:6.1.0\n          lifecycle:\n            preStop:\n              exec:\n                command: [\"sh\", \"-c\", \"sleep 5\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "grace-period-too-short-for-prestop",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: checkout-worker\n  namespace: default\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: checkout-worker\n  template:\n    metadata:\n      labels:\n        app: checkout-worker\n    spec:\n      terminationGracePeriodSeconds: 30\n      containers:\n        - name: checkout-worker\n          image: ghcr.io/example/checkout-worker:6.1.0\n          lifecycle:\n            preStop:\n              exec:\n                command: [\"sh\", \"-c\", \"sleep 5\"]\n"
+      }
+    }
+  ],
+  "name": "add_k8s_termination_grace_period_prestop",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

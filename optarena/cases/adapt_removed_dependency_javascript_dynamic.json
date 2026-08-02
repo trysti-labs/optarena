@@ -1,0 +1,63 @@
+{
+  "name": "adapt_removed_dependency_javascript_dynamic",
+  "language": "javascript",
+  "domain": "backend",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "javascript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "greetingData.js exports GREETING via module.exports. Create message.js with a function message() that returns the value of GREETING, requiring it from './greetingData'. Export message() as module.exports = { message }.",
+    "greetingData.js has just been removed from the project. Update message.js so it still works with NO reference to greetingData, and message() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "greetingData.js": "module.exports = { GREETING: \"hola\" };\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "greetingData.js deleted",
+      "delete_files": [
+        "greetingData.js"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "message.js",
+      "content_patterns": [
+        "message"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_message.js": "const assert = require('assert');\nlet mod;\ntry {\n  mod = require('./message.js');\n} catch (e) {\n  throw new Error('message.js failed to load (likely still references the deleted greetingData): ' + e.message);\n}\nlet got;\ntry {\n  got = mod.message();\n} catch (e) {\n  throw new Error('message() threw (likely still references the deleted greetingData): ' + e.message);\n}\nassert.strictEqual(got, 'hola');\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_message.js",
+  "reference_solution": {
+    "message.js": "function message() {\n  return \"hola\";\n}\n\nmodule.exports = { message };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-references-deleted-file",
+      "files": {
+        "message.js": "const { GREETING } = require('./greetingData');\n\nfunction message() {\n  return GREETING;\n}\n\nmodule.exports = { message };\n"
+      }
+    },
+    {
+      "name": "wrong-value",
+      "files": {
+        "message.js": "function message() {\n  return \"bonjour\";\n}\n\nmodule.exports = { message };\n"
+      }
+    }
+  ]
+}

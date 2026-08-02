@@ -15,8 +15,22 @@ checks, unknown-key rejection - doesn't need a general JSON Schema engine.
 
 from __future__ import annotations
 
+import re
+
 MAX_CHECK_COMMAND_TIMEOUT = 3600   # seconds; generous ceiling, not a real per-case budget
 MAX_CASE_TIMEOUT = 3600
+
+# A-04: `setup_repo` names a directory under repos/ and nothing else - no
+# separators, no "..", no drive letters. See validate_case for why this
+# input is untrusted.
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+# A-05: a case's `image` is interpolated into the container command line
+# ahead of the image argument, and `docker run` parses options up to the
+# first non-option token - so a value starting with "-" is consumed as a
+# FLAG, not an image name. Restrict to a conservative image-reference shape.
+_IMAGE_RE = re.compile(
+    r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?$")
 
 
 class SchemaError(ValueError):
@@ -101,6 +115,13 @@ def validate_scenario(data: dict, source: str = "<scenario>") -> None:
     # immutable :<sha> tag).
     if "image_overrides" in data and data["image_overrides"] is not None:
         _validate_string_map(data["image_overrides"], f"{source}.image_overrides")
+        # A-05: an override replaces the image reference that ends up on the
+        # container command line, so it needs the same shape check a case's
+        # own `image` gets.
+        for key, val in data["image_overrides"].items():
+            if not _IMAGE_RE.match(val):
+                raise _err(f"{source}.image_overrides.{key}",
+                           f"not a valid container image reference: {val!r}")
 
 
 # ── Case files ───────────────────────────────────────────────────────────
@@ -124,6 +145,11 @@ _DISRUPTION_WHEN_KNOWN_KEYS = {"file_exists", "file_contains"}
 _DISRUPTION_FILE_CONTAINS_KEYS = {"path", "pattern"}
 _EXPECTED_FILE_KNOWN_KEYS = {
     "path_pattern", "content_patterns", "not_content_patterns", "regex_patterns", "min_lines",
+    # A-17: opt this spec's content/regex assertions out of the default
+    # lowercase-everything matching, so a case CAN require exact casing
+    # (`class UserDTO`, `SELECT`, a Go exported identifier). Default false =
+    # historical behaviour.
+    "case_sensitive",
 }
 _BROKEN_SOLUTION_KNOWN_KEYS = {"name", "files"}
 
@@ -146,8 +172,19 @@ def validate_case(data: dict, source: str = "<case>") -> None:
         if key in data and data[key] is not None:
             _validate_string_map(data[key], f"{source}.{key}")
 
-    if "setup_repo" in data and data["setup_repo"] is not None and not isinstance(data["setup_repo"], str):
-        raise _err(source, "'setup_repo' must be a string")
+    if "setup_repo" in data and data["setup_repo"] is not None:
+        repo = data["setup_repo"]
+        if not isinstance(repo, str):
+            raise _err(source, "'setup_repo' must be a string")
+        # A-04: a bare directory name under repos/, nothing else. This is
+        # untrusted input (case JSON, installable from a URL via `cases
+        # install`) that cases.copy_setup_repo turns into a filesystem path -
+        # a traversal there reads arbitrary host directories into the
+        # agent-visible workspace. copy_setup_repo re-checks containment as
+        # the load-bearing control; this rejects it earlier and more clearly.
+        if not _REPO_NAME_RE.match(repo):
+            raise _err(source, f"'setup_repo' must be a plain directory name under repos/ "
+                               f"(letters, digits, . _ -), got {repo!r}")
     if "git_init" in data and not isinstance(data["git_init"], bool):
         raise _err(source, "'git_init' must be a boolean")
     if "check_command" in data and data["check_command"] is not None and not isinstance(data["check_command"], str):
@@ -162,8 +199,12 @@ def validate_case(data: dict, source: str = "<case>") -> None:
         if not _is_number(t) or t <= 0 or t > MAX_CASE_TIMEOUT:
             raise _err(source, f"'timeout' must be a number in (0, {MAX_CASE_TIMEOUT}]")
 
-    if "image" in data and data["image"] is not None and not isinstance(data["image"], str):
-        raise _err(source, "'image' must be a string")
+    if "image" in data and data["image"] is not None:
+        if not isinstance(data["image"], str):
+            raise _err(source, "'image' must be a string")
+        if not _IMAGE_RE.match(data["image"]):
+            raise _err(source, f"'image' is not a valid container image reference: "
+                               f"{data['image']!r} (see A-05)")
 
     if "difficulty" in data:
         d = data["difficulty"]
@@ -195,6 +236,8 @@ def validate_case(data: dict, source: str = "<case>") -> None:
                 ml = spec["min_lines"]
                 if not isinstance(ml, int) or isinstance(ml, bool) or ml < 0:
                     raise _err(where, "'min_lines' must be a non-negative integer")
+            if "case_sensitive" in spec and not isinstance(spec["case_sensitive"], bool):
+                raise _err(where, "'case_sensitive' must be a boolean")
 
     if "reference_solution" in data and data["reference_solution"] is not None:
         _validate_string_map(data["reference_solution"], f"{source}.reference_solution")

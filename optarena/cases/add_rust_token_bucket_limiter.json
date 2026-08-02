@@ -1,0 +1,49 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "rust",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "src/lib.rs's TokenBucket::allow always returns true. Implement it properly: TokenBucket::new(capacity: f64, refill_rate: f64) - `refill_rate` tokens are added per second, capped at `capacity` tokens (never above it, even after a long idle period). allow(&mut self, now: f64) -> bool refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"token_bucket\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub struct TokenBucket {\n    capacity: f64,\n    refill_rate: f64,\n}\n\nimpl TokenBucket {\n    pub fn new(capacity: f64, refill_rate: f64) -> Self {\n        TokenBucket { capacity, refill_rate }\n    }\n\n    pub fn allow(&mut self, now: f64) -> bool {\n        true\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "struct TokenBucket"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/limiter_test.rs": "use token_bucket::TokenBucket;\n\n#[test]\nfn starts_full_and_drains() {\n    let mut b = TokenBucket::new(3.0, 1.0);\n    assert!(b.allow(0.0));\n    assert!(b.allow(0.0));\n    assert!(b.allow(0.0));\n    assert!(!b.allow(0.0));\n}\n\n#[test]\nfn refills_over_time() {\n    let mut b = TokenBucket::new(3.0, 1.0);\n    for _ in 0..3 { b.allow(0.0); }\n    assert!(!b.allow(0.5));\n    assert!(b.allow(1.0));\n    assert!(!b.allow(1.0));\n}\n\n#[test]\nfn refill_caps_at_capacity() {\n    let mut b = TokenBucket::new(2.0, 1.0);\n    b.allow(0.0);\n    b.allow(0.0);\n    assert!(b.allow(1000.0));\n    assert!(b.allow(1000.0));\n    assert!(!b.allow(1000.0));\n}\n"
+  },
+  "reference_solution": {
+    "Cargo.toml": "[package]\nname = \"token_bucket\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub struct TokenBucket {\n    capacity: f64,\n    refill_rate: f64,\n    tokens: f64,\n    last: Option<f64>,\n}\n\nimpl TokenBucket {\n    pub fn new(capacity: f64, refill_rate: f64) -> Self {\n        TokenBucket { capacity, refill_rate, tokens: capacity, last: None }\n    }\n\n    pub fn allow(&mut self, now: f64) -> bool {\n        if let Some(last) = self.last {\n            let elapsed = now - last;\n            self.tokens = (self.tokens + elapsed * self.refill_rate).min(self.capacity);\n        }\n        self.last = Some(now);\n        if self.tokens >= 1.0 {\n            self.tokens -= 1.0;\n            true\n        } else {\n            false\n        }\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"token_bucket\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n",
+        "src/lib.rs": "pub struct TokenBucket {\n    capacity: f64,\n    refill_rate: f64,\n    tokens: f64,\n    last: Option<f64>,\n}\n\nimpl TokenBucket {\n    pub fn new(capacity: f64, refill_rate: f64) -> Self {\n        TokenBucket { capacity, refill_rate, tokens: capacity, last: None }\n    }\n\n    pub fn allow(&mut self, now: f64) -> bool {\n        if let Some(last) = self.last {\n            let elapsed = now - last;\n            self.tokens += elapsed * self.refill_rate;\n        }\n        self.last = Some(now);\n        if self.tokens >= 1.0 {\n            self.tokens -= 1.0;\n            true\n        } else {\n            false\n        }\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_rust_token_bucket_limiter",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "cargo test --offline"
+}

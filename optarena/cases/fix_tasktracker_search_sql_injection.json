@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 120,
   "timeout": 600,
-  "description": "L3 repo-scale: parameterize the raw-SQL task search endpoint (SQL injection via string interpolation); incomplete-fix broken variant strips ; and -- only",
+  "description": "Repo-scale: parameterize the raw-SQL task search endpoint (SQL injection via string interpolation); incomplete-fix broken variant strips ; and -- only",
   "difficulty": 3,
   "task_type": "security",
   "tags": [

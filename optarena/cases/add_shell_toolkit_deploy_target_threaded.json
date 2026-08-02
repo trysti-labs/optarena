@@ -1,0 +1,69 @@
+{
+  "description": "Repo-scale (shell-toolkit): a validated -t TARGET flag must correctly flow into BOTH the config backup (target-specific file) AND the notification message (must name the target) - not just be validated and then dropped",
+  "tags": [
+    "shell",
+    "bash",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add a required `-t TARGET` flag to `deploy.sh` (getopts pattern `\"v:t:\"`), validated via a new `validate_target` function in lib/validate.sh (must be exactly `staging` or `production`, else `[ERROR] invalid target: ...` and exit 1). This validated target must actually be USED in two places, not just checked and discarded: (1) the config backup (via the existing `backup_file` helper) must back up `config/app-$TARGET.conf` - the target-specific file, not a generic one; (2) add `lib/notify.sh` with `notify_deploy_complete(version, target)` printing `[NOTIFY] deploy of $version to $target complete`, and call it after a successful deploy with the ACTUAL validated target - not a placeholder. Both `config/app-staging.conf` and `config/app-production.conf` already exist in the repo."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "lib/validate.sh",
+      "content_patterns": [
+        "validate_target"
+      ]
+    },
+    {
+      "path_pattern": "lib/notify.sh",
+      "content_patterns": [
+        "notify_deploy_complete"
+      ]
+    },
+    {
+      "path_pattern": "deploy.sh",
+      "content_patterns": [
+        "validate_target",
+        "config/app-$TARGET.conf",
+        "notify_deploy_complete"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_target_threaded.py": "import os\nimport subprocess\n\nbad = subprocess.run(\n    ['bash', 'deploy.sh', '-v', '1.2.3', '-t', 'not-a-target'],\n    capture_output=True, text=True, timeout=15,\n)\nassert bad.returncode != 0, 'expected an unknown target to be rejected'\n\nresp = subprocess.run(\n    ['bash', 'deploy.sh', '-v', '1.2.3', '-t', 'production'],\n    capture_output=True, text=True, timeout=15,\n)\nassert resp.returncode == 0, (resp.stdout, resp.stderr)\n\nassert os.path.isfile('config/app-production.conf.bak.1.2.3'), (\n    'expected deploy.sh to back up config/app-production.conf specifically, not a generic file')\nassert not os.path.isfile('config/app-staging.conf.bak.1.2.3'), (\n    'deploying to production must not touch the staging config file')\n\nnotify_lines = [line for line in resp.stdout.splitlines() if line.startswith('[NOTIFY]')]\nassert notify_lines, f'expected a [NOTIFY] line in output, got: {resp.stdout!r}'\nassert 'production' in notify_lines[0], (\n    f'expected the [NOTIFY] line itself to name the target (\\'production\\'), got: '\n    f'{notify_lines[0]!r} - validating the target is not enough if the notification step does not '\n    f'actually use it (it must not just rely on an unrelated log line elsewhere mentioning the target)')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_target_threaded.py",
+  "reference_solution": {
+    "lib/validate.sh": "# Returns 0 if all named environment variables are set and non-empty,\n# 1 otherwise (logging each missing one).\nvalidate_env() {\n    local missing=0\n    local var_name\n    for var_name in \"$@\"; do\n        if [ -z \"${!var_name:-}\" ]; then\n            log_error \"missing required environment variable: $var_name\"\n            missing=1\n        fi\n    done\n    return \"$missing\"\n}\n\n# Returns 0 if $1 matches a semantic version X.Y.Z, 1 otherwise.\nvalidate_version() {\n    if [[ \"$1\" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then\n        return 0\n    fi\n    log_error \"invalid version format: $1 (expected X.Y.Z)\"\n    return 1\n}\n\n# Returns 0 if $1 is a known deploy target (staging or production),\n# 1 otherwise.\nvalidate_target() {\n    case \"$1\" in\n        staging|production) return 0 ;;\n        *)\n            log_error \"invalid target: $1 (expected staging or production)\"\n            return 1\n            ;;\n    esac\n}\n",
+    "lib/notify.sh": "# Builds a human-readable deploy-complete message naming both the\n# version and the target it was deployed to. No real network call -\n# this is a stub that just prints, so tests stay offline.\nnotify_deploy_complete() {\n    local version=\"$1\"\n    local target=\"$2\"\n    echo \"[NOTIFY] deploy of $version to $target complete\"\n}\n",
+    "config/app-staging.conf": "environment=staging\nreplicas=2\n",
+    "config/app-production.conf": "environment=production\nreplicas=5\n",
+    "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\nsource \"$SCRIPT_DIR/lib/notify.sh\"\n\nVERSION=\"\"\nTARGET=\"\"\nwhile getopts \"v:t:\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        t) TARGET=\"$OPTARG\" ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION -t TARGET\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\nif [ -z \"$TARGET\" ]; then\n    log_error \"missing -t TARGET\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\nif ! validate_target \"$TARGET\"; then\n    exit 1\nfi\n\nif ! backup_file \"config/app-$TARGET.conf\" \"$VERSION\"; then\n    log_error \"aborting: config backup failed\"\n    exit 1\nfi\n\nlog_info \"deploying version $VERSION to $TARGET\"\nnotify_deploy_complete \"$VERSION\" \"$TARGET\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "notify-drops-validated-target",
+      "files": {
+        "lib/validate.sh": "# Returns 0 if all named environment variables are set and non-empty,\n# 1 otherwise (logging each missing one).\nvalidate_env() {\n    local missing=0\n    local var_name\n    for var_name in \"$@\"; do\n        if [ -z \"${!var_name:-}\" ]; then\n            log_error \"missing required environment variable: $var_name\"\n            missing=1\n        fi\n    done\n    return \"$missing\"\n}\n\n# Returns 0 if $1 matches a semantic version X.Y.Z, 1 otherwise.\nvalidate_version() {\n    if [[ \"$1\" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then\n        return 0\n    fi\n    log_error \"invalid version format: $1 (expected X.Y.Z)\"\n    return 1\n}\n\n# Returns 0 if $1 is a known deploy target (staging or production),\n# 1 otherwise.\nvalidate_target() {\n    case \"$1\" in\n        staging|production) return 0 ;;\n        *)\n            log_error \"invalid target: $1 (expected staging or production)\"\n            return 1\n            ;;\n    esac\n}\n",
+        "lib/notify.sh": "# Builds a human-readable deploy-complete message naming both the\n# version and the target it was deployed to. No real network call -\n# this is a stub that just prints, so tests stay offline.\nnotify_deploy_complete() {\n    local version=\"$1\"\n    local target=\"$2\"\n    echo \"[NOTIFY] deploy of $version to $target complete\"\n}\n",
+        "config/app-staging.conf": "environment=staging\nreplicas=2\n",
+        "config/app-production.conf": "environment=production\nreplicas=5\n",
+        "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\nsource \"$SCRIPT_DIR/lib/notify.sh\"\n\nVERSION=\"\"\nTARGET=\"\"\nwhile getopts \"v:t:\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        t) TARGET=\"$OPTARG\" ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION -t TARGET\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\nif [ -z \"$TARGET\" ]; then\n    log_error \"missing -t TARGET\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\nif ! validate_target \"$TARGET\"; then\n    exit 1\nfi\n\nif ! backup_file \"config/app-$TARGET.conf\" \"$VERSION\"; then\n    log_error \"aborting: config backup failed\"\n    exit 1\nfi\n\nlog_info \"deploying version $VERSION to $TARGET\"\nnotify_deploy_complete \"$VERSION\" \"unknown\"\n"
+      }
+    }
+  ],
+  "name": "add_shell_toolkit_deploy_target_threaded",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "shell-toolkit",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

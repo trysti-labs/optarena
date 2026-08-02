@@ -40,5 +40,13 @@
   "timeout": 150,
   "reference_solution": {
     ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  build-test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: cargo build\n      - run: cargo test\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "cargo-test-mentioned-not-run",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\n# TODO: also run cargo test\non:\n  push:\n  pull_request:\njobs:\n  build-test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: cargo build\n"
+      }
+    }
+  ]
 }

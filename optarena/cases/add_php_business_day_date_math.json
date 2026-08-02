@@ -1,0 +1,44 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends and is exact for any starting weekday",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "Create src/Dates.php defining namespace App with a function addBusinessDays(\\DateTimeImmutable $start, int $n): \\DateTimeImmutable. A naive `$start->modify(\"+{$n} days\")` counts weekends as business days. Implement it properly: n=0 returns $start unchanged (even if $start itself falls on a weekend); for n>0, step forward day by day, skipping Saturday and Sunday, until n business days have been counted, then return that date. It must be exact for any starting weekday and correctly cross month/year boundaries - do not use an approximation formula like `n + 2*intdiv(n, 5)` calendar-days shortcut, it gives the wrong answer depending on which weekday $start falls on."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/Dates.php",
+      "content_patterns": [
+        "function addBusinessDays"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/Dates.php": "<?php\nnamespace App;\n\nfunction addBusinessDays(\\DateTimeImmutable $start, int $n): \\DateTimeImmutable\n{\n    if ($n === 0) {\n        return $start;\n    }\n    $current = $start;\n    $counted = 0;\n    while ($counted < $n) {\n        $current = $current->modify('+1 day');\n        $weekday = (int)$current->format('N'); // 1=Mon .. 7=Sun\n        if ($weekday !== 6 && $weekday !== 7) {\n            $counted++;\n        }\n    }\n    return $current;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "src/Dates.php": "<?php\nnamespace App;\n\nfunction addBusinessDays(\\DateTimeImmutable $start, int $n): \\DateTimeImmutable\n{\n    if ($n === 0) {\n        return $start;\n    }\n    $weeks = intdiv($n, 5);\n    $remainder = $n % 5;\n    $calendarDays = $weeks * 7 + $remainder;\n    return $start->modify(\"+{$calendarDays} days\");\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_business_day_date_math",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "difficulty": 3,
+  "check_command": "phpunit tests/DatesTest.php",
+  "setup_files": {},
+  "test_setup_files": {
+    "tests/DatesTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Dates.php';\n\nfinal class DatesTest extends TestCase\n{\n    public function testZeroReturnsStartUnchanged(): void\n    {\n        $d = new \\DateTimeImmutable('2024-06-01'); // Saturday\n        $this->assertSame($d->format('Y-m-d'), \\App\\addBusinessDays($d, 0)->format('Y-m-d'));\n    }\n\n    public function testFridayPlusOneSkipsWeekend(): void\n    {\n        $friday = new \\DateTimeImmutable('2024-05-31');\n        $this->assertSame('2024-06-03', \\App\\addBusinessDays($friday, 1)->format('Y-m-d'));\n    }\n\n    public function testMondayPlusFiveLandsNextMonday(): void\n    {\n        $monday = new \\DateTimeImmutable('2024-05-27');\n        $this->assertSame('2024-06-03', \\App\\addBusinessDays($monday, 5)->format('Y-m-d'));\n    }\n\n    public function testCrossesMonthAndYearBoundary(): void\n    {\n        $friday = new \\DateTimeImmutable('2024-12-27');\n        $this->assertSame('2025-01-01', \\App\\addBusinessDays($friday, 3)->format('Y-m-d'));\n    }\n\n    public function testStartingOnAWeekendStillCountsCorrectly(): void\n    {\n        $saturday = new \\DateTimeImmutable('2024-06-01');\n        $this->assertSame('2024-06-03', \\App\\addBusinessDays($saturday, 1)->format('Y-m-d'));\n    }\n}\n"
+  }
+}

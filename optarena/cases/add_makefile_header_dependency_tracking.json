@@ -1,0 +1,56 @@
+{
+  "description": "Add automatic header dependency tracking (-MMD -MP) so editing a .h file actually triggers a rebuild of every .c file that includes it, instead of silently leaving stale .o files",
+  "tags": [
+    "make",
+    "devops",
+    "dependency-tracking",
+    "correctness"
+  ],
+  "prompts": [
+    "The Makefile's %.o: %.c rule only depends on the .c file - if util.h changes, main.c (which #includes it) is NOT recompiled on the next `make`, because Make has no idea main.o depends on util.h at all. Fix it with automatic dependency generation: add -MMD -MP to CFLAGS so gcc emits a main.d file listing main.o's real header dependencies, then `include` the generated .d files (guarded so a missing .d file on a clean build doesn't break `make`, e.g. `-include $(wildcard *.d)`). Keep the `app` and `clean` targets working the same way for a normal from-scratch build; `clean` should also remove the generated .d files."
+  ],
+  "setup_files": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: main.o\n\t$(CC) -o app main.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n.PHONY: clean\nclean:\n\trm -f app *.o\n",
+    "util.h": "#define GREETING \"hello\"\n",
+    "main.c": "#include <stdio.h>\n#include \"util.h\"\n\nint main(void) {\n    printf(\"%s\\n\", GREETING);\n    return 0;\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "-mmd",
+        "-mp"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_header_dep.py": "import subprocess\nimport time\nfrom pathlib import Path\n\nr = subprocess.run(['make'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'initial make failed: {r.stderr}'\nout = subprocess.run(['./app'], capture_output=True, text=True, timeout=15).stdout.strip()\nassert out == 'hello', f'unexpected output: {out!r}'\n\nmtime_before = Path('main.o').stat().st_mtime\ntime.sleep(1.1)  # ensure a strictly later mtime on most filesystems\nPath('util.h').write_text('#define GREETING \"goodbye\"\\n', encoding='utf-8')\n\nr = subprocess.run(['make'], capture_output=True, text=True, timeout=45)\nassert r.returncode == 0, f'rebuild after header change failed: {r.stderr}'\n\nmtime_after = Path('main.o').stat().st_mtime\nassert mtime_after > mtime_before, (\n    'main.o was NOT rebuilt after util.h changed - header dependency tracking is missing')\n\nout = subprocess.run(['./app'], capture_output=True, text=True, timeout=15).stdout.strip()\nassert out == 'goodbye', f'app still prints stale output: {out!r}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_header_dep.py",
+  "reference_solution": {
+    "Makefile": "CC = gcc\nCFLAGS = -Wall -MMD -MP\n\napp: main.o\n\t$(CC) -o app main.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n-include $(wildcard *.d)\n\n.PHONY: clean\nclean:\n\trm -f app *.o *.d\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Makefile": "CC = gcc\nCFLAGS = -Wall\n\napp: main.o\n\t$(CC) -o app main.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n.PHONY: clean\nclean:\n\trm -f app *.o\n"
+      }
+    },
+    {
+      "name": "generates-d-files-but-never-includes-them",
+      "files": {
+        "Makefile": "CC = gcc\nCFLAGS = -Wall -MMD -MP\n\napp: main.o\n\t$(CC) -o app main.o\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n.PHONY: clean\nclean:\n\trm -f app *.o *.d\n"
+      }
+    }
+  ],
+  "name": "add_makefile_header_dependency_tracking",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 180,
+  "difficulty": 3,
+  "task_type": "devops"
+}

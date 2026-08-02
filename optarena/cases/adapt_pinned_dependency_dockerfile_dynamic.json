@@ -1,0 +1,58 @@
+{
+  "name": "adapt_pinned_dependency_dockerfile_dynamic",
+  "language": "dockerfile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: node_version.txt (a spec file the Dockerfile's FROM tag must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the pinned tag, not leave the stale version in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "dockerfile",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a Dockerfile at the repo root that starts with `FROM node:<version>-slim` where <version> is EXACTLY the version listed in node_version.txt (currently: 18), then sets WORKDIR /app and copies the current directory in with `COPY . .`.",
+    "node_version.txt has changed. Update the Dockerfile's FROM line so the pinned Node version matches the CURRENT contents of node_version.txt exactly."
+  ],
+  "setup_files": {
+    "node_version.txt": "18\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "node_version.txt rewritten to a new required Node version",
+      "write_files": {
+        "node_version.txt": "20\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "FROM",
+        "WORKDIR"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_version.py": "import re\n\nwith open('node_version.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'node_version.txt is empty'\n\nwith open('Dockerfile', encoding='utf-8') as f:\n    content = f.read()\n\nm = re.search(r'(?im)^FROM\\s+node:([^\\s]+)', content)\nassert m, 'no FROM node:... line found in Dockerfile'\ntag = m.group(1)\nassert tag.startswith(current + '-') or tag == current, \\\n    f'Dockerfile pins node:{tag}, want a tag starting with the CURRENT node_version.txt value {current!r} (stale version not updated)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_version.py",
+  "reference_solution": {
+    "Dockerfile": "FROM node:20-slim\nWORKDIR /app\nCOPY . .\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-node-version",
+      "files": {
+        "Dockerfile": "FROM node:18-slim\nWORKDIR /app\nCOPY . .\n"
+      }
+    }
+  ]
+}

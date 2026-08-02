@@ -1,0 +1,64 @@
+{
+  "name": "adapt_removed_dependency_python_dynamic",
+  "language": "python",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "greeting_data.py exports GREETING. Create message.py with a function message() that returns the value of GREETING imported from greeting_data.",
+    "greeting_data.py has just been removed from the project. Update message.py so it still works with NO reference to greeting_data or a GREETING identifier, and message() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "greeting_data.py": "GREETING = \"hola\"\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "greeting_data.py deleted",
+      "delete_files": [
+        "greeting_data.py"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "message.py",
+      "content_patterns": [
+        "message"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_message.py": "import importlib.util\nspec = importlib.util.spec_from_file_location('message_mod', 'message.py')\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nassert mod.message() == 'hola', f'message() = {mod.message()!r}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_message.py",
+  "reference_solution": {
+    "message.py": "def message():\n    return \"hola\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-references-deleted-file",
+      "files": {
+        "message.py": "from greeting_data import GREETING\n\n\ndef message():\n    return GREETING\n"
+      }
+    },
+    {
+      "name": "wrong-value",
+      "files": {
+        "message.py": "def message():\n    return \"bonjour\"\n"
+      }
+    }
+  ]
+}

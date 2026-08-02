@@ -5,26 +5,20 @@ Optional driver: a minimal AutoGen/AG2 AssistantAgent (single agent, one run
 per prompt) pointed at the backend's OpenAI-compatible endpoint. Requires
 `pip install autogen-agentchat autogen-ext[openai]`.
 
-Same shape as crewai_sdk.py: the agent has no tools, so it is asked to
-output the complete file in one code block; the driver writes it to the
-expected path - this measures the SDK's own orchestration/prompting stack on
-top of the backend, not a tool-using agent. AutoGen's chat client is async
-throughout, so each prompt is run via `asyncio.run`.
+The agent has no tools, so it is asked to output the complete file in one code
+block; the driver writes it to the expected path - this measures the SDK's own
+orchestration/prompting stack on top of the backend, not a tool-using agent.
+
+AutoGen's chat client is async throughout, so this builds on
+`sdk_base.AsyncSingleFileSDKDriver` (A-09): each prompt runs under
+`asyncio.wait_for`, which gives the case deadline a real cancellation path
+rather than the thread-abandonment the synchronous SDK drivers settle for.
 """
 
 from __future__ import annotations
 
-import asyncio
-import re
-import time
-from pathlib import Path
-
-from ..cases import changed_files, evaluate_case, prepare_workspace, snapshot
 from ..scenario import Scenario
-from .base import CaseResult, Driver
-from .openai_chat import concrete_target
-
-_CODE_BLOCK = re.compile(r"```(?:\w+[^\n]*)?\n(.*?)```", re.DOTALL)
+from .sdk_base import AsyncSingleFileSDKDriver
 
 # AutoGen validates the target model against known OpenAI capability
 # profiles unless told otherwise - a local/proxied model (Ollama, a router)
@@ -37,74 +31,56 @@ _LOCAL_MODEL_INFO = {
 }
 
 
-class AutoGenDriver(Driver):
+class AutoGenDriver(AsyncSingleFileSDKDriver):
     name = "autogen"
+    import_names = ("autogen_agentchat", "autogen_ext.models.openai")
+    install_hint = "pip install autogen-agentchat autogen-ext[openai]"
 
-    def prepare(self, scenario: Scenario, workspace: Path) -> None:
-        try:
-            import autogen_agentchat  # noqa: F401
-            import autogen_ext.models.openai  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError(
-                "autogen not installed - pip install autogen-agentchat autogen-ext[openai]"
-            ) from exc
-
-    def run_case(self, case: dict, scenario: Scenario, workspace: Path) -> CaseResult:
+    async def aopen_session(self, scenario: Scenario):
         from autogen_agentchat.agents import AssistantAgent
         from autogen_ext.models.openai import OpenAIChatCompletionClient
 
-        result = CaseResult(name=case["name"])
         backend = scenario.backend
-        prepare_workspace(workspace, case)
-        before = snapshot(workspace)
+        client = OpenAIChatCompletionClient(
+            model=backend.model,
+            base_url=backend.openai_base,
+            api_key=backend.api_key or "optarena",
+            model_info=_LOCAL_MODEL_INFO,
+        )
+        agent = AssistantAgent(
+            name="software_engineer",
+            model_client=client,
+            system_message="You are a precise engineer who answers with one fenced "
+                            "code block containing the complete file content, and "
+                            "nothing else.",
+        )
+        return (agent, client)
 
-        expected = case.get("expected_files", [])
-        target = concrete_target(expected[0]["path_pattern"] if expected else None)
+    async def aclose_session(self, session) -> None:
+        # Without an explicit close, the client's httpx connections are
+        # garbage-collected after the event loop is gone, raising a noisy
+        # "Event loop is closed" at interpreter exit.
+        _agent, client = session
+        await client.close()
 
-        async def _run_prompts() -> str | None:
-            client = OpenAIChatCompletionClient(
-                model=backend.model,
-                base_url=backend.openai_base,
-                api_key=backend.api_key or "optarena",
-                model_info=_LOCAL_MODEL_INFO,
-            )
-            try:
-                agent = AssistantAgent(
-                    name="software_engineer",
-                    model_client=client,
-                    system_message="You are a precise engineer who answers with one fenced "
-                                    "code block containing the complete file content, and "
-                                    "nothing else.",
-                )
-                for prompt in case.get("prompts", []):
-                    context = ""
-                    if (workspace / target).exists():
-                        context = (
-                            f"\nCurrent content of {target.name}:\n```\n"
-                            f"{(workspace / target).read_text(encoding='utf-8', errors='replace')}\n```"
-                        )
-                    task_result = await agent.run(
-                        task=prompt + context +
-                        "\nReply with exactly one fenced code block containing the full file."
-                    )
-                    out = str(task_result.messages[-1].to_text())
-                    blocks = _CODE_BLOCK.findall(out)
-                    content = blocks[0].strip() + "\n" if blocks else out.strip() + "\n"
-                    dest = workspace / target
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_text(content, encoding="utf-8")
-                return None
-            finally:
-                await client.close()
+    async def acomplete(self, session, prompt: str, scenario: Scenario) -> "tuple[str, dict]":
+        agent, _client = session
+        task_result = await agent.run(task=prompt)
+        return str(task_result.messages[-1].to_text()), _usage_from(task_result)
 
-        t0 = time.monotonic()
-        try:
-            asyncio.run(_run_prompts())
-        except Exception as exc:  # noqa: BLE001
-            result.error = f"{type(exc).__name__}: {exc}"
-        result.duration_s = time.monotonic() - t0
 
-        result.files = changed_files(before, workspace)
-        result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
-        result.passed = result.error is None and not result.failures
-        return result
+def _usage_from(task_result) -> dict:   # noqa: ANN001 - SDK-specific object
+    """Sum `models_usage` across the result's messages, when reported.
+    Empty dict otherwise - absent telemetry must not read as zero."""
+    prompt_tokens = completion_tokens = 0
+    seen = False
+    for message in getattr(task_result, "messages", None) or []:
+        usage = getattr(message, "models_usage", None)
+        if usage is None:
+            continue
+        seen = True
+        prompt_tokens += getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens += getattr(usage, "completion_tokens", 0) or 0
+    if not seen:
+        return {}
+    return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}

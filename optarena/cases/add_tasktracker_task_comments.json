@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 120,
   "timeout": 600,
-  "description": "L3 repo-scale: add a Comment sub-resource to tasks across models/schemas/crud/routers",
+  "description": "Repo-scale: add a Comment sub-resource to tasks across models/schemas/crud/routers",
   "difficulty": 3,
   "task_type": "feature",
   "tags": [

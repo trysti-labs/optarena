@@ -1,0 +1,60 @@
+{
+  "name": "adapt_cart_limit_csharp_dynamic",
+  "language": "csharp",
+  "framework": "plain-csharp",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dynamic eval: max_items.txt (a spec file the cart limit must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old limit into Cart.cs",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "csharp",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create Cart.cs with a public static class Cart containing a static method CanAdd(int count) returning true if count is less than or equal to the integer in max_items.txt (currently 5), else false. Read the limit from the file (File.ReadAllText) at call time - do not hardcode it.",
+    "max_items.txt has changed. Make sure CanAdd() enforces the CURRENT limit in the file."
+  ],
+  "setup_files": {
+    "max_items.txt": "5\n",
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "max_items.txt tightened to a lower limit",
+      "write_files": {
+        "max_items.txt": "3\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Cart.cs",
+      "content_patterns": [
+        "CanAdd"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "int limit = int.Parse(File.ReadAllText(\"max_items.txt\").Trim());\nif (!Cart.CanAdd(limit)) { Console.Error.WriteLine($\"CanAdd({limit}) should be true\"); Environment.Exit(1); return; }\nif (Cart.CanAdd(limit + 1)) { Console.Error.WriteLine($\"CanAdd({limit + 1}) should be false (stale limit not updated)\"); Environment.Exit(1); return; }\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Cart.cs": "public static class Cart\n{\n    public static bool CanAdd(int count)\n    {\n        int limit = int.Parse(File.ReadAllText(\"max_items.txt\").Trim());\n        return count <= limit;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-limit",
+      "files": {
+        "Cart.cs": "public static class Cart\n{\n    public static bool CanAdd(int count) => count <= 5;\n}\n"
+      }
+    }
+  ]
+}

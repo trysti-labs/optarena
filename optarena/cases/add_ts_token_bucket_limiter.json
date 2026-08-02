@@ -1,0 +1,47 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "typescript",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "limiter.ts's TokenBucket.allow always returns true. Implement it properly: the constructor takes (capacity: number, refillRate: number) - `refillRate` tokens are added per second, capped at `capacity` tokens (never above it, even after a long idle period). allow(now: number): boolean refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time. The file must compile under tsc --strict."
+  ],
+  "setup_files": {
+    "limiter.ts": "export class TokenBucket {\n  constructor(private capacity: number, private refillRate: number) {}\n\n  allow(now: number): boolean {\n    return true;\n  }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "limiter.ts",
+      "content_patterns": [
+        "class TokenBucket"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "limiter.ts": "export class TokenBucket {\n  private tokens: number;\n  private last: number | undefined;\n\n  constructor(private capacity: number, private refillRate: number) {\n    this.tokens = capacity;\n  }\n\n  allow(now: number): boolean {\n    if (this.last !== undefined) {\n      const elapsed = now - this.last;\n      this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.refillRate);\n    }\n    this.last = now;\n    if (this.tokens >= 1) {\n      this.tokens -= 1;\n      return true;\n    }\n    return false;\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "limiter.ts": "export class TokenBucket {\n  private tokens: number;\n  private last: number | undefined;\n\n  constructor(private capacity: number, private refillRate: number) {\n    this.tokens = capacity;\n  }\n\n  allow(now: number): boolean {\n    if (this.last !== undefined) {\n      const elapsed = now - this.last;\n      this.tokens = this.tokens + elapsed * this.refillRate;\n    }\n    this.last = now;\n    if (this.tokens >= 1) {\n      this.tokens -= 1;\n      return true;\n    }\n    return false;\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_ts_token_bucket_limiter",
+  "language": "typescript",
+  "framework": "typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "sh run_checks.sh",
+  "test_setup_files": {
+    "run_checks.sh": "set -e\ntsc --strict --target es2020 --module commonjs --skipLibCheck --noEmit limiter.ts\ntsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build limiter.ts\nnode behavior_test.js\n",
+    "behavior_test.js": "const assert = require(\"assert\");\nconst { TokenBucket } = require(\"./build/limiter.js\");\n\n{\n  const b = new TokenBucket(3, 1);\n  assert.strictEqual(b.allow(0), true);\n  assert.strictEqual(b.allow(0), true);\n  assert.strictEqual(b.allow(0), true);\n  assert.strictEqual(b.allow(0), false);\n}\n{\n  const b = new TokenBucket(3, 1);\n  for (let i = 0; i < 3; i++) b.allow(0);\n  assert.strictEqual(b.allow(0.5), false);\n  assert.strictEqual(b.allow(1.0), true);\n  assert.strictEqual(b.allow(1.0), false);\n}\n{\n  const b = new TokenBucket(2, 1);\n  b.allow(0);\n  b.allow(0);\n  assert.strictEqual(b.allow(1000), true);\n  assert.strictEqual(b.allow(1000), true);\n  assert.strictEqual(b.allow(1000), false);\n}\nconsole.log(\"behavior OK\");\n"
+  }
+}

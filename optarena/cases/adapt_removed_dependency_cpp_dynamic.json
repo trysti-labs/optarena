@@ -1,0 +1,58 @@
+{
+  "name": "adapt_removed_dependency_cpp_dynamic",
+  "language": "cpp",
+  "domain": "systems",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: a header the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "cpp",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "greeting_data.hpp declares namespace app with a constexpr const char* GREETING. Create a header-only message.hpp that #includes \"greeting_data.hpp\" and <string>, declaring an inline std::string app::message() returning GREETING.",
+    "greeting_data.hpp has just been removed from the project. Update message.hpp so it still compiles with NO reference to greeting_data.hpp, and message() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "greeting_data.hpp": "#pragma once\n\nnamespace app {\nconstexpr const char* GREETING = \"hola\";\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "greeting_data.hpp deleted",
+      "delete_files": [
+        "greeting_data.hpp"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "message.hpp",
+      "content_patterns": [
+        "message"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_message_main.cpp": "#include \"message.hpp\"\n#include <iostream>\n#include <string>\n\nint main() {\n    std::string got = app::message();\n    if (got != \"hola\") {\n        std::cerr << \"message() = \\\"\" << got << \"\\\", want \\\"hola\\\"\" << std::endl;\n        return 1;\n    }\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n",
+    "test_message.py": "import subprocess\nsubprocess.run(['g++', '-std=c++17', 'test_message_main.cpp', '-o', 'test_message_bin'], check=True)\nproc = subprocess.run(['./test_message_bin'], capture_output=True, text=True, timeout=15)\nassert proc.returncode == 0, f'exit {proc.returncode}, stderr={proc.stderr[-300:]}'\nassert 'PASS' in proc.stdout\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_message.py",
+  "reference_solution": {
+    "message.hpp": "#pragma once\n\n#include <string>\n\nnamespace app {\ninline std::string message() {\n    return \"hola\";\n}\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-value",
+      "files": {
+        "message.hpp": "#pragma once\n\n#include <string>\n\nnamespace app {\ninline std::string message() {\n    return \"bonjour\";\n}\n}\n"
+      }
+    }
+  ]
+}

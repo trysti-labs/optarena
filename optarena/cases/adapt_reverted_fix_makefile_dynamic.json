@@ -1,0 +1,58 @@
+{
+  "name": "adapt_reverted_fix_makefile_dynamic",
+  "language": "makefile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: the agent's bug fix is REVERTED between prompts (fixed after_prompt trigger, Makefile rewritten back to the buggy version); the agent must notice and reapply the fix",
+  "difficulty": 1,
+  "task_type": "bug_fix",
+  "test_kind": "unit",
+  "tags": [
+    "makefile",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "reverted-edit"
+  ],
+  "prompts": [
+    "The `clean` target in this Makefile is missing the `.PHONY` declaration, which is a bug (a file named `clean` in the directory would silently break it). Fix the Makefile by adding `.PHONY: clean`.",
+    "Your fix to the Makefile seems to have been reverted - `.PHONY: clean` is gone again. Please reapply the fix."
+  ],
+  "setup_files": {
+    "Makefile": "clean:\n\trm -rf build\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "Makefile reverted back to missing .PHONY",
+      "write_files": {
+        "Makefile": "clean:\n\trm -rf build\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        ".PHONY",
+        "clean"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_phony.py": "import re\n\nwith open('Makefile', encoding='utf-8') as f:\n    content = f.read()\n\nassert re.search(r'(?m)^\\.PHONY\\s*:.*\\bclean\\b', content), \\\n    'expected a .PHONY: clean declaration (stale unfixed Makefile)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_phony.py",
+  "reference_solution": {
+    "Makefile": ".PHONY: clean\n\nclean:\n\trm -rf build\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fix-not-reapplied",
+      "files": {
+        "Makefile": "clean:\n\trm -rf build\n"
+      }
+    }
+  ]
+}

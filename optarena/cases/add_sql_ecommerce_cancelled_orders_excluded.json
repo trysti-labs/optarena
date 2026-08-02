@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (sql-ecommerce): a new cancelled order status must be excluded from BOTH aggregate views, not just one",
+  "tags": [
+    "sql",
+    "sqlite",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a `cancelled` status to the `orders.status` CHECK constraint in schema.sql (alongside pending/paid/shipped). Cancelled orders must not contribute to EITHER of the two existing aggregate views in views.sql: `customer_order_totals`'s `total_cents` must exclude line items from cancelled orders, AND `product_sales_summary`'s `units_sold` must ALSO exclude them - both views currently sum every order_items row regardless of the parent order's status, and both need the same exclusion applied, not just one."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "cancelled"
+      ]
+    },
+    {
+      "path_pattern": "views.sql",
+      "content_patterns": [
+        "cancelled"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_cancelled_exclusion.py": "import sqlite3\nfrom pathlib import Path\n\nschema = Path('schema.sql').read_text(encoding='utf-8')\nviews = Path('views.sql').read_text(encoding='utf-8')\n\ncon = sqlite3.connect(':memory:')\ncon.executescript(schema)\ncon.executescript(views)\ncon.executescript(\"\"\"\nINSERT INTO customers VALUES (1, 'Ada', 'ada@example.com');\nINSERT INTO products VALUES (1, 'Widget', 500);\nINSERT INTO orders VALUES (1, 1, 'paid', '2026-01-01');\nINSERT INTO orders VALUES (2, 1, 'cancelled', '2026-01-02');\nINSERT INTO order_items VALUES (1, 1, 1, 2, 500);\nINSERT INTO order_items VALUES (2, 2, 1, 5, 500);\n\"\"\")\n\ncustomer_total = con.execute(\n    'SELECT total_cents FROM customer_order_totals WHERE customer_id = 1').fetchone()[0]\nassert customer_total == 1000, (\n    f'expected 1000 (only the paid order counted), got {customer_total} - the cancelled '\n    f'order (5 units) must not contribute to the customer total')\n\nunits_sold = con.execute(\n    'SELECT units_sold FROM product_sales_summary WHERE product_id = 1').fetchone()[0]\nassert units_sold == 2, (\n    f'expected 2 units sold (only the paid order counted), got {units_sold} - the '\n    f'product_sales_summary view must ALSO exclude cancelled orders, not just '\n    f'customer_order_totals')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_cancelled_exclusion.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped', 'cancelled')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n",
+    "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) AS total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id AND o.status != 'cancelled'\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(oi.quantity), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nLEFT JOIN orders o ON o.id = oi.order_id AND o.status != 'cancelled'\nWHERE o.id IS NOT NULL OR oi.id IS NULL\nGROUP BY p.id, p.name;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "product-summary-still-counts-cancelled",
+      "files": {
+        "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped', 'cancelled')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n",
+        "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) AS total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id AND o.status != 'cancelled'\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(oi.quantity), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name;\n"
+      }
+    }
+  ],
+  "name": "add_sql_ecommerce_cancelled_orders_excluded",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "sql-ecommerce",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

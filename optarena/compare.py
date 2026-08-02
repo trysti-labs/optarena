@@ -169,8 +169,22 @@ def regression_summary(cmp: dict) -> dict:
     accuracy/time/token deltas - "did the upgrade help or hurt?" in one
     glance, not a full per-case table.
     """
-    regressed = [r["case"] for r in cmp["cases"] if r["a_passed"] and not r["b_passed"]]
-    improved = [r["case"] for r in cmp["cases"] if not r["a_passed"] and r["b_passed"]]
+    # A-03: `is False`, not `not ...` - `a_passed`/`b_passed` are None when a
+    # case is absent from that run entirely (case_deltas aligns by name over
+    # the UNION of both runs), and `not None` is True. The loose test counted
+    # every case that run B simply didn't include as a regression, so
+    # comparing a `--cases`/`--language` subset against a full baseline failed
+    # the CI gate (cmd_regression exits 1) naming cases that never regressed.
+    # compare_runs' own discordant count already used the strict form, so the
+    # two disagreed about the same pair of runs.
+    regressed = [r["case"] for r in cmp["cases"] if r["a_passed"] and r["b_passed"] is False]
+    improved = [r["case"] for r in cmp["cases"] if r["a_passed"] is False and r["b_passed"]]
+    # Cases only one run has at all: reported as their own category rather than
+    # silently folded into regressed/improved. Not a verdict about the tool -
+    # the runs measured different case sets, which manifest_compatibility
+    # already flags separately.
+    missing_in_b = [r["case"] for r in cmp["cases"] if r["a_passed"] is not None and r["b_passed"] is None]
+    missing_in_a = [r["case"] for r in cmp["cases"] if r["a_passed"] is None and r["b_passed"] is not None]
 
     def _is_flaky(marker):     # "2/3" -> True, "3/3"/"0/3"/None -> False
         if not marker:
@@ -216,6 +230,10 @@ def regression_summary(cmp: dict) -> dict:
         "improved_cases": improved,
         "flaky_cases": flaky,
         "infrastructure_error_cases": infra_error_cases,
+        # A-03: cases present in only one of the two runs - previously
+        # miscounted as regressions/improvements.
+        "missing_in_b_cases": missing_in_b,
+        "missing_in_a_cases": missing_in_a,
     }
 
 
@@ -280,6 +298,15 @@ def format_regression(summary: dict) -> str:
         lines.append(f"  flaky cases (non-unanimous across --trials): {len(s['flaky_cases'])}")
         for name in s["flaky_cases"]:
             lines.append(f"    - {name}")
+    # A-03: only-in-one-run cases, named explicitly instead of being counted
+    # as regressions (which is what they used to be reported as).
+    for key, label in (("missing_in_b_cases", f"only in {s['a_label']} (not run in {s['b_label']})"),
+                       ("missing_in_a_cases", f"only in {s['b_label']} (not run in {s['a_label']})")):
+        if s.get(key):
+            lines.append("")
+            lines.append(f"  cases {label}: {len(s[key])}")
+            for name in s[key]:
+                lines.append(f"    - {name}")
     if s.get("infrastructure_error_cases"):
         lines.append("")
         lines.append(f"  ** INFRASTRUCTURE ERRORS (not a code verdict): {len(s['infrastructure_error_cases'])} **")

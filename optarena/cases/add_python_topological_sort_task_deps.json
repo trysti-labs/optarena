@@ -1,0 +1,46 @@
+{
+  "description": "Replace an order-ignoring task scheduler with a real topological sort that also detects cycles",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "algorithms",
+    "graphs"
+  ],
+  "prompts": [
+    "scheduler.py's order_tasks(deps) ignores the dependency graph entirely and just returns the tasks in whatever order the dict iterates. deps is a mapping of task name -> list of tasks it depends on (which must run before it). Implement a real topological sort: every task must appear in the output AFTER all of its dependencies, every task named anywhere (as a key OR only as a dependency value) must appear exactly once in the output, and a cycle (e.g. A depends on B which depends on A) must raise ValueError instead of silently returning a partial or wrong order."
+  ],
+  "setup_files": {
+    "scheduler.py": "def order_tasks(deps):\n    return list(deps.keys())\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "scheduler.py",
+      "content_patterns": [
+        "def order_tasks"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_scheduler_hidden.py": "import pytest\n\nfrom scheduler import order_tasks\n\n\ndef test_dependencies_come_before_dependents():\n    deps = {'build': ['compile'], 'compile': ['fetch'], 'fetch': []}\n    order = order_tasks(deps)\n    assert set(order) == {'build', 'compile', 'fetch'}\n    assert order.index('fetch') < order.index('compile') < order.index('build')\n\n\ndef test_dependency_only_mentioned_as_a_value_is_included():\n    deps = {'app': ['lib']}\n    order = order_tasks(deps)\n    assert set(order) == {'app', 'lib'}\n    assert order.index('lib') < order.index('app')\n\n\ndef test_diamond_dependency():\n    deps = {'d': ['b', 'c'], 'b': ['a'], 'c': ['a'], 'a': []}\n    order = order_tasks(deps)\n    assert order.index('a') < order.index('b')\n    assert order.index('a') < order.index('c')\n    assert order.index('b') < order.index('d')\n    assert order.index('c') < order.index('d')\n\n\ndef test_cycle_raises():\n    deps = {'a': ['b'], 'b': ['a']}\n    with pytest.raises(ValueError):\n        order_tasks(deps)\n"
+  },
+  "check_command": "python3 -m pytest -q test_scheduler_hidden.py",
+  "reference_solution": {
+    "scheduler.py": "def order_tasks(deps):\n    all_tasks = set(deps.keys())\n    for dependencies in deps.values():\n        all_tasks.update(dependencies)\n\n    visited = set()\n    in_progress = set()\n    order = []\n\n    def visit(task):\n        if task in visited:\n            return\n        if task in in_progress:\n            raise ValueError(f'cycle detected involving {task!r}')\n        in_progress.add(task)\n        for dep in deps.get(task, []):\n            visit(dep)\n        in_progress.discard(task)\n        visited.add(task)\n        order.append(task)\n\n    for task in sorted(all_tasks):\n        visit(task)\n    return order\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "cycle-silently-drops-node-instead-of-raising",
+      "files": {
+        "scheduler.py": "def order_tasks(deps):\n    all_tasks = set(deps.keys())\n    for dependencies in deps.values():\n        all_tasks.update(dependencies)\n\n    remaining = dict(deps)\n    for task in all_tasks:\n        remaining.setdefault(task, [])\n\n    order = []\n    done = set()\n    progressed = True\n    while remaining and progressed:\n        progressed = False\n        for task in sorted(remaining):\n            if all(d in done for d in remaining[task]):\n                order.append(task)\n                done.add(task)\n                del remaining[task]\n                progressed = True\n                break\n    return order\n"
+      }
+    }
+  ],
+  "name": "add_python_topological_sort_task_deps",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

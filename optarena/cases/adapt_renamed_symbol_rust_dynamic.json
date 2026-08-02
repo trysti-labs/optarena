@@ -1,0 +1,68 @@
+{
+  "name": "adapt_renamed_symbol_rust_dynamic",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time src/lib.rs's own text contains 'circle_area' (i.e. once the agent has produced a first attempt), then mathutils::square is RENAMED to mathutils::sq under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "rust",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "renamed-symbol",
+    "reactive"
+  ],
+  "prompts": [
+    "src/mathutils.rs exports a function square(x: f64) -> f64; src/lib.rs already has `mod mathutils;`. Add a function `pub fn circle_area(r: f64) -> f64` to src/lib.rs that returns 3.14159 * mathutils::square(r).",
+    "mathutils::square has just been renamed to mathutils::sq. Update src/lib.rs to use the new name (do not keep a reference to the old name square)."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"renamed_rust_case\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/mathutils.rs": "pub fn square(x: f64) -> f64 {\n    x * x\n}\n",
+    "src/lib.rs": "mod mathutils;\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "src/lib.rs",
+          "pattern": "circle_area"
+        }
+      },
+      "description": "mathutils::square renamed to mathutils::sq, triggered reactively once src/lib.rs's first draft appeared",
+      "write_files": {
+        "src/mathutils.rs": "pub fn sq(x: f64) -> f64 {\n    x * x\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "circle_area"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/area_test.rs": "use renamed_rust_case::circle_area;\n\n#[test]\nfn test_circle_area() {\n    let got = circle_area(2.0);\n    let want = 3.14159 * 4.0;\n    assert!((got - want).abs() < 1e-9, \"circle_area(2.0) = {}, want {}\", got, want);\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "mod mathutils;\n\npub fn circle_area(r: f64) -> f64 {\n    3.14159 * mathutils::sq(r)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-name",
+      "files": {
+        "src/lib.rs": "mod mathutils;\n\npub fn circle_area(r: f64) -> f64 {\n    3.14159 * mathutils::square(r)\n}\n",
+        "Cargo.toml": "[package]\nname = \"renamed_rust_case\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n"
+      }
+    }
+  ]
+}

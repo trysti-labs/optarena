@@ -1,0 +1,56 @@
+{
+  "description": "Add deletion_protection and storage_encrypted to an RDS instance that currently has neither, so a stray terraform destroy can't silently wipe an unencrypted production database",
+  "tags": [
+    "terraform",
+    "hcl",
+    "devops",
+    "aws",
+    "rds",
+    "hardening"
+  ],
+  "prompts": [
+    "main.tf declares a bare aws_db_instance with no protection at all - it can be destroyed by a single `terraform destroy` with no confirmation, and its storage is unencrypted at rest. Add deletion_protection = true and storage_encrypted = true to the existing aws_db_instance.orders resource (do not create a new resource - modify the existing one in place). Keep every other existing attribute (engine, instance_class, allocated_storage, username) unchanged."
+  ],
+  "setup_files": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_db_instance\" \"orders\" {\n  identifier        = \"orders-db\"\n  engine            = \"postgres\"\n  engine_version    = \"15\"\n  instance_class    = \"db.t3.micro\"\n  allocated_storage = 20\n  username          = \"orders_app\"\n  password          = \"changeme123!\"\n  skip_final_snapshot = true\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "main.tf",
+      "content_patterns": [
+        "deletion_protection",
+        "storage_encrypted"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_rds.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\ncontent = open('main.tf', encoding='utf-8').read()\n\ndb = re.search(r'resource\\s+\"aws_db_instance\"\\s+\"orders\"\\s*\\{(.*?)\\n\\}', content, re.DOTALL)\nassert db, 'aws_db_instance.orders not found'\nblock = db.group(1)\n\nm = re.search(r'deletion_protection\\s*=\\s*(true|false)', block)\nassert m, 'deletion_protection missing'\nassert m.group(1) == 'true', f'deletion_protection must be true, got {m.group(1)}'\n\nm = re.search(r'storage_encrypted\\s*=\\s*(true|false)', block)\nassert m, 'storage_encrypted missing'\nassert m.group(1) == 'true', f'storage_encrypted must be true, got {m.group(1)}'\n\nassert 'db.t3.micro' in block, 'instance_class must stay unchanged'\nassert re.search(r'allocated_storage\\s*=\\s*20', block), 'allocated_storage must stay unchanged'\n\nprint('PASS RDS hardening checks')\n"
+  },
+  "check_command": "python3 check_rds.py",
+  "reference_solution": {
+    "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_db_instance\" \"orders\" {\n  identifier          = \"orders-db\"\n  engine              = \"postgres\"\n  engine_version      = \"15\"\n  instance_class      = \"db.t3.micro\"\n  allocated_storage   = 20\n  username            = \"orders_app\"\n  password            = \"changeme123!\"\n  skip_final_snapshot = true\n  deletion_protection = true\n  storage_encrypted   = true\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_db_instance\" \"orders\" {\n  identifier        = \"orders-db\"\n  engine            = \"postgres\"\n  engine_version    = \"15\"\n  instance_class    = \"db.t3.micro\"\n  allocated_storage = 20\n  username          = \"orders_app\"\n  password          = \"changeme123!\"\n  skip_final_snapshot = true\n}\n"
+      }
+    },
+    {
+      "name": "encrypted-but-not-deletion-protected",
+      "files": {
+        "main.tf": "terraform {\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\nresource \"aws_db_instance\" \"orders\" {\n  identifier          = \"orders-db\"\n  engine              = \"postgres\"\n  engine_version      = \"15\"\n  instance_class      = \"db.t3.micro\"\n  allocated_storage   = 20\n  username            = \"orders_app\"\n  password            = \"changeme123!\"\n  skip_final_snapshot = true\n  deletion_protection = false\n  storage_encrypted   = true\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_rds_deletion_protection_and_encryption",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 150,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

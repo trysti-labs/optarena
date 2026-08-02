@@ -1,0 +1,42 @@
+{
+  "description": "Implement a token bucket rate limiter (fractional refill over elapsed time, capped at capacity) driven via a stdin command protocol",
+  "task_type": "feature",
+  "tags": [
+    "c",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "Create a C program in limiter.c implementing a token bucket rate limiter, driven by commands read from stdin (one per line) until EOF: `init CAPACITY REFILL_RATE` initializes the bucket (both doubles; the bucket starts full with CAPACITY tokens); `allow NOW` (NOW is a double, seconds) refills the bucket based on elapsed time since the last call (REFILL_RATE tokens per second, capped at CAPACITY - never above it even after a long idle gap), then - if at least 1 token is available - consumes exactly 1 and prints `1`; otherwise prints `0` and consumes nothing. Assume `init` is called exactly once, before any `allow`."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "limiter.c",
+      "content_patterns": [
+        "int main"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "limiter.c": "#include <stdio.h>\n#include <string.h>\n\nstatic double capacity;\nstatic double refill_rate;\nstatic double tokens;\nstatic double last;\nstatic int has_last = 0;\n\nstatic void do_init(double cap, double rate) {\n    capacity = cap;\n    refill_rate = rate;\n    tokens = cap;\n    has_last = 0;\n}\n\nstatic int do_allow(double now) {\n    if (has_last) {\n        double elapsed = now - last;\n        tokens += elapsed * refill_rate;\n        if (tokens > capacity) tokens = capacity;\n    }\n    last = now;\n    has_last = 1;\n    if (tokens >= 1.0) {\n        tokens -= 1.0;\n        return 1;\n    }\n    return 0;\n}\n\nint main(void) {\n    char cmd[16];\n    double a, b;\n    while (scanf(\"%15s\", cmd) == 1) {\n        if (strcmp(cmd, \"init\") == 0) {\n            if (scanf(\"%lf %lf\", &a, &b) == 2) do_init(a, b);\n        } else if (strcmp(cmd, \"allow\") == 0) {\n            if (scanf(\"%lf\", &a) == 1) printf(\"%d\\n\", do_allow(a));\n        }\n    }\n    return 0;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "limiter.c": "#include <stdio.h>\n#include <string.h>\n\nstatic double capacity;\nstatic double refill_rate;\nstatic double tokens;\nstatic double last;\nstatic int has_last = 0;\n\nstatic void do_init(double cap, double rate) {\n    capacity = cap;\n    refill_rate = rate;\n    tokens = cap;\n    has_last = 0;\n}\n\nstatic int do_allow(double now) {\n    if (has_last) {\n        double elapsed = now - last;\n        tokens += elapsed * refill_rate;\n    }\n    last = now;\n    has_last = 1;\n    if (tokens >= 1.0) {\n        tokens -= 1.0;\n        return 1;\n    }\n    return 0;\n}\n\nint main(void) {\n    char cmd[16];\n    double a, b;\n    while (scanf(\"%15s\", cmd) == 1) {\n        if (strcmp(cmd, \"init\") == 0) {\n            if (scanf(\"%lf %lf\", &a, &b) == 2) do_init(a, b);\n        } else if (strcmp(cmd, \"allow\") == 0) {\n            if (scanf(\"%lf\", &a) == 1) printf(\"%d\\n\", do_allow(a));\n        }\n    }\n    return 0;\n}\n"
+      }
+    }
+  ],
+  "name": "add_c_token_bucket_limiter",
+  "language": "c",
+  "domain": "systems",
+  "check_command_timeout": 60,
+  "timeout": 120,
+  "difficulty": 3,
+  "setup_files": {},
+  "test_setup_files": {
+    "test_limiter.py": "import subprocess\nsubprocess.run(['gcc', '-std=c11', '-Wall', 'limiter.c', '-o', 'limiter_bin'], check=True)\n\ndef run(commands):\n    text = '\\n'.join(commands) + '\\n'\n    proc = subprocess.run(['./limiter_bin'], input=text, capture_output=True, text=True, timeout=10)\n    assert proc.returncode == 0, f'nonzero exit: {proc.returncode}, stderr={proc.stderr[-400:]}'\n    return [l.strip() for l in proc.stdout.strip('\\n').split('\\n') if proc.stdout.strip('\\n')]\n\nout = run(['init 3 1', 'allow 0', 'allow 0', 'allow 0', 'allow 0'])\nassert out == ['1', '1', '1', '0'], f'starts full and drains: got {out}'\n\nout = run(['init 3 1', 'allow 0', 'allow 0', 'allow 0', 'allow 0.5', 'allow 1.0', 'allow 1.0'])\nassert out == ['1', '1', '1', '0', '1', '0'], f'refills over time: got {out}'\n\nout = run(['init 2 1', 'allow 0', 'allow 0', 'allow 1000', 'allow 1000', 'allow 1000'])\nassert out == ['1', '1', '1', '1', '0'], f'refill caps at capacity: got {out}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_limiter.py"
+}

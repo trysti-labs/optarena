@@ -1,0 +1,46 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "limiter.rb's TokenBucket#allow always returns true. Implement it properly: TokenBucket.new(capacity, refill_rate) - `refill_rate` tokens are added per second, capped at `capacity` tokens (never above it, even after a long idle period). allow(now) refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "setup_files": {
+    "limiter.rb": "class TokenBucket\n  def initialize(capacity, refill_rate)\n    @capacity = capacity\n    @refill_rate = refill_rate\n  end\n\n  def allow(now)\n    true\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "limiter.rb",
+      "content_patterns": [
+        "class TokenBucket"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "limiter.rb": "class TokenBucket\n  def initialize(capacity, refill_rate)\n    @capacity = capacity\n    @refill_rate = refill_rate\n    @tokens = capacity.to_f\n    @last = nil\n  end\n\n  def allow(now)\n    unless @last.nil?\n      elapsed = now - @last\n      @tokens = [@capacity.to_f, @tokens + elapsed * @refill_rate].min\n    end\n    @last = now\n    if @tokens >= 1\n      @tokens -= 1\n      true\n    else\n      false\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "limiter.rb": "class TokenBucket\n  def initialize(capacity, refill_rate)\n    @capacity = capacity\n    @refill_rate = refill_rate\n    @tokens = capacity.to_f\n    @last = nil\n  end\n\n  def allow(now)\n    unless @last.nil?\n      elapsed = now - @last\n      @tokens = @tokens + elapsed * @refill_rate\n    end\n    @last = now\n    if @tokens >= 1\n      @tokens -= 1\n      true\n    else\n      false\n    end\n  end\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_token_bucket_limiter",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "ruby limiter_hidden_test.rb",
+  "test_setup_files": {
+    "limiter_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"limiter\"\n\nclass TokenBucketTest < Minitest::Test\n  def test_starts_full_and_drains\n    b = TokenBucket.new(3, 1)\n    assert b.allow(0)\n    assert b.allow(0)\n    assert b.allow(0)\n    refute b.allow(0)\n  end\n\n  def test_refills_over_time\n    b = TokenBucket.new(3, 1)\n    3.times { b.allow(0) }\n    refute b.allow(0.5)\n    assert b.allow(1.0)\n    refute b.allow(1.0)\n  end\n\n  def test_refill_caps_at_capacity\n    b = TokenBucket.new(2, 1)\n    b.allow(0)\n    b.allow(0)\n    assert b.allow(1000)\n    assert b.allow(1000)\n    refute b.allow(1000)\n  end\nend\n"
+  }
+}

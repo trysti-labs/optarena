@@ -39,5 +39,13 @@
   "timeout": 150,
   "reference_solution": {
     ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: \"3.11\"\n      - run: pip install ruff\n      - run: ruff check .\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: \"3.11\"\n      - run: pip install pytest\n      - run: pytest\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "missing-lint-job",
+      "files": {
+        ".github/workflows/ci.yml": "name: CI\non:\n  push:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: \"3.11\"\n      - run: pip install pytest\n      - run: pytest\n"
+      }
+    }
+  ]
 }

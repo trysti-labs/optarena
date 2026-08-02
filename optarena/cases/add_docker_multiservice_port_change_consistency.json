@@ -1,0 +1,62 @@
+{
+  "description": "Repo-scale (docker-multiservice): changing the api's port must propagate across its own Dockerfile, docker-compose.yml, AND nginx's proxy target",
+  "tags": [
+    "dockerfile",
+    "docker-compose",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Move the `api` service from port 8000 to port 8080: update `EXPOSE` in api/Dockerfile, and the port mapping (`\"8080:8080\"`) in docker-compose.yml. This change must ALSO propagate to nginx/nginx.conf - its `proxy_pass` currently points at `http://api:8000`, which must be updated to `http://api:8080` too, otherwise nginx (the only public entrypoint) would keep forwarding every request to a port nothing is listening on anymore."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "api/Dockerfile",
+      "content_patterns": [
+        "8080"
+      ]
+    },
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "8080"
+      ]
+    },
+    {
+      "path_pattern": "nginx/nginx.conf",
+      "content_patterns": [
+        "8080"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_port_consistency.py": "import re\nfrom pathlib import Path\n\napi_dockerfile = Path('api/Dockerfile').read_text(encoding='utf-8')\ncompose = Path('docker-compose.yml').read_text(encoding='utf-8')\nnginx_conf = Path('nginx/nginx.conf').read_text(encoding='utf-8')\n\nassert re.search(r'EXPOSE\\s+8080', api_dockerfile), 'api/Dockerfile must EXPOSE 8080'\nassert '\"8080:8080\"' in compose, 'docker-compose.yml must map 8080:8080 for api'\n\nproxy = re.search(r'proxy_pass\\s+http://api:(\\d+)', nginx_conf)\nassert proxy, 'nginx.conf is missing a proxy_pass to the api service'\nassert proxy.group(1) == '8080', (\n    f'nginx.conf still proxies to port {proxy.group(1)} - the api service moved to port 8080 '\n    f'in both its own Dockerfile and docker-compose.yml, but nginx was never updated to match, '\n    f'so it would forward every request to a port nothing is listening on')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_port_consistency.py",
+  "reference_solution": {
+    "api/Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nRUN useradd --create-home appuser\nUSER appuser\n\nEXPOSE 8080\n\nCMD [\"python\", \"main.py\"]\n",
+    "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"8080:8080\"\n    environment:\n      - LOG_LEVEL=info\n    depends_on:\n      - worker\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n",
+    "nginx/nginx.conf": "server {\n    listen 80;\n\n    location / {\n        proxy_pass http://api:8080;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "nginx-proxy-target-not-updated",
+      "files": {
+        "api/Dockerfile": "FROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nRUN useradd --create-home appuser\nUSER appuser\n\nEXPOSE 8080\n\nCMD [\"python\", \"main.py\"]\n",
+        "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"8080:8080\"\n    environment:\n      - LOG_LEVEL=info\n    depends_on:\n      - worker\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n",
+        "nginx/nginx.conf": "server {\n    listen 80;\n\n    location / {\n        proxy_pass http://api:8000;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_docker_multiservice_port_change_consistency",
+  "language": "dockerfile",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "docker-multiservice",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

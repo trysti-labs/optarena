@@ -1,0 +1,60 @@
+{
+  "name": "adapt_cart_limit_kotlin_dynamic",
+  "language": "kotlin",
+  "framework": "plain-kotlin",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "description": "Dynamic eval: max_items.txt (a spec file the cart limit must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old limit into Cart.kt",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "kotlin",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create src/main/kotlin/com/optarena/app/Cart.kt declaring object Cart with a fun canAdd(count: Int): Boolean returning true if count is less than or equal to the integer in max_items.txt (currently 5), else false. Read the limit from the file (File(\"max_items.txt\").readText()) at call time - do not hardcode it.",
+    "max_items.txt has changed. Make sure canAdd() enforces the CURRENT limit in the file."
+  ],
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "max_items.txt": "5\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "max_items.txt tightened to a lower limit",
+      "write_files": {
+        "max_items.txt": "3\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/Cart.kt",
+      "content_patterns": [
+        "canAdd"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/CartTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertFalse\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\nimport java.io.File\n\nclass CartTest {\n    @Test\n    fun enforcesCurrentLimit() {\n        val limit = File(\"max_items.txt\").readText().trim().toInt()\n        assertTrue(Cart.canAdd(limit))\n        assertFalse(Cart.canAdd(limit + 1))\n    }\n}\n"
+  },
+  "check_command": "mvn -o -q test -Dtest=CartTest",
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/Cart.kt": "package com.optarena.app\n\nimport java.io.File\n\nobject Cart {\n    fun canAdd(count: Int): Boolean {\n        val limit = File(\"max_items.txt\").readText().trim().toInt()\n        return count <= limit\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-limit",
+      "files": {
+        "src/main/kotlin/com/optarena/app/Cart.kt": "package com.optarena.app\n\nobject Cart {\n    fun canAdd(count: Int): Boolean = count <= 5\n}\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "description": "Repo-scale (k8s-appstack): a new ResourceQuota must cover the COMBINED cpu requests of BOTH the existing webstore-api Deployment AND a new webstore-worker Deployment - not just the one that was just added",
+  "tags": [
+    "yaml",
+    "kubernetes",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add a new `k8s/worker-deployment.yaml`: a Deployment named `webstore-worker` in the `webstore` namespace, 3 replicas, one container named `worker` (image `webstore/worker:1.0.0`) with `resources.requests.cpu: 200m` and `resources.requests.memory: 256Mi` (limits `400m`/`512Mi`), labeled `app: webstore-worker`, sourcing its env from the existing `webstore-config` ConfigMap. Add a new `k8s/resourcequota.yaml` (a ResourceQuota named `webstore-quota` in the `webstore` namespace) capping `requests.cpu` and `requests.memory`. Critically, this quota is namespace-wide: it must be sized to cover the COMBINED cpu requests of BOTH Deployments already in the `webstore` namespace - the existing `webstore-api` (its replicas x per-pod cpu request) AND the new `webstore-worker` - not just the one you just added. Undersizing it would leave no headroom for the pods that are already running."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "k8s/worker-deployment.yaml",
+      "content_patterns": [
+        "webstore-worker"
+      ]
+    },
+    {
+      "path_pattern": "k8s/resourcequota.yaml",
+      "content_patterns": [
+        "webstore-quota",
+        "requests.cpu"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_quota_combined.py": "import yaml\n\n\ndef parse_millicpu(value):\n    value = str(value)\n    if value.endswith('m'):\n        return int(value[:-1])\n    return int(float(value) * 1000)\n\n\nwith open('k8s/deployment.yaml') as f:\n    api_dep = yaml.safe_load(f)\nwith open('k8s/worker-deployment.yaml') as f:\n    worker_dep = yaml.safe_load(f)\nwith open('k8s/resourcequota.yaml') as f:\n    quota = yaml.safe_load(f)\n\nassert worker_dep['metadata']['name'] == 'webstore-worker'\nassert worker_dep['spec']['replicas'] == 3\n\ndef deployment_cpu_total(dep):\n    replicas = dep['spec']['replicas']\n    container = dep['spec']['template']['spec']['containers'][0]\n    per_pod_cpu = parse_millicpu(container['resources']['requests']['cpu'])\n    return replicas * per_pod_cpu\n\napi_total = deployment_cpu_total(api_dep)\nworker_total = deployment_cpu_total(worker_dep)\nneeded = api_total + worker_total\n\nquota_cpu = parse_millicpu(quota['spec']['hard']['requests.cpu'])\nassert quota_cpu >= needed, (\n    f\"ResourceQuota requests.cpu ({quota_cpu}m) covers less than the COMBINED footprint of \"\n    f\"webstore-api ({api_total}m) + webstore-worker ({worker_total}m) = {needed}m - the quota is \"\n    f\"namespace-wide, so it must account for every Deployment in the namespace, not just the one \"\n    f\"that was just added\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_quota_combined.py",
+  "reference_solution": {
+    "k8s/worker-deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: webstore-worker\n  namespace: webstore\n  labels:\n    app: webstore-worker\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: webstore-worker\n  template:\n    metadata:\n      labels:\n        app: webstore-worker\n    spec:\n      containers:\n        - name: worker\n          image: webstore/worker:1.0.0\n          envFrom:\n            - configMapRef:\n                name: webstore-config\n          resources:\n            requests:\n              cpu: \"200m\"\n              memory: \"256Mi\"\n            limits:\n              cpu: \"400m\"\n              memory: \"512Mi\"\n",
+    "k8s/resourcequota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: webstore-quota\n  namespace: webstore\nspec:\n  hard:\n    requests.cpu: \"1500m\"\n    requests.memory: \"2Gi\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "quota-covers-new-deployment-only",
+      "files": {
+        "k8s/worker-deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: webstore-worker\n  namespace: webstore\n  labels:\n    app: webstore-worker\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: webstore-worker\n  template:\n    metadata:\n      labels:\n        app: webstore-worker\n    spec:\n      containers:\n        - name: worker\n          image: webstore/worker:1.0.0\n          envFrom:\n            - configMapRef:\n                name: webstore-config\n          resources:\n            requests:\n              cpu: \"200m\"\n              memory: \"256Mi\"\n            limits:\n              cpu: \"400m\"\n              memory: \"512Mi\"\n",
+        "k8s/resourcequota.yaml": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: webstore-quota\n  namespace: webstore\nspec:\n  hard:\n    requests.cpu: \"600m\"\n    requests.memory: \"1Gi\"\n"
+      }
+    }
+  ],
+  "name": "add_k8s_appstack_quota_covers_combined_deployments",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "k8s-appstack",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

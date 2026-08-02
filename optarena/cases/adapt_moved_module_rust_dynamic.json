@@ -1,0 +1,65 @@
+{
+  "name": "adapt_moved_module_rust_dynamic",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 240,
+  "timeout": 300,
+  "description": "Dynamic eval: the module the agent's first solution uses is MOVED between prompts (fixed after_prompt trigger, old module deleted, new one created); the agent must update its `mod`/path reference, not keep pointing at the old location",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "rust",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "moved-module"
+  ],
+  "prompts": [
+    "src/pricing.rs exports a const DISCOUNT; src/lib.rs already has `mod pricing;`. Add a function `pub fn apply_discount(price: f64) -> f64` to src/lib.rs that returns price * (1.0 - pricing::DISCOUNT).",
+    "src/pricing.rs has moved to src/config.rs (same DISCOUNT value). Update src/lib.rs to use `mod config;` and config::DISCOUNT instead - remove the old `mod pricing;` declaration."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"moved_rust_case\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/pricing.rs": "pub const DISCOUNT: f64 = 0.1;\n",
+    "src/lib.rs": "mod pricing;\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "src/pricing.rs moved to src/config.rs",
+      "delete_files": [
+        "src/pricing.rs"
+      ],
+      "write_files": {
+        "src/config.rs": "pub const DISCOUNT: f64 = 0.1;\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "apply_discount"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/checkout_test.rs": "use moved_rust_case::apply_discount;\n\n#[test]\nfn test_apply_discount() {\n    let got = apply_discount(100.0);\n    assert!((got - 90.0).abs() < 1e-9, \"apply_discount(100.0) = {}\", got);\n}\n"
+  },
+  "check_command": "cargo test --offline",
+  "reference_solution": {
+    "src/lib.rs": "mod config;\n\npub fn apply_discount(price: f64) -> f64 {\n    price * (1.0 - config::DISCOUNT)\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-module",
+      "files": {
+        "src/lib.rs": "mod pricing;\n\npub fn apply_discount(price: f64) -> f64 {\n    price * (1.0 - pricing::DISCOUNT)\n}\n",
+        "Cargo.toml": "[package]\nname = \"moved_rust_case\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n"
+      }
+    }
+  ]
+}

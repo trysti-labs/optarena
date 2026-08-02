@@ -1,0 +1,55 @@
+{
+  "description": "Repo-scale (terraform-webapp): a new bastion host's security group must be wired into the app security group's ingress rules, not just created",
+  "tags": [
+    "hcl",
+    "terraform",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a bastion (jump) host: a new security_groups.tf resource `aws_security_group.bastion` (ingress 22 from 203.0.113.0/24 - a fictional admin CIDR), and a new bastion.tf with `aws_instance.bastion` (in `aws_subnet.public_a`, using the bastion security group, with a public IP). Creating the bastion alone isn't enough - it needs to actually be able to reach the app instances: add a new ingress rule to the EXISTING `aws_security_group.app` in security_groups.tf allowing port 22 FROM `aws_security_group.bastion`, alongside its existing 8080-from-ALB rule."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "bastion.tf",
+      "content_patterns": [
+        "aws_instance",
+        "bastion"
+      ]
+    },
+    {
+      "path_pattern": "security_groups.tf",
+      "content_patterns": [
+        "bastion"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_bastion_access.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\nbastion_tf = open('bastion.tf', encoding='utf-8').read()\nassert 'aws_instance' in bastion_tf and 'bastion' in bastion_tf, 'aws_instance.bastion not found'\nassert re.search(r'security_group_ids\\s*=\\s*\\[aws_security_group\\.bastion\\.id\\]', bastion_tf), (\n    'bastion instance must use the bastion security group')\n\nsg = open('security_groups.tf', encoding='utf-8').read()\nassert 'aws_security_group\" \"bastion\"' in sg, 'aws_security_group.bastion not found'\n\napp_block_match = re.search(r'resource\\s+\"aws_security_group\"\\s+\"app\"\\s*\\{(.*)\\}\\s*$', sg, re.DOTALL)\nassert app_block_match, 'aws_security_group.app not found'\napp_block = app_block_match.group(1)\n\nssh_ingress = re.search(\n    r'ingress\\s*\\{[^}]*from_port\\s*=\\s*22[^}]*security_groups\\s*=\\s*\\[aws_security_group\\.bastion\\.id\\][^}]*\\}',\n    app_block, re.DOTALL)\nassert ssh_ingress, (\n    'aws_security_group.app is missing an ingress rule allowing port 22 from '\n    'aws_security_group.bastion - the bastion host exists and is reachable, but nothing '\n    'lets it actually reach the app instances, making it useless as a jump host')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_bastion_access.py",
+  "reference_solution": {
+    "security_groups.tf": "resource \"aws_security_group\" \"alb\" {\n  name   = \"webapp-alb-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port   = 80\n    to_port     = 80\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n\nresource \"aws_security_group\" \"bastion\" {\n  name   = \"webapp-bastion-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [\"203.0.113.0/24\"]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n\nresource \"aws_security_group\" \"app\" {\n  name   = \"webapp-app-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port       = 8080\n    to_port         = 8080\n    protocol        = \"tcp\"\n    security_groups = [aws_security_group.alb.id]\n  }\n\n  ingress {\n    from_port       = 22\n    to_port         = 22\n    protocol        = \"tcp\"\n    security_groups = [aws_security_group.bastion.id]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n",
+    "bastion.tf": "resource \"aws_instance\" \"bastion\" {\n  ami                         = \"ami-0123456789abcdef0\"\n  instance_type               = \"t3.micro\"\n  subnet_id                   = aws_subnet.public_a.id\n  vpc_security_group_ids      = [aws_security_group.bastion.id]\n  associate_public_ip_address = true\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "app-sg-missing-bastion-ingress-rule",
+      "files": {
+        "security_groups.tf": "resource \"aws_security_group\" \"alb\" {\n  name   = \"webapp-alb-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port   = 80\n    to_port     = 80\n    protocol    = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n\nresource \"aws_security_group\" \"bastion\" {\n  name   = \"webapp-bastion-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [\"203.0.113.0/24\"]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n\nresource \"aws_security_group\" \"app\" {\n  name   = \"webapp-app-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port       = 8080\n    to_port         = 8080\n    protocol        = \"tcp\"\n    security_groups = [aws_security_group.alb.id]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n",
+        "bastion.tf": "resource \"aws_instance\" \"bastion\" {\n  ami                         = \"ami-0123456789abcdef0\"\n  instance_type               = \"t3.micro\"\n  subnet_id                   = aws_subnet.public_a.id\n  vpc_security_group_ids      = [aws_security_group.bastion.id]\n  associate_public_ip_address = true\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_webapp_bastion_access",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "terraform-webapp",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Replace a per-row correlated subquery averaging ALL prior rows with a proper bounded window frame computing a trailing 3-day moving average",
+  "task_type": "feature",
+  "tags": [
+    "sql",
+    "sqlite",
+    "window-functions"
+  ],
+  "prompts": [
+    "moving_avg.sql's correlated subquery averages EVERY prior day's price up to and including the current one (an expanding average, not a moving one) - by day 10 it's averaging 10 days, which is not what a 3-day moving average means. Rewrite it using a window function with an explicit bounded frame: AVG(price) OVER (ORDER BY day ROWS BETWEEN 2 PRECEDING AND CURRENT ROW), so each row's average covers ONLY itself and the two immediately preceding rows (fewer if near the start - day 1 averages just itself, day 2 averages days 1-2, day 3 onward always averages exactly 3 rows)."
+  ],
+  "setup_files": {
+    "moving_avg.sql": "-- BUG: averages every prior day (expanding), not a bounded 3-day window.\nSELECT\n  p1.day,\n  (SELECT AVG(p2.price) FROM prices p2 WHERE p2.day <= p1.day) AS moving_avg\nFROM prices p1\nORDER BY p1.day;\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "moving_avg.sql",
+      "content_patterns": [
+        "rows between",
+        "preceding"
+      ]
+    }
+  ],
+  "check_command": "python3 check_moving_avg.py",
+  "reference_solution": {
+    "moving_avg.sql": "SELECT\n  day,\n  AVG(price) OVER (ORDER BY day ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS moving_avg\nFROM prices\nORDER BY day;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-expanding-average",
+      "files": {
+        "moving_avg.sql": "SELECT\n  p1.day,\n  (SELECT AVG(p2.price) FROM prices p2 WHERE p2.day <= p1.day) AS moving_avg\nFROM prices p1\nORDER BY p1.day;\n"
+      }
+    }
+  ],
+  "name": "add_sql_moving_average_window_frame",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "test_setup_files": {
+    "check_moving_avg.py": "import sqlite3\nfrom pathlib import Path\n\nsql = Path(\"moving_avg.sql\").read_text(encoding=\"utf-8\")\n\ncon = sqlite3.connect(\":memory:\")\ncon.executescript(\"\"\"\nCREATE TABLE prices (day INTEGER PRIMARY KEY, price REAL NOT NULL);\nINSERT INTO prices VALUES (1, 10.0), (2, 20.0), (3, 30.0), (4, 40.0), (5, 100.0);\n\"\"\")\n\ncur = con.execute(sql)\ncols = [d[0] for d in cur.description]\nrows = cur.fetchall()\n\nassert cols == [\"day\", \"moving_avg\"], f\"column names/order changed: {cols}\"\n\nexpected = [\n    (1, 10.0),\n    (2, 15.0),\n    (3, 20.0),\n    (4, 30.0),\n    (5, 170.0 / 3),\n]\nfor (d1, a1), (d2, a2) in zip(rows, expected):\n    assert d1 == d2, f\"day mismatch: {rows} vs {expected}\"\n    assert abs(a1 - a2) < 1e-9, f\"day {d1}: expected {a2}, got {a1}\"\n\nprint(\"PASS moving_avg.sql behavior checks\")\n"
+  }
+}

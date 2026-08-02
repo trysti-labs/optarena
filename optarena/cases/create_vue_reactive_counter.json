@@ -38,5 +38,13 @@
   "timeout": 120,
   "reference_solution": {
     "counter.js": "const { ref, computed } = require('vue');\n\nfunction createCounter(initial) {\n  const count = ref(initial || 0);\n  const double = computed(() => count.value * 2);\n\n  function increment() {\n    count.value += 1;\n  }\n\n  return { count, double, increment };\n}\n\nmodule.exports = { createCounter };\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "double-not-reactive",
+      "files": {
+        "counter.js": "const { ref, computed } = require('vue');\n\nfunction createCounter(initial) {\n  const count = ref(initial || 0);\n  // BUG: computed once at creation time, never updates with count.\n  const double = { value: count.value * 2 };\n\n  function increment() {\n    count.value += 1;\n  }\n\n  return { count, double, increment };\n}\n\nmodule.exports = { createCounter };\n"
+      }
+    }
+  ]
 }

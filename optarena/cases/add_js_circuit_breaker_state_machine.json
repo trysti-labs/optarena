@@ -1,0 +1,47 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker in place of a stub that always calls through",
+  "task_type": "feature",
+  "tags": [
+    "javascript",
+    "node",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "breaker.js's CircuitBreaker.call(fn, now) always just calls fn() - there is no breaking logic at all. Implement the real 3-state machine: the constructor takes (failureThreshold, resetTimeout). Starts CLOSED. In CLOSED, call(fn, now) invokes fn(); if it throws, count consecutive failures, and once `failureThreshold` CONSECUTIVE failures have happened, trip to OPEN (recording when it opened) and re-throw. While OPEN, call(fn, now) must NOT invoke fn() at all and must instead throw a CircuitOpenError - UNLESS at least `resetTimeout` seconds have passed since it opened, in which case it moves to HALF_OPEN and allows exactly ONE trial call: if that call succeeds, go back to CLOSED (reset the failure count); if it throws, go back to OPEN and RESET the open-time to `now` (so the next trial is only allowed after another full resetTimeout, not immediately). Export CircuitOpenError alongside CircuitBreaker."
+  ],
+  "setup_files": {
+    "breaker.js": "class CircuitOpenError extends Error {}\n\nclass CircuitBreaker {\n  constructor(failureThreshold, resetTimeout) {\n    this.failureThreshold = failureThreshold;\n    this.resetTimeout = resetTimeout;\n  }\n\n  call(fn, now) {\n    return fn();\n  }\n}\n\nmodule.exports = { CircuitBreaker, CircuitOpenError };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "breaker.js",
+      "content_patterns": [
+        "class CircuitBreaker"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_breaker_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { CircuitBreaker, CircuitOpenError } = require(\"./breaker\");\n\nfunction boom() {\n  throw new Error(\"boom\");\n}\n\ntest(\"trips open after consecutive failures\", () => {\n  const b = new CircuitBreaker(3, 10);\n  for (let i = 0; i < 3; i++) {\n    assert.throws(() => b.call(boom, 0), /boom/);\n  }\n  assert.throws(() => b.call(() => \"should not run\", 0), CircuitOpenError);\n});\n\ntest(\"fails fast without calling fn while open\", () => {\n  const b = new CircuitBreaker(1, 100);\n  assert.throws(() => b.call(boom, 0), /boom/);\n  const calls = [];\n  assert.throws(() => b.call(() => calls.push(1), 1), CircuitOpenError);\n  assert.deepStrictEqual(calls, []);\n});\n\ntest(\"half-open trial after timeout success closes\", () => {\n  const b = new CircuitBreaker(1, 10);\n  assert.throws(() => b.call(boom, 0), /boom/);\n  assert.strictEqual(b.call(() => \"ok\", 10), \"ok\");\n  assert.strictEqual(b.call(() => \"still-fine\", 11), \"still-fine\");\n});\n\ntest(\"half-open failure reopens and resets clock\", () => {\n  const b = new CircuitBreaker(1, 10);\n  assert.throws(() => b.call(boom, 0), /boom/);\n  assert.throws(() => b.call(boom, 10), /boom/);\n  assert.throws(() => b.call(() => \"too soon\", 15), CircuitOpenError);\n  assert.strictEqual(b.call(() => \"ok now\", 20), \"ok now\");\n});\n"
+  },
+  "check_command": "node --test test_breaker_hidden.test.js",
+  "reference_solution": {
+    "breaker.js": "class CircuitOpenError extends Error {}\n\nclass CircuitBreaker {\n  constructor(failureThreshold, resetTimeout) {\n    this.failureThreshold = failureThreshold;\n    this.resetTimeout = resetTimeout;\n    this.state = \"closed\";\n    this.failures = 0;\n    this.openedAt = null;\n  }\n\n  call(fn, now) {\n    if (this.state === \"open\") {\n      if (now - this.openedAt < this.resetTimeout) {\n        throw new CircuitOpenError();\n      }\n      this.state = \"half_open\";\n    }\n\n    let result;\n    try {\n      result = fn();\n    } catch (err) {\n      if (this.state === \"half_open\") {\n        this.state = \"open\";\n        this.openedAt = now;\n      } else {\n        this.failures += 1;\n        if (this.failures >= this.failureThreshold) {\n          this.state = \"open\";\n          this.openedAt = now;\n        }\n      }\n      throw err;\n    }\n\n    this.state = \"closed\";\n    this.failures = 0;\n    return result;\n  }\n}\n\nmodule.exports = { CircuitBreaker, CircuitOpenError };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "breaker.js": "class CircuitOpenError extends Error {}\n\nclass CircuitBreaker {\n  constructor(failureThreshold, resetTimeout) {\n    this.failureThreshold = failureThreshold;\n    this.resetTimeout = resetTimeout;\n    this.state = \"closed\";\n    this.failures = 0;\n    this.openedAt = null;\n  }\n\n  call(fn, now) {\n    if (this.state === \"open\") {\n      if (now - this.openedAt < this.resetTimeout) {\n        throw new CircuitOpenError();\n      }\n      this.state = \"half_open\";\n    }\n\n    let result;\n    try {\n      result = fn();\n    } catch (err) {\n      if (this.state === \"half_open\") {\n        this.state = \"open\";\n      } else {\n        this.failures += 1;\n        if (this.failures >= this.failureThreshold) {\n          this.state = \"open\";\n          this.openedAt = now;\n        }\n      }\n      throw err;\n    }\n\n    this.state = \"closed\";\n    this.failures = 0;\n    return result;\n  }\n}\n\nmodule.exports = { CircuitBreaker, CircuitOpenError };\n"
+      }
+    }
+  ],
+  "name": "add_js_circuit_breaker_state_machine",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Add full jitter to an exponential backoff formula that currently produces identical, unbounded delays for every client",
+  "task_type": "feature",
+  "tags": [
+    "javascript",
+    "node",
+    "retry",
+    "algorithms"
+  ],
+  "prompts": [
+    "retry.js's backoffDelay(attempt, base, maxDelay) is deterministic exponential backoff with no jitter and no cap - every client retrying at the same attempt count picks the exact same delay, and the delay keeps growing forever for large attempt numbers. Change the signature to backoffDelay(attempt, base, maxDelay, rand = Math.random) and implement 'full jitter': compute cap = Math.min(maxDelay, base * 2**attempt), then return rand() * cap - `rand` must be an injectable function returning a number in [0, 1) (defaulting to Math.random) so callers can pass a fixed function for deterministic behavior. The delay must never exceed maxDelay, no matter how large `attempt` gets."
+  ],
+  "setup_files": {
+    "retry.js": "function backoffDelay(attempt, base, maxDelay) {\n  return base * 2 ** attempt;\n}\n\nmodule.exports = { backoffDelay };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "retry.js",
+      "content_patterns": [
+        "function backoffDelay"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_retry_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { backoffDelay } = require(\"./retry\");\n\ntest(\"upper bound is the cap\", () => {\n  const delay = backoffDelay(2, 1, 100, () => 1.0);\n  assert.strictEqual(delay, 4);\n});\n\ntest(\"lower bound is zero\", () => {\n  const delay = backoffDelay(5, 1, 100, () => 0.0);\n  assert.strictEqual(delay, 0);\n});\n\ntest(\"delay never exceeds maxDelay for large attempts\", () => {\n  const delay = backoffDelay(50, 1, 10, () => 1.0);\n  assert.strictEqual(delay, 10);\n});\n\ntest(\"default rand stays in bounds\", () => {\n  for (let attempt = 0; attempt < 10; attempt++) {\n    const delay = backoffDelay(attempt, 1, 20);\n    assert.ok(delay >= 0 && delay <= 20);\n  }\n});\n"
+  },
+  "check_command": "node --test test_retry_hidden.test.js",
+  "reference_solution": {
+    "retry.js": "function backoffDelay(attempt, base, maxDelay, rand = Math.random) {\n  const cap = Math.min(maxDelay, base * 2 ** attempt);\n  return rand() * cap;\n}\n\nmodule.exports = { backoffDelay };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-cap-on-exponent",
+      "files": {
+        "retry.js": "function backoffDelay(attempt, base, maxDelay, rand = Math.random) {\n  return rand() * base * 2 ** attempt;\n}\n\nmodule.exports = { backoffDelay };\n"
+      }
+    }
+  ],
+  "name": "add_js_backoff_with_jitter_cap",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3
+}

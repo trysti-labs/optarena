@@ -1,0 +1,48 @@
+{
+  "description": "Add a checksum annotation of the ConfigMap's contents to the pod template so editing the ConfigMap actually triggers a rollout instead of silently doing nothing",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "configmap",
+    "rollout"
+  ],
+  "prompts": [
+    "k8s/configmap.yaml and k8s/deployment.yaml exist for the pricing-api Deployment, which mounts the ConfigMap as env vars via envFrom. Kubernetes does NOT restart pods when a ConfigMap they reference changes - editing k8s/configmap.yaml and re-applying it updates the ConfigMap object but the running pods keep their stale env vars until something ELSE forces a rollout. Add a pod template annotation checksum/config on k8s/deployment.yaml whose value is the literal string \"REPLACE_WITH_SHA256_OF_CONFIGMAP_DATA\" (a placeholder a deploy pipeline would compute and substitute - you do not need to compute a real hash here, just add the annotation key in the right place) so that changing it on every deploy forces the pod template to change, which forces a rollout."
+  ],
+  "setup_files": {
+    "k8s/configmap.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: pricing-api-config\n  namespace: default\ndata:\n  FEATURE_FLAGS: \"new_pricing=true\"\n  CACHE_TTL_SECONDS: \"300\"\n",
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: pricing-api\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: pricing-api\n  template:\n    metadata:\n      labels:\n        app: pricing-api\n    spec:\n      containers:\n        - name: pricing-api\n          image: ghcr.io/example/pricing-api:2.3.0\n          envFrom:\n            - configMapRef:\n                name: pricing-api-config\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/deployment.yaml",
+      "content_patterns": [
+        "checksum/config"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_checksum.py": "import yaml\n\nwith open(\"k8s/deployment.yaml\") as f:\n    dep = yaml.safe_load(f)\n\npod_meta = dep[\"spec\"][\"template\"][\"metadata\"]\nannotations = pod_meta.get(\"annotations\") or {}\nassert \"checksum/config\" in annotations, (\n    \"pod template is missing a checksum/config annotation - without something in the pod \"\n    \"template changing on every deploy, editing the ConfigMap alone never triggers a rollout\")\nassert annotations[\"checksum/config\"], \"checksum/config annotation must not be empty\"\n\nenvfrom = dep[\"spec\"][\"template\"][\"spec\"][\"containers\"][0].get(\"envFrom\") or []\nassert any((e.get(\"configMapRef\") or {}).get(\"name\") == \"pricing-api-config\" for e in envfrom), (\n    \"the existing envFrom -> pricing-api-config wiring must stay intact\")\n\nwith open(\"k8s/configmap.yaml\") as f:\n    cm = yaml.safe_load(f)\nassert cm[\"data\"][\"FEATURE_FLAGS\"] == \"new_pricing=true\", \"ConfigMap data must stay unchanged\"\n\nprint(\"PASS checksum annotation checks\")\n"
+  },
+  "check_command": "python3 check_checksum.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: pricing-api\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: pricing-api\n  template:\n    metadata:\n      labels:\n        app: pricing-api\n      annotations:\n        checksum/config: \"REPLACE_WITH_SHA256_OF_CONFIGMAP_DATA\"\n    spec:\n      containers:\n        - name: pricing-api\n          image: ghcr.io/example/pricing-api:2.3.0\n          envFrom:\n            - configMapRef:\n                name: pricing-api-config\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "checksum-on-wrong-object",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: pricing-api\n  namespace: default\n  annotations:\n    checksum/config: \"REPLACE_WITH_SHA256_OF_CONFIGMAP_DATA\"\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: pricing-api\n  template:\n    metadata:\n      labels:\n        app: pricing-api\n    spec:\n      containers:\n        - name: pricing-api\n          image: ghcr.io/example/pricing-api:2.3.0\n          envFrom:\n            - configMapRef:\n                name: pricing-api-config\n"
+      }
+    }
+  ],
+  "name": "add_k8s_configmap_checksum_rollout",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

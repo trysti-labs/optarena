@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 120,
   "timeout": 900,
-  "description": "L3 repo-scale multi-prompt session: add project archiving, then extend it with include_archived listing and a 409 guard on task creation",
+  "description": "Repo-scale multi-prompt session: add project archiving, then extend it with include_archived listing and a 409 guard on task creation",
   "difficulty": 3,
   "task_type": "feature",
   "tags": [

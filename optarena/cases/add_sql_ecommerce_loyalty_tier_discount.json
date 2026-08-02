@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (sql-ecommerce): a new loyalty_tier column must actually drive a discounted total in the view, not just exist",
+  "tags": [
+    "sql",
+    "sqlite",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a `loyalty_tier` column to `customers` in schema.sql (TEXT NOT NULL DEFAULT 'bronze', CHECK constrained to 'bronze'/'silver'/'gold'). Add a `discounted_total_cents` column to the `customer_order_totals` view in views.sql, applying a tier-based discount to the existing `total_cents`: gold gets 10% off, silver gets 5% off, bronze gets no discount - round to the nearest cent. Adding the column alone is not the point: `discounted_total_cents` must actually reflect each customer's `loyalty_tier`, not just duplicate `total_cents` unmodified. `product_sales_summary` is unaffected."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "loyalty_tier"
+      ]
+    },
+    {
+      "path_pattern": "views.sql",
+      "content_patterns": [
+        "discounted_total_cents"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_tier_discount.py": "import sqlite3\nfrom pathlib import Path\n\nschema = Path('schema.sql').read_text(encoding='utf-8')\nviews = Path('views.sql').read_text(encoding='utf-8')\n\ncon = sqlite3.connect(':memory:')\ncon.executescript(schema)\ncon.executescript(views)\ncon.executescript(\"\"\"\nINSERT INTO customers VALUES (1, 'Ada', 'ada@example.com', 'gold');\nINSERT INTO customers VALUES (2, 'Bob', 'bob@example.com', 'bronze');\nINSERT INTO products VALUES (1, 'Widget', 1000);\nINSERT INTO orders VALUES (1, 1, 'paid', '2026-01-01');\nINSERT INTO orders VALUES (2, 2, 'paid', '2026-01-01');\nINSERT INTO order_items VALUES (1, 1, 1, 10, 1000);\nINSERT INTO order_items VALUES (2, 2, 1, 10, 1000);\n\"\"\")\n\ngold = con.execute(\n    'SELECT total_cents, discounted_total_cents FROM customer_order_totals WHERE customer_id = 1'\n).fetchone()\nbronze = con.execute(\n    'SELECT total_cents, discounted_total_cents FROM customer_order_totals WHERE customer_id = 2'\n).fetchone()\n\nassert gold[0] == 10000 and bronze[0] == 10000, (gold, bronze)\nassert gold[1] == 9000, (\n    f'gold tier gets a 10% discount: expected discounted_total_cents 9000, got {gold[1]}')\nassert bronze[1] == 10000, (\n    f'bronze tier gets no discount: expected discounted_total_cents 10000, got {bronze[1]} - '\n    f'discounted_total_cents must not just mirror total_cents, it must actually apply the '\n    f\"customer's loyalty_tier\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_tier_discount.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE,\n    loyalty_tier TEXT NOT NULL DEFAULT 'bronze' CHECK (loyalty_tier IN ('bronze', 'silver', 'gold'))\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n",
+    "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) AS total_cents,\n       CAST(ROUND(\n           COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) *\n           (CASE c.loyalty_tier\n                WHEN 'gold' THEN 0.90\n                WHEN 'silver' THEN 0.95\n                ELSE 1.0\n            END)\n       ) AS INTEGER) AS discounted_total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name, c.loyalty_tier;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(oi.quantity), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "discount-column-ignores-loyalty-tier",
+      "files": {
+        "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE,\n    loyalty_tier TEXT NOT NULL DEFAULT 'bronze' CHECK (loyalty_tier IN ('bronze', 'silver', 'gold'))\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n",
+        "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) AS total_cents,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) AS discounted_total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(oi.quantity), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name;\n"
+      }
+    }
+  ],
+  "name": "add_sql_ecommerce_loyalty_tier_discount",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "sql-ecommerce",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

@@ -1,0 +1,62 @@
+{
+  "name": "adapt_moved_file_ruby_dynamic",
+  "language": "ruby",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: the file the agent's first solution requires is RENAMED between prompts (fixed after_prompt trigger, old file deleted, new one created); the agent must update its require_relative, not keep pointing at the old filename",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "ruby",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "moved-module"
+  ],
+  "prompts": [
+    "pricing_rules.rb defines a constant DISCOUNT. Create checkout.rb with `require_relative \"pricing_rules\"` and a method apply_discount(price) that returns price * (1 - DISCOUNT).",
+    "pricing_rules.rb has been renamed to config_rules.rb (same DISCOUNT value). Update checkout.rb's require_relative to \"config_rules\" - do not keep requiring the old filename."
+  ],
+  "setup_files": {
+    "pricing_rules.rb": "DISCOUNT = 0.1\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "pricing_rules.rb renamed to config_rules.rb",
+      "delete_files": [
+        "pricing_rules.rb"
+      ],
+      "write_files": {
+        "config_rules.rb": "DISCOUNT = 0.1\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "checkout.rb",
+      "content_patterns": [
+        "apply_discount"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "checkout_hidden_test.rb": "require_relative \"checkout\"\n\ngot = apply_discount(100)\nraise \"apply_discount(100) = #{got}\" if (got - 90).abs > 1e-9\nputs \"all tests passed\"\n"
+  },
+  "check_command": "ruby checkout_hidden_test.rb",
+  "reference_solution": {
+    "checkout.rb": "require_relative \"config_rules\"\n\ndef apply_discount(price)\n  price * (1 - DISCOUNT)\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-requires-old-filename",
+      "files": {
+        "checkout.rb": "require_relative \"pricing_rules\"\n\ndef apply_discount(price)\n  price * (1 - DISCOUNT)\nend\n"
+      }
+    }
+  ]
+}

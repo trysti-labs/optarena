@@ -21,9 +21,27 @@ boundary:
    available, OptArena refuses to run them** - host execution requires an
    explicit opt-in (`OPTARENA_DISABLE_SANDBOX=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
    All case-supplied file paths are containment-checked before anything is
-   written; traversal (`../`), absolute paths, and symlinked escapes are
-   rejected. Only load case packs from sources you trust enough to run in
-   that sandbox.
+   read or written: `setup_files`, `test_setup_files`, disruption
+   writes/deletes, and `setup_repo` all reject traversal (`../`), absolute
+   paths, and symlinked escapes, in both directions (a `setup_repo` naming a
+   directory outside `repos/` is refused, not just a destination outside the
+   workspace). A case's `image` is validated as a container image reference,
+   so it cannot smuggle flags onto the engine's command line. Only load case
+   packs from sources you trust enough to run in that sandbox: the pack format
+   carries a content hash, which detects corruption and accidental tampering,
+   but it is self-declared - it is not a signature and proves nothing about
+   who wrote the pack.
+
+   Containers run as root by default with an otherwise-minimal capability set.
+   Set `OPTARENA_SANDBOX_USER=1000:1000` to run them as the unprivileged
+   `optarena` account every published image now provides (the runner relaxes
+   workspace permissions to match). This is opt-in rather than the default
+   because the run root is a host bind mount whose ownership OptArena cannot
+   guarantee across Docker Desktop, rootless Podman, and CI. Note that for the
+   built-in corpus, one container is shared across a run, so a case's
+   `check_command` can reach sibling cases' workspaces through the shared
+   mount; custom `--cases-dir` packs never share a container (each gets an
+   ephemeral one mounting only its own workspace).
 
 2. **The coding agents under evaluation.** CLI agents (aider, Claude Code,
    Codex, …) run headlessly with auto-approval flags - that is the point of
@@ -53,12 +71,19 @@ boundary:
 ## Credentials
 
 - `backend.api_key` is **never persisted**: saved runs and comparisons store
-  a redacted backend (`api_key: null`, plus an `api_key_set` boolean).
+  a redacted backend (`api_key: null`, plus an `api_key_set` boolean). Records
+  written before that was true still carry the raw value on disk -
+  `optarena runs scrub-secrets` reports them, and `--yes` redacts them in
+  place.
+- No driver puts the key in a subprocess's argv (process arguments are
+  readable by other local users); every driver passes it through the
+  subprocess environment or an explicit in-process client instead.
 - Prefer `OPTARENA_API_KEY` (environment) over `--api-key` (visible in `ps`
   and shell history).
 - `optarena serve` binds `127.0.0.1` and serves only `dashboard/` and the
   results directory - never the repository root - with directory listings
-  disabled.
+  disabled. `--host` can widen that, and warns when it does: the server has no
+  authentication and the results directory holds prompts and generated code.
 
 ## What OptArena results are
 

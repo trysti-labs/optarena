@@ -1,0 +1,61 @@
+{
+  "name": "adapt_moved_module_python_dynamic",
+  "language": "python",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: the module the agent's first solution imports from is MOVED to a new package path between prompts (fixed after_prompt trigger, old path deleted and new path created); the agent must update its import, not keep pointing at the old location",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "moved-module"
+  ],
+  "prompts": [
+    "pricing/rules.py exports DISCOUNT. Create checkout.py with a function apply_discount(price) that returns price * (1 - DISCOUNT), importing DISCOUNT from pricing.rules.",
+    "pricing/rules.py has moved to config/rules.py (same DISCOUNT constant, same value). Update checkout.py's import to use the new location config.rules - do not keep importing from pricing.rules."
+  ],
+  "setup_files": {
+    "pricing/rules.py": "DISCOUNT = 0.1\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "pricing/rules.py moved to config/rules.py",
+      "delete_files": [
+        "pricing/rules.py"
+      ],
+      "write_files": {
+        "config/rules.py": "DISCOUNT = 0.1\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "checkout.py",
+      "content_patterns": [
+        "apply_discount"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_checkout.py": "import importlib.util\nspec = importlib.util.spec_from_file_location('checkout_mod', 'checkout.py')\nmod = importlib.util.module_from_spec(spec)\ntry:\n    spec.loader.exec_module(mod)\nexcept ImportError as e:\n    raise AssertionError(f'checkout.py failed to import (likely still imports from the old pricing.rules path): {e}')\nresult = mod.apply_discount(100)\nassert abs(result - 90) < 1e-6, f'apply_discount(100) = {result}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_checkout.py",
+  "reference_solution": {
+    "checkout.py": "from config.rules import DISCOUNT\n\n\ndef apply_discount(price):\n    return price * (1 - DISCOUNT)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-imports-old-path",
+      "files": {
+        "checkout.py": "from pricing.rules import DISCOUNT\n\n\ndef apply_discount(price):\n    return price * (1 - DISCOUNT)\n"
+      }
+    }
+  ]
+}

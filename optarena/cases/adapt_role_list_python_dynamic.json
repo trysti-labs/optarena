@@ -1,0 +1,58 @@
+{
+  "name": "adapt_role_list_python_dynamic",
+  "language": "python",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: allowed_roles.txt (a spec file the role check must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old list into roles.py",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create roles.py with a function is_allowed(role) that returns True if role is in the comma-separated list in allowed_roles.txt (currently: admin, editor), else False. Read the list from the file at call time - do not hardcode it.",
+    "allowed_roles.txt has changed. Make sure is_allowed() reflects the CURRENT list in the file."
+  ],
+  "setup_files": {
+    "allowed_roles.txt": "admin,editor\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "allowed_roles.txt rewritten to add a new role",
+      "write_files": {
+        "allowed_roles.txt": "admin,editor,viewer\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "roles.py",
+      "content_patterns": [
+        "is_allowed"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_roles.py": "import importlib.util\nwith open('allowed_roles.txt', encoding='utf-8') as f:\n    allowed = [r.strip() for r in f.read().strip().split(',') if r.strip()]\nspec = importlib.util.spec_from_file_location('roles_mod', 'roles.py')\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nfor role in allowed:\n    assert mod.is_allowed(role) is True, f'is_allowed({role!r}) should be True'\nassert mod.is_allowed('not_a_real_role') is False, 'is_allowed should reject an unknown role'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_roles.py",
+  "reference_solution": {
+    "roles.py": "def is_allowed(role):\n    with open(\"allowed_roles.txt\", encoding=\"utf-8\") as f:\n        allowed = [r.strip() for r in f.read().strip().split(\",\") if r.strip()]\n    return role in allowed\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-role-list",
+      "files": {
+        "roles.py": "def is_allowed(role):\n    return role in [\"admin\", \"editor\"]\n"
+      }
+    }
+  ]
+}

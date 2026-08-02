@@ -1,0 +1,56 @@
+{
+  "description": "Add a dedicated non-root user and switch to it before CMD, with file ownership set up so the app can still read its own files",
+  "tags": [
+    "docker",
+    "devops",
+    "security",
+    "non-root"
+  ],
+  "prompts": [
+    "The Dockerfile runs its Flask app as root (the default when no USER instruction is present) - a container escape from a root process is far more dangerous than one from an unprivileged one. Add a dedicated non-root user: create a system user/group named `appuser` (RUN groupadd -r appuser && useradd -r -g appuser appuser), give it ownership of /app via `COPY --chown=appuser:appuser` (or an explicit RUN chown after copying), and add a `USER appuser` instruction so the final CMD actually runs as that user, not root. Keep the app's runtime behavior (EXPOSE 5000, the flask run CMD) unchanged."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY app ./app\nEXPOSE 5000\nCMD [\"flask\", \"--app\", \"app.main\", \"run\", \"--host=0.0.0.0\"]\n",
+    "requirements.txt": "flask\n",
+    "app/main.py": "from flask import Flask\n\napp = Flask(__name__)\n\n\n@app.get(\"/health\")\ndef health():\n    return {\"status\": \"ok\"}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "useradd",
+        "user appuser"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_nonroot.py": "import re\nfrom pathlib import Path\n\nraw = Path(\"Dockerfile\").read_text(encoding=\"utf-8\")\njoined = re.sub(r\"\\\\\\s*\\n\", \" \", raw)\nlines = [l.strip() for l in joined.splitlines() if l.strip() and not l.strip().startswith(\"#\")]\n\nassert any(\"groupadd\" in l and \"appuser\" in l for l in lines), \"missing groupadd for appuser\"\nassert any(\"useradd\" in l and \"appuser\" in l for l in lines), \"missing useradd for appuser\"\n\nall_user_idxs = [i for i, l in enumerate(lines) if re.match(r\"^USER\\s+\\S+\", l, re.IGNORECASE)]\nassert all_user_idxs, \"no USER instruction found\"\n\ncmd_idxs = [i for i, l in enumerate(lines) if l.upper().startswith((\"CMD \", \"ENTRYPOINT \"))]\nassert cmd_idxs, \"no CMD/ENTRYPOINT found\"\n\nlast_user_line = lines[all_user_idxs[-1]]\nassert re.match(r\"^USER\\s+appuser\\b\", last_user_line, re.IGNORECASE), (\n    f\"the LAST USER instruction before CMD must be 'USER appuser', got {last_user_line!r} - \"\n    f\"a later USER switching back to root undoes the fix\")\nassert all_user_idxs[-1] < cmd_idxs[-1], (\n    \"the final USER instruction must appear BEFORE the CMD, or the container still starts as root\")\n\ncopy_or_chown = [\n    l for l in lines\n    if (\"COPY\" in l.upper() and \"--CHOWN=APPUSER\" in l.upper().replace(\" \", \"\"))\n    or (l.upper().startswith(\"RUN\") and \"CHOWN\" in l.upper() and \"APPUSER\" in l.upper())\n]\nassert copy_or_chown, \"app files must be owned by appuser (COPY --chown or a chown RUN step)\"\n\nassert any(l.upper().startswith(\"EXPOSE\") and \"5000\" in l for l in lines), \"EXPOSE 5000 missing\"\ncmd_all = \" \".join(l for l in lines if l.upper().startswith((\"CMD \", \"ENTRYPOINT \")))\nassert \"flask\" in cmd_all and \"0.0.0.0\" in cmd_all, \"CMD changed unexpectedly\"\n\nprint(\"PASS non-root user structural checks\")\n"
+  },
+  "check_command": "python3 check_nonroot.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nRUN groupadd -r appuser && useradd -r -g appuser appuser\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY --chown=appuser:appuser app ./app\nUSER appuser\nEXPOSE 5000\nCMD [\"flask\", \"--app\", \"app.main\", \"run\", \"--host=0.0.0.0\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY app ./app\nEXPOSE 5000\nCMD [\"flask\", \"--app\", \"app.main\", \"run\", \"--host=0.0.0.0\"]\n"
+      }
+    },
+    {
+      "name": "user-declared-but-switched-back-to-root",
+      "files": {
+        "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nRUN groupadd -r appuser && useradd -r -g appuser appuser\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY --chown=appuser:appuser app ./app\nUSER appuser\nUSER root\nEXPOSE 5000\nCMD [\"flask\", \"--app\", \"app.main\", \"run\", \"--host=0.0.0.0\"]\n"
+      }
+    }
+  ],
+  "name": "add_dockerfile_non_root_user",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

@@ -1,0 +1,60 @@
+{
+  "name": "adapt_cart_limit_java_dynamic",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval: max_items.txt (a spec file the cart limit must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old limit into Cart.java",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "java",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create Cart.java with a public final class Cart containing a public static boolean canAdd(int count) returning true if count is less than or equal to the integer in max_items.txt (currently 5), else false. Read the limit from the file (java.nio.file.Files.readString) at call time - do not hardcode it.",
+    "max_items.txt has changed. Make sure canAdd() enforces the CURRENT limit in the file."
+  ],
+  "setup_files": {
+    "max_items.txt": "5\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "max_items.txt tightened to a lower limit",
+      "write_files": {
+        "max_items.txt": "3\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Cart.java",
+      "content_patterns": [
+        "canAdd"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "CartTest.java": "import java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic final class CartTest {\n    public static void main(String[] args) throws Exception {\n        int limit = Integer.parseInt(Files.readString(Path.of(\"max_items.txt\")).trim());\n        if (!Cart.canAdd(limit)) throw new AssertionError(\"canAdd(\" + limit + \") should be true\");\n        if (Cart.canAdd(limit + 1)) throw new AssertionError(\"canAdd(\" + (limit + 1) + \") should be false (stale limit not updated)\");\n        System.out.println(\"all tests passed\");\n    }\n}\n",
+    "CheckCart.java": "import java.io.IOException;\n\npublic final class CheckCart {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Cart.java\", \"CartTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"CartTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  },
+  "check_command": "java CheckCart.java",
+  "reference_solution": {
+    "Cart.java": "import java.nio.file.Files;\nimport java.nio.file.Path;\n\npublic final class Cart {\n    public static boolean canAdd(int count) throws Exception {\n        int limit = Integer.parseInt(Files.readString(Path.of(\"max_items.txt\")).trim());\n        return count <= limit;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-limit",
+      "files": {
+        "Cart.java": "public final class Cart {\n    public static boolean canAdd(int count) {\n        return count <= 5;\n    }\n}\n"
+      }
+    }
+  ]
+}

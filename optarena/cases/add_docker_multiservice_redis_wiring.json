@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (docker-multiservice): a new redis service's connection string must be wired into BOTH consuming services",
+  "tags": [
+    "dockerfile",
+    "docker-compose",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a new `redis` service to docker-compose.yml (`image: redis:7-alpine`, no build needed). Both `api` and `worker` talk to redis, so BOTH need a `REDIS_URL=redis://redis:6379/0` environment entry added (alongside their existing `LOG_LEVEL`), and both need `redis` added to their `depends_on` list so they don't start before it's available - wiring only one of the two consuming services leaves the other one unable to reach redis at runtime."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "redis",
+        "REDIS_URL"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_redis_wiring.py": "import re\nfrom pathlib import Path\n\ncompose = Path('docker-compose.yml').read_text(encoding='utf-8')\n\nassert re.search(r'redis:\\s*\\n\\s*image:\\s*redis', compose), (\n    'a redis service (image: redis:...) is missing from docker-compose.yml')\n\ndef service_block(name):\n    m = re.search(rf'  {name}:\\n((?:    .*\\n|\\n)+)', compose)\n    assert m, f'{name} service block not found'\n    return m.group(1)\n\napi_block = service_block('api')\nworker_block = service_block('worker')\n\nassert 'REDIS_URL=redis://redis:6379' in worker_block, (\n    'worker service is missing REDIS_URL')\nassert 'REDIS_URL=redis://redis:6379' in api_block, (\n    'api service is missing REDIS_URL - both api AND worker talk to redis, so both need the '\n    'connection string wired in, not just worker')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_redis_wiring.py",
+  "reference_solution": {
+    "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"8000:8000\"\n    environment:\n      - LOG_LEVEL=info\n      - REDIS_URL=redis://redis:6379/0\n    depends_on:\n      - worker\n      - redis\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n      - REDIS_URL=redis://redis:6379/0\n    depends_on:\n      - redis\n\n  redis:\n    image: redis:7-alpine\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "api-missing-redis-url",
+      "files": {
+        "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"8000:8000\"\n    environment:\n      - LOG_LEVEL=info\n    depends_on:\n      - worker\n      - redis\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n      - REDIS_URL=redis://redis:6379/0\n    depends_on:\n      - redis\n\n  redis:\n    image: redis:7-alpine\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n"
+      }
+    }
+  ],
+  "name": "add_docker_multiservice_redis_wiring",
+  "language": "dockerfile",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "docker-multiservice",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

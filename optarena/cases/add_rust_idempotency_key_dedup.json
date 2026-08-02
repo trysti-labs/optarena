@@ -1,0 +1,49 @@
+{
+  "description": "Add idempotency-key deduplication with a TTL window to a processor that currently re-executes on every call",
+  "task_type": "feature",
+  "tags": [
+    "rust",
+    "idempotency",
+    "algorithms"
+  ],
+  "prompts": [
+    "src/lib.rs's Processor::process(&mut self, key: &str, payload: i32, now: i64) runs the side effect (pushes onto self.effects and returns a fresh result) EVERY time it's called, even for a key it has already processed. Make it idempotent: within `window` seconds of the first call for a given key, a repeat call with that SAME key must return the ORIGINAL result WITHOUT running the side effect again (self.effects must not grow) - regardless of what payload is passed the second time. Once `window` seconds have passed since the first call for that key, the NEXT call for that key must run for real again (a fresh execution, whose result becomes the new one remembered for that key)."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"idempotency\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "#[derive(Debug, Clone, PartialEq)]\npub struct ProcResult {\n    pub key: String,\n    pub payload: i32,\n    pub processed_at: i64,\n}\n\npub struct Processor {\n    pub window: i64,\n    pub effects: Vec<(String, i32)>,\n}\n\nimpl Processor {\n    pub fn new(window: i64) -> Self {\n        Processor { window, effects: Vec::new() }\n    }\n\n    pub fn process(&mut self, key: &str, payload: i32, now: i64) -> ProcResult {\n        self.effects.push((key.to_string(), payload));\n        ProcResult { key: key.to_string(), payload, processed_at: now }\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "struct Processor"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/processor_test.rs": "use idempotency::Processor;\n\n#[test]\nfn duplicate_key_within_window_not_reexecuted() {\n    let mut p = Processor::new(10);\n    let first = p.process(\"order-1\", 5, 0);\n    let second = p.process(\"order-1\", 999, 5);\n    assert_eq!(second, first);\n    assert_eq!(p.effects.len(), 1);\n}\n\n#[test]\nfn different_keys_both_execute() {\n    let mut p = Processor::new(10);\n    p.process(\"a\", 1, 0);\n    p.process(\"b\", 2, 0);\n    assert_eq!(p.effects.len(), 2);\n}\n\n#[test]\nfn reexecutes_after_window_expires() {\n    let mut p = Processor::new(10);\n    p.process(\"order-1\", 5, 0);\n    p.process(\"order-1\", 5, 9);\n    assert_eq!(p.effects.len(), 1);\n    p.process(\"order-1\", 7, 10);\n    assert_eq!(p.effects.len(), 2);\n    assert_eq!(p.effects[1].1, 7);\n}\n"
+  },
+  "reference_solution": {
+    "Cargo.toml": "[package]\nname = \"idempotency\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::collections::HashMap;\n\n#[derive(Debug, Clone, PartialEq)]\npub struct ProcResult {\n    pub key: String,\n    pub payload: i32,\n    pub processed_at: i64,\n}\n\npub struct Processor {\n    pub window: i64,\n    pub effects: Vec<(String, i32)>,\n    seen: HashMap<String, (ProcResult, i64)>,\n}\n\nimpl Processor {\n    pub fn new(window: i64) -> Self {\n        Processor { window, effects: Vec::new(), seen: HashMap::new() }\n    }\n\n    pub fn process(&mut self, key: &str, payload: i32, now: i64) -> ProcResult {\n        if let Some((result, recorded_at)) = self.seen.get(key) {\n            if now - recorded_at < self.window {\n                return result.clone();\n            }\n        }\n        self.effects.push((key.to_string(), payload));\n        let result = ProcResult { key: key.to_string(), payload, processed_at: now };\n        self.seen.insert(key.to_string(), (result.clone(), now));\n        result\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedup-never-expires",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"idempotency\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n",
+        "src/lib.rs": "use std::collections::HashMap;\n\n#[derive(Debug, Clone, PartialEq)]\npub struct ProcResult {\n    pub key: String,\n    pub payload: i32,\n    pub processed_at: i64,\n}\n\npub struct Processor {\n    pub window: i64,\n    pub effects: Vec<(String, i32)>,\n    seen: HashMap<String, ProcResult>,\n}\n\nimpl Processor {\n    pub fn new(window: i64) -> Self {\n        Processor { window, effects: Vec::new(), seen: HashMap::new() }\n    }\n\n    pub fn process(&mut self, key: &str, payload: i32, now: i64) -> ProcResult {\n        if let Some(result) = self.seen.get(key) {\n            return result.clone();\n        }\n        self.effects.push((key.to_string(), payload));\n        let result = ProcResult { key: key.to_string(), payload, processed_at: now };\n        self.seen.insert(key.to_string(), result.clone());\n        result\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_rust_idempotency_key_dedup",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "cargo test --offline"
+}

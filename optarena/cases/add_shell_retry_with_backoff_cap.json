@@ -1,0 +1,53 @@
+{
+  "description": "Add a retrying wrapper with a capped exponential backoff and a max-attempts limit around a flaky command, instead of retrying forever or failing immediately",
+  "tags": [
+    "shell",
+    "bash",
+    "retry",
+    "resilience"
+  ],
+  "prompts": [
+    "scripts/retry.sh runs its arguments as a command exactly once - if it fails, the script just fails. Turn it into a retrying wrapper: `retry.sh MAX_ATTEMPTS BASE_DELAY -- CMD [ARGS...]` runs CMD; on failure, sleeps BASE_DELAY * 2^(attempt-1) seconds (integer arithmetic - BASE_DELAY is always a whole number of seconds - capped at 8 seconds, so it never sleeps longer than that regardless of how many attempts) then retries, up to MAX_ATTEMPTS total attempts. Exit 0 the moment CMD succeeds (don't keep retrying after success). If CMD still fails after MAX_ATTEMPTS attempts, exit non-zero. Use `set -euo pipefail`, quote every expansion, and use plain bash integer arithmetic ($(( ... ))) for the backoff calculation - do not rely on `bc`, it is not installed in this sandbox."
+  ],
+  "setup_files": {
+    "scripts/retry.sh": "#!/bin/bash\n# Runs the given command exactly once - no retry logic at all.\n\"$@\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/retry.sh",
+      "content_patterns": [
+        "set -euo pipefail"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "scripts/retry.sh": "#!/bin/bash\nset -euo pipefail\n\nmax_attempts=$1\nbase_delay=$2\nshift 2\nif [[ \"$1\" == \"--\" ]]; then\n  shift\nfi\n\nattempt=1\nwhile true; do\n  if \"$@\"; then\n    exit 0\n  fi\n  if [[ \"$attempt\" -ge \"$max_attempts\" ]]; then\n    exit 1\n  fi\n  delay=$(( base_delay * (2 ** (attempt - 1)) ))\n  if [[ \"$delay\" -gt 8 ]]; then\n    delay=8\n  fi\n  sleep \"$delay\"\n  attempt=$((attempt + 1))\ndone\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "scripts/retry.sh": "#!/bin/bash\n\"$@\"\n"
+      }
+    },
+    {
+      "name": "keeps-retrying-after-success",
+      "files": {
+        "scripts/retry.sh": "#!/bin/bash\nset -euo pipefail\n\nmax_attempts=$1\nbase_delay=$2\nshift 2\nif [[ \"$1\" == \"--\" ]]; then\n  shift\nfi\n\nattempt=1\nresult=1\nwhile [[ \"$attempt\" -le \"$max_attempts\" ]]; do\n  \"$@\"\n  result=$?\n  delay=$(( base_delay * (2 ** (attempt - 1)) ))\n  if [[ \"$delay\" -gt 8 ]]; then\n    delay=8\n  fi\n  sleep \"$delay\"\n  attempt=$((attempt + 1))\ndone\nexit \"$result\"\n"
+      }
+    }
+  ],
+  "name": "add_shell_retry_with_backoff_cap",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops",
+  "test_setup_files": {
+    "check_retry.py": "\"\"\"Behavioral checks for scripts/retry.sh, run with the real bash.\"\"\"\nimport subprocess\nimport time\nfrom pathlib import Path\n\nSCRIPT = \"scripts/retry.sh\"\n\n\ndef run(*args, timeout=15):\n    return subprocess.run(\n        [\"bash\", SCRIPT, *[str(a) for a in args]],\n        capture_output=True, text=True, timeout=timeout,\n    )\n\n\n# 1. A command that always fails must be retried MAX_ATTEMPTS times, then fail.\ncounter_file = Path(\"fail_counter.txt\")\ncounter_file.write_text(\"0\", encoding=\"utf-8\")\ncount_script = Path(\"count_and_fail.sh\")\ncount_script.write_text(\n    '#!/bin/bash\\n'\n    'n=$(cat fail_counter.txt)\\n'\n    'echo $((n + 1)) > fail_counter.txt\\n'\n    'exit 1\\n',\n    encoding=\"utf-8\",\n)\ncount_script.chmod(0o755)\n\nstart = time.monotonic()\nproc = run(\"3\", \"1\", \"--\", \"bash\", \"count_and_fail.sh\", timeout=30)\nelapsed = time.monotonic() - start\nassert proc.returncode != 0, f\"expected failure after exhausting all attempts: {proc.stdout}{proc.stderr}\"\nassert counter_file.read_text(encoding=\"utf-8\").strip() == \"3\", (\n    f\"expected exactly 3 attempts, counter says {counter_file.read_text()}: {proc.stdout}{proc.stderr}\")\nassert elapsed >= 1 + 2, f\"expected at least two backoff sleeps (1 + 2), elapsed {elapsed}\"\n\n# 2. A command that succeeds on the 2nd attempt must stop retrying immediately.\ncounter_file.write_text(\"0\", encoding=\"utf-8\")\nflaky_script = Path(\"flaky.sh\")\nflaky_script.write_text(\n    '#!/bin/bash\\n'\n    'n=$(cat fail_counter.txt)\\n'\n    'n=$((n + 1))\\n'\n    'echo $n > fail_counter.txt\\n'\n    'if [ \"$n\" -lt 2 ]; then exit 1; fi\\n'\n    'exit 0\\n',\n    encoding=\"utf-8\",\n)\nflaky_script.chmod(0o755)\n\nproc = run(\"5\", \"1\", \"--\", \"bash\", \"flaky.sh\", timeout=20)\nassert proc.returncode == 0, f\"expected eventual success: {proc.stdout}{proc.stderr}\"\nassert counter_file.read_text(encoding=\"utf-8\").strip() == \"2\", (\n    f\"expected exactly 2 attempts (stop on first success), got {counter_file.read_text()}\")\n\nprint(\"PASS retry.sh behavior checks\")\n"
+  },
+  "check_command": "python3 check_retry.py"
+}

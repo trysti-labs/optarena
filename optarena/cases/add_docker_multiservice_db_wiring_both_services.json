@@ -1,0 +1,65 @@
+{
+  "description": "Repo-scale (docker-multiservice): a new db service must be wired to BOTH api AND worker (env var + depends_on), AND the postgres driver must be added to BOTH their independent requirements.txt files",
+  "tags": [
+    "dockerfile",
+    "docker-compose",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add a `db` service to docker-compose.yml: `image: postgres:16-alpine`, with `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` all set to `webapp`, and a named volume `db-data` mounted at `/var/lib/postgresql/data` (declare `db-data` under a top-level `volumes:` key). BOTH `api` AND `worker` need database access: give BOTH a `DATABASE_URL=postgresql://webapp:webapp@db:5432/webapp` environment entry and add `db` to BOTH their `depends_on` lists - wiring only one of the two consuming services leaves the other unable to reach the database. Since `api` and `worker` each declare their own Python dependencies independently, add `psycopg2-binary==2.9.9` to BOTH api/requirements.txt AND worker/requirements.txt - adding the driver to only one of them would leave the other service crashing with an ImportError the moment it tried to use its new DATABASE_URL."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "db:",
+        "postgres",
+        "DATABASE_URL"
+      ]
+    },
+    {
+      "path_pattern": "api/requirements.txt",
+      "content_patterns": [
+        "psycopg2"
+      ]
+    },
+    {
+      "path_pattern": "worker/requirements.txt",
+      "content_patterns": [
+        "psycopg2"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_db_wiring_both.py": "import re\nfrom pathlib import Path\n\ncompose = Path('docker-compose.yml').read_text(encoding='utf-8')\napi_requirements = Path('api/requirements.txt').read_text(encoding='utf-8')\nworker_requirements = Path('worker/requirements.txt').read_text(encoding='utf-8')\n\nassert re.search(r'db:\\s*\\n\\s*image:\\s*postgres', compose), (\n    'a db service (image: postgres:...) is missing from docker-compose.yml')\nassert 'db-data:/var/lib/postgresql/data' in compose, 'db-data volume must be mounted for db'\nassert re.search(r'^  db-data:\\s*$', compose, re.MULTILINE), 'db-data must be declared as a top-level volume'\n\ndef service_block(name):\n    m = re.search(rf'  {name}:\\n((?:    .*\\n|\\n)+)', compose)\n    assert m, f'{name} service block not found'\n    return m.group(1)\n\napi_block = service_block('api')\nworker_block = service_block('worker')\n\nassert 'DATABASE_URL=postgresql://' in api_block, 'api service is missing DATABASE_URL'\nassert 'DATABASE_URL=postgresql://' in worker_block, (\n    'worker service is missing DATABASE_URL - both api AND worker need database access, so both '\n    'need the connection string wired in, not just api')\n\nassert re.search(r'psycopg2', api_requirements), 'api/requirements.txt is missing a postgres driver'\nassert re.search(r'psycopg2', worker_requirements), (\n    'worker/requirements.txt is missing a postgres driver (psycopg2-binary) - worker and api each '\n    'declare their OWN Python dependencies independently, so giving worker a DATABASE_URL is not '\n    \"enough if worker's own requirements.txt has no library capable of using it\")\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_db_wiring_both.py",
+  "reference_solution": {
+    "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"8000:8000\"\n    environment:\n      - LOG_LEVEL=info\n      - DATABASE_URL=postgresql://webapp:webapp@db:5432/webapp\n    depends_on:\n      - worker\n      - db\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n      - DATABASE_URL=postgresql://webapp:webapp@db:5432/webapp\n    depends_on:\n      - db\n\n  db:\n    image: postgres:16-alpine\n    environment:\n      - POSTGRES_USER=webapp\n      - POSTGRES_PASSWORD=webapp\n      - POSTGRES_DB=webapp\n    volumes:\n      - db-data:/var/lib/postgresql/data\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n\nvolumes:\n  db-data:\n",
+    "api/requirements.txt": "flask==3.0.0\npsycopg2-binary==2.9.9\n",
+    "worker/requirements.txt": "redis==5.0.1\npsycopg2-binary==2.9.9\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "worker-requirements-missing-driver",
+      "files": {
+        "docker-compose.yml": "version: \"3.9\"\n\nservices:\n  api:\n    build:\n      context: ./api\n    ports:\n      - \"8000:8000\"\n    environment:\n      - LOG_LEVEL=info\n      - DATABASE_URL=postgresql://webapp:webapp@db:5432/webapp\n    depends_on:\n      - worker\n      - db\n\n  worker:\n    build:\n      context: ./worker\n    environment:\n      - LOG_LEVEL=info\n      - DATABASE_URL=postgresql://webapp:webapp@db:5432/webapp\n    depends_on:\n      - db\n\n  db:\n    image: postgres:16-alpine\n    environment:\n      - POSTGRES_USER=webapp\n      - POSTGRES_PASSWORD=webapp\n      - POSTGRES_DB=webapp\n    volumes:\n      - db-data:/var/lib/postgresql/data\n\n  nginx:\n    build:\n      context: ./nginx\n    ports:\n      - \"80:80\"\n    depends_on:\n      - api\n\nvolumes:\n  db-data:\n",
+        "api/requirements.txt": "flask==3.0.0\npsycopg2-binary==2.9.9\n",
+        "worker/requirements.txt": "redis==5.0.1\n"
+      }
+    }
+  ],
+  "name": "add_docker_multiservice_db_wiring_both_services",
+  "language": "dockerfile",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "docker-multiservice",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

@@ -33,5 +33,13 @@
     "c",
     "socket",
     "tcp"
+  ],
+  "broken_solutions": [
+    {
+      "name": "drops-last-byte",
+      "files": {
+        "server.c": "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <unistd.h>\n#include <arpa/inet.h>\n\nint main(void) {\n    int server_fd = socket(AF_INET, SOCK_STREAM, 0);\n    if (server_fd < 0) return 1;\n\n    int opt = 1;\n    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));\n\n    struct sockaddr_in addr;\n    memset(&addr, 0, sizeof(addr));\n    addr.sin_family = AF_INET;\n    addr.sin_addr.s_addr = INADDR_ANY;\n    addr.sin_port = htons(8080);\n\n    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) return 1;\n    if (listen(server_fd, 1) < 0) return 1;\n\n    int client_fd = accept(server_fd, NULL, NULL);\n    if (client_fd < 0) return 1;\n\n    char buffer[1024];\n    ssize_t n = read(client_fd, buffer, sizeof(buffer));\n    if (n > 1) {\n        write(client_fd, buffer, (size_t)(n - 1));\n    }\n\n    close(client_fd);\n    close(server_fd);\n    return 0;\n}\n"
+      }
+    }
   ]
 }

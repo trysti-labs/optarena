@@ -1,0 +1,60 @@
+{
+  "name": "adapt_cart_limit_go_dynamic",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: max_items.txt (a spec file the cart limit must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it live, not bake the old limit into cart.go",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "go",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create cart.go (package cartcase) with a function CanAdd(count int) bool returning true if count is less than or equal to the integer in max_items.txt (currently 5), else false. Read the limit from the file (os.ReadFile) at call time - do not hardcode it.",
+    "max_items.txt has changed. Make sure CanAdd() enforces the CURRENT limit in the file."
+  ],
+  "setup_files": {
+    "go.mod": "module cartcase\n\ngo 1.22\n",
+    "max_items.txt": "5\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "max_items.txt tightened to a lower limit",
+      "write_files": {
+        "max_items.txt": "3\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "cart.go",
+      "content_patterns": [
+        "CanAdd"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "cart_test.go": "package cartcase\n\nimport (\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n\t\"testing\"\n)\n\nfunc TestCanAdd(t *testing.T) {\n\tdata, _ := os.ReadFile(\"max_items.txt\")\n\tlimit, _ := strconv.Atoi(strings.TrimSpace(string(data)))\n\tif !CanAdd(limit) {\n\t\tt.Fatalf(\"CanAdd(%d) should be true\", limit)\n\t}\n\tif CanAdd(limit + 1) {\n\t\tt.Fatalf(\"CanAdd(%d) should be false (stale limit not updated)\", limit+1)\n\t}\n}\n"
+  },
+  "check_command": "go test ./...",
+  "reference_solution": {
+    "cart.go": "package cartcase\n\nimport (\n\t\"os\"\n\t\"strconv\"\n\t\"strings\"\n)\n\nfunc CanAdd(count int) bool {\n\tdata, _ := os.ReadFile(\"max_items.txt\")\n\tlimit, _ := strconv.Atoi(strings.TrimSpace(string(data)))\n\treturn count <= limit\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-limit",
+      "files": {
+        "cart.go": "package cartcase\n\nfunc CanAdd(count int) bool {\n\treturn count <= 5\n}\n"
+      }
+    }
+  ]
+}

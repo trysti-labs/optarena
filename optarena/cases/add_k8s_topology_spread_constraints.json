@@ -1,0 +1,48 @@
+{
+  "description": "Add a topologySpreadConstraint so replicas are spread across zones instead of the default scheduler potentially stacking them all on one",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "scheduling",
+    "availability"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml's inventory-api Deployment (replicas: 4) has no spread rule, so all 4 pods can end up in a single availability zone - if that zone goes down, the service goes down entirely. Add a topologySpreadConstraints entry to the pod template spec: topologyKey topology.kubernetes.io/zone, maxSkew 1 (no zone may have more than 1 pod more than the least-loaded zone), whenUnsatisfiable DoNotSchedule (a hard requirement, not just a hint - ScheduleAnyway would let the scheduler ignore it under pressure, defeating the point), and labelSelector matching the Deployment's own pod labels (matchLabels app: inventory-api - it must select ITS OWN pods to count against, not be empty or select nothing)."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: inventory-api\n  namespace: default\nspec:\n  replicas: 4\n  selector:\n    matchLabels:\n      app: inventory-api\n  template:\n    metadata:\n      labels:\n        app: inventory-api\n    spec:\n      containers:\n        - name: inventory-api\n          image: ghcr.io/example/inventory-api:4.0.0\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/deployment.yaml",
+      "content_patterns": [
+        "topologyspreadconstraints",
+        "maxskew"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_spread.py": "import yaml\n\nwith open(\"k8s/deployment.yaml\") as f:\n    dep = yaml.safe_load(f)\n\npod_spec = dep[\"spec\"][\"template\"][\"spec\"]\nconstraints = pod_spec.get(\"topologySpreadConstraints\") or []\nassert constraints, \"no topologySpreadConstraints on the pod template\"\nc = constraints[0]\n\nassert c.get(\"topologyKey\") == \"topology.kubernetes.io/zone\", (\n    f\"expected topologyKey topology.kubernetes.io/zone, got {c.get('topologyKey')}\")\nassert c.get(\"maxSkew\") == 1, f\"expected maxSkew 1, got {c.get('maxSkew')}\"\nassert c.get(\"whenUnsatisfiable\") == \"DoNotSchedule\", (\n    f\"expected DoNotSchedule (a hard requirement), got {c.get('whenUnsatisfiable')} - \"\n    f\"ScheduleAnyway lets the scheduler ignore the constraint under pressure\")\n\nselector = (c.get(\"labelSelector\") or {}).get(\"matchLabels\") or {}\nassert selector.get(\"app\") == \"inventory-api\", (\n    f\"labelSelector must match the Deployment's own pods (app: inventory-api), got {selector} - \"\n    f\"an empty or mismatched selector counts nothing against the constraint\")\n\nprint(\"PASS topology spread checks\")\n"
+  },
+  "check_command": "python3 check_spread.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: inventory-api\n  namespace: default\nspec:\n  replicas: 4\n  selector:\n    matchLabels:\n      app: inventory-api\n  template:\n    metadata:\n      labels:\n        app: inventory-api\n    spec:\n      topologySpreadConstraints:\n        - topologyKey: topology.kubernetes.io/zone\n          maxSkew: 1\n          whenUnsatisfiable: DoNotSchedule\n          labelSelector:\n            matchLabels:\n              app: inventory-api\n      containers:\n        - name: inventory-api\n          image: ghcr.io/example/inventory-api:4.0.0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "schedule-anyway-is-just-a-hint",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: inventory-api\n  namespace: default\nspec:\n  replicas: 4\n  selector:\n    matchLabels:\n      app: inventory-api\n  template:\n    metadata:\n      labels:\n        app: inventory-api\n    spec:\n      topologySpreadConstraints:\n        - topologyKey: topology.kubernetes.io/zone\n          maxSkew: 1\n          whenUnsatisfiable: ScheduleAnyway\n          labelSelector:\n            matchLabels:\n              app: inventory-api\n      containers:\n        - name: inventory-api\n          image: ghcr.io/example/inventory-api:4.0.0\n"
+      }
+    }
+  ],
+  "name": "add_k8s_topology_spread_constraints",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

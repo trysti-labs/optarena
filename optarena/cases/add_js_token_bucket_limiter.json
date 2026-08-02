@@ -1,0 +1,47 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "javascript",
+    "node",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "limiter.js's TokenBucket.allow always returns true. Implement it properly: the constructor takes (capacity, refillRate) - `refillRate` tokens are added per second, capped at `capacity` tokens (never above it, even after a long idle period). allow(now) refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "setup_files": {
+    "limiter.js": "class TokenBucket {\n  constructor(capacity, refillRate) {\n    this.capacity = capacity;\n    this.refillRate = refillRate;\n  }\n\n  allow(now) {\n    return true;\n  }\n}\n\nmodule.exports = { TokenBucket };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "limiter.js",
+      "content_patterns": [
+        "class TokenBucket"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_limiter_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { TokenBucket } = require(\"./limiter\");\n\ntest(\"starts full and drains\", () => {\n  const b = new TokenBucket(3, 1);\n  assert.strictEqual(b.allow(0), true);\n  assert.strictEqual(b.allow(0), true);\n  assert.strictEqual(b.allow(0), true);\n  assert.strictEqual(b.allow(0), false);\n});\n\ntest(\"refills over time\", () => {\n  const b = new TokenBucket(3, 1);\n  for (let i = 0; i < 3; i++) b.allow(0);\n  assert.strictEqual(b.allow(0.5), false);\n  assert.strictEqual(b.allow(1.0), true);\n  assert.strictEqual(b.allow(1.0), false);\n});\n\ntest(\"refill caps at capacity\", () => {\n  const b = new TokenBucket(2, 1);\n  b.allow(0);\n  b.allow(0);\n  assert.strictEqual(b.allow(1000), true);\n  assert.strictEqual(b.allow(1000), true);\n  assert.strictEqual(b.allow(1000), false);\n});\n"
+  },
+  "check_command": "node --test test_limiter_hidden.test.js",
+  "reference_solution": {
+    "limiter.js": "class TokenBucket {\n  constructor(capacity, refillRate) {\n    this.capacity = capacity;\n    this.refillRate = refillRate;\n    this.tokens = capacity;\n    this.last = null;\n  }\n\n  allow(now) {\n    if (this.last !== null) {\n      const elapsed = now - this.last;\n      this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.refillRate);\n    }\n    this.last = now;\n    if (this.tokens >= 1) {\n      this.tokens -= 1;\n      return true;\n    }\n    return false;\n  }\n}\n\nmodule.exports = { TokenBucket };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "limiter.js": "class TokenBucket {\n  constructor(capacity, refillRate) {\n    this.capacity = capacity;\n    this.refillRate = refillRate;\n    this.tokens = capacity;\n    this.last = null;\n  }\n\n  allow(now) {\n    if (this.last !== null) {\n      const elapsed = now - this.last;\n      this.tokens = this.tokens + elapsed * this.refillRate;\n    }\n    this.last = now;\n    if (this.tokens >= 1) {\n      this.tokens -= 1;\n      return true;\n    }\n    return false;\n  }\n}\n\nmodule.exports = { TokenBucket };\n"
+      }
+    }
+  ],
+  "name": "add_js_token_bucket_limiter",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3
+}

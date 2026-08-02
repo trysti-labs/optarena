@@ -1,0 +1,66 @@
+{
+  "name": "adapt_subnet_cidr_hcl_dynamic",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "infrastructure",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: subnet_cidr.txt (a spec file the Terraform variable's default must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the default, not leave the stale CIDR in place",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "hcl",
+    "terraform",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Create a Terraform file called network.tf declaring a variable named `subnet_cidr` (type string) whose default value matches EXACTLY the value in subnet_cidr.txt (currently: 10.0.1.0/24), plus an output named `configured_subnet_cidr` whose value is var.subnet_cidr (do not hardcode the output value).",
+    "subnet_cidr.txt has changed. Update network.tf so variable subnet_cidr's default matches the CURRENT contents of subnet_cidr.txt exactly."
+  ],
+  "setup_files": {
+    "subnet_cidr.txt": "10.0.1.0/24\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "subnet_cidr.txt rewritten to a new required CIDR block",
+      "write_files": {
+        "subnet_cidr.txt": "10.0.2.0/24\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "network.tf",
+      "content_patterns": [
+        "variable",
+        "subnet_cidr",
+        "output",
+        "configured_subnet_cidr"
+      ],
+      "regex_patterns": [
+        "variable\\s+\"subnet_cidr\"\\s*\\{",
+        "output\\s+\"configured_subnet_cidr\"\\s*\\{"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_subnet.py": "import re\nimport json\nimport subprocess\n\nwith open('subnet_cidr.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'subnet_cidr.txt is empty'\n\nproc = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(proc.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {proc.stdout}\\n{proc.stderr}'\n\nwith open('network.tf', encoding='utf-8') as f:\n    content = f.read()\n\nm = re.search(r'variable\\s+\"subnet_cidr\"\\s*\\{(.*?)\\n\\}', content, re.DOTALL)\nassert m, 'could not locate the subnet_cidr variable block'\nblock = m.group(1)\n\ndm = re.search(r'default\\s*=\\s*\"([^\"]*)\"', block)\nassert dm, f'variable block has no default value: {block!r}'\ngot = dm.group(1)\nassert got == current, f'variable default is {got!r}, want the CURRENT subnet_cidr.txt value {current!r} (stale default not updated)'\n\nassert re.search(r'output\\s+\"configured_subnet_cidr\"\\s*\\{[^}]*var\\.subnet_cidr', content, re.DOTALL), \\\n    'output configured_subnet_cidr must reference var.subnet_cidr, not a hardcoded value'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_subnet.py",
+  "reference_solution": {
+    "network.tf": "variable \"subnet_cidr\" {\n  type    = string\n  default = \"10.0.2.0/24\"\n}\n\noutput \"configured_subnet_cidr\" {\n  value = var.subnet_cidr\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-cidr-value",
+      "files": {
+        "network.tf": "variable \"subnet_cidr\" {\n  type    = string\n  default = \"10.0.1.0/24\"\n}\n\noutput \"configured_subnet_cidr\" {\n  value = var.subnet_cidr\n}\n"
+      }
+    }
+  ]
+}

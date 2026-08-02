@@ -1,0 +1,61 @@
+{
+  "name": "adapt_log_level_yaml_dynamic",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: log_level.txt (a spec file the compose service's LOG_LEVEL env var must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the value, not leave the stale level in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "yaml",
+    "docker-compose",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a docker-compose.yml at the repo root defining one service named 'app' using image myorg/webapp:latest, with an environment variable LOG_LEVEL set to EXACTLY the value in log_level.txt (currently: info).",
+    "log_level.txt has changed. Update docker-compose.yml so LOG_LEVEL matches the CURRENT value in the file."
+  ],
+  "setup_files": {
+    "log_level.txt": "info\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "log_level.txt rewritten to a new required log level",
+      "write_files": {
+        "log_level.txt": "debug\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "services",
+        "app",
+        "LOG_LEVEL"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_compose.py": "import yaml\n\nwith open('log_level.txt', encoding='utf-8') as f:\n    current = f.read().strip()\n\nwith open('docker-compose.yml') as f:\n    data = yaml.safe_load(f)\n\nenv = data['services']['app'].get('environment')\nif isinstance(env, dict):\n    env_map = {str(k): str(v) for k, v in env.items()}\nelse:\n    env_map = {}\n    for item in (env or []):\n        item = str(item)\n        if '=' in item:\n            k, v = item.split('=', 1)\n            env_map[k] = v\ngot = env_map.get('LOG_LEVEL')\nassert got == current, f'LOG_LEVEL is {got!r}, want the CURRENT log_level.txt value {current!r} (stale level not updated)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_compose.py",
+  "reference_solution": {
+    "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:latest\n    environment:\n      - LOG_LEVEL=debug\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-log-level",
+      "files": {
+        "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:latest\n    environment:\n      - LOG_LEVEL=info\n"
+      }
+    }
+  ]
+}

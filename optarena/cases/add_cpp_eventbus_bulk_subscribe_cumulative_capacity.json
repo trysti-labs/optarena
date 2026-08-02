@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (cpp-eventbus): EventBus::bulkSubscribe must reject the whole batch if the CUMULATIVE subscriber count would exceed maxSubscribersPerTopic - not check each callback against a stale pre-batch baseline",
+  "tags": [
+    "cpp",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add an optional `maxSubscribersPerTopic` constructor argument to EventBus (default -1, meaning unlimited), and a `countSubscribersForTopic(topic)` helper. Extend `subscribe()` to return -1 when the topic is already at capacity. Add `int EventBus::bulkSubscribe(const std::string& topic, const std::vector<Callback>& callbacks, std::vector<int>& outIds)`, subscribing every callback in `callbacks` to `topic` in one call. Critically, get the capacity check right: the invariant is that the topic's subscriber count (existing + everything in this batch, combined) must never exceed maxSubscribersPerTopic. Compute the topic's current subscriber count and compare it plus the batch size against maxSubscribersPerTopic ONCE for the whole batch - do not check each callback individually against the pre-batch count, since that lets a batch of several callbacks sail past a cap that would reject them if counted together. Fill outIds and return 1 on success, or 0 (nothing subscribed) if the batch would overflow."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "include/event_bus.hpp",
+      "content_patterns": [
+        "maxSubscribersPerTopic",
+        "bulkSubscribe"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/test_bulk_subscribe_capacity.cpp": "#include \"event_bus.hpp\"\n#include \"event_log.hpp\"\n\n#include <cassert>\n#include <cstdio>\n#include <vector>\n\nstatic void test_bulk_subscribe_rejects_whole_batch_when_cumulative_exceeds_capacity() {\n    EventLog log(10);\n    EventBus bus(log, 2);\n\n    std::vector<EventBus::Callback> callbacks = {\n        [](const Event&) {}, [](const Event&) {}, [](const Event&) {}\n    };\n    std::vector<int> outIds;\n    int result = bus.bulkSubscribe(\"topic-a\", callbacks, outIds);\n    assert(result == 0);\n    assert(bus.countSubscribersForTopic(\"topic-a\") == 0);\n}\n\nstatic void test_bulk_subscribe_succeeds_within_capacity() {\n    EventLog log(10);\n    EventBus bus(log, 3);\n\n    std::vector<EventBus::Callback> callbacks = {\n        [](const Event&) {}, [](const Event&) {}\n    };\n    std::vector<int> outIds;\n    int result = bus.bulkSubscribe(\"topic-a\", callbacks, outIds);\n    assert(result == 1);\n    assert(outIds.size() == 2);\n}\n\nint main() {\n    test_bulk_subscribe_rejects_whole_batch_when_cumulative_exceeds_capacity();\n    test_bulk_subscribe_succeeds_within_capacity();\n    printf(\"PASS\\n\");\n    return 0;\n}\n"
+  },
+  "check_command": "g++ -std=c++17 -Iinclude tests/test_bulk_subscribe_capacity.cpp -o test_bin && ./test_bin",
+  "reference_solution": {
+    "include/event_bus.hpp": "#pragma once\n\n#include <functional>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n#include \"event.hpp\"\n#include \"event_log.hpp\"\n\nclass EventBus {\npublic:\n    using Callback = std::function<void(const Event&)>;\n\n    explicit EventBus(EventLog& log, int maxSubscribersPerTopic = -1)\n        : log_(log), maxSubscribersPerTopic_(maxSubscribersPerTopic) {}\n\n    int countSubscribersForTopic(const std::string& topic) const {\n        int count = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                count++;\n            }\n        }\n        return count;\n    }\n\n    /* Registers a callback for an exact topic match. Returns a\n     * subscription id usable with unsubscribe(), or -1 if the topic\n     * is already at maxSubscribersPerTopic capacity. */\n    int subscribe(const std::string& topic, Callback cb) {\n        if (maxSubscribersPerTopic_ >= 0 && countSubscribersForTopic(topic) >= maxSubscribersPerTopic_) {\n            return -1;\n        }\n        int id = next_id_++;\n        subscribers_[id] = std::make_pair(topic, std::move(cb));\n        return id;\n    }\n\n    /* Subscribes every callback in `callbacks` to `topic` in one call.\n     * Validates the WHOLE batch against maxSubscribersPerTopic (the\n     * topic's current subscriber count plus the batch size) ONCE\n     * before subscribing any of them - not each callback individually\n     * against a stale pre-batch count. Fills outIds and returns 1 on\n     * success, or 0 (nothing subscribed) if the batch would overflow. */\n    int bulkSubscribe(const std::string& topic, const std::vector<Callback>& callbacks, std::vector<int>& outIds) {\n        if (callbacks.empty()) {\n            return 0;\n        }\n        if (maxSubscribersPerTopic_ >= 0) {\n            int current = countSubscribersForTopic(topic);\n            if (current + static_cast<int>(callbacks.size()) > maxSubscribersPerTopic_) {\n                return 0;\n            }\n        }\n        outIds.clear();\n        for (const Callback& cb : callbacks) {\n            int id = next_id_++;\n            subscribers_[id] = std::make_pair(topic, cb);\n            outIds.push_back(id);\n        }\n        return 1;\n    }\n\n    void unsubscribe(int subscription_id) {\n        subscribers_.erase(subscription_id);\n    }\n\n    /* Records the event in the log, then invokes every subscriber whose\n     * topic exactly matches. Returns how many callbacks were invoked. */\n    int publish(const std::string& topic, const std::string& payload) {\n        Event event{next_seq_++, topic, payload};\n        log_.record(event);\n\n        int invoked = 0;\n        for (const auto& entry : subscribers_) {\n            const std::string& sub_topic = entry.second.first;\n            const Callback& cb = entry.second.second;\n            if (sub_topic == topic) {\n                cb(event);\n                invoked++;\n            }\n        }\n        return invoked;\n    }\n\nprivate:\n    EventLog& log_;\n    int maxSubscribersPerTopic_;\n    std::unordered_map<int, std::pair<std::string, Callback>> subscribers_;\n    int next_id_ = 1;\n    long next_seq_ = 1;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "cap-checked-per-callback-against-stale-baseline",
+      "files": {
+        "include/event_bus.hpp": "#pragma once\n\n#include <functional>\n#include <string>\n#include <unordered_map>\n#include <utility>\n#include <vector>\n\n#include \"event.hpp\"\n#include \"event_log.hpp\"\n\nclass EventBus {\npublic:\n    using Callback = std::function<void(const Event&)>;\n\n    explicit EventBus(EventLog& log, int maxSubscribersPerTopic = -1)\n        : log_(log), maxSubscribersPerTopic_(maxSubscribersPerTopic) {}\n\n    int countSubscribersForTopic(const std::string& topic) const {\n        int count = 0;\n        for (const auto& entry : subscribers_) {\n            if (entry.second.first == topic) {\n                count++;\n            }\n        }\n        return count;\n    }\n\n    int subscribe(const std::string& topic, Callback cb) {\n        if (maxSubscribersPerTopic_ >= 0 && countSubscribersForTopic(topic) >= maxSubscribersPerTopic_) {\n            return -1;\n        }\n        int id = next_id_++;\n        subscribers_[id] = std::make_pair(topic, std::move(cb));\n        return id;\n    }\n\n    int bulkSubscribe(const std::string& topic, const std::vector<Callback>& callbacks, std::vector<int>& outIds) {\n        if (callbacks.empty()) {\n            return 0;\n        }\n        int current = countSubscribersForTopic(topic);\n        outIds.clear();\n        for (const Callback& cb : callbacks) {\n            if (maxSubscribersPerTopic_ >= 0 && current + 1 > maxSubscribersPerTopic_) {\n                return 0;\n            }\n            int id = next_id_++;\n            subscribers_[id] = std::make_pair(topic, cb);\n            outIds.push_back(id);\n        }\n        return 1;\n    }\n\n    void unsubscribe(int subscription_id) {\n        subscribers_.erase(subscription_id);\n    }\n\n    int publish(const std::string& topic, const std::string& payload) {\n        Event event{next_seq_++, topic, payload};\n        log_.record(event);\n\n        int invoked = 0;\n        for (const auto& entry : subscribers_) {\n            const std::string& sub_topic = entry.second.first;\n            const Callback& cb = entry.second.second;\n            if (sub_topic == topic) {\n                cb(event);\n                invoked++;\n            }\n        }\n        return invoked;\n    }\n\nprivate:\n    EventLog& log_;\n    int maxSubscribersPerTopic_;\n    std::unordered_map<int, std::pair<std::string, Callback>> subscribers_;\n    int next_id_ = 1;\n    long next_seq_ = 1;\n};\n"
+      }
+    }
+  ],
+  "name": "add_cpp_eventbus_bulk_subscribe_cumulative_capacity",
+  "language": "cpp",
+  "framework": "none",
+  "domain": "systems",
+  "image": "optarena-tester:latest",
+  "setup_repo": "cpp-eventbus",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

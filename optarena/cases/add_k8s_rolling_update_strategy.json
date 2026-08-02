@@ -1,0 +1,48 @@
+{
+  "description": "Add an explicit RollingUpdate strategy whose maxUnavailable leaves at least one pod serving traffic during a rollout",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "rollout",
+    "availability"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml's notifications-api Deployment (replicas: 2) has no explicit update strategy, so it falls back to Kubernetes' default RollingUpdate (25% maxUnavailable/25% maxSurge), which on 2 replicas rounds down to maxUnavailable: 0 already - but that's an accident of the default math, not a deliberate choice, and it silently breaks the moment someone bumps replicas. Add an EXPLICIT spec.strategy: type RollingUpdate with maxUnavailable: 1 and maxSurge: 1, so the intent (never more than one pod down at a time during a rollout, and headroom for one extra pod while rolling) survives future replica-count changes."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notifications-api\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notifications-api\n  template:\n    metadata:\n      labels:\n        app: notifications-api\n    spec:\n      containers:\n        - name: notifications-api\n          image: ghcr.io/example/notifications-api:1.0.0\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/deployment.yaml",
+      "content_patterns": [
+        "rollingupdate",
+        "maxunavailable"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_strategy.py": "import yaml\n\nwith open(\"k8s/deployment.yaml\") as f:\n    dep = yaml.safe_load(f)\n\nstrategy = dep[\"spec\"].get(\"strategy\") or {}\nassert strategy.get(\"type\") == \"RollingUpdate\", f\"expected RollingUpdate, got {strategy.get('type')}\"\n\nru = strategy.get(\"rollingUpdate\") or {}\nassert ru.get(\"maxUnavailable\") == 1, f\"expected maxUnavailable 1, got {ru.get('maxUnavailable')}\"\nassert ru.get(\"maxSurge\") == 1, f\"expected maxSurge 1, got {ru.get('maxSurge')}\"\n\nassert dep[\"spec\"][\"replicas\"] == 2, \"replicas must stay unchanged\"\n\nprint(\"PASS rolling update strategy checks\")\n"
+  },
+  "check_command": "python3 check_strategy.py",
+  "reference_solution": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notifications-api\n  namespace: default\nspec:\n  replicas: 2\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 1\n      maxSurge: 1\n  selector:\n    matchLabels:\n      app: notifications-api\n  template:\n    metadata:\n      labels:\n        app: notifications-api\n    spec:\n      containers:\n        - name: notifications-api\n          image: ghcr.io/example/notifications-api:1.0.0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "maxunavailable-equals-replicas",
+      "files": {
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notifications-api\n  namespace: default\nspec:\n  replicas: 2\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 2\n      maxSurge: 1\n  selector:\n    matchLabels:\n      app: notifications-api\n  template:\n    metadata:\n      labels:\n        app: notifications-api\n    spec:\n      containers:\n        - name: notifications-api\n          image: ghcr.io/example/notifications-api:1.0.0\n"
+      }
+    }
+  ],
+  "name": "add_k8s_rolling_update_strategy",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

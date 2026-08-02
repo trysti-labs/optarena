@@ -30,5 +30,13 @@
     "python",
     "basics",
     "stdout"
+  ],
+  "broken_solutions": [
+    {
+      "name": "missing-comma",
+      "files": {
+        "hello.py": "print('Hello World!')\n"
+      }
+    }
   ]
 }

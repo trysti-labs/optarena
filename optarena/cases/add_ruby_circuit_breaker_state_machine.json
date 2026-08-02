@@ -1,0 +1,46 @@
+{
+  "description": "Implement a real 3-state (closed/open/half-open) circuit breaker in place of a stub that always calls through",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "resilience",
+    "state-machine"
+  ],
+  "prompts": [
+    "breaker.rb's CircuitBreaker#call(now, &block) always just calls the block. Implement the real 3-state machine: CircuitBreaker.new(failure_threshold, reset_timeout). Starts :closed. In :closed, call invokes the block; if it raises, count consecutive failures, and once `failure_threshold` CONSECUTIVE failures have happened, trip to :open (recording when it opened) and re-raise. While :open, call must NOT invoke the block at all and must instead raise CircuitOpenError - UNLESS at least `reset_timeout` seconds have passed since it opened, in which case it moves to :half_open and allows exactly ONE trial call: if that call succeeds, go back to :closed (reset the failure count); if it raises, go back to :open and RESET the open-time to `now` (so the next trial is only allowed after another full reset_timeout, not immediately). Define CircuitOpenError as a StandardError subclass in the same file."
+  ],
+  "setup_files": {
+    "breaker.rb": "class CircuitOpenError < StandardError; end\n\nclass CircuitBreaker\n  def initialize(failure_threshold, reset_timeout)\n    @failure_threshold = failure_threshold\n    @reset_timeout = reset_timeout\n  end\n\n  def call(now, &block)\n    block.call\n  end\nend\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "breaker.rb",
+      "content_patterns": [
+        "class CircuitBreaker"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "breaker.rb": "class CircuitOpenError < StandardError; end\n\nclass CircuitBreaker\n  def initialize(failure_threshold, reset_timeout)\n    @failure_threshold = failure_threshold\n    @reset_timeout = reset_timeout\n    @state = :closed\n    @failures = 0\n    @opened_at = nil\n  end\n\n  def call(now, &block)\n    if @state == :open\n      raise CircuitOpenError if now - @opened_at < @reset_timeout\n      @state = :half_open\n    end\n\n    begin\n      result = block.call\n    rescue StandardError => e\n      if @state == :half_open\n        @state = :open\n        @opened_at = now\n      else\n        @failures += 1\n        if @failures >= @failure_threshold\n          @state = :open\n          @opened_at = now\n        end\n      end\n      raise e\n    end\n\n    @state = :closed\n    @failures = 0\n    result\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "half-open-failure-does-not-reset-clock",
+      "files": {
+        "breaker.rb": "class CircuitOpenError < StandardError; end\n\nclass CircuitBreaker\n  def initialize(failure_threshold, reset_timeout)\n    @failure_threshold = failure_threshold\n    @reset_timeout = reset_timeout\n    @state = :closed\n    @failures = 0\n    @opened_at = nil\n  end\n\n  def call(now, &block)\n    if @state == :open\n      raise CircuitOpenError if now - @opened_at < @reset_timeout\n      @state = :half_open\n    end\n\n    begin\n      result = block.call\n    rescue StandardError => e\n      if @state == :half_open\n        @state = :open\n      else\n        @failures += 1\n        if @failures >= @failure_threshold\n          @state = :open\n          @opened_at = now\n        end\n      end\n      raise e\n    end\n\n    @state = :closed\n    @failures = 0\n    result\n  end\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_circuit_breaker_state_machine",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "ruby breaker_hidden_test.rb",
+  "test_setup_files": {
+    "breaker_hidden_test.rb": "require \"minitest/autorun\"\nrequire_relative \"breaker\"\n\nclass CircuitBreakerTest < Minitest::Test\n  def boom\n    raise \"boom\"\n  end\n\n  def test_trips_open_after_consecutive_failures\n    b = CircuitBreaker.new(3, 10)\n    3.times do\n      assert_raises(RuntimeError) { b.call(0) { boom } }\n    end\n    assert_raises(CircuitOpenError) { b.call(0) { \"should not run\" } }\n  end\n\n  def test_fails_fast_without_calling_block_while_open\n    b = CircuitBreaker.new(1, 100)\n    assert_raises(RuntimeError) { b.call(0) { boom } }\n    called = false\n    assert_raises(CircuitOpenError) { b.call(1) { called = true; \"x\" } }\n    refute called\n  end\n\n  def test_half_open_trial_after_timeout_success_closes\n    b = CircuitBreaker.new(1, 10)\n    assert_raises(RuntimeError) { b.call(0) { boom } }\n    assert_equal \"ok\", b.call(10) { \"ok\" }\n    assert_equal \"still-fine\", b.call(11) { \"still-fine\" }\n  end\n\n  def test_half_open_failure_reopens_and_resets_clock\n    b = CircuitBreaker.new(1, 10)\n    assert_raises(RuntimeError) { b.call(0) { boom } }\n    assert_raises(RuntimeError) { b.call(10) { boom } }\n    assert_raises(CircuitOpenError) { b.call(15) { \"too soon\" } }\n    assert_equal \"ok now\", b.call(20) { \"ok now\" }\n  end\nend\n"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "adapt_host_port_yaml_dynamic",
+  "language": "yaml",
+  "framework": "docker-compose",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: host_port.txt (a spec file the compose service's published host port must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the port mapping, not leave the stale port in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "yaml",
+    "docker-compose",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a docker-compose.yml at the repo root defining one service named 'app' using image myorg/webapp:latest, publishing container port 80 to EXACTLY the host port listed in host_port.txt (currently 8080).",
+    "host_port.txt has changed. Update docker-compose.yml so the app service publishes to the CURRENT host port in the file."
+  ],
+  "setup_files": {
+    "host_port.txt": "8080\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "host_port.txt rewritten to a new required host port",
+      "write_files": {
+        "host_port.txt": "9090\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "docker-compose.yml",
+      "content_patterns": [
+        "services",
+        "app"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_compose.py": "import yaml\n\nwith open('host_port.txt', encoding='utf-8') as f:\n    current = f.read().strip()\n\nwith open('docker-compose.yml') as f:\n    data = yaml.safe_load(f)\n\nservices = data.get('services') or {}\nassert 'app' in services, f'app service missing, got {list(services)}'\nports = services['app'].get('ports') or []\nhost_ports = [str(p).split(':')[0] for p in ports]\nassert current in host_ports, f'app ports {ports!r} do not publish the CURRENT host_port.txt value {current!r} (stale port not updated)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_compose.py",
+  "reference_solution": {
+    "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"9090:80\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-host-port",
+      "files": {
+        "docker-compose.yml": "version: \"3.9\"\nservices:\n  app:\n    image: myorg/webapp:latest\n    ports:\n      - \"8080:80\"\n"
+      }
+    }
+  ]
+}

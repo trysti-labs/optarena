@@ -1,0 +1,45 @@
+{
+  "description": "Fix a std::priority_queue that compares by priority alone (no FIFO guarantee for ties) into an insertion-order-stable one",
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "algorithms"
+  ],
+  "prompts": [
+    "stable_priority_queue.h wraps std::priority_queue<Item> with a comparator that only compares Item::priority - std::priority_queue makes NO ordering guarantee among elements the comparator treats as equal (it's a binary heap, not a stable structure). Fix it so that: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO) - add an explicit monotonically increasing insertion-order field to Item and use it as the comparator's tiebreaker (remember std::priority_queue is a MAX-heap by default, so the comparator needs the right sense to get min-priority-first, FIFO-tiebreak pop order)."
+  ],
+  "setup_files": {
+    "stable_priority_queue.h": "#pragma once\n#include <queue>\n#include <string>\n#include <vector>\n\nstruct Item {\n    int priority;\n    std::string value;\n};\n\nstruct ItemCompare {\n    bool operator()(const Item& a, const Item& b) const {\n        return a.priority > b.priority;\n    }\n};\n\nclass StablePriorityQueue {\npublic:\n    void push(int priority, const std::string& value) {\n        heap_.push(Item{priority, value});\n    }\n\n    std::string pop() {\n        Item top = heap_.top();\n        heap_.pop();\n        return top.value;\n    }\n\nprivate:\n    std::priority_queue<Item, std::vector<Item>, ItemCompare> heap_;\n};\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "stable_priority_queue.h",
+      "content_patterns": [
+        "class StablePriorityQueue"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "stable_priority_queue.h": "#pragma once\n#include <queue>\n#include <string>\n#include <vector>\n\nstruct Item {\n    int priority;\n    long long order;\n    std::string value;\n};\n\nstruct ItemCompare {\n    bool operator()(const Item& a, const Item& b) const {\n        if (a.priority != b.priority) return a.priority > b.priority;\n        return a.order > b.order;\n    }\n};\n\nclass StablePriorityQueue {\npublic:\n    void push(int priority, const std::string& value) {\n        heap_.push(Item{priority, counter_++, value});\n    }\n\n    std::string pop() {\n        Item top = heap_.top();\n        heap_.pop();\n        return top.value;\n    }\n\nprivate:\n    long long counter_ = 0;\n    std::priority_queue<Item, std::vector<Item>, ItemCompare> heap_;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-order-tiebreak",
+      "files": {
+        "stable_priority_queue.h": "#pragma once\n#include <queue>\n#include <string>\n#include <vector>\n\nstruct Item {\n    int priority;\n    std::string value;\n};\n\nstruct ItemCompare {\n    bool operator()(const Item& a, const Item& b) const {\n        return a.priority > b.priority;\n    }\n};\n\nclass StablePriorityQueue {\npublic:\n    void push(int priority, const std::string& value) {\n        heap_.push(Item{priority, value});\n    }\n\n    std::string pop() {\n        Item top = heap_.top();\n        heap_.pop();\n        return top.value;\n    }\n\nprivate:\n    std::priority_queue<Item, std::vector<Item>, ItemCompare> heap_;\n};\n"
+      }
+    }
+  ],
+  "name": "add_cpp_stable_priority_queue",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "g++ -std=c++17 test_stable_priority_queue.cpp -o test_stable_priority_queue_bin && ./test_stable_priority_queue_bin",
+  "test_setup_files": {
+    "test_stable_priority_queue.cpp": "#include \"stable_priority_queue.h\"\n#include <cassert>\n#include <iostream>\n\nint main() {\n    {\n        StablePriorityQueue q;\n        q.push(5, \"low\");\n        q.push(1, \"high\");\n        q.push(3, \"mid\");\n        assert(q.pop() == \"high\");\n        assert(q.pop() == \"mid\");\n        assert(q.pop() == \"low\");\n    }\n    {\n        StablePriorityQueue q;\n        for (int i = 0; i < 20; i++) {\n            q.push(1, std::string(1, (char)('a' + i)));\n        }\n        for (int i = 0; i < 20; i++) {\n            std::string want(1, (char)('a' + i));\n            assert(q.pop() == want);\n        }\n    }\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  }
+}

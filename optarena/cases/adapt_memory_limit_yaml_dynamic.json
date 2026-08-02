@@ -1,0 +1,61 @@
+{
+  "name": "adapt_memory_limit_yaml_dynamic",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: memory_limit.txt (a spec file the Deployment container's memory limit must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the limit, not leave the stale value in place",
+  "difficulty": 1,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "yaml",
+    "kubernetes",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a Kubernetes Deployment manifest at deployment.yaml for a Deployment named api, one container named api using image myorg/api:latest, with resources.limits.memory set to EXACTLY the value in memory_limit.txt (currently 256Mi).",
+    "memory_limit.txt has changed. Update deployment.yaml's memory limit to match the CURRENT value in the file."
+  ],
+  "setup_files": {
+    "memory_limit.txt": "256Mi\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "memory_limit.txt rewritten to a higher limit",
+      "write_files": {
+        "memory_limit.txt": "512Mi\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "deployment.yaml",
+      "content_patterns": [
+        "Deployment",
+        "api",
+        "memory"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_deployment.py": "import yaml\n\nwith open('memory_limit.txt', encoding='utf-8') as f:\n    current = f.read().strip()\n\nwith open('deployment.yaml') as f:\n    data = yaml.safe_load(f)\n\ncontainers = data['spec']['template']['spec']['containers']\napi = next(c for c in containers if c.get('name') == 'api')\ngot = api.get('resources', {}).get('limits', {}).get('memory')\nassert got == current, f'memory limit is {got!r}, want the CURRENT memory_limit.txt value {current!r} (stale limit not updated)'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_deployment.py",
+  "reference_solution": {
+    "deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: api\n  template:\n    metadata:\n      labels:\n        app: api\n    spec:\n      containers:\n        - name: api\n          image: myorg/api:latest\n          resources:\n            limits:\n              memory: 512Mi\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-memory-limit",
+      "files": {
+        "deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: api\n  template:\n    metadata:\n      labels:\n        app: api\n    spec:\n      containers:\n        - name: api\n          image: myorg/api:latest\n          resources:\n            limits:\n              memory: 256Mi\n"
+      }
+    }
+  ]
+}

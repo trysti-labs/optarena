@@ -1,0 +1,55 @@
+{
+  "description": "Add a PriorityClass and wire it onto the Deployment's pod template, so the scheduler preempts lower-priority pods for it under resource pressure",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "priority",
+    "scheduling"
+  ],
+  "prompts": [
+    "The billing-worker Deployment in k8s/deployment.yaml has no priority set, so under node pressure the scheduler treats it the same as any best-effort batch job. Add k8s/priorityclass.yaml defining a scheduling.k8s.io/v1 PriorityClass named high-priority-billing with value 1000000 and globalDefault false, and set the Deployment's pod template spec.priorityClassName to high-priority-billing so it actually takes effect (defining a PriorityClass that nothing references does nothing)."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: billing-worker\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: billing-worker\n  template:\n    metadata:\n      labels:\n        app: billing-worker\n    spec:\n      containers:\n        - name: billing-worker\n          image: ghcr.io/example/billing-worker:1.9.0\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/priorityclass.yaml",
+      "content_patterns": [
+        "priorityclass"
+      ]
+    },
+    {
+      "path_pattern": "*/deployment.yaml",
+      "content_patterns": [
+        "priorityclassname"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_priority.py": "import yaml\n\nwith open(\"k8s/priorityclass.yaml\") as f:\n    pc = yaml.safe_load(f)\n\nassert pc[\"apiVersion\"] == \"scheduling.k8s.io/v1\" and pc[\"kind\"] == \"PriorityClass\", (\n    f\"expected a scheduling.k8s.io/v1 PriorityClass, got {pc.get('apiVersion')}/{pc.get('kind')}\")\nassert pc[\"metadata\"][\"name\"] == \"high-priority-billing\", \"unexpected PriorityClass name\"\nassert pc.get(\"value\") == 1000000, f\"expected value 1000000, got {pc.get('value')}\"\nassert pc.get(\"globalDefault\", False) is False, \"globalDefault must be false - this is not for every pod\"\n\nwith open(\"k8s/deployment.yaml\") as f:\n    dep = yaml.safe_load(f)\n\npod_spec = dep[\"spec\"][\"template\"][\"spec\"]\nassert pod_spec.get(\"priorityClassName\") == \"high-priority-billing\", (\n    f\"Deployment's pod template must reference priorityClassName high-priority-billing, \"\n    f\"got {pod_spec.get('priorityClassName')!r} - defining a PriorityClass nothing uses does nothing\")\n\nprint(\"PASS priority class checks\")\n"
+  },
+  "check_command": "python3 check_priority.py",
+  "reference_solution": {
+    "k8s/priorityclass.yaml": "apiVersion: scheduling.k8s.io/v1\nkind: PriorityClass\nmetadata:\n  name: high-priority-billing\nvalue: 1000000\nglobalDefault: false\ndescription: Priority class for billing pipeline workers.\n",
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: billing-worker\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: billing-worker\n  template:\n    metadata:\n      labels:\n        app: billing-worker\n    spec:\n      priorityClassName: high-priority-billing\n      containers:\n        - name: billing-worker\n          image: ghcr.io/example/billing-worker:1.9.0\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "priorityclass-defined-but-not-referenced",
+      "files": {
+        "k8s/priorityclass.yaml": "apiVersion: scheduling.k8s.io/v1\nkind: PriorityClass\nmetadata:\n  name: high-priority-billing\nvalue: 1000000\nglobalDefault: false\n",
+        "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: billing-worker\n  namespace: default\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: billing-worker\n  template:\n    metadata:\n      labels:\n        app: billing-worker\n    spec:\n      containers:\n        - name: billing-worker\n          image: ghcr.io/example/billing-worker:1.9.0\n"
+      }
+    }
+  ],
+  "name": "add_k8s_priority_class_wiring",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

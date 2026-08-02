@@ -6,11 +6,23 @@ Register new tools here; everything else (runner, metrics, compare, dashboard)
 is driver-agnostic.
 
 Registry metadata per driver:
-- kind:    cli | sdk | baseline
-- backend: scenario (points at the scenario backend; backend-vs-backend
-           comparisons are valid) | fixed (uses its own account/provider;
-           only tool-vs-tool comparisons are valid)
-- status:  stable | experimental | optional
+- kind:        cli | sdk | baseline
+- backend:     scenario (points at the scenario backend; backend-vs-backend
+               comparisons are valid) | fixed (uses its own account/provider;
+               only tool-vs-tool comparisons are valid)
+- status:      stable | experimental | optional
+- file_tools:  A-40: does this driver's tool actually edit files in the
+               workspace (True - every `cli` driver: aider, Claude Code,
+               Codex, ...), or does it only produce ONE block of text that
+               the DRIVER itself writes to a single flattened path with no
+               directory structure (False - every `baseline`/`sdk` driver:
+               openai-chat, ollama-chat, and every SDK-agent driver, all of
+               which share `openai_chat.concrete_target` for this). Used by
+               `cli.cmd_run` to warn, before spending any compute, when a
+               selected case cannot possibly be satisfied by a
+               file_tools=False driver (see `cases.baseline_incompatible`) -
+               found by tracing an unexplained 15% jvm pass rate to exactly
+               this gap during a gemma4:12b corpus calibration run.
 """
 
 from __future__ import annotations
@@ -21,36 +33,36 @@ from .base import Driver, CaseResult
 # ("one file in optarena/drivers/ implementing Driver -> CaseResult").
 __all__ = ["Driver", "CaseResult", "DRIVERS", "DRIVER_NAMES", "get_driver"]
 
-# name -> {kind, backend, status, summary}
+# name -> {kind, backend, status, summary, file_tools}
 # CLI, raw API, and in-process agent-framework/SDK drivers.
 DRIVERS: dict[str, dict] = {
-    "openai-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable",
+    "openai-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable", "file_tools": False,
                      "summary": "raw model via /v1/chat/completions (no agent)"},
-    "ollama-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable",
+    "ollama-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable", "file_tools": False,
                      "summary": "raw model via Ollama-native /api/chat"},
-    "aider":        {"kind": "cli",      "backend": "scenario", "status": "stable",
+    "aider":        {"kind": "cli",      "backend": "scenario", "status": "stable", "file_tools": True,
                      "summary": "aider CLI, headless"},
-    "claude-code":  {"kind": "cli",      "backend": "fixed",    "status": "experimental",
+    "claude-code":  {"kind": "cli",      "backend": "fixed",    "status": "experimental", "file_tools": True,
                      "summary": "Claude Code headless (claude -p)"},
-    "codex":        {"kind": "cli",      "backend": "fixed",    "status": "experimental",
+    "codex":        {"kind": "cli",      "backend": "fixed",    "status": "experimental", "file_tools": True,
                      "summary": "Codex CLI (codex exec --full-auto)"},
-    "opencode":     {"kind": "cli",      "backend": "scenario", "status": "experimental",
+    "opencode":     {"kind": "cli",      "backend": "scenario", "status": "experimental", "file_tools": True,
                      "summary": "OpenCode (opencode run)"},
-    "goose":        {"kind": "cli",      "backend": "scenario", "status": "experimental",
+    "goose":        {"kind": "cli",      "backend": "scenario", "status": "experimental", "file_tools": True,
                      "summary": "Goose (goose run -t)"},
-    "qwen-code":    {"kind": "cli",      "backend": "scenario", "status": "experimental",
+    "qwen-code":    {"kind": "cli",      "backend": "scenario", "status": "experimental", "file_tools": True,
                      "summary": "Qwen Code (qwen -p)"},
-    "crewai":            {"kind": "sdk", "backend": "scenario", "status": "optional",
+    "crewai":            {"kind": "sdk", "backend": "scenario", "status": "optional", "file_tools": False,
                           "summary": "crewAI SDK agent (pip install optarena[crewai])"},
-    "openai-agents":     {"kind": "sdk", "backend": "scenario", "status": "optional",
+    "openai-agents":     {"kind": "sdk", "backend": "scenario", "status": "optional", "file_tools": False,
                           "summary": "OpenAI Agents SDK (pip install optarena[openai-agents])"},
-    "smolagents":        {"kind": "sdk", "backend": "scenario", "status": "optional",
+    "smolagents":        {"kind": "sdk", "backend": "scenario", "status": "optional", "file_tools": False,
                           "summary": "HuggingFace smolagents CodeAgent (pip install optarena[smolagents])"},
-    "langgraph":         {"kind": "sdk", "backend": "scenario", "status": "optional",
+    "langgraph":         {"kind": "sdk", "backend": "scenario", "status": "optional", "file_tools": False,
                           "summary": "LangGraph prebuilt ReAct agent (pip install optarena[langgraph])"},
-    "autogen":           {"kind": "sdk", "backend": "scenario", "status": "optional",
+    "autogen":           {"kind": "sdk", "backend": "scenario", "status": "optional", "file_tools": False,
                           "summary": "AutoGen/AG2 AssistantAgent (pip install optarena[autogen])"},
-    "semantic-kernel":   {"kind": "sdk", "backend": "scenario", "status": "optional",
+    "semantic-kernel":   {"kind": "sdk", "backend": "scenario", "status": "optional", "file_tools": False,
                           "summary": "Semantic Kernel chat agent (pip install optarena[semantic-kernel])"},
 }
 

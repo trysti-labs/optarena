@@ -1,0 +1,46 @@
+{
+  "description": "Add full jitter to an exponential backoff formula that currently produces identical, unbounded delays for every client",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "retry",
+    "algorithms"
+  ],
+  "prompts": [
+    "retry.py's backoff_delay(attempt) is deterministic exponential backoff with no jitter and no cap - every client retrying at the same attempt count picks the exact same delay (a thundering-herd problem), and the delay keeps growing forever for large attempt numbers. Change the signature to backoff_delay(attempt, base, max_delay, rand=random.random) and implement 'full jitter': compute cap = min(max_delay, base * 2**attempt), then return rand() * cap - `rand` must be an injectable callable returning a float in [0, 1) (defaulting to random.random) so callers can pass a fixed function for deterministic behavior. The delay must never exceed max_delay, no matter how large `attempt` gets."
+  ],
+  "setup_files": {
+    "retry.py": "def backoff_delay(attempt, base, max_delay):\n    return base * 2 ** attempt\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "retry.py",
+      "content_patterns": [
+        "def backoff_delay"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_retry_hidden.py": "from retry import backoff_delay\n\n\ndef test_upper_bound_is_the_cap():\n    delay = backoff_delay(attempt=2, base=1, max_delay=100, rand=lambda: 1.0)\n    assert delay == 4  # min(100, 1 * 2**2) * 1.0\n\n\ndef test_lower_bound_is_zero():\n    delay = backoff_delay(attempt=5, base=1, max_delay=100, rand=lambda: 0.0)\n    assert delay == 0\n\n\ndef test_delay_never_exceeds_max_delay_for_large_attempts():\n    delay = backoff_delay(attempt=50, base=1, max_delay=10, rand=lambda: 1.0)\n    assert delay == 10\n\n\ndef test_default_rand_stays_in_bounds():\n    for attempt in range(10):\n        delay = backoff_delay(attempt=attempt, base=1, max_delay=20)\n        assert 0 <= delay <= 20\n"
+  },
+  "check_command": "python3 -m pytest -q test_retry_hidden.py",
+  "reference_solution": {
+    "retry.py": "import random\n\n\ndef backoff_delay(attempt, base, max_delay, rand=random.random):\n    cap = min(max_delay, base * 2 ** attempt)\n    return rand() * cap\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-cap-on-exponent",
+      "files": {
+        "retry.py": "import random\n\n\ndef backoff_delay(attempt, base, max_delay, rand=random.random):\n    return rand() * base * 2 ** attempt\n"
+      }
+    }
+  ],
+  "name": "add_python_backoff_with_jitter_cap",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

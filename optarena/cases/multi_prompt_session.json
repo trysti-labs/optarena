@@ -33,5 +33,13 @@
     "python",
     "multi-prompt",
     "functions"
+  ],
+  "broken_solutions": [
+    {
+      "name": "ignored-second-turn",
+      "files": {
+        "greet.py": "def greet(name):\n    return 'Hello, ' + name + '!'\n"
+      }
+    }
   ]
 }

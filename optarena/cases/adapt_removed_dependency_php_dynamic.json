@@ -1,0 +1,59 @@
+{
+  "name": "adapt_removed_dependency_php_dynamic",
+  "language": "php",
+  "framework": "plain-php",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "php",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "src/GreetingData.php declares App\\GreetingData with a public const GREETING. Create src/Message.php declaring App\\Message with a public static function get(): string returning GreetingData::GREETING.",
+    "src/GreetingData.php has just been removed from the project. Update Message.php so it still works with NO reference to GreetingData, and get() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "src/GreetingData.php": "<?php\nnamespace App;\n\nclass GreetingData\n{\n    const GREETING = \"hola\";\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "src/GreetingData.php deleted",
+      "delete_files": [
+        "src/GreetingData.php"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "src/Message.php",
+      "content_patterns": [
+        "get"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/MessageTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Message.php';\n\nfinal class MessageTest extends TestCase\n{\n    public function testGetReturnsHola(): void\n    {\n        $this->assertSame(\"hola\", \\App\\Message::get());\n    }\n}\n"
+  },
+  "check_command": "phpunit tests/MessageTest.php",
+  "reference_solution": {
+    "src/Message.php": "<?php\nnamespace App;\n\nclass Message\n{\n    public static function get(): string\n    {\n        return \"hola\";\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-value",
+      "files": {
+        "src/Message.php": "<?php\nnamespace App;\n\nclass Message\n{\n    public static function get(): string\n    {\n        return \"bonjour\";\n    }\n}\n"
+      }
+    }
+  ]
+}

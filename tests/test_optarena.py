@@ -9,6 +9,7 @@ atomic results store.
 import argparse
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -16,9 +17,9 @@ from pathlib import Path
 from unittest import mock
 
 from optarena.cases import (
-    DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, REPOS_DIR, _HARDENING_ARGS, check_expected,
-    classify_failure, diff_stats, dockerfile_for, evaluate_case, filter_cases, load_cases,
-    prepare_workspace, run_capture, run_check_command,
+    DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, REPOS_DIR, _HARDENING_ARGS, baseline_incompatible,
+    check_expected, classify_failure, diff_stats, dockerfile_for, evaluate_case, filter_cases, load_cases,
+    normalize_workspace_line_endings, path_pattern_matches, prepare_workspace, run_capture, run_check_command,
 )
 from optarena.compare import (
     _cheaper, compare_runs, format_regression, format_table,
@@ -36,12 +37,53 @@ from optarena.scenario import Backend, Scenario
 from optarena.schema import SchemaError, validate_case, validate_scenario, validate_unique_case_names
 from optarena.verify import variants_for, verify_cases
 
+_MODULE_RESULTS_DIR = None
+_ORIG_RESULTS_DIRS = None
+
+
+def setUpModule():
+    """
+    A-32: point the whole suite at a throwaway results directory.
+
+    Several tests call `run_scenario`, which checkpoints through
+    `store.save_checkpoint` - so running the suite used to deposit ~13 run
+    records per invocation into the DEVELOPER'S OWN `results/runs/`, silently
+    inflating `optarena runs list` and the dashboard with junk named after
+    test scenarios. Tests that need their own results directory still override
+    it themselves (they save and restore the module globals); this just makes
+    the default safe.
+    """
+    global _MODULE_RESULTS_DIR, _ORIG_RESULTS_DIRS
+    import optarena.store as store_mod
+    _ORIG_RESULTS_DIRS = (store_mod.RESULTS_DIR, store_mod.RUNS_DIR)
+    _MODULE_RESULTS_DIR = Path(tempfile.mkdtemp(prefix="optarena_test_results_root_"))
+    store_mod.set_results_dir(_MODULE_RESULTS_DIR)
+
+
+def tearDownModule():
+    import shutil
+    import optarena.store as store_mod
+    if _ORIG_RESULTS_DIRS:
+        store_mod.RESULTS_DIR, store_mod.RUNS_DIR = _ORIG_RESULTS_DIRS
+    if _MODULE_RESULTS_DIR:
+        shutil.rmtree(_MODULE_RESULTS_DIR, ignore_errors=True)
+
 
 class OracleTests(unittest.TestCase):
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
         (self.ws / "out.py").write_text(
             "def add(a, b):\n    return a + b\n", encoding="utf-8")
+        # test_check_command_pass_and_fail below uses sys.executable (a host
+        # path) as the check_command binary - meaningless if it gets routed
+        # into a Linux container. Force the host path explicitly, the same
+        # opt-out every other host-exec test in this file already uses,
+        # instead of silently depending on whether Docker happens to be
+        # available on the machine running the suite.
+        self._env = mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
 
     def test_content_patterns_still_work(self):
         spec = [{"path_pattern": "out.py", "content_patterns": ["def add"]}]
@@ -91,6 +133,7 @@ class PrepareWorkspaceTests(unittest.TestCase):
 
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
 
     def test_plain_setup_files_only_unchanged(self):
         prepare_workspace(self.ws, {"setup_files": {"a.py": "x = 1\n"}})
@@ -147,6 +190,7 @@ class TestSetupFilesTests(unittest.TestCase):
 
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
         self._env = mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"})
         self._env.start()
         self.addCleanup(self._env.stop)
@@ -181,11 +225,106 @@ class TestSetupFilesTests(unittest.TestCase):
         self.assertNotEqual(oracle["exit_code"], 0)
 
 
+class SetupRepoContainmentTests(unittest.TestCase):
+    """
+    A-04: `setup_repo` names a directory under repos/ and nothing else. It is
+    untrusted input (case JSON, installable from a URL), and copy_setup_repo
+    turns it into a filesystem path - a traversal there copies an arbitrary
+    host directory INTO the agent-visible workspace, where the baselines feed
+    it back to the configured backend.
+    """
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_setuprepo_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+
+    def test_traversal_source_is_rejected(self):
+        from optarena.cases import copy_setup_repo
+        for evil in ("..", "../..", "../optarena/cases", "../../etc"):
+            with self.subTest(setup_repo=evil):
+                with self.assertRaises(ValueError):
+                    copy_setup_repo(self.ws, evil)
+                self.assertEqual(list(self.ws.rglob("*")), [],
+                                 f"{evil!r} copied files into the workspace")
+
+    def test_absolute_source_is_rejected(self):
+        from optarena.cases import copy_setup_repo
+        absolute = str(Path(__file__).resolve().parent)
+        with self.assertRaises(ValueError):
+            copy_setup_repo(self.ws, absolute)
+
+    def test_schema_rejects_separators_in_setup_repo(self):
+        for evil in ("../x", "a/b", "a\\b", "/abs", "..", "."):
+            with self.subTest(setup_repo=evil):
+                with self.assertRaises(SchemaError):
+                    validate_case({"name": "c", "setup_repo": evil})
+
+    def test_legitimate_starter_repo_still_copies(self):
+        from optarena.cases import copy_setup_repo
+        available = [p.name for p in REPOS_DIR.iterdir() if p.is_dir()] if REPOS_DIR.is_dir() else []
+        if not available:
+            self.skipTest("no starter repos checked out")
+        copy_setup_repo(self.ws, available[0])
+        self.assertTrue(any(p.is_file() for p in self.ws.rglob("*")))
+        validate_case({"name": "c", "setup_repo": available[0]})   # and it validates
+
+
+class ImageReferenceValidationTests(unittest.TestCase):
+    """
+    A-05: an image reference reaches a `docker run` command line ahead of the
+    image argument, and the engine parses options up to the first non-option
+    token - so a value starting with "-" is read as a FLAG. Every source of an
+    image reference (case field, scenario override, OPTARENA_SANDBOX_IMAGE)
+    must be shape-checked.
+    """
+
+    def test_option_lookalikes_are_rejected(self):
+        from optarena.cases import validate_image_ref
+        for evil in ("--privileged", "-v=/:/hostfs", "--entrypoint=sh",
+                     "--volume=/:/host", "-it", "img with space", ""):
+            with self.subTest(image=evil):
+                with self.assertRaises(ValueError):
+                    validate_image_ref(evil)
+
+    def test_real_references_are_accepted(self):
+        from optarena.cases import validate_image_ref
+        for good in ("optarena-tester:latest", "optarena-tester-python:latest",
+                     "ghcr.io/trysti-labs/optarena/optarena-tester:v1.2.3",
+                     "debian@sha256:" + "a" * 64, "img"):
+            with self.subTest(image=good):
+                self.assertEqual(validate_image_ref(good), good)
+
+    def test_schema_rejects_case_image_option_lookalike(self):
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "c", "image": "--privileged"})
+        validate_case({"name": "c", "image": "optarena-tester:latest"})
+
+    def test_schema_rejects_override_option_lookalike(self):
+        with self.assertRaises(SchemaError):
+            validate_scenario({"name": "s", "driver": "aider",
+                               "image_overrides": {"python": "--privileged"}})
+
+    def test_resolve_image_validates_env_override(self):
+        import optarena.cases as cases_mod
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with mock.patch.dict(os.environ, {"OPTARENA_SANDBOX_IMAGE": "--privileged"}):
+            with self.assertRaises(ValueError):
+                cases_mod.DockerSandbox(d)
+
+    def test_every_builtin_case_image_is_valid(self):
+        from optarena.cases import validate_image_ref
+        for case in load_cases():
+            if case.get("image"):
+                validate_image_ref(case["image"])
+
+
 class DockerCheckCommandTests(unittest.TestCase):
     """Docker sandboxing for check_command: command construction + fallback."""
 
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
         import optarena.cases as cases_mod
         self.cases_mod = cases_mod
         # Reset the module-level docker-availability cache before each test.
@@ -201,6 +340,28 @@ class DockerCheckCommandTests(unittest.TestCase):
          self.cases_mod._docker_warned, sandboxes) = self._orig
         self.cases_mod._active_sandboxes.clear()
         self.cases_mod._active_sandboxes.update(sandboxes)
+
+    def test_workspace_crlf_is_normalized_before_the_command_runs(self):
+        # A-42: run_check_command must normalize the workspace before
+        # dispatching, regardless of which sandbox path is used - this is
+        # the one place every driver's check funnels through.
+        (self.ws / "backup.sh").write_bytes(b'#!/bin/sh\r\necho hi\r\n')
+
+        def fake_run(args, **kwargs):
+            if args[:2] == ["docker", "info"]:
+                return mock.Mock(returncode=0)
+            if args[:3] == ["docker", "image", "inspect"]:
+                return mock.Mock(returncode=0)
+            if args[:2] == ["docker", "run"]:
+                return mock.Mock(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"unexpected subprocess call: {args}")
+
+        with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run), \
+             mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPTARENA_DISABLE_SANDBOX", None)
+            self.cases_mod.run_check_command({"check_command": "sh backup.sh"}, self.ws)
+
+        self.assertNotIn(b"\r", (self.ws / "backup.sh").read_bytes())
 
     def test_docker_run_invoked_with_isolation_flags(self):
         calls = []
@@ -328,6 +489,7 @@ class SharedSandboxTests(unittest.TestCase):
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="optarena_test_root_"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         (self.root / "case_a").mkdir()
         (self.root / "case_b" / "t1").mkdir(parents=True)
         import optarena.cases as cases_mod
@@ -424,6 +586,7 @@ class RunScenarioEmptyCasesTests(unittest.TestCase):
 
     def setUp(self):
         self.empty_dir = Path(tempfile.mkdtemp(prefix="optarena_test_nocases_"))
+        self.addCleanup(shutil.rmtree, self.empty_dir, ignore_errors=True)
 
     def test_empty_case_set_refused_by_default(self):
         sc = Scenario(name="x", driver="aider", cases=[], cases_dir=str(self.empty_dir))
@@ -458,6 +621,7 @@ class ParallelSandboxSharingTests(unittest.TestCase):
 
     def setUp(self):
         self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_parallel_"))
+        self.addCleanup(shutil.rmtree, self.cases_dir, ignore_errors=True)
         (self.cases_dir / "c1.json").write_text(json.dumps({
             "name": "c1", "prompts": ["do it"], "check_command": "echo hi",
         }), encoding="utf-8")
@@ -493,6 +657,93 @@ class ParallelSandboxSharingTests(unittest.TestCase):
              mock.patch("optarena.runner.DockerSandbox") as sandbox_cls:
             run_scenario(sc, parallel=1)
         sandbox_cls.assert_called_once()
+
+
+class ParallelDurabilityTests(unittest.TestCase):
+    """
+    A-01/A-02: the --parallel path must be as durable and as crash-safe as the
+    serial one. Two defects lived here: checkpoints that recorded zero cases
+    (so an interrupted parallel run lost everything F-02 exists to preserve),
+    and a worker exception that hung the whole run forever.
+    """
+
+    def setUp(self):
+        self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_pardur_"))
+        self.addCleanup(shutil.rmtree, self.cases_dir, ignore_errors=True)
+        for i in range(4):
+            (self.cases_dir / f"c{i}.json").write_text(json.dumps({
+                "name": f"c{i}", "prompts": ["do it"], "expected_files": [],
+            }), encoding="utf-8")
+        self.results_dir = Path(tempfile.mkdtemp(prefix="optarena_test_pardur_out_"))
+        self.addCleanup(shutil.rmtree, self.results_dir, ignore_errors=True)
+
+    def _scenario(self):
+        return Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
+
+    def test_checkpoints_record_completed_cases(self):
+        # A-01: every checkpoint must see the cases finished SO FAR - the
+        # regression was a constant zero, because on_result closed over a list
+        # the parallel runner never appended to.
+        driver = mock.Mock(parallel_safe=True, caches_results=False)
+        driver.run_case.side_effect = lambda case, sc, ws: CaseResult(
+            name=case["name"], passed=True, duration_s=0.1)
+        seen = []
+        with mock.patch("optarena.runner.get_driver", return_value=driver), \
+             mock.patch("optarena.runner.store.save_checkpoint",
+                        side_effect=lambda rec: seen.append(len(rec.cases))):
+            record = run_scenario(self._scenario(), parallel=3)
+        self.assertEqual(seen, [1, 2, 3, 4])
+        self.assertEqual(len(record.cases), 4)
+
+    def test_worker_exception_does_not_hang_the_run(self):
+        # A-02: an unexpected exception inside a worker used to kill that
+        # thread without ever queuing a result, leaving the collector blocked
+        # on a fixed-count get() forever. It must become this case's error.
+        def _boom(case, sc, ws):
+            if case["name"] == "c1":
+                raise OSError("disk full")
+            return CaseResult(name=case["name"], passed=True, duration_s=0.1)
+
+        driver = mock.Mock(parallel_safe=True, caches_results=False)
+        driver.run_case.side_effect = _boom
+        done = []
+        thread = __import__("threading").Thread(
+            target=lambda: done.append(run_scenario(self._scenario(), parallel=2)),
+            daemon=True)
+        with mock.patch("optarena.runner.get_driver", return_value=driver), \
+             mock.patch("optarena.runner.store.save_checkpoint"):
+            thread.start()
+            thread.join(timeout=60)
+        self.assertFalse(thread.is_alive(), "parallel run hung on a worker exception")
+        record = done[0]
+        self.assertEqual(len(record.cases), 4)
+        failed = [c for c in record.cases if c["error"]]
+        self.assertEqual(len(failed), 1)
+        self.assertIn("disk full", failed[0]["error"])
+        self.assertFalse(failed[0]["execution_ok"])
+
+    def test_interrupted_parallel_run_keeps_completed_cases(self):
+        # The whole point of A-01: what survives a KeyboardInterrupt.
+        import threading as _threading
+        gate = _threading.Event()
+
+        def _hang_after_two(case, sc, ws):
+            if case["name"] in ("c2", "c3"):
+                gate.wait(timeout=30)
+                raise KeyboardInterrupt
+            return CaseResult(name=case["name"], passed=True, duration_s=0.1)
+
+        driver = mock.Mock(parallel_safe=True, caches_results=False)
+        driver.run_case.side_effect = _hang_after_two
+        saved = []
+        with mock.patch("optarena.runner.get_driver", return_value=driver), \
+             mock.patch("optarena.runner.store.save_checkpoint",
+                        side_effect=lambda rec: saved.append([c["name"] for c in rec.cases])):
+            gate.set()
+            run_scenario(self._scenario(), parallel=2)
+        # c2/c3 report as errored cases; c0/c1 must still be in the record.
+        self.assertTrue(saved, "no checkpoint was written at all")
+        self.assertIn("c0", saved[-1])
 
 
 class LegacyArgvRewriteTests(unittest.TestCase):
@@ -540,6 +791,7 @@ class CachingDriverTrialsPlumbingTests(unittest.TestCase):
 
     def setUp(self):
         self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_uitrials_"))
+        self.addCleanup(shutil.rmtree, self.cases_dir, ignore_errors=True)
         (self.cases_dir / "c1.json").write_text(json.dumps({
             "name": "c1", "prompts": ["do it"],
         }), encoding="utf-8")
@@ -579,6 +831,7 @@ class RunCaptureTests(unittest.TestCase):
         import sys
         import time
         tmp = Path(tempfile.mkdtemp(prefix="optarena_treekill_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         sentinel = tmp / "child_ran.txt"
         child = tmp / "child.py"
         child.write_text(
@@ -620,6 +873,7 @@ class WorkspaceCleanupTests(unittest.TestCase):
 
     def setUp(self):
         self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_wscleanup_"))
+        self.addCleanup(shutil.rmtree, self.cases_dir, ignore_errors=True)
         (self.cases_dir / "c1.json").write_text(json.dumps({
             "name": "c1", "prompts": ["do it"],
         }), encoding="utf-8")
@@ -750,6 +1004,7 @@ class ExecutionOkTests(unittest.TestCase):
 
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_execok_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
 
     @staticmethod
     def _case():
@@ -810,6 +1065,7 @@ class DynamicDriverIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_dyn_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
 
     @staticmethod
     def _disruption_case():
@@ -1184,6 +1440,186 @@ class ConcreteTargetTests(unittest.TestCase):
         self.assertEqual(concrete_target(None), Path("output.txt"))
 
 
+class NormalizeWorkspaceLineEndingsTests(unittest.TestCase):
+    """
+    A-42: found live via a qwen3-coder+aider run - a syntactically and
+    semantically correct generated shell script (`backup.sh`) failed with
+    `Syntax error: end of file unexpected (expecting "then")`, purely
+    because it was CRLF-terminated on this Windows host and then
+    bind-mounted, unmodified, into the Linux sandbox. `run_check_command`
+    now normalizes every file in the workspace right before the command
+    that actually runs inside Linux executes.
+    """
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_crlf_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+
+    def test_crlf_file_is_normalized_to_lf(self):
+        target = self.ws / "backup.sh"
+        target.write_bytes(b'#!/bin/sh\r\nif [ -z "$1" ]; then\r\n  exit 1\r\nfi\r\n')
+        normalize_workspace_line_endings(self.ws)
+        data = target.read_bytes()
+        self.assertNotIn(b"\r", data)
+        self.assertEqual(data, b'#!/bin/sh\nif [ -z "$1" ]; then\n  exit 1\nfi\n')
+
+    def test_lone_cr_is_also_normalized(self):
+        target = self.ws / "old_mac.sh"
+        target.write_bytes(b"echo one\recho two\r")
+        normalize_workspace_line_endings(self.ws)
+        self.assertEqual(target.read_bytes(), b"echo one\necho two\n")
+
+    def test_lf_only_file_is_left_untouched(self):
+        target = self.ws / "already_fine.sh"
+        original = b"#!/bin/sh\necho hi\n"
+        target.write_bytes(original)
+        mtime_before = target.stat().st_mtime_ns
+        normalize_workspace_line_endings(self.ws)
+        self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(target.stat().st_mtime_ns, mtime_before)
+
+    def test_binary_looking_file_is_left_alone(self):
+        target = self.ws / "fixture.bin"
+        original = b"\x00\x01binary\r\ndata"
+        target.write_bytes(original)
+        normalize_workspace_line_endings(self.ws)
+        self.assertEqual(target.read_bytes(), original)
+
+    def test_recurses_into_subdirectories(self):
+        nested = self.ws / "src" / "nested.sh"
+        nested.parent.mkdir(parents=True)
+        nested.write_bytes(b"echo a\r\necho b\r\n")
+        normalize_workspace_line_endings(self.ws)
+        self.assertNotIn(b"\r", nested.read_bytes())
+
+    def test_symlink_is_skipped(self):
+        real = self.ws / "real.sh"
+        real.write_bytes(b"echo a\r\n")
+        link = self.ws / "link.sh"
+        try:
+            link.symlink_to(real)
+        except OSError:
+            self.skipTest("symlinks not permitted on this host")
+        normalize_workspace_line_endings(self.ws)
+        # the real file (visited directly) is still normalized; the symlink
+        # itself is never opened/rewritten as a distinct target.
+        self.assertNotIn(b"\r", real.read_bytes())
+
+
+class PathPatternMatchesTests(unittest.TestCase):
+    """
+    A-39: `**/X` must mean "X, at any depth INCLUDING the root" (standard
+    globstar semantics - bash's globstar, rsync excludes, Python 3.13's own
+    glob.translate()/pathlib matching, Ant filesets all agree on this), not
+    "X, strictly nested" - which is what plain `fnmatch` accidentally
+    enforced, since it has no concept of "/" as a path separator and a
+    "**/" pattern can only ever match a candidate that literally contains a
+    "/". Found via a real jvm-track calibration failure: the model's output
+    was correct, sitting right in the oracle's own "got:" message, and still
+    failed because it was a flat file with no "/" in its path at all.
+    """
+
+    def test_bare_file_satisfies_a_doublestar_prefix(self):
+        # the exact case that surfaced this: model wrote a flat file, case
+        # wanted "**/MessageFormatterTest.java".
+        self.assertTrue(path_pattern_matches(
+            "MessageFormatterTest.java", "**/MessageFormatterTest.java"))
+
+    def test_genuinely_nested_path_still_satisfies_a_doublestar_prefix(self):
+        # a real agent driver writing a proper project layout must be
+        # completely unaffected by this fix.
+        self.assertTrue(path_pattern_matches(
+            "src/main/java/com/example/MessageFormatterTest.java",
+            "**/MessageFormatterTest.java"))
+
+    def test_wrong_basename_still_fails(self):
+        self.assertFalse(path_pattern_matches(
+            "WrongName.java", "**/MessageFormatterTest.java"))
+
+    def test_case_insensitive_both_sides(self):
+        self.assertTrue(path_pattern_matches("classname.JAVA", "**/ClassName.java"))
+
+    def test_single_star_prefix_is_NOT_loosened(self):
+        # A single "*" conventionally means "exactly one path segment", not
+        # "zero or more" - concrete_target() has no way to invent an
+        # arbitrary wrapper directory name, so this class of pattern stays
+        # genuinely unsatisfiable by a flat-file writer. Must NOT be
+        # widened by this fix - only an exact "**/" prefix is.
+        self.assertFalse(path_pattern_matches("routes/respond.ts", "*/routes/respond.ts"))
+        self.assertTrue(path_pattern_matches("src/routes/respond.ts", "*/routes/respond.ts"))
+
+    def test_doublestar_not_at_the_start_is_unaffected(self):
+        # scoped deliberately narrow - only a LEADING "**/" is special-cased
+        # (the only shape the built-in corpus actually uses). "**" appearing
+        # elsewhere in a pattern falls through to plain fnmatch, unchanged.
+        self.assertFalse(path_pattern_matches("X.txt", "a/**/X.txt"))
+
+    def test_no_regression_on_a_plain_literal_pattern(self):
+        self.assertTrue(path_pattern_matches("hello.py", "hello.py"))
+        self.assertFalse(path_pattern_matches("goodbye.py", "hello.py"))
+
+    def test_no_regression_on_a_bare_glob_with_no_directory(self):
+        self.assertTrue(path_pattern_matches("output_test.go", "*_test.go"))
+        self.assertTrue(path_pattern_matches("src/output_test.go", "*_test.go"))
+
+
+class BaselineIncompatibleTests(unittest.TestCase):
+    """
+    A-40: can a flat-file-writing driver (openai-chat/ollama-chat, and every
+    SDK-agent driver - none have file tools) ever satisfy this case? Powers
+    cli.cmd_run's preflight warning. Deliberately built on the SAME
+    functions (concrete_target, path_pattern_matches) that decide the real
+    outcome at run time, not a separately maintained heuristic.
+    """
+
+    def test_none_when_winnable(self):
+        case = {"expected_files": [{"path_pattern": "hello.py"}]}
+        self.assertIsNone(baseline_incompatible(case))
+
+    def test_none_for_a_doublestar_prefix_after_the_A39_fix(self):
+        # this exact shape used to be hostile before path_pattern_matches
+        # was fixed - confirms the two fixes compose correctly.
+        case = {"expected_files": [{"path_pattern": "**/MessageFormatterTest.java"}]}
+        self.assertIsNone(baseline_incompatible(case))
+
+    def test_multi_file_is_hostile(self):
+        case = {"expected_files": [{"path_pattern": "a.py"}, {"path_pattern": "b.py"}]}
+        reason = baseline_incompatible(case)
+        self.assertIsNotNone(reason)
+        self.assertIn("2 separate files", reason)
+
+    def test_setup_repo_is_hostile(self):
+        case = {"expected_files": [{"path_pattern": "a.py"}], "setup_repo": "fastapi-tasktracker"}
+        reason = baseline_incompatible(case)
+        self.assertIsNotNone(reason)
+        self.assertIn("starter repo", reason)
+
+    def test_single_star_prefix_is_hostile(self):
+        case = {"expected_files": [{"path_pattern": "*/routes/foo.ts"}]}
+        reason = baseline_incompatible(case)
+        self.assertIsNotNone(reason)
+        self.assertIn("does not itself satisfy", reason)
+
+    def test_no_expected_files_is_winnable(self):
+        self.assertIsNone(baseline_incompatible({"expected_files": []}))
+        self.assertIsNone(baseline_incompatible({}))
+
+    def test_every_builtin_case_is_classified_without_raising(self):
+        for case in load_cases():
+            baseline_incompatible(case)   # must never raise
+
+    def test_corpus_wide_count_dropped_after_the_glob_fix(self):
+        # A-39 rescued 81 **/-prefix cases from being false-flagged. The
+        # D4/D5 repo-scale push then added 108 new setup_repo cases (every
+        # one baseline_incompatible by construction - that's the whole
+        # point of "repo-scale"), so the hostile set is now ~175 rather
+        # than the earlier post-fix ~91. Bound kept well above the current
+        # count so it still catches a real regression, not this expansion.
+        hostile = [c for c in load_cases() if baseline_incompatible(c)]
+        self.assertGreater(len(hostile), 0)
+        self.assertLess(len(hostile), 250)
+
+
 class RegistryTests(unittest.TestCase):
     def test_all_registered_drivers_instantiate(self):
         # No skip needed for any optional SDK driver (crewai, openai-agents,
@@ -1201,6 +1637,23 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(DRIVERS["claude-code"]["backend"], "fixed")
         self.assertEqual(DRIVERS["codex"]["backend"], "fixed")
         self.assertEqual(DRIVERS["aider"]["backend"], "scenario")
+
+    def test_every_driver_declares_file_tools(self):
+        # A-40: cli.cmd_run's preflight warning reads this field; a driver
+        # missing it entirely would silently read as "has file tools" (the
+        # permissive default in DRIVERS.get(...).get("file_tools", True)),
+        # under-warning rather than crashing - catch that at registration
+        # time instead, where it's obvious and cheap to fix.
+        for name, meta in DRIVERS.items():
+            self.assertIn("file_tools", meta, name)
+            self.assertIsInstance(meta["file_tools"], bool, name)
+            # Holds for every driver registered today: real file-editing
+            # tools <=> a CLI agent. Not a hard law forever (a future SDK
+            # driver could gain function-calling file tools), so this is a
+            # deliberate assertion of the current registry, not a
+            # constraint enforced elsewhere - if it ever needs to differ,
+            # update this test alongside the registry entry.
+            self.assertEqual(meta["file_tools"], meta["kind"] == "cli", name)
 
 
 class SubprocessEnvTests(unittest.TestCase):
@@ -1240,6 +1693,61 @@ class SubprocessEnvTests(unittest.TestCase):
         self.assertEqual(env["OPENAI_API_KEY"], "scenario-value")
 
 
+class ApiKeyNeverInArgvTests(unittest.TestCase):
+    """
+    A-06: process arguments are readable by other local users
+    (/proc/<pid>/cmdline, any Windows session), so no driver may put the
+    backend's API key in argv. The aider driver used to pass
+    `--openai-api-key <secret>`, contradicting cli.py's own --api-key help
+    and SECURITY.md.
+    """
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_argvkey_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+
+    def _capture_aider_invocation(self):
+        captured = {}
+
+        def _fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["env"] = kwargs.get("env") or {}
+            import subprocess as _sp
+            return _sp.CompletedProcess(cmd, 0, "", "")
+
+        driver = AiderDriver()
+        driver._aider = "aider"
+        scenario = Scenario(name="s", driver="aider",
+                            backend=Backend(base_url="http://localhost:11434",
+                                            model="llama3.2", api_key="sk-super-secret"))
+        case = {"name": "c", "prompts": ["do it"], "expected_files": []}
+        with mock.patch("optarena.drivers.aider_cli.run_capture", side_effect=_fake_run):
+            driver.run_case(case, scenario, self.ws)
+        return captured
+
+    def test_aider_key_absent_from_argv(self):
+        captured = self._capture_aider_invocation()
+        joined = " ".join(captured["cmd"])
+        self.assertNotIn("sk-super-secret", joined)
+        self.assertNotIn("--openai-api-key", captured["cmd"])
+
+    def test_aider_key_present_in_subprocess_env(self):
+        captured = self._capture_aider_invocation()
+        self.assertEqual(captured["env"].get("OPENAI_API_KEY"), "sk-super-secret")
+        self.assertEqual(captured["env"].get("OPENAI_API_BASE"),
+                         "http://localhost:11434/v1")
+
+    def test_no_cli_agent_spec_puts_the_key_in_argv(self):
+        # The generic CLI-agent descriptors build argv from a lambda - none of
+        # them may embed the key either.
+        from optarena.drivers.cli_agents import CLI_AGENTS
+        backend = Backend(api_key="sk-super-secret", model="m")
+        for key, spec in CLI_AGENTS.items():
+            with self.subTest(agent=key):
+                argv = spec["argv"]("prompt text", backend)
+                self.assertNotIn("sk-super-secret", " ".join(str(a) for a in argv))
+
+
 class ScenarioTests(unittest.TestCase):
     def test_cases_dir_roundtrip(self):
         sc = Scenario(name="x", driver="aider", cases_dir="my/cases")
@@ -1252,6 +1760,7 @@ class ScenarioTests(unittest.TestCase):
         # set no matter what directory `optarena run` happens to be invoked
         # from.
         project = Path(tempfile.mkdtemp(prefix="optarena_test_relpath_"))
+        self.addCleanup(shutil.rmtree, project, ignore_errors=True)
         (project / "scenarios").mkdir()
         (project / "scenarios" / "my-cases").mkdir()
         (project / "scenarios" / "my-cases" / "c1.json").write_text(
@@ -1262,6 +1771,7 @@ class ScenarioTests(unittest.TestCase):
         }), encoding="utf-8")
 
         elsewhere = Path(tempfile.mkdtemp(prefix="optarena_test_elsewhere_"))
+        self.addCleanup(shutil.rmtree, elsewhere, ignore_errors=True)
         cwd = os.getcwd()
         try:
             os.chdir(elsewhere)
@@ -1275,6 +1785,7 @@ class ScenarioTests(unittest.TestCase):
 
     def test_absolute_cases_dir_unchanged(self):
         abs_dir = Path(tempfile.mkdtemp(prefix="optarena_test_absdir_"))
+        self.addCleanup(shutil.rmtree, abs_dir, ignore_errors=True)
         scenario_file = abs_dir / "sc.json"
         scenario_file.write_text(json.dumps({
             "name": "x", "driver": "aider", "cases_dir": str(abs_dir),
@@ -1305,6 +1816,7 @@ class ScenarioTests(unittest.TestCase):
 
     def test_load_cases_custom_dir(self):
         d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         (d / "a_case.json").write_text(json.dumps(
             {"name": "custom", "prompts": ["p"], "expected_files": []}), encoding="utf-8")
         cases = load_cases(cases_dir=str(d))
@@ -1316,6 +1828,7 @@ class ScenarioTests(unittest.TestCase):
         # `if names:` would silently treat it the same as `names=None` (no
         # filter -> load everything) instead of "load nothing".
         d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         (d / "a_case.json").write_text(json.dumps(
             {"name": "custom", "prompts": ["p"], "expected_files": []}), encoding="utf-8")
         cases = load_cases(names=[], cases_dir=str(d))
@@ -1324,6 +1837,7 @@ class ScenarioTests(unittest.TestCase):
     def test_language_filter_resolves_to_matching_case_names_only(self):
         from optarena.cli import _scenario_from_args
         d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         (d / "py_case.json").write_text(json.dumps(
             {"name": "py_case", "language": "python", "prompts": ["p"], "expected_files": []}), encoding="utf-8")
         (d / "js_case.json").write_text(json.dumps(
@@ -1339,6 +1853,7 @@ class ScenarioTests(unittest.TestCase):
     def test_framework_filter_resolves_to_matching_case_names_only(self):
         from optarena.cli import _scenario_from_args
         d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         (d / "gin_case.json").write_text(json.dumps(
             {"name": "gin_case", "language": "go", "framework": "gin",
              "prompts": ["p"], "expected_files": []}), encoding="utf-8")
@@ -1444,6 +1959,7 @@ class SchemaValidationTests(unittest.TestCase):
 
     def test_load_cases_rejects_malformed_case_file(self):
         d = Path(tempfile.mkdtemp(prefix="optarena_test_badcase_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         (d / "bad.json").write_text(json.dumps({"name": "x", "chekc_command": "echo hi"}),
                                     encoding="utf-8")
         with self.assertRaises(SchemaError):
@@ -1451,6 +1967,7 @@ class SchemaValidationTests(unittest.TestCase):
 
     def test_load_cases_rejects_duplicate_names_across_files(self):
         d = Path(tempfile.mkdtemp(prefix="optarena_test_dupcase_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         (d / "a1.json").write_text(json.dumps({"name": "dup", "prompts": ["x"]}), encoding="utf-8")
         (d / "a2.json").write_text(json.dumps({"name": "dup", "prompts": ["y"]}), encoding="utf-8")
         with self.assertRaises(SchemaError):
@@ -1458,6 +1975,7 @@ class SchemaValidationTests(unittest.TestCase):
 
     def test_scenario_from_file_rejects_malformed_scenario(self):
         d = Path(tempfile.mkdtemp(prefix="optarena_test_badsc_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         f = d / "bad.json"
         f.write_text(json.dumps({"name": "x", "driver": "aider", "timeout": -5}), encoding="utf-8")
         with self.assertRaises(SchemaError) as ctx:
@@ -1489,6 +2007,7 @@ class MultiImageSandboxTests(unittest.TestCase):
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="optarena_test_multiimg_"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         (self.root / "case_py").mkdir()
         (self.root / "case_go").mkdir()
         import optarena.cases as cases_mod
@@ -1556,6 +2075,7 @@ class StoreTests(unittest.TestCase):
     def test_atomic_write_and_index(self):
         from optarena.store import _write_atomic
         d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         target = d / "x.json"
         _write_atomic(target, json.dumps({"ok": True}))
         self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"ok": True})
@@ -1570,6 +2090,7 @@ class RunIdCollisionTests(unittest.TestCase):
         import optarena.store as store_mod
         self.store = store_mod
         results_dir = Path(tempfile.mkdtemp(prefix="optarena_test_results_"))
+        self.addCleanup(shutil.rmtree, results_dir, ignore_errors=True)
         self._orig = (store_mod.RESULTS_DIR, store_mod.RUNS_DIR)
         store_mod.RESULTS_DIR = results_dir
         store_mod.RUNS_DIR = results_dir / "runs"
@@ -1622,6 +2143,7 @@ class ConfigurableResultsDirTests(unittest.TestCase):
 
     def test_set_results_dir_updates_runs_dir_too(self):
         new_dir = Path(tempfile.mkdtemp(prefix="optarena_test_newresults_"))
+        self.addCleanup(shutil.rmtree, new_dir, ignore_errors=True)
         self.store.set_results_dir(new_dir)
         self.assertEqual(self.store.RESULTS_DIR, new_dir)
         self.assertEqual(self.store.RUNS_DIR, new_dir / "runs")
@@ -1633,6 +2155,7 @@ class ConfigurableResultsDirTests(unittest.TestCase):
         # imported.
         from optarena import compare as compare_mod
         new_dir = Path(tempfile.mkdtemp(prefix="optarena_test_cmpresults_"))
+        self.addCleanup(shutil.rmtree, new_dir, ignore_errors=True)
         self.store.set_results_dir(new_dir)
         cmp = {"a": {"label": "a"}, "b": {"label": "b"}}
         path = compare_mod.save_comparison(cmp)
@@ -1641,6 +2164,7 @@ class ConfigurableResultsDirTests(unittest.TestCase):
     def test_cli_results_dir_flag_overrides_default(self):
         from optarena.cli import main
         new_dir = Path(tempfile.mkdtemp(prefix="optarena_test_cliresults_"))
+        self.addCleanup(shutil.rmtree, new_dir, ignore_errors=True)
         rc = main(["--results-dir", str(new_dir), "list", "runs"])
         self.assertEqual(rc, 0)
         self.assertEqual(self.store.RESULTS_DIR, new_dir)
@@ -1651,6 +2175,7 @@ class RichMetricsTests(unittest.TestCase):
 
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
 
     def test_diff_stats_new_file_counts_full_length(self):
         (self.ws / "new.py").write_text("a\nb\nc\n", encoding="utf-8")
@@ -1802,6 +2327,7 @@ class ManifestTests(unittest.TestCase):
 
     def setUp(self):
         self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_manifest_cases_"))
+        self.addCleanup(shutil.rmtree, self.cases_dir, ignore_errors=True)
         (self.cases_dir / "c1.json").write_text(json.dumps({
             "name": "c1", "prompts": ["do it"],
         }), encoding="utf-8")
@@ -1919,6 +2445,35 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(summary["improved_cases"], ["signup"])
         self.assertEqual(summary["token_delta"], -200)
         self.assertAlmostEqual(summary["token_delta_pct"], -20.0)
+
+    def test_case_missing_from_b_is_not_a_regression(self):
+        # A-03: a case run B simply didn't include (a --cases/--language
+        # subset compared against a full baseline) used to be reported as a
+        # regression and failed the CI gate, because `not None` is True.
+        run_a = self._run("a", [("login", True, 1.0), ("oauth", True, 1.0)])
+        run_b = self._run("b", [("login", True, 1.0)])
+        summary = regression_summary(compare_runs(run_a, run_b))
+        self.assertEqual(summary["regressed_cases"], [])
+        self.assertEqual(summary["improved_cases"], [])
+        self.assertEqual(summary["missing_in_b_cases"], ["oauth"])
+        self.assertEqual(summary["n_discordant"], 0)
+        self.assertIn("only in a", format_regression(summary))
+
+    def test_case_missing_from_a_is_not_an_improvement(self):
+        run_a = self._run("a", [("login", True, 1.0)])
+        run_b = self._run("b", [("login", True, 1.0), ("oauth", True, 1.0)])
+        summary = regression_summary(compare_runs(run_a, run_b))
+        self.assertEqual(summary["improved_cases"], [])
+        self.assertEqual(summary["missing_in_a_cases"], ["oauth"])
+
+    def test_regression_and_comparison_agree_on_discordant_count(self):
+        # The two code paths computed this differently; they must not.
+        run_a = self._run("a", [("login", True, 1.0), ("oauth", True, 1.0), ("gone", True, 1.0)])
+        run_b = self._run("b", [("login", False, 1.0), ("oauth", True, 1.0)])
+        cmp = compare_runs(run_a, run_b)
+        summary = regression_summary(cmp)
+        self.assertEqual(summary["n_discordant"], cmp["verdict"]["n_discordant"])
+        self.assertEqual(summary["accuracy_p_value"], cmp["verdict"]["accuracy_p_value"])
 
     def test_cost_delta_reported_and_formatted(self):
         run_a = self._run("a", [("login", True, 1.0)])
@@ -2445,6 +3000,7 @@ class PackVersionSortTests(unittest.TestCase):
     def test_resolve_pack_picks_numerically_highest_version(self):
         from optarena.packs import resolve_pack
         packs_dir = Path(tempfile.mkdtemp(prefix="optarena_test_packs_"))
+        self.addCleanup(shutil.rmtree, packs_dir, ignore_errors=True)
         for version in ("1.9.0", "1.10.0", "1.2.0"):
             d = packs_dir / f"demo@{version}"
             d.mkdir()
@@ -2530,6 +3086,7 @@ class PackInstallAtomicityTests(unittest.TestCase):
     def test_install_failure_leaves_no_staging_directory_behind(self):
         from optarena import packs
         packs_dir = Path(tempfile.mkdtemp(prefix="optarena_test_packinstall_"))
+        self.addCleanup(shutil.rmtree, packs_dir, ignore_errors=True)
         pack = {
             "optarena_pack": 1, "name": "demo", "version": "1.0.0",
             "case_count": 1, "hash": "sha256:x",
@@ -2544,6 +3101,7 @@ class PackInstallAtomicityTests(unittest.TestCase):
     def test_successful_install_is_visible_and_idempotent(self):
         from optarena import packs
         packs_dir = Path(tempfile.mkdtemp(prefix="optarena_test_packinstall2_"))
+        self.addCleanup(shutil.rmtree, packs_dir, ignore_errors=True)
         cases = {"c1.json": {"name": "c1", "prompts": ["x"]}}
         pack = {
             "optarena_pack": 1, "name": "demo", "version": "1.0.0",
@@ -2631,6 +3189,7 @@ class RunScenarioLifecycleEventsTests(unittest.TestCase):
 
     def setUp(self):
         self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_events_"))
+        self.addCleanup(shutil.rmtree, self.cases_dir, ignore_errors=True)
         (self.cases_dir / "c1.json").write_text(json.dumps({
             "name": "c1", "prompts": ["do it"],
         }), encoding="utf-8")
@@ -2689,6 +3248,7 @@ class ManifestTrialsTests(unittest.TestCase):
 
     def test_caching_driver_manifest_reflects_requested_trials_not_one(self):
         cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_manifesttrials_"))
+        self.addCleanup(shutil.rmtree, cases_dir, ignore_errors=True)
         (cases_dir / "c1.json").write_text(json.dumps({
             "name": "c1", "prompts": ["do it"],
         }), encoding="utf-8")
@@ -2711,6 +3271,7 @@ class RunScenarioCleanupResilienceTests(unittest.TestCase):
 
     def setUp(self):
         self.cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_cleanup_"))
+        self.addCleanup(shutil.rmtree, self.cases_dir, ignore_errors=True)
         (self.cases_dir / "c1.json").write_text(json.dumps({
             "name": "c1", "prompts": ["do it"],
         }), encoding="utf-8")
@@ -2736,6 +3297,7 @@ class CheckpointStatusTests(unittest.TestCase):
         import optarena.store as store_mod
         self.store = store_mod
         results_dir = Path(tempfile.mkdtemp(prefix="optarena_test_checkpoint_"))
+        self.addCleanup(shutil.rmtree, results_dir, ignore_errors=True)
         self._orig = (store_mod.RESULTS_DIR, store_mod.RUNS_DIR)
         store_mod.RESULTS_DIR = results_dir
         store_mod.RUNS_DIR = results_dir / "runs"
@@ -2889,6 +3451,464 @@ class EngineHealthTTLTests(unittest.TestCase):
         with mock.patch.object(self.cases_mod.subprocess, "run", side_effect=fake_run):
             self.assertTrue(self.cases_mod._docker_available())
         self.assertEqual(len(calls), 2)
+
+
+class CaseSensitiveAssertionTests(unittest.TestCase):
+    """
+    A-17: content was lowercased and then matched with re.IGNORECASE, so a
+    case could not assert casing at all. `case_sensitive: true` opts a spec in;
+    the default stays exactly as before.
+    """
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_casesens_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+        (self.ws / "m.go").write_text("package main\nfunc Handler() {}\n", encoding="utf-8")
+
+    def test_default_is_case_insensitive_as_before(self):
+        failures = check_expected(["m.go"], [{
+            "path_pattern": "m.go", "content_patterns": ["FUNC HANDLER"],
+            "regex_patterns": [r"func handler"],
+        }], self.ws)
+        self.assertEqual(failures, [])
+
+    def test_case_sensitive_content_pattern_catches_wrong_casing(self):
+        failures = check_expected(["m.go"], [{
+            "path_pattern": "m.go", "case_sensitive": True,
+            "content_patterns": ["func handler"],     # real code says Handler
+        }], self.ws)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("missing expected content", failures[0])
+
+    def test_case_sensitive_content_pattern_accepts_right_casing(self):
+        failures = check_expected(["m.go"], [{
+            "path_pattern": "m.go", "case_sensitive": True,
+            "content_patterns": ["func Handler"],
+            "regex_patterns": [r"func [A-Z]\w+\("],   # an EXPORTED identifier
+            "not_content_patterns": ["func handler"],
+        }], self.ws)
+        self.assertEqual(failures, [])
+
+    def test_schema_accepts_and_type_checks_the_flag(self):
+        validate_case({"name": "c", "expected_files": [
+            {"path_pattern": "x", "case_sensitive": True}]})
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "c", "expected_files": [
+                {"path_pattern": "x", "case_sensitive": "yes"}]})
+
+
+class EngineStateResetTests(unittest.TestCase):
+    """A-11/A-12/A-13: per-scenario resets of module-level engine state, so a
+    transient failure in one scenario of a matrix run doesn't silently degrade
+    every later one."""
+
+    def setUp(self):
+        import optarena.cases as cases_mod
+        self.cases_mod = cases_mod
+        self._orig = (cases_mod._docker_checked_at, cases_mod._docker_warned,
+                      dict(cases_mod._pull_attempts))
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        (self.cases_mod._docker_checked_at, self.cases_mod._docker_warned, attempts) = self._orig
+        self.cases_mod._pull_attempts.clear()
+        self.cases_mod._pull_attempts.update(attempts)
+
+    def test_reset_clears_health_cache_and_warning_flag(self):
+        self.cases_mod._docker_checked_at = 12345.0
+        self.cases_mod._docker_warned = True
+        self.cases_mod.reset_engine_health_cache()
+        self.assertEqual(self.cases_mod._docker_checked_at, -1.0)
+        self.assertFalse(self.cases_mod._docker_warned)
+
+    def test_reset_clears_pull_backoff(self):
+        self.cases_mod._pull_attempts["img"] = 3
+        self.cases_mod._pull_last_attempt_at["img"] = 1.0
+        self.cases_mod.reset_pull_backoff()
+        self.assertEqual(self.cases_mod._pull_attempts, {})
+        self.assertEqual(self.cases_mod._pull_last_attempt_at, {})
+
+    def test_run_scenario_resets_engine_state_per_scenario(self):
+        self.cases_mod._docker_warned = True
+        driver = mock.Mock(parallel_safe=False, caches_results=False)
+        driver.run_case.return_value = CaseResult(name="create_factorial", passed=True)
+        with mock.patch("optarena.runner.get_driver", return_value=driver), \
+             mock.patch("optarena.runner.DockerSandbox"), \
+             mock.patch("optarena.runner.store.save_checkpoint"):
+            run_scenario(Scenario(name="x", driver="aider", cases=["create_factorial"]))
+        self.assertFalse(self.cases_mod._docker_warned)
+
+
+class IndexLockOwnershipTests(unittest.TestCase):
+    """A-07: a process that gave up waiting must not delete the lock it never
+    acquired - doing so hands the lock to a third process while the real
+    holder is still mid-update."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="optarena_test_lock_"))
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.lock = self.dir / "index.lock"
+
+    def test_acquired_lock_is_released(self):
+        from optarena.store import _IndexLock
+        with _IndexLock(self.lock) as lk:
+            self.assertTrue(lk.acquired)
+            self.assertTrue(self.lock.exists())
+        self.assertFalse(self.lock.exists())
+
+    def test_unacquired_lock_is_not_deleted(self):
+        from optarena.store import _IndexLock
+        self.lock.write_text("held by someone else", encoding="utf-8")
+        with mock.patch.object(_IndexLock, "WAIT_DEADLINE_S", 0.01), \
+             mock.patch.object(_IndexLock, "STALE_AFTER_S", 10_000):
+            with _IndexLock(self.lock) as lk:
+                self.assertFalse(lk.acquired)
+        self.assertTrue(self.lock.exists(), "deleted a lock it never held")
+
+
+class ReportEscapingTests(unittest.TestCase):
+    """A-16: escape AFTER truncation, so a long detail can't be cut mid-entity."""
+
+    def test_long_markup_detail_is_not_cut_mid_entity(self):
+        from optarena.report import to_html
+        run = {"run_id": "r", "scenario": {"name": "s", "driver": "d", "backend": {}},
+               "summary": {"pass_rate": 0.0, "passed": 0, "cases": 1},
+               "cases": [{"name": "c", "passed": False, "duration_s": 1.0,
+                          "failures": ["x" * 396 + "<b>boom</b>"], "extra": {}}]}
+        html = to_html(run)
+        self.assertNotIn("<b>boom", html)          # escaped, not live markup
+        for broken in ("&l;", "&lt", "&a;"):
+            self.assertNotIn(broken + "<", html)   # and never a half-written entity
+        self.assertNotRegex(html, r"&[a-z]{1,3}(?![a-z;])")
+
+
+class _StubBackend:
+    """
+    A-10: a real HTTP backend on localhost, so the baseline drivers' run_case
+    can be executed end to end by the test suite instead of only their helper
+    functions. Serves both the OpenAI-compatible and the Ollama-native chat
+    endpoints. `delay_s` makes it slow enough to exercise the whole-case
+    deadline (F-05).
+    """
+
+    def __init__(self, reply="```python\nprint('hi')\n```", delay_s=0.0):
+        import http.server
+        import threading
+
+        self.reply, self.delay_s, self.requests = reply, delay_s, []
+        stub = self
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):                      # noqa: N802 - stdlib signature
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                stub.requests.append({"path": self.path, "body": body,
+                                      "auth": self.headers.get("Authorization")})
+                if stub.delay_s:
+                    import time as _t
+                    _t.sleep(stub.delay_s)
+                text = stub.reply(body) if callable(stub.reply) else stub.reply
+                if self.path.endswith("/api/chat"):
+                    payload = {"message": {"content": text},
+                               "prompt_eval_count": 11, "eval_count": 7}
+                else:
+                    payload = {"choices": [{"message": {"content": text}}],
+                               "usage": {"prompt_tokens": 11, "completion_tokens": 7,
+                                         "total_tokens": 18}}
+                raw = json.dumps(payload).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, *args):           # noqa: A003 - silence the test log
+                pass
+
+        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        self.base_url = f"http://127.0.0.1:{self._server.server_port}"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def close(self):
+        self._server.shutdown()
+        self._server.server_close()
+
+
+class BaselineDriverEndToEndTests(unittest.TestCase):
+    """
+    A-10: `openai-chat`/`ollama-chat` run_case against a real (stub) HTTP
+    backend. These are the reference implementation every other driver copies,
+    and nothing executed them before - only their helper functions.
+    """
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_baseline_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+        self.backend = _StubBackend()
+        self.addCleanup(self.backend.close)
+        self._env = mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
+    def _case(self, prompts=("write hi.py",), **extra):
+        case = {"name": "c", "prompts": list(prompts),
+                "expected_files": [{"path_pattern": "hi.py", "content_patterns": ["print"]}]}
+        case.update(extra)
+        return case
+
+    def _scenario(self, kind="openai", **kw):
+        return Scenario(name="s", driver="openai-chat",
+                        backend=Backend(kind=kind, base_url=self.backend.base_url,
+                                        model="test-model", api_key="sk-scenario"), **kw)
+
+    def test_openai_chat_writes_block_and_passes(self):
+        from optarena.drivers.openai_chat import OpenAIChatDriver
+        result = OpenAIChatDriver().run_case(self._case(), self._scenario(), self.ws)
+        self.assertTrue(result.passed, result.failures or result.error)
+        self.assertEqual((self.ws / "hi.py").read_text(encoding="utf-8"), "print('hi')\n")
+        self.assertEqual(result.extra["prompt_tokens"], 11)
+        self.assertEqual(result.extra["completion_tokens"], 7)
+        self.assertEqual(result.extra["n_steps"], 1)
+        self.assertTrue(result.extra["steps"][0]["ok"])
+
+    def test_openai_chat_sends_the_scenario_key_as_bearer(self):
+        from optarena.drivers.openai_chat import OpenAIChatDriver
+        OpenAIChatDriver().run_case(self._case(), self._scenario(), self.ws)
+        self.assertEqual(self.backend.requests[0]["auth"], "Bearer sk-scenario")
+        self.assertTrue(self.backend.requests[0]["path"].endswith("/v1/chat/completions"))
+
+    def test_ollama_chat_uses_native_endpoint_and_num_ctx(self):
+        from optarena.drivers.openai_chat import OllamaChatDriver
+        scenario = Scenario(name="s", driver="ollama-chat",
+                            backend=Backend(kind="ollama", base_url=self.backend.base_url,
+                                            model="m", num_ctx=4096))
+        OllamaChatDriver().run_case(self._case(), scenario, self.ws)
+        request = self.backend.requests[0]
+        self.assertTrue(request["path"].endswith("/api/chat"))
+        self.assertEqual(request["body"]["options"], {"num_ctx": 4096})
+
+    def test_whole_case_deadline_is_not_per_prompt(self):
+        # F-05: 3 prompts with a 1s case budget against a 0.6s backend must
+        # stop early, not spend 3 x 1s.
+        from optarena.drivers.openai_chat import OpenAIChatDriver
+        self.backend.delay_s = 0.6
+        case = self._case(prompts=["a", "b", "c"])
+        result = OpenAIChatDriver().run_case(case, self._scenario(timeout=1), self.ws)
+        self.assertIsNotNone(result.error)
+        self.assertIn("deadline", result.error)
+        self.assertLess(result.duration_s, 3.0)
+        self.assertLess(len(self.backend.requests), 3)
+
+    def test_cost_is_zero_for_a_localhost_backend(self):
+        from optarena.drivers.openai_chat import OpenAIChatDriver
+        result = OpenAIChatDriver().run_case(self._case(), self._scenario(), self.ws)
+        self.assertEqual(result.extra["cost_usd"], 0.0)
+
+    def test_written_file_uses_lf_not_crlf(self):
+        # A-42: write_text(..., newline="") must be set - otherwise Windows'
+        # universal-newline translation turns every "\n" the model wrote
+        # into "\r\n" on disk, corrupting POSIX shell/etc. once bind-mounted
+        # into the Linux sandbox. Checked at the raw-bytes level so this
+        # actually catches a regression regardless of which platform the
+        # suite runs on.
+        from optarena.drivers.openai_chat import OpenAIChatDriver
+        backend = _StubBackend(reply="```\nline one\nline two\nline three\n```")
+        self.addCleanup(backend.close)
+        scenario = Scenario(name="s", driver="openai-chat",
+                            backend=Backend(kind="openai", base_url=backend.base_url,
+                                            model="test-model"))
+        case = {"name": "c", "prompts": ["write hi.py"],
+                "expected_files": [{"path_pattern": "hi.py"}]}
+        OpenAIChatDriver().run_case(case, scenario, self.ws)
+        raw = (self.ws / "hi.py").read_bytes()
+        self.assertNotIn(b"\r\n", raw)
+
+
+class SDKDriverBaseTests(unittest.TestCase):
+    """
+    A-09: the six SDK drivers now share one case loop, so these test that loop
+    directly through a fake subclass - no framework installed, and no network.
+    Each assertion here corresponds to something every SDK driver silently did
+    NOT do before: honour a timeout, fire disruptions, record steps/tokens/cost.
+    """
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_sdkbase_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+        self._env = mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
+    @staticmethod
+    def _driver(reply="```\nprint('hi')\n```", usage=None, delay_s=0.0, closed=None):
+        from optarena.drivers.sdk_base import SingleFileSDKDriver
+
+        class _Fake(SingleFileSDKDriver):
+            name = "fake-sdk"
+            prompts_seen = []
+
+            def open_session(self, scenario):
+                return {"opened": True}
+
+            def close_session(self, session):
+                if closed is not None:
+                    closed.append(session)
+
+            def complete(self, session, prompt, scenario, timeout):
+                self.prompts_seen.append(prompt)
+                if delay_s:
+                    import time as _t
+                    _t.sleep(delay_s)
+                return reply, dict(usage or {})
+
+        return _Fake()
+
+    def _case(self, **extra):
+        case = {"name": "c", "prompts": ["write hi.py"],
+                "expected_files": [{"path_pattern": "hi.py", "content_patterns": ["print"]}]}
+        case.update(extra)
+        return case
+
+    def _scenario(self, **kw):
+        return Scenario(name="s", driver="fake-sdk",
+                        backend=Backend(base_url="http://localhost:11434", model="m"), **kw)
+
+    def test_writes_block_and_passes(self):
+        result = self._driver().run_case(self._case(), self._scenario(), self.ws)
+        self.assertTrue(result.passed, result.failures or result.error)
+        self.assertEqual((self.ws / "hi.py").read_text(encoding="utf-8"), "print('hi')\n")
+
+    def test_written_file_uses_lf_not_crlf(self):
+        # A-42: same fix as openai_chat.py - write_text(..., newline="")
+        # must be set on the SDK drivers' shared write path too.
+        reply = "```\nline one\nline two\nline three\n```"
+        self._driver(reply=reply).run_case(self._case(), self._scenario(), self.ws)
+        raw = (self.ws / "hi.py").read_bytes()
+        self.assertNotIn(b"\r\n", raw)
+
+    def test_case_timeout_is_enforced(self):
+        # The headline gap: a hung SDK call used to hang the run forever.
+        driver = self._driver(delay_s=5)
+        result = driver.run_case(self._case(timeout=1), self._scenario(), self.ws)
+        self.assertIsNotNone(result.error)
+        self.assertIn("budget", result.error)
+        self.assertFalse(result.execution_ok)
+        self.assertFalse(result.passed)
+        self.assertLess(result.duration_s, 4.0)
+
+    def test_scenario_timeout_overrides_case_timeout(self):
+        driver = self._driver(delay_s=5)
+        result = driver.run_case(self._case(timeout=600), self._scenario(timeout=1), self.ws)
+        self.assertIn("budget", result.error or "")
+
+    def test_disruptions_fire_between_prompts(self):
+        # A dynamic case under an SDK driver used to grade an EASIER task,
+        # because the disruption never fired at all.
+        case = self._case(
+            prompts=["first", "second"],
+            disruptions=[{"after_prompt": 1,
+                          "description": "config changed",
+                          "write_files": {"config.ini": "changed\n"}}],
+        )
+        driver = self._driver()
+        result = driver.run_case(case, self._scenario(), self.ws)
+        self.assertEqual((self.ws / "config.ini").read_text(encoding="utf-8"), "changed\n")
+        fired = [d for st in result.extra["steps"] for d in st.get("disrupted", [])]
+        self.assertEqual(fired, ["config changed"])
+
+    def test_per_step_records_and_attribution_inputs(self):
+        result = self._driver().run_case(
+            self._case(prompts=["a", "b"]), self._scenario(), self.ws)
+        steps = result.extra["steps"]
+        self.assertEqual(result.extra["n_steps"], 2)
+        self.assertEqual([s["i"] for s in steps], [1, 2])
+        for step in steps:
+            self.assertIn("expected_ok", step)
+            self.assertIn("duration_s", step)
+
+    def test_token_usage_accumulates_and_prices(self):
+        driver = self._driver(usage={"prompt_tokens": 100, "completion_tokens": 50})
+        scenario = Scenario(name="s", driver="fake-sdk",
+                            backend=Backend(base_url="https://api.openai.com",
+                                            model="gpt-4o", api_key="k"))
+        result = driver.run_case(self._case(prompts=["a", "b"]), scenario, self.ws)
+        self.assertEqual(result.extra["prompt_tokens"], 200)
+        self.assertEqual(result.extra["completion_tokens"], 100)
+        self.assertGreater(result.extra["cost_usd"], 0)
+
+    def test_absent_usage_stays_absent(self):
+        result = self._driver().run_case(self._case(), self._scenario(), self.ws)
+        self.assertNotIn("prompt_tokens", result.extra)
+        self.assertEqual(result.extra["cost_usd"], 0.0)
+
+    def test_session_is_closed_even_on_timeout(self):
+        closed = []
+        driver = self._driver(delay_s=5, closed=closed)
+        driver.run_case(self._case(timeout=1), self._scenario(), self.ws)
+        self.assertEqual(len(closed), 1)
+
+    def test_no_code_block_still_writes_and_marks_step_not_ok(self):
+        result = self._driver(reply="sorry, no block here").run_case(
+            self._case(), self._scenario(), self.ws)
+        self.assertFalse(result.extra["steps"][0]["ok"])
+        self.assertIn("sorry", (self.ws / "hi.py").read_text(encoding="utf-8"))
+
+    def test_every_registered_sdk_driver_uses_the_shared_loop(self):
+        # The parity guarantee itself: if a new SDK driver reimplements
+        # run_case, it silently loses timeouts/disruptions/telemetry again.
+        from optarena.drivers import _SDK_DRIVERS
+        from optarena.drivers.sdk_base import SingleFileSDKDriver
+        import importlib
+        for key, (module_name, class_name) in _SDK_DRIVERS.items():
+            with self.subTest(driver=key):
+                module = importlib.import_module(f"optarena.drivers.{module_name}")
+                cls = getattr(module, class_name)
+                self.assertTrue(issubclass(cls, SingleFileSDKDriver))
+                self.assertIs(cls.run_case, SingleFileSDKDriver.run_case,
+                              f"{class_name} overrides run_case and loses the shared guarantees")
+
+
+class OpenAIAgentsSessionCleanupTests(unittest.TestCase):
+    """
+    A-41: found live in a driver smoke-test sweep - OpenAIAgentsDriver created
+    an AsyncOpenAI client in open_session() and never closed it. Harmless to
+    the run's own pass/fail data, but printed a
+    "RuntimeError: Event loop is closed" traceback to stderr once per case
+    (5 times in the sweep's 5-case run) - noisy enough to look like a real
+    crash under --debug, and a genuine resource leak (the client's httpx
+    connections were never released). Same class of bug already guarded
+    against in autogen_sdk.py/semantic_kernel_sdk.py.
+
+    close_session() itself imports nothing from `agents`/`openai` - only
+    open_session()/complete() do - so this is tested in isolation with a
+    mock client, runs regardless of whether the optional `openai-agents`
+    extra is installed, matching this project's SDKDriverBaseTests
+    convention (fake driver, no real framework needed).
+    """
+
+    def test_close_session_closes_the_client(self):
+        from optarena.drivers.openai_agents_sdk import OpenAIAgentsDriver
+
+        closed = []
+
+        class _FakeClient:
+            async def close(self):
+                closed.append(True)
+
+        driver = OpenAIAgentsDriver()
+        driver.close_session(("agent-placeholder", "run-config-placeholder", _FakeClient()))
+        self.assertEqual(closed, [True])
+
+    def test_close_session_never_raises_even_if_close_fails(self):
+        from optarena.drivers.openai_agents_sdk import OpenAIAgentsDriver
+
+        class _BrokenClient:
+            async def close(self):
+                raise RuntimeError("simulated close failure")
+
+        driver = OpenAIAgentsDriver()
+        driver.close_session(("agent-placeholder", "run-config-placeholder", _BrokenClient()))   # must not raise
 
 
 if __name__ == "__main__":

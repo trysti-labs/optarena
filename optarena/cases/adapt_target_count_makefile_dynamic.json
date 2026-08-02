@@ -1,0 +1,58 @@
+{
+  "name": "adapt_target_count_makefile_dynamic",
+  "language": "makefile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: worker_count.txt (a spec file a build target's parallelism must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it AT BUILD TIME, not bake the old count into the Makefile",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "makefile",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a Makefile with a target `report` that reads the current worker count from worker_count.txt AT BUILD TIME (e.g. via `$(shell cat worker_count.txt)`, not by copying the value into the Makefile) and writes a file named workers.txt containing exactly that number.",
+    "worker_count.txt may have changed since you last checked. Make sure `make report` still writes the CURRENT worker count into workers.txt, not a stale hardcoded one."
+  ],
+  "setup_files": {
+    "worker_count.txt": "4\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "worker_count.txt rewritten to a new count",
+      "write_files": {
+        "worker_count.txt": "8\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "report",
+        "worker_count.txt"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_make.py": "import subprocess\nfrom pathlib import Path\n\nwith open('worker_count.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'worker_count.txt is empty'\n\nPath('workers.txt').unlink(missing_ok=True)\nproc = subprocess.run(['make', 'report'], capture_output=True, text=True, timeout=15)\nassert proc.returncode == 0, f'make report failed: exit {proc.returncode}, stderr={proc.stderr!r}'\n\ngot = Path('workers.txt').read_text(encoding='utf-8').strip()\nassert got == current, f'workers.txt = {got!r}, want the CURRENT worker_count.txt value {current!r} (stale count not updated)'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_make.py",
+  "reference_solution": {
+    "Makefile": "report:\n\techo $(shell cat worker_count.txt) > workers.txt\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-count",
+      "files": {
+        "Makefile": "report:\n\techo 4 > workers.txt\n"
+      }
+    }
+  ]
+}

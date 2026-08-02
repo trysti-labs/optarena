@@ -37,5 +37,13 @@
   "timeout": 180,
   "reference_solution": {
     "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\napp.MapGet(\"/health\", () => Results.Json(new { status = \"ok\" }));\n\napp.Run(\"http://0.0.0.0:8005\");\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-status-value",
+      "files": {
+        "Program.cs": "var builder = WebApplication.CreateBuilder(args);\nvar app = builder.Build();\n\napp.MapGet(\"/health\", () => Results.Json(new { status = \"OK\" }));\n\napp.Run(\"http://0.0.0.0:8005\");\n"
+      }
+    }
+  ]
 }

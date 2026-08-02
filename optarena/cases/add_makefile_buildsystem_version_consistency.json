@@ -1,0 +1,57 @@
+{
+  "description": "Repo-scale (makefile-buildsystem): the compiled-in version and a standalone version target must both read from the SAME VERSION file",
+  "tags": [
+    "makefile",
+    "make",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a plain-text `VERSION` file at the repo root containing `1.2.0`. In the Makefile, read it once via `APP_VERSION := $(shell cat VERSION)` and embed it into the build via `-DAPP_VERSION=\\\"$(APP_VERSION)\\\"` in CFLAGS; update src/cli/main.c to print it (`printf(\"version: %s\\n\", APP_VERSION);`, with a fallback `#define APP_VERSION \"unknown\"` guarded by `#ifndef` for standalone compiles). ALSO add a `.PHONY` `version` target that prints the version - it must read the SAME `VERSION` file (e.g. `@cat VERSION`), not hardcode the number as a separate string literal, otherwise the compiled-in version and `make version`'s output can silently drift apart the next time VERSION is bumped."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "VERSION",
+      "content_patterns": [
+        "1.2.0"
+      ]
+    },
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "APP_VERSION",
+        "version:"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_version_consistency.py": "import subprocess\nfrom pathlib import Path\n\nr = subprocess.run(['make', 'version'], capture_output=True, text=True, timeout=30)\nassert r.returncode == 0, f'make version failed:\\n{r.stdout}\\n{r.stderr}'\nassert r.stdout.strip() == '1.2.0', f\"expected 'make version' to print 1.2.0, got {r.stdout!r}\"\n\nr2 = subprocess.run(['make', 'all'], capture_output=True, text=True, timeout=60)\nassert r2.returncode == 0, f'make all failed:\\n{r2.stdout}\\n{r2.stderr}'\nrun = subprocess.run(['./bin/app'], capture_output=True, text=True, timeout=15)\nassert 'version: 1.2.0' in run.stdout, run.stdout\n\n# Bump VERSION and confirm `make version` tracks it (not hardcoded).\nPath('VERSION').write_text('9.9.9\\n', encoding='utf-8')\nr3 = subprocess.run(['make', 'version'], capture_output=True, text=True, timeout=30)\nassert r3.stdout.strip() == '9.9.9', (\n    f\"'make version' still prints {r3.stdout.strip()!r} after VERSION was bumped to 9.9.9 - \"\n    f'it must read the file live, not have the old number baked in')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_version_consistency.py",
+  "reference_solution": {
+    "VERSION": "1.2.0\n",
+    "src/cli/main.c": "#include <stdio.h>\n\n#include \"calc.h\"\n#include \"strutil.h\"\n\n#ifndef APP_VERSION\n#define APP_VERSION \"unknown\"\n#endif\n\nint main(int argc, char **argv) {\n    (void)argv;\n    if (argc > 1) {\n        printf(\"unexpected arguments\\n\");\n        return 1;\n    }\n    printf(\"version: %s\\n\", APP_VERSION);\n    printf(\"add: %d\\n\", calc_add(2, 3));\n    printf(\"multiply: %d\\n\", calc_multiply(2, 3));\n\n    char greeting[] = \"  hello  \";\n    printf(\"trimmed: '%s'\\n\", strutil_trim(greeting));\n    return 0;\n}\n",
+    "Makefile": "CC := gcc\nAPP_VERSION := $(shell cat VERSION)\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils -DAPP_VERSION=\\\"$(APP_VERSION)\\\"\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nTEST_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_TARGET := $(BINDIR)/test_calc\n\n.PHONY: all clean test version\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\nversion:\n\t@cat VERSION\n\ntest: $(TEST_TARGET)\n\t./$(TEST_TARGET)\n\n$(TEST_TARGET): $(TEST_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_SRCS) -o $(TEST_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "version-target-hardcoded-not-read-from-file",
+      "files": {
+        "VERSION": "1.2.0\n",
+        "src/cli/main.c": "#include <stdio.h>\n\n#include \"calc.h\"\n#include \"strutil.h\"\n\n#ifndef APP_VERSION\n#define APP_VERSION \"unknown\"\n#endif\n\nint main(int argc, char **argv) {\n    (void)argv;\n    if (argc > 1) {\n        printf(\"unexpected arguments\\n\");\n        return 1;\n    }\n    printf(\"version: %s\\n\", APP_VERSION);\n    printf(\"add: %d\\n\", calc_add(2, 3));\n    printf(\"multiply: %d\\n\", calc_multiply(2, 3));\n\n    char greeting[] = \"  hello  \";\n    printf(\"trimmed: '%s'\\n\", strutil_trim(greeting));\n    return 0;\n}\n",
+        "Makefile": "CC := gcc\nAPP_VERSION := $(shell cat VERSION)\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils -DAPP_VERSION=\\\"$(APP_VERSION)\\\"\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nTEST_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_TARGET := $(BINDIR)/test_calc\n\n.PHONY: all clean test version\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\nversion:\n\t@echo 1.2.0\n\ntest: $(TEST_TARGET)\n\t./$(TEST_TARGET)\n\n$(TEST_TARGET): $(TEST_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_SRCS) -o $(TEST_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+      }
+    }
+  ],
+  "name": "add_makefile_buildsystem_version_consistency",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "makefile-buildsystem",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

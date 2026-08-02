@@ -1,0 +1,49 @@
+{
+  "description": "Add RFC4180-style field quoting/escaping to a CSV row builder that currently joins fields with no escaping at all",
+  "task_type": "feature",
+  "tags": [
+    "rust",
+    "csv",
+    "correctness"
+  ],
+  "prompts": [
+    "src/lib.rs's to_csv_row(fields: &[String]) -> String just does fields.join(\",\") - a field containing a comma, a double quote, or a newline corrupts the row. Fix it: a field must be wrapped in double quotes if it contains a comma, a double quote, or a newline (\\n); any double quote INSIDE such a field must be escaped by doubling it (\" becomes \"\"); a field with none of those characters stays bare (unquoted). Fields are still joined with commas between them."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"csv_util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub fn to_csv_row(fields: &[String]) -> String {\n    fields.join(\",\")\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "fn to_csv_row"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/csv_test.rs": "use csv_util::to_csv_row;\n\n#[test]\nfn plain_fields_stay_bare() {\n    let fields = vec![\"a\".to_string(), \"b\".to_string(), \"c\".to_string()];\n    assert_eq!(to_csv_row(&fields), \"a,b,c\");\n}\n\n#[test]\nfn comma_triggers_quoting() {\n    let fields = vec![\"a,b\".to_string(), \"c\".to_string()];\n    assert_eq!(to_csv_row(&fields), \"\\\"a,b\\\",c\");\n}\n\n#[test]\nfn embedded_quote_is_doubled_and_quoted() {\n    let fields = vec![\"say \\\"hi\\\"\".to_string()];\n    assert_eq!(to_csv_row(&fields), \"\\\"say \\\"\\\"hi\\\"\\\"\\\"\");\n}\n\n#[test]\nfn newline_triggers_quoting() {\n    let fields = vec![\"line1\\nline2\".to_string()];\n    assert_eq!(to_csv_row(&fields), \"\\\"line1\\nline2\\\"\");\n}\n\n#[test]\nfn mixed_row() {\n    let fields = vec![\"plain\".to_string(), \"has,comma\".to_string(), \"has\\\"quote\".to_string()];\n    assert_eq!(to_csv_row(&fields), \"plain,\\\"has,comma\\\",\\\"has\\\"\\\"quote\\\"\");\n}\n"
+  },
+  "reference_solution": {
+    "Cargo.toml": "[package]\nname = \"csv_util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "fn escape_field(field: &str) -> String {\n    let needs_quoting = field.contains(',') || field.contains('\"') || field.contains('\\n');\n    if !needs_quoting {\n        return field.to_string();\n    }\n    let escaped = field.replace('\"', \"\\\"\\\"\");\n    format!(\"\\\"{}\\\"\", escaped)\n}\n\npub fn to_csv_row(fields: &[String]) -> String {\n    fields.iter().map(|f| escape_field(f)).collect::<Vec<_>>().join(\",\")\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "newline-not-checked",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"csv_util\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n",
+        "src/lib.rs": "fn escape_field(field: &str) -> String {\n    let needs_quoting = field.contains(',') || field.contains('\"');\n    if !needs_quoting {\n        return field.to_string();\n    }\n    let escaped = field.replace('\"', \"\\\"\\\"\");\n    format!(\"\\\"{}\\\"\", escaped)\n}\n\npub fn to_csv_row(fields: &[String]) -> String {\n    fields.iter().map(|f| escape_field(f)).collect::<Vec<_>>().join(\",\")\n}\n"
+      }
+    }
+  ],
+  "name": "add_rust_csv_safe_writer",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "cargo test --offline"
+}

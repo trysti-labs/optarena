@@ -1,0 +1,54 @@
+{
+  "description": "Repo-scale (sql-ecommerce): a new reviews table (dual FK) needs a consuming average-rating view too",
+  "tags": [
+    "sql",
+    "sqlite",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a new table `reviews` to schema.sql: `id INTEGER PRIMARY KEY`, `customer_id INTEGER NOT NULL REFERENCES customers(id)`, `product_id INTEGER NOT NULL REFERENCES products(id)`, `rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5)`. Creating the table alone isn't enough - add a new view `product_average_ratings` to views.sql with columns `product_id`, `name`, `average_rating` (the AVG of that product's ratings), and `review_count` (COUNT of its reviews) - one row per product (LEFT JOIN so products with no reviews yet still appear). The two existing views are unaffected."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "reviews"
+      ]
+    },
+    {
+      "path_pattern": "views.sql",
+      "content_patterns": [
+        "product_average_ratings"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_average_ratings.py": "import sqlite3\nfrom pathlib import Path\n\nschema = Path('schema.sql').read_text(encoding='utf-8')\nviews = Path('views.sql').read_text(encoding='utf-8')\n\ncon = sqlite3.connect(':memory:')\ncon.executescript(schema)\ncon.executescript(views)\ncon.executescript(\"\"\"\nINSERT INTO customers VALUES (1, 'Ada', 'ada@example.com'), (2, 'Bob', 'bob@example.com');\nINSERT INTO products VALUES (1, 'Widget', 1000);\nINSERT INTO reviews VALUES (1, 1, 1, 5);\nINSERT INTO reviews VALUES (2, 2, 1, 3);\n\"\"\")\n\nrow = con.execute(\n    'SELECT average_rating, review_count FROM product_average_ratings WHERE product_id = 1'\n).fetchone()\nassert row is not None, \"product_average_ratings view is missing or has no row for product 1\"\navg_rating, review_count = row\nassert review_count == 2, f\"expected 2 reviews, got {review_count}\"\nassert abs(avg_rating - 4.0) < 1e-9, f\"expected average rating 4.0, got {avg_rating}\"\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_average_ratings.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n\nCREATE TABLE reviews (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5)\n);\n",
+    "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) AS total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(oi.quantity), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name;\n\nCREATE VIEW product_average_ratings AS\nSELECT p.id AS product_id,\n       p.name,\n       AVG(r.rating) AS average_rating,\n       COUNT(r.id) AS review_count\nFROM products p\nLEFT JOIN reviews r ON r.product_id = p.id\nGROUP BY p.id, p.name;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "reviews-table-created-but-no-consuming-view",
+      "files": {
+        "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n\nCREATE TABLE reviews (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5)\n);\n",
+        "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(SUM(oi.quantity * oi.unit_price_cents), 0) AS total_cents\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nLEFT JOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(oi.quantity), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name;\n"
+      }
+    }
+  ],
+  "name": "add_sql_ecommerce_product_reviews",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "sql-ecommerce",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

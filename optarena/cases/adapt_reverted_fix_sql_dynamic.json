@@ -1,0 +1,58 @@
+{
+  "name": "adapt_reverted_fix_sql_dynamic",
+  "language": "sql",
+  "domain": "data",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: the agent's bug fix is REVERTED between prompts (fixed after_prompt trigger, schema.sql rewritten back to the buggy version); the agent must notice and reapply the fix",
+  "difficulty": 2,
+  "task_type": "bug_fix",
+  "test_kind": "unit",
+  "tags": [
+    "sql",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "reverted-edit"
+  ],
+  "prompts": [
+    "schema.sql's users table allows email to be NULL, which is a bug - every user must have an email. Fix schema.sql so the email column is NOT NULL.",
+    "Your fix to schema.sql seems to have been reverted - email allows NULL again. Please reapply the fix so email is NOT NULL."
+  ],
+  "setup_files": {
+    "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    email TEXT\n);\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "schema.sql reverted back to allowing NULL email",
+      "write_files": {
+        "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    email TEXT\n);\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "users",
+        "not null"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_schema.py": "import sqlite3\n\nconn = sqlite3.connect(':memory:')\nwith open('schema.sql', encoding='utf-8') as f:\n    conn.executescript(f.read())\n\ntry:\n    conn.execute('INSERT INTO users (id, email) VALUES (1, NULL)')\n    conn.commit()\n    raise AssertionError('expected NULL email insert to fail (NOT NULL constraint missing)')\nexcept sqlite3.IntegrityError:\n    pass\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_schema.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    email TEXT NOT NULL\n);\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "fix-not-reapplied",
+      "files": {
+        "schema.sql": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY,\n    email TEXT\n);\n"
+      }
+    }
+  ]
+}

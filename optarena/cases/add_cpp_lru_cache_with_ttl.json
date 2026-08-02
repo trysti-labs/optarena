@@ -1,0 +1,46 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded header-only cache",
+  "task_type": "feature",
+  "tags": [
+    "cpp",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "cache.h's Cache is an unbounded std::unordered_map wrapper - get/put never evict anything. Turn it into an LRU cache with a TTL: the constructor Cache(int capacity, long long ttl) takes a max size and a time-to-live in seconds. put(const std::string& key, int value, long long now) stores a value timestamped at `now`. get returns a bool and writes the value out through an int* out-parameter: `bool get(const std::string& key, long long now, int* out)` returns true and sets *out if the key is present AND not expired (now - storedAt < ttl), else returns false (and *out is untouched) - an expired entry observed by get must be REMOVED immediately. Both get and put must refresh a key's recency. When put would exceed capacity with a genuinely new key, evict the LEAST recently used entry first."
+  ],
+  "setup_files": {
+    "cache.h": "#pragma once\n#include <string>\n#include <unordered_map>\n\nclass Cache {\npublic:\n    Cache(int capacity, long long ttl) : capacity_(capacity), ttl_(ttl) {}\n\n    void put(const std::string& key, int value, long long now) {\n        store_[key] = value;\n    }\n\n    bool get(const std::string& key, long long now, int* out) {\n        auto it = store_.find(key);\n        if (it == store_.end()) return false;\n        *out = it->second;\n        return true;\n    }\n\nprivate:\n    int capacity_;\n    long long ttl_;\n    std::unordered_map<std::string, int> store_;\n};\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "cache.h",
+      "content_patterns": [
+        "class Cache"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "cache.h": "#pragma once\n#include <list>\n#include <string>\n#include <unordered_map>\n\nclass Cache {\nprivate:\n    struct Node {\n        std::string key;\n        int value;\n        long long stored_at;\n    };\n\npublic:\n    Cache(int capacity, long long ttl) : capacity_(capacity), ttl_(ttl) {}\n\n    void put(const std::string& key, int value, long long now) {\n        auto it = index_.find(key);\n        if (it != index_.end()) {\n            order_.erase(it->second);\n            index_.erase(it);\n        } else if ((int)order_.size() >= capacity_) {\n            index_.erase(order_.back().key);\n            order_.pop_back();\n        }\n        order_.push_front(Node{key, value, now});\n        index_[key] = order_.begin();\n    }\n\n    bool get(const std::string& key, long long now, int* out) {\n        auto it = index_.find(key);\n        if (it == index_.end()) return false;\n        if (now - it->second->stored_at >= ttl_) {\n            order_.erase(it->second);\n            index_.erase(it);\n            return false;\n        }\n        Node moved = *it->second;\n        order_.erase(it->second);\n        order_.push_front(moved);\n        index_[key] = order_.begin();\n        *out = moved.value;\n        return true;\n    }\n\nprivate:\n    int capacity_;\n    long long ttl_;\n    std::list<Node> order_; // front = most recently used\n    std::unordered_map<std::string, std::list<Node>::iterator> index_;\n};\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "cache.h": "#pragma once\n#include <list>\n#include <string>\n#include <unordered_map>\n\nclass Cache {\nprivate:\n    struct Node {\n        std::string key;\n        int value;\n        long long stored_at;\n    };\n\npublic:\n    Cache(int capacity, long long ttl) : capacity_(capacity), ttl_(ttl) {}\n\n    void put(const std::string& key, int value, long long now) {\n        auto it = index_.find(key);\n        if (it != index_.end()) {\n            order_.erase(it->second);\n            index_.erase(it);\n        } else if ((int)order_.size() >= capacity_) {\n            index_.erase(order_.back().key);\n            order_.pop_back();\n        }\n        order_.push_front(Node{key, value, now});\n        index_[key] = order_.begin();\n    }\n\n    bool get(const std::string& key, long long now, int* out) {\n        auto it = index_.find(key);\n        if (it == index_.end()) return false;\n        if (now - it->second->stored_at >= ttl_) {\n            order_.erase(it->second);\n            index_.erase(it);\n            return false;\n        }\n        *out = it->second->value;\n        return true;\n    }\n\nprivate:\n    int capacity_;\n    long long ttl_;\n    std::list<Node> order_;\n    std::unordered_map<std::string, std::list<Node>::iterator> index_;\n};\n"
+      }
+    }
+  ],
+  "name": "add_cpp_lru_cache_with_ttl",
+  "language": "cpp",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "g++ -std=c++17 test_cache.cpp -o test_cache_bin && ./test_cache_bin",
+  "test_setup_files": {
+    "test_cache.cpp": "#include \"cache.h\"\n#include <cassert>\n#include <iostream>\n\nint main() {\n    {\n        Cache c(2, 1000);\n        c.put(\"a\", 1, 0);\n        c.put(\"b\", 2, 1);\n        int out;\n        c.get(\"a\", 2, &out);\n        c.put(\"c\", 3, 3);\n        assert(c.get(\"a\", 4, &out) && out == 1);\n        assert(!c.get(\"b\", 4, &out));\n        assert(c.get(\"c\", 4, &out) && out == 3);\n    }\n    {\n        Cache c(2, 1000);\n        c.put(\"a\", 1, 0);\n        c.put(\"b\", 2, 1);\n        int out;\n        c.get(\"a\", 2, &out);\n        c.get(\"b\", 3, &out);\n        c.put(\"c\", 3, 4);\n        assert(!c.get(\"a\", 5, &out));\n        assert(c.get(\"b\", 5, &out) && out == 2);\n    }\n    {\n        Cache c(5, 10);\n        c.put(\"a\", 1, 0);\n        int out;\n        assert(c.get(\"a\", 9, &out) && out == 1);\n        assert(!c.get(\"a\", 10, &out));\n    }\n    std::cout << \"PASS\" << std::endl;\n    return 0;\n}\n"
+  }
+}

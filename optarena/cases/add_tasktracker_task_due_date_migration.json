@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 120,
   "timeout": 600,
-  "description": "L3 repo-scale: add an optional due_date to Task end-to-end - model, schemas, crud passthrough, and an alembic migration proven by running upgrade head",
+  "description": "Repo-scale: add an optional due_date to Task end-to-end - model, schemas, crud passthrough, and an alembic migration proven by running upgrade head",
   "difficulty": 3,
   "task_type": "feature",
   "tags": [

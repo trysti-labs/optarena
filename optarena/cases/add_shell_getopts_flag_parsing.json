@@ -1,0 +1,53 @@
+{
+  "description": "Replace fragile positional $1/$2 argument parsing with getopts, so flags work in any order and combined short flags are rejected cleanly instead of silently misread",
+  "tags": [
+    "shell",
+    "bash",
+    "getopts",
+    "cli"
+  ],
+  "prompts": [
+    "scripts/deploy.sh reads its environment and version from FIXED positions ($1 is env, $2 is version) - if a caller passes them in the wrong order, or adds a flag in between, the script silently uses the wrong values instead of failing. Rewrite argument parsing using getopts: support `-e ENV` (environment, required), `-v VERSION` (version, required), and `-d` (dry-run, optional boolean flag, default off). Flags may appear in ANY order. If either -e or -v is missing, print a usage message to stderr and exit 1. On success, echo exactly `deploying VERSION to ENV` (dry-run also present) or `[dry-run] deploying VERSION to ENV` (dry-run) to stdout."
+  ],
+  "setup_files": {
+    "scripts/deploy.sh": "#!/bin/bash\nset -euo pipefail\n# BUG: purely positional - env and version must be given in exactly\n# this order, with no way to pass a dry-run flag at all.\nENV=$1\nVERSION=$2\necho \"deploying $VERSION to $ENV\"\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/deploy.sh",
+      "content_patterns": [
+        "getopts"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "scripts/deploy.sh": "#!/bin/bash\nset -euo pipefail\n\nENV=\"\"\nVERSION=\"\"\nDRY_RUN=0\n\nwhile getopts \"e:v:d\" opt; do\n  case \"$opt\" in\n    e) ENV=\"$OPTARG\" ;;\n    v) VERSION=\"$OPTARG\" ;;\n    d) DRY_RUN=1 ;;\n    *) echo \"usage: deploy.sh -e ENV -v VERSION [-d]\" >&2; exit 1 ;;\n  esac\ndone\n\nif [[ -z \"$ENV\" || -z \"$VERSION\" ]]; then\n  echo \"usage: deploy.sh -e ENV -v VERSION [-d]\" >&2\n  exit 1\nfi\n\nif [[ \"$DRY_RUN\" -eq 1 ]]; then\n  echo \"[dry-run] deploying $VERSION to $ENV\"\nelse\n  echo \"deploying $VERSION to $ENV\"\nfi\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "scripts/deploy.sh": "#!/bin/bash\nset -euo pipefail\nENV=$1\nVERSION=$2\necho \"deploying $VERSION to $ENV\"\n"
+      }
+    },
+    {
+      "name": "missing-required-flag-check",
+      "files": {
+        "scripts/deploy.sh": "#!/bin/bash\nset -euo pipefail\n\nENV=\"\"\nVERSION=\"\"\nDRY_RUN=0\n\nwhile getopts \"e:v:d\" opt; do\n  case \"$opt\" in\n    e) ENV=\"$OPTARG\" ;;\n    v) VERSION=\"$OPTARG\" ;;\n    d) DRY_RUN=1 ;;\n  esac\ndone\n\nif [[ \"$DRY_RUN\" -eq 1 ]]; then\n  echo \"[dry-run] deploying $VERSION to $ENV\"\nelse\n  echo \"deploying $VERSION to $ENV\"\nfi\n"
+      }
+    }
+  ],
+  "name": "add_shell_getopts_flag_parsing",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops",
+  "test_setup_files": {
+    "check_deploy.py": "\"\"\"Behavioral checks for scripts/deploy.sh, run with the real bash.\"\"\"\nimport subprocess\n\nSCRIPT = \"scripts/deploy.sh\"\n\n\ndef run(*args, timeout=10):\n    return subprocess.run(\n        [\"bash\", SCRIPT, *args], capture_output=True, text=True, timeout=timeout,\n    )\n\n\n# 1. Flags in the documented order.\nproc = run(\"-e\", \"staging\", \"-v\", \"1.2.3\")\nassert proc.returncode == 0, f\"expected success: {proc.stdout}{proc.stderr}\"\nassert proc.stdout.strip() == \"deploying 1.2.3 to staging\", f\"got {proc.stdout!r}\"\n\n# 2. Flags in the OPPOSITE order must give the SAME result.\nproc = run(\"-v\", \"1.2.3\", \"-e\", \"staging\")\nassert proc.returncode == 0, f\"expected success regardless of flag order: {proc.stdout}{proc.stderr}\"\nassert proc.stdout.strip() == \"deploying 1.2.3 to staging\", f\"got {proc.stdout!r}\"\n\n# 3. -d enables dry-run, and can appear anywhere.\nproc = run(\"-d\", \"-e\", \"prod\", \"-v\", \"9.0.0\")\nassert proc.returncode == 0\nassert proc.stdout.strip() == \"[dry-run] deploying 9.0.0 to prod\", f\"got {proc.stdout!r}\"\n\n# 4. Missing -v must fail loudly.\nproc = run(\"-e\", \"prod\")\nassert proc.returncode != 0, \"missing -v must fail\"\n\n# 5. Missing -e must fail loudly.\nproc = run(\"-v\", \"1.0.0\")\nassert proc.returncode != 0, \"missing -e must fail\"\n\nprint(\"PASS deploy.sh getopts checks\")\n"
+  },
+  "check_command": "python3 check_deploy.py"
+}

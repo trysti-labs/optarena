@@ -1,0 +1,47 @@
+{
+  "description": "Add full jitter to an exponential backoff formula that currently produces identical, unbounded delays for every client",
+  "task_type": "feature",
+  "tags": [
+    "java",
+    "retry",
+    "algorithms"
+  ],
+  "prompts": [
+    "Retry.java's backoffDelay(int attempt, double base, double maxDelay) is deterministic exponential backoff with no jitter and no cap. Change the signature to backoffDelay(int attempt, double base, double maxDelay, DoubleSupplier rand) and implement 'full jitter': compute cap = Math.min(maxDelay, base * Math.pow(2, attempt)), then return rand.getAsDouble() * cap - `rand` is an injectable DoubleSupplier returning a value in [0, 1), so callers can pass a fixed supplier for deterministic tests. The delay must never exceed maxDelay, no matter how large `attempt` gets."
+  ],
+  "setup_files": {
+    "Retry.java": "public final class Retry {\n    public static double backoffDelay(int attempt, double base, double maxDelay) {\n        return base * Math.pow(2, attempt);\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Retry.java",
+      "content_patterns": [
+        "backoffDelay"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "Retry.java": "import java.util.function.DoubleSupplier;\n\npublic final class Retry {\n    public static double backoffDelay(int attempt, double base, double maxDelay, DoubleSupplier rand) {\n        double cap = Math.min(maxDelay, base * Math.pow(2, attempt));\n        return rand.getAsDouble() * cap;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-cap-on-exponent",
+      "files": {
+        "Retry.java": "import java.util.function.DoubleSupplier;\n\npublic final class Retry {\n    public static double backoffDelay(int attempt, double base, double maxDelay, DoubleSupplier rand) {\n        return rand.getAsDouble() * base * Math.pow(2, attempt);\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_java_backoff_with_jitter_cap",
+  "language": "java",
+  "framework": "plain-java",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "java CheckRetryTest.java",
+  "test_setup_files": {
+    "RetryTest.java": "public final class RetryTest {\n    public static void main(String[] args) {\n        checkUpperBoundIsTheCap();\n        checkLowerBoundIsZero();\n        checkDelayNeverExceedsMaxDelayForLargeAttempts();\n        checkStaysInBounds();\n        System.out.println(\"all tests passed\");\n    }\n\n    static void checkUpperBoundIsTheCap() {\n        double delay = Retry.backoffDelay(2, 1, 100, () -> 1.0);\n        if (delay != 4) throw new AssertionError(\"got \" + delay + \", want 4\");\n    }\n\n    static void checkLowerBoundIsZero() {\n        double delay = Retry.backoffDelay(5, 1, 100, () -> 0.0);\n        if (delay != 0) throw new AssertionError(\"got \" + delay + \", want 0\");\n    }\n\n    static void checkDelayNeverExceedsMaxDelayForLargeAttempts() {\n        double delay = Retry.backoffDelay(50, 1, 10, () -> 1.0);\n        if (delay != 10) throw new AssertionError(\"got \" + delay + \", want 10\");\n    }\n\n    static void checkStaysInBounds() {\n        for (int attempt = 0; attempt < 10; attempt++) {\n            double delay = Retry.backoffDelay(attempt, 1, 20, () -> 0.5);\n            if (delay < 0 || delay > 20) throw new AssertionError(\"delay out of bounds: \" + delay);\n        }\n    }\n}\n",
+    "CheckRetryTest.java": "import java.io.IOException;\n\npublic final class CheckRetryTest {\n    public static void main(String[] args) throws Exception {\n        if (exec(\"javac\", \"Retry.java\", \"RetryTest.java\") != 0) {\n            System.err.println(\"compilation failed\");\n            System.exit(1);\n        }\n        System.exit(exec(\"java\", \"-ea\", \"RetryTest\"));\n    }\n\n    static int exec(String... cmd) throws IOException, InterruptedException {\n        return new ProcessBuilder(cmd).inheritIO().start().waitFor();\n    }\n}\n"
+  }
+}

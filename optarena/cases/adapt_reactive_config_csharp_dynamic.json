@@ -1,0 +1,58 @@
+{
+  "name": "adapt_reactive_config_csharp_dynamic",
+  "language": "csharp",
+  "framework": "plain-csharp",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time Greeter.cs's own text contains 'Hello' (i.e. once the agent has produced a first attempt) instead of a fixed prompt count, then Config.Name changes under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": ["csharp", "dynamic", "disruption", "adaptation", "reactive"],
+  "prompts": [
+    "This project (app.csproj already set up as an executable) has a Config.cs with a public const string Name. Create Greeter.cs with a public static class Greeter containing a public static method Greet() that returns \"Hello, \" + Config.Name + \"!\", reading Config.Name (do not copy or hardcode its value).",
+    "Config.Name may have changed since you last checked it. Make sure Greeter.Greet() still returns a string built from the CURRENT value of Config.Name, not a stale or hardcoded one."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n</Project>\n",
+    "Config.cs": "public static class Config\n{\n    public const string Name = \"World\";\n}\n"
+  },
+  "disruptions": [
+    {
+      "when": {"file_contains": {"path": "Greeter.cs", "pattern": "Hello"}},
+      "description": "Config.Name changed World -> Universe, triggered reactively once Greeter.cs's first draft appeared (not a fixed step count)",
+      "write_files": {
+        "Config.cs": "public static class Config\n{\n    public const string Name = \"Universe\";\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Greeter.cs",
+      "content_patterns": ["Greet"]
+    }
+  ],
+  "test_setup_files": {
+    "Program.cs": "string got = Greeter.Greet();\nstring want = \"Hello, \" + Config.Name + \"!\";\nif (got != want)\n{\n    Console.Error.WriteLine($\"Greeter.Greet() = \\\"{got}\\\", want \\\"{want}\\\" (the CURRENT Config.Name, not a stale value)\");\n    Environment.Exit(1);\n    return;\n}\nConsole.WriteLine(\"PASS\");\n"
+  },
+  "check_command": "dotnet run --project app.csproj",
+  "reference_solution": {
+    "Greeter.cs": "public static class Greeter\n{\n    public static string Greet()\n    {\n        return \"Hello, \" + Config.Name + \"!\";\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-old-value",
+      "files": {
+        "Greeter.cs": "public static class Greeter\n{\n    public static string Greet()\n    {\n        return \"Hello, World!\";\n    }\n}\n"
+      }
+    },
+    {
+      "name": "copies-value-instead-of-reading-live",
+      "files": {
+        "Greeter.cs": "public static class Greeter\n{\n    private const string CachedName = \"World\";\n\n    public static string Greet()\n    {\n        return \"Hello, \" + CachedName + \"!\";\n    }\n}\n"
+      }
+    }
+  ]
+}

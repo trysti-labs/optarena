@@ -1,0 +1,55 @@
+{
+  "description": "Repo-scale (terraform-webapp): a new CloudWatch storage alarm must reference the RDS instance by resource attribute, not a hardcoded identifier",
+  "tags": [
+    "hcl",
+    "terraform",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Increase the RDS instance's `allocated_storage` in rds.tf from 20 to 50. Add a new `aws_cloudwatch_metric_alarm.low_storage` in cloudwatch.tf monitoring `FreeStorageSpace` (namespace AWS/RDS, comparison LessThanThreshold, evaluation_periods 1, period 300, threshold 5368709120 bytes/5GiB) for the RDS instance - the alarm's `DBInstanceIdentifier` dimension must be a real Terraform reference to `aws_db_instance.main.id`, NOT a hardcoded string literal like \"webapp-db\" - a hardcoded value would silently stop tracking the right resource if the DB instance is ever renamed or recreated."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "rds.tf",
+      "content_patterns": [
+        "allocated_storage"
+      ]
+    },
+    {
+      "path_pattern": "cloudwatch.tf",
+      "content_patterns": [
+        "low_storage",
+        "FreeStorageSpace"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_storage_alarm.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\nrds = open('rds.tf', encoding='utf-8').read()\nassert re.search(r'allocated_storage\\s*=\\s*50', rds), 'allocated_storage must be increased to 50'\n\ncw = open('cloudwatch.tf', encoding='utf-8').read()\nalarm = re.search(r'resource\\s+\"aws_cloudwatch_metric_alarm\"\\s+\"low_storage\"\\s*\\{(.*?)\\n\\}', cw, re.DOTALL)\nassert alarm, 'aws_cloudwatch_metric_alarm.low_storage not found in cloudwatch.tf'\nblock = alarm.group(1)\n\nassert re.search(r'metric_name\\s*=\\s*\"FreeStorageSpace\"', block), 'must monitor FreeStorageSpace'\n\ndim = re.search(r'DBInstanceIdentifier\\s*=\\s*(\\S+)', block)\nassert dim, 'DBInstanceIdentifier dimension missing'\nvalue = dim.group(1)\nassert value == 'aws_db_instance.main.id', (\n    f'DBInstanceIdentifier must reference aws_db_instance.main.id (a real Terraform '\n    f'resource reference), not a hardcoded string like {value!r} - a hardcoded value goes '\n    f'stale if the DB instance is ever renamed or recreated')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_storage_alarm.py",
+  "reference_solution": {
+    "rds.tf": "resource \"aws_db_subnet_group\" \"main\" {\n  name       = \"webapp-db-subnets\"\n  subnet_ids = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n}\n\nresource \"aws_security_group\" \"db\" {\n  name   = \"webapp-db-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port       = 5432\n    to_port         = 5432\n    protocol        = \"tcp\"\n    security_groups = [aws_security_group.app.id]\n  }\n}\n\nresource \"aws_db_instance\" \"main\" {\n  identifier              = \"webapp-db\"\n  engine                  = \"postgres\"\n  engine_version          = \"15.4\"\n  instance_class          = \"db.t3.micro\"\n  allocated_storage       = 50\n  db_name                 = \"webapp\"\n  username                = \"webapp_admin\"\n  password                = \"changeme-in-real-life\"\n  db_subnet_group_name    = aws_db_subnet_group.main.name\n  vpc_security_group_ids  = [aws_security_group.db.id]\n  deletion_protection     = true\n  storage_encrypted       = true\n  skip_final_snapshot     = true\n}\n",
+    "cloudwatch.tf": "resource \"aws_cloudwatch_metric_alarm\" \"high_cpu\" {\n  alarm_name          = \"webapp-high-cpu\"\n  comparison_operator = \"GreaterThanThreshold\"\n  evaluation_periods  = 3\n  metric_name         = \"CPUUtilization\"\n  namespace           = \"AWS/EC2\"\n  period              = 60\n  statistic           = \"Average\"\n  threshold           = 80\n\n  dimensions = {\n    AutoScalingGroupName = aws_autoscaling_group.app.name\n  }\n}\n\nresource \"aws_cloudwatch_metric_alarm\" \"low_storage\" {\n  alarm_name          = \"webapp-db-low-storage\"\n  comparison_operator = \"LessThanThreshold\"\n  evaluation_periods  = 1\n  metric_name         = \"FreeStorageSpace\"\n  namespace           = \"AWS/RDS\"\n  period              = 300\n  statistic           = \"Average\"\n  threshold           = 5368709120\n\n  dimensions = {\n    DBInstanceIdentifier = aws_db_instance.main.id\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "alarm-dimension-hardcoded-instead-of-referenced",
+      "files": {
+        "rds.tf": "resource \"aws_db_subnet_group\" \"main\" {\n  name       = \"webapp-db-subnets\"\n  subnet_ids = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n}\n\nresource \"aws_security_group\" \"db\" {\n  name   = \"webapp-db-sg\"\n  vpc_id = aws_vpc.main.id\n\n  ingress {\n    from_port       = 5432\n    to_port         = 5432\n    protocol        = \"tcp\"\n    security_groups = [aws_security_group.app.id]\n  }\n}\n\nresource \"aws_db_instance\" \"main\" {\n  identifier              = \"webapp-db\"\n  engine                  = \"postgres\"\n  engine_version          = \"15.4\"\n  instance_class          = \"db.t3.micro\"\n  allocated_storage       = 50\n  db_name                 = \"webapp\"\n  username                = \"webapp_admin\"\n  password                = \"changeme-in-real-life\"\n  db_subnet_group_name    = aws_db_subnet_group.main.name\n  vpc_security_group_ids  = [aws_security_group.db.id]\n  deletion_protection     = true\n  storage_encrypted       = true\n  skip_final_snapshot     = true\n}\n",
+        "cloudwatch.tf": "resource \"aws_cloudwatch_metric_alarm\" \"high_cpu\" {\n  alarm_name          = \"webapp-high-cpu\"\n  comparison_operator = \"GreaterThanThreshold\"\n  evaluation_periods  = 3\n  metric_name         = \"CPUUtilization\"\n  namespace           = \"AWS/EC2\"\n  period              = 60\n  statistic           = \"Average\"\n  threshold           = 80\n\n  dimensions = {\n    AutoScalingGroupName = aws_autoscaling_group.app.name\n  }\n}\n\nresource \"aws_cloudwatch_metric_alarm\" \"low_storage\" {\n  alarm_name          = \"webapp-db-low-storage\"\n  comparison_operator = \"LessThanThreshold\"\n  evaluation_periods  = 1\n  metric_name         = \"FreeStorageSpace\"\n  namespace           = \"AWS/RDS\"\n  period              = 300\n  statistic           = \"Average\"\n  threshold           = 5368709120\n\n  dimensions = {\n    DBInstanceIdentifier = \"webapp-db\"\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_webapp_storage_alarm",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "terraform-webapp",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

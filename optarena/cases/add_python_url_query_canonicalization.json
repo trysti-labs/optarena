@@ -1,0 +1,46 @@
+{
+  "description": "Add real query-string canonicalization (sorted by key, stable for duplicates) to a no-op passthrough",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "urls",
+    "correctness"
+  ],
+  "prompts": [
+    "urlutil.py's canonicalize_query(url) is a no-op - it just returns the URL unchanged. Implement it for real: parse the URL, sort its query-string parameters by KEY only (not by value), keeping the RELATIVE order of parameters that share the same key unchanged (a stable sort), and rebuild the URL with the sorted query string. Scheme, host, path, and fragment must be left exactly as they were."
+  ],
+  "setup_files": {
+    "urlutil.py": "def canonicalize_query(url):\n    return url\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "urlutil.py",
+      "content_patterns": [
+        "def canonicalize_query"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_urlutil_hidden.py": "from urllib.parse import urlsplit, parse_qsl\n\nfrom urlutil import canonicalize_query\n\n\ndef test_params_sorted_by_key():\n    result = canonicalize_query('https://example.com/path?z=1&a=2&m=3')\n    parsed = urlsplit(result)\n    keys = [k for k, v in parse_qsl(parsed.query)]\n    assert keys == ['a', 'm', 'z']\n\n\ndef test_duplicate_keys_keep_relative_order():\n    result = canonicalize_query('https://example.com/?b=2&a=second&b=1&a=first')\n    parsed = urlsplit(result)\n    pairs = parse_qsl(parsed.query)\n    a_values = [v for k, v in pairs if k == 'a']\n    b_values = [v for k, v in pairs if k == 'b']\n    assert a_values == ['second', 'first']\n    assert b_values == ['2', '1']\n\n\ndef test_scheme_host_path_fragment_untouched():\n    result = canonicalize_query('https://example.com/some/path?z=1&a=2#section')\n    parsed = urlsplit(result)\n    assert parsed.scheme == 'https'\n    assert parsed.netloc == 'example.com'\n    assert parsed.path == '/some/path'\n    assert parsed.fragment == 'section'\n"
+  },
+  "check_command": "python3 -m pytest -q test_urlutil_hidden.py",
+  "reference_solution": {
+    "urlutil.py": "from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode\n\n\ndef canonicalize_query(url):\n    parsed = urlsplit(url)\n    pairs = parse_qsl(parsed.query, keep_blank_values=True)\n    sorted_pairs = sorted(pairs, key=lambda pair: pair[0])\n    new_query = urlencode(sorted_pairs)\n    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "sorted-by-key-and-value-breaks-duplicate-order",
+      "files": {
+        "urlutil.py": "from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode\n\n\ndef canonicalize_query(url):\n    parsed = urlsplit(url)\n    pairs = parse_qsl(parsed.query, keep_blank_values=True)\n    sorted_pairs = sorted(pairs, key=lambda pair: (pair[0], pair[1]))\n    new_query = urlencode(sorted_pairs)\n    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))\n"
+      }
+    }
+  ],
+  "name": "add_python_url_query_canonicalization",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

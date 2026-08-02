@@ -1,0 +1,48 @@
+{
+  "description": "Repo-scale (shell-toolkit): a new -n/--dry-run flag must suppress the config backup entirely while STILL running version validation - the opposite scoping direction from the existing -f/--force flag",
+  "tags": [
+    "shell",
+    "bash",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add a `-n` (dry-run) flag to `deploy.sh` (getopts pattern `\"v:n\"`). In dry-run mode, `deploy.sh` must: (1) STILL run version validation via the existing `validate_version` - an invalid version must still be rejected exactly as in normal mode, dry-run does not bypass validation; (2) NOT call the existing `backup_file` helper at all - dry-run must never touch the filesystem, so no `config/app.conf.bak.*` file should be created; (3) instead print `[DRY-RUN] would deploy version $VERSION` and exit 0. This is the opposite scoping direction from an already-shipped `-f`/force flag elsewhere in this toolkit, which bypasses validation but must never skip the backup - here, dry-run must bypass the backup (and the real deploy) but must never skip validation."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "deploy.sh",
+      "content_patterns": [
+        "DRY_RUN",
+        "DRY-RUN"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_dry_run.py": "import os\nimport subprocess\n\nbad = subprocess.run(['bash', 'deploy.sh', '-v', 'not-a-version', '-n'], capture_output=True, text=True, timeout=15)\nassert bad.returncode != 0, (\n    'expected --dry-run to still run version validation - an invalid version must still be rejected')\n\nassert not os.path.isfile('config/app.conf.bak.1.2.3'), 'setup check: no stray backup should exist yet'\n\nok = subprocess.run(['bash', 'deploy.sh', '-v', '1.2.3', '-n'], capture_output=True, text=True, timeout=15)\nassert ok.returncode == 0, (ok.stdout, ok.stderr)\nassert 'DRY-RUN' in ok.stdout, ok.stdout\n\nassert not os.path.isfile('config/app.conf.bak.1.2.3'), (\n    'expected --dry-run to suppress the config backup entirely - no config/app.conf.bak.1.2.3 should '\n    'have been created, since dry-run must not mutate the filesystem at all')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_dry_run.py",
+  "reference_solution": {
+    "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\n\nVERSION=\"\"\nDRY_RUN=0\nwhile getopts \"v:n\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        n) DRY_RUN=1 ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION [-n]\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\n\nif [ \"$DRY_RUN\" -eq 1 ]; then\n    log_info \"[DRY-RUN] would deploy version $VERSION\"\n    exit 0\nfi\n\nif ! backup_file \"config/app.conf\" \"$VERSION\"; then\n    log_error \"aborting: config backup failed\"\n    exit 1\nfi\n\nlog_info \"deploying version $VERSION\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dry-run-still-writes-backup",
+      "files": {
+        "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\n\nVERSION=\"\"\nDRY_RUN=0\nwhile getopts \"v:n\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        n) DRY_RUN=1 ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION [-n]\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\n\nif ! backup_file \"config/app.conf\" \"$VERSION\"; then\n    log_error \"aborting: config backup failed\"\n    exit 1\nfi\n\nif [ \"$DRY_RUN\" -eq 1 ]; then\n    log_info \"[DRY-RUN] would deploy version $VERSION\"\n    exit 0\nfi\n\nlog_info \"deploying version $VERSION\"\n"
+      }
+    }
+  ],
+  "name": "add_shell_toolkit_deploy_dry_run",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "shell-toolkit",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

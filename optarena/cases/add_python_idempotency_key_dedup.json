@@ -1,0 +1,46 @@
+{
+  "description": "Add idempotency-key deduplication with a TTL window to a processor that currently re-executes on every call",
+  "task_type": "feature",
+  "tags": [
+    "python",
+    "idempotency",
+    "algorithms"
+  ],
+  "prompts": [
+    "processor.py's Processor.process(key, payload, now) runs the side effect (appends to self.effects and returns a fresh result) EVERY time it's called, even for a key it has already processed. Make it idempotent: within `window` seconds of the first call for a given key, a repeat call with that SAME key must return the ORIGINAL result WITHOUT running the side effect again (self.effects must not grow) - regardless of what payload is passed the second time. Once `window` seconds have passed since the first call for that key, the NEXT call for that key must run for real again (a fresh execution, whose result becomes the new one remembered for that key)."
+  ],
+  "setup_files": {
+    "processor.py": "class Processor:\n    def __init__(self, window):\n        self.window = window\n        self.effects = []\n\n    def process(self, key, payload, now):\n        self.effects.append((key, payload))\n        return {\"key\": key, \"payload\": payload, \"processed_at\": now}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "processor.py",
+      "content_patterns": [
+        "class Processor"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_processor_hidden.py": "from processor import Processor\n\n\ndef test_duplicate_key_within_window_is_not_reexecuted():\n    p = Processor(window=10)\n    first = p.process('order-1', {'amount': 5}, now=0)\n    second = p.process('order-1', {'amount': 999}, now=5)\n    assert second == first\n    assert p.effects == [('order-1', {'amount': 5})]\n\n\ndef test_different_keys_both_execute():\n    p = Processor(window=10)\n    p.process('a', 1, now=0)\n    p.process('b', 2, now=0)\n    assert len(p.effects) == 2\n\n\ndef test_reexecutes_after_window_expires():\n    p = Processor(window=10)\n    p.process('order-1', {'amount': 5}, now=0)\n    p.process('order-1', {'amount': 5}, now=9)\n    assert len(p.effects) == 1\n    p.process('order-1', {'amount': 7}, now=10)\n    assert len(p.effects) == 2\n    assert p.effects[-1] == ('order-1', {'amount': 7})\n"
+  },
+  "check_command": "python3 -m pytest -q test_processor_hidden.py",
+  "reference_solution": {
+    "processor.py": "class Processor:\n    def __init__(self, window):\n        self.window = window\n        self.effects = []\n        self._seen = {}  # key -> (result, recorded_at)\n\n    def process(self, key, payload, now):\n        cached = self._seen.get(key)\n        if cached is not None:\n            result, recorded_at = cached\n            if now - recorded_at < self.window:\n                return result\n        self.effects.append((key, payload))\n        result = {\"key\": key, \"payload\": payload, \"processed_at\": now}\n        self._seen[key] = (result, now)\n        return result\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "dedup-never-expires",
+      "files": {
+        "processor.py": "class Processor:\n    def __init__(self, window):\n        self.window = window\n        self.effects = []\n        self._seen = {}  # key -> result\n\n    def process(self, key, payload, now):\n        if key in self._seen:\n            return self._seen[key]\n        self.effects.append((key, payload))\n        result = {\"key\": key, \"payload\": payload, \"processed_at\": now}\n        self._seen[key] = result\n        return result\n"
+      }
+    }
+  ],
+  "name": "add_python_idempotency_key_dedup",
+  "language": "python",
+  "framework": "pytest",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

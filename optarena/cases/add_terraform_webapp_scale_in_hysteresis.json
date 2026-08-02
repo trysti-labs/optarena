@@ -1,0 +1,57 @@
+{
+  "description": "Repo-scale (terraform-webapp): a new scale-in autoscaling policy + low-cpu alarm must maintain a real hysteresis gap below the existing high-cpu alarm's threshold - not just be numerically lower",
+  "tags": [
+    "hcl",
+    "terraform",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add `aws_autoscaling_policy.scale_in` in asg.tf (adjustment_type `ChangeInCapacity`, scaling_adjustment `-1`, cooldown `300`) referencing `aws_autoscaling_group.app.name`. Add a new `aws_cloudwatch_metric_alarm.low_cpu` in cloudwatch.tf (comparison_operator `LessThanThreshold`, same metric/namespace/period/statistic/evaluation_periods as the existing `high_cpu` alarm, dimensions referencing `aws_autoscaling_group.app.name` the same way `high_cpu` does) that triggers the scale-in policy via `alarm_actions = [aws_autoscaling_policy.scale_in.arn]`. Critically, the low_cpu alarm's `threshold` must maintain a REAL hysteresis gap below `high_cpu`'s existing threshold of 80 - at least 20 percentage points lower (60 or below), not just numerically less than 80. A threshold too close to 80 (like 75) risks the scale-out and scale-in alarms flapping back and forth near the same utilization level."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "asg.tf",
+      "content_patterns": [
+        "aws_autoscaling_policy",
+        "scale_in"
+      ]
+    },
+    {
+      "path_pattern": "cloudwatch.tf",
+      "content_patterns": [
+        "low_cpu",
+        "alarm_actions"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_hysteresis_gap.py": "import json\nimport re\nimport subprocess\n\ninit = subprocess.run(['terraform', 'init', '-backend=false', '-input=false'],\n                      capture_output=True, text=True, timeout=120)\nassert init.returncode == 0, f'terraform init failed:\\n{init.stdout}\\n{init.stderr}'\n\nvalidate = subprocess.run(['terraform', 'validate', '-no-color', '-json'], capture_output=True, text=True)\ndata = json.loads(validate.stdout)\nassert data.get('valid') is True, f'terraform validate failed: {validate.stdout}\\n{validate.stderr}'\n\nasg = open('asg.tf', encoding='utf-8').read()\nassert 'aws_autoscaling_policy' in asg and 'scale_in' in asg, 'aws_autoscaling_policy.scale_in not found'\nassert re.search(r'autoscaling_group_name\\s*=\\s*aws_autoscaling_group\\.app\\.name', asg), (\n    'the scale-in policy must reference aws_autoscaling_group.app.name')\n\ncw = open('cloudwatch.tf', encoding='utf-8').read()\nassert 'aws_cloudwatch_metric_alarm\" \"low_cpu\"' in cw, 'aws_cloudwatch_metric_alarm.low_cpu not found'\nassert re.search(r'alarm_actions\\s*=\\s*\\[aws_autoscaling_policy\\.scale_in\\.arn\\]', cw), (\n    'low_cpu alarm must trigger the scale_in policy via alarm_actions')\n\nlow_block_match = re.search(r'resource\\s+\"aws_cloudwatch_metric_alarm\"\\s+\"low_cpu\"\\s*\\{(.*?)\\n\\}', cw, re.DOTALL)\nassert low_block_match, 'could not parse the low_cpu alarm block'\nlow_block = low_block_match.group(1)\nm = re.search(r'threshold\\s*=\\s*(\\d+)', low_block)\nassert m, 'low_cpu alarm is missing a threshold'\nlow_threshold = int(m.group(1))\n\nassert low_threshold <= 60, (\n    f'low_cpu threshold ({low_threshold}) does not leave a real hysteresis gap below the existing '\n    f'high_cpu threshold (80) - it must be at least 20 points lower (60 or below), otherwise the '\n    f'scale-out and scale-in alarms can flap back and forth near the same utilization level')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_hysteresis_gap.py",
+  "reference_solution": {
+    "asg.tf": "resource \"aws_launch_template\" \"app\" {\n  name_prefix   = \"webapp-\"\n  image_id      = \"ami-0123456789abcdef0\"\n  instance_type = \"t3.micro\"\n\n  vpc_security_group_ids = [aws_security_group.app.id]\n}\n\nresource \"aws_autoscaling_group\" \"app\" {\n  name                = \"webapp-asg\"\n  min_size            = 2\n  max_size            = 6\n  desired_capacity    = 2\n  vpc_zone_identifier = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n  health_check_type   = \"EC2\"\n\n  launch_template {\n    id      = aws_launch_template.app.id\n    version = \"$Latest\"\n  }\n}\n\nresource \"aws_autoscaling_policy\" \"scale_in\" {\n  name                   = \"webapp-scale-in\"\n  autoscaling_group_name = aws_autoscaling_group.app.name\n  adjustment_type        = \"ChangeInCapacity\"\n  scaling_adjustment     = -1\n  cooldown               = 300\n}\n",
+    "cloudwatch.tf": "resource \"aws_cloudwatch_metric_alarm\" \"high_cpu\" {\n  alarm_name          = \"webapp-high-cpu\"\n  comparison_operator = \"GreaterThanThreshold\"\n  evaluation_periods  = 3\n  metric_name         = \"CPUUtilization\"\n  namespace           = \"AWS/EC2\"\n  period              = 60\n  statistic           = \"Average\"\n  threshold           = 80\n\n  dimensions = {\n    AutoScalingGroupName = aws_autoscaling_group.app.name\n  }\n}\n\nresource \"aws_cloudwatch_metric_alarm\" \"low_cpu\" {\n  alarm_name          = \"webapp-low-cpu\"\n  comparison_operator = \"LessThanThreshold\"\n  evaluation_periods  = 3\n  metric_name         = \"CPUUtilization\"\n  namespace           = \"AWS/EC2\"\n  period              = 60\n  statistic           = \"Average\"\n  threshold           = 60\n  alarm_actions       = [aws_autoscaling_policy.scale_in.arn]\n\n  dimensions = {\n    AutoScalingGroupName = aws_autoscaling_group.app.name\n  }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "low-cpu-threshold-too-close-to-high-cpu",
+      "files": {
+        "asg.tf": "resource \"aws_launch_template\" \"app\" {\n  name_prefix   = \"webapp-\"\n  image_id      = \"ami-0123456789abcdef0\"\n  instance_type = \"t3.micro\"\n\n  vpc_security_group_ids = [aws_security_group.app.id]\n}\n\nresource \"aws_autoscaling_group\" \"app\" {\n  name                = \"webapp-asg\"\n  min_size            = 2\n  max_size            = 6\n  desired_capacity    = 2\n  vpc_zone_identifier = [aws_subnet.public_a.id, aws_subnet.public_b.id]\n  health_check_type   = \"EC2\"\n\n  launch_template {\n    id      = aws_launch_template.app.id\n    version = \"$Latest\"\n  }\n}\n\nresource \"aws_autoscaling_policy\" \"scale_in\" {\n  name                   = \"webapp-scale-in\"\n  autoscaling_group_name = aws_autoscaling_group.app.name\n  adjustment_type        = \"ChangeInCapacity\"\n  scaling_adjustment     = -1\n  cooldown               = 300\n}\n",
+        "cloudwatch.tf": "resource \"aws_cloudwatch_metric_alarm\" \"high_cpu\" {\n  alarm_name          = \"webapp-high-cpu\"\n  comparison_operator = \"GreaterThanThreshold\"\n  evaluation_periods  = 3\n  metric_name         = \"CPUUtilization\"\n  namespace           = \"AWS/EC2\"\n  period              = 60\n  statistic           = \"Average\"\n  threshold           = 80\n\n  dimensions = {\n    AutoScalingGroupName = aws_autoscaling_group.app.name\n  }\n}\n\nresource \"aws_cloudwatch_metric_alarm\" \"low_cpu\" {\n  alarm_name          = \"webapp-low-cpu\"\n  comparison_operator = \"LessThanThreshold\"\n  evaluation_periods  = 3\n  metric_name         = \"CPUUtilization\"\n  namespace           = \"AWS/EC2\"\n  period              = 60\n  statistic           = \"Average\"\n  threshold           = 75\n  alarm_actions       = [aws_autoscaling_policy.scale_in.arn]\n\n  dimensions = {\n    AutoScalingGroupName = aws_autoscaling_group.app.name\n  }\n}\n"
+      }
+    }
+  ],
+  "name": "add_terraform_webapp_scale_in_hysteresis",
+  "language": "hcl",
+  "framework": "terraform",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "terraform-webapp",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

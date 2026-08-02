@@ -8,7 +8,7 @@
   "git_init": true,
   "check_command_timeout": 120,
   "timeout": 600,
-  "description": "L3 repo-scale: extract the offset/limit pagination duplicated across crud/user.py, crud/project.py, and crud/task.py into one shared helper, behavior-preserving",
+  "description": "Repo-scale: extract the offset/limit pagination duplicated across crud/user.py, crud/project.py, and crud/task.py into one shared helper, behavior-preserving",
   "difficulty": 3,
   "task_type": "refactoring",
   "tags": [

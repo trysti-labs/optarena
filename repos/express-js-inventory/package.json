@@ -1,0 +1,9 @@
+{
+  "name": "express-js-inventory",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Warehouse inventory tracker with stock movements (Express, plain JS)",
+  "scripts": {
+    "test": "node --test"
+  }
+}

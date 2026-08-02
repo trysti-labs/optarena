@@ -1,0 +1,64 @@
+{
+  "name": "adapt_renamed_symbol_python_dynamic",
+  "language": "python",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time area.py's own text contains 'circle_area' (i.e. once the agent has produced a first attempt), then mathutils.square is RENAMED to mathutils.sq under it",
+  "difficulty": 3,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "python",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "renamed-symbol",
+    "reactive"
+  ],
+  "prompts": [
+    "mathutils.py has a function square(x). Create area.py with a function circle_area(r) that returns 3.14159 * square(r), importing square from mathutils.",
+    "mathutils.py's square function has just been renamed to sq. Update area.py to use the new name (do not keep a reference to the old name square)."
+  ],
+  "setup_files": {
+    "mathutils.py": "def square(x):\n    return x * x\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "area.py",
+          "pattern": "circle_area"
+        }
+      },
+      "description": "mathutils.square renamed to mathutils.sq, triggered reactively once area.py's first draft appeared",
+      "write_files": {
+        "mathutils.py": "def sq(x):\n    return x * x\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "area.py",
+      "content_patterns": [
+        "circle_area"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_area.py": "import importlib.util\nspec = importlib.util.spec_from_file_location('area_mod', 'area.py')\nmod = importlib.util.module_from_spec(spec)\ntry:\n    spec.loader.exec_module(mod)\nexcept ImportError as e:\n    raise AssertionError(f'area.py failed to import (likely still references the old name square): {e}')\nresult = mod.circle_area(2)\nassert abs(result - 3.14159 * 4) < 1e-6, f'circle_area(2) = {result}'\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_area.py",
+  "reference_solution": {
+    "area.py": "from mathutils import sq\n\n\ndef circle_area(r):\n    return 3.14159 * sq(r)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "still-uses-old-name",
+      "files": {
+        "area.py": "from mathutils import square\n\n\ndef circle_area(r):\n    return 3.14159 * square(r)\n"
+      }
+    }
+  ]
+}

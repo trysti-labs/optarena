@@ -1,0 +1,58 @@
+{
+  "description": "Repo-scale (makefile-buildsystem): a second test suite must be wired into test (both binaries run), AND install must depend on test (not just all) - make install must never stage an unverified build",
+  "tags": [
+    "makefile",
+    "make",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add tests/test_strutil.c (assert-based, exercising strutil_trim on leading-only, trailing-only, and all-whitespace input, printing PASS at the end - same style as the existing tests/test_calc.c). In the Makefile, rename the existing `TEST_SRCS`/`TEST_TARGET` to `TEST_CALC_SRCS`/`TEST_CALC_TARGET` and add matching `TEST_STRUTIL_SRCS`/`TEST_STRUTIL_TARGET` plus a build rule for the new binary. Update the `test` target's prerequisites AND recipe so `make test` builds and runs BOTH test binaries. Add an `install` target that stages the built binary at `stage/app` - but critically, `install` must depend on `test` (not just `all`), so a clean `make install` actually runs BOTH test suites before staging anything. An unverified build - one where the tests were never run - must never make it into `stage/`."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "tests/test_strutil.c",
+      "content_patterns": [
+        "strutil_trim"
+      ]
+    },
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "TEST_STRUTIL_TARGET",
+        "install: $(TARGET) test"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_install_runs_tests.py": "import subprocess\nfrom pathlib import Path\n\nr = subprocess.run(['make', 'clean'], capture_output=True, text=True, timeout=60)\nassert r.returncode == 0, f'make clean failed:\\n{r.stdout}\\n{r.stderr}'\n\nr = subprocess.run(['make', 'install'], capture_output=True, text=True, timeout=60)\nassert r.returncode == 0, f'make install failed:\\n{r.stdout}\\n{r.stderr}'\n\nassert Path('stage/app').exists(), 'make install did not stage bin/app to stage/app'\n\nassert r.stdout.count('PASS') >= 2, (\n    f\"expected 'make install' to run BOTH test suites before staging (2 PASS lines), got: \"\n    f'{r.stdout!r} - install must depend on test, not just all, so an unverified build can never '\n    f'be staged')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_install_runs_tests.py",
+  "reference_solution": {
+    "src/utils/strutil.h": "#pragma once\n\n/* Trims leading/trailing whitespace from `s` in place and returns it. */\nchar *strutil_trim(char *s);\n",
+    "tests/test_strutil.c": "#include \"strutil.h\"\n\n#include <assert.h>\n#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char only_leading[] = \"   x\";\n    assert(strcmp(strutil_trim(only_leading), \"x\") == 0);\n\n    char only_trailing[] = \"x   \";\n    assert(strcmp(strutil_trim(only_trailing), \"x\") == 0);\n\n    char all_space[] = \"    \";\n    assert(strcmp(strutil_trim(all_space), \"\") == 0);\n\n    printf(\"PASS\\n\");\n    return 0;\n}\n",
+    "Makefile": "CC := gcc\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nSTAGEDIR := stage\nSTAGED_TARGET := $(STAGEDIR)/app\n\nTEST_CALC_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_CALC_TARGET := $(BINDIR)/test_calc\n\nTEST_STRUTIL_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_strutil.c\nTEST_STRUTIL_TARGET := $(BINDIR)/test_strutil\n\n.PHONY: all clean test install\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\n$(STAGEDIR):\n\tmkdir -p $(STAGEDIR)\n\ninstall: $(TARGET) test | $(STAGEDIR)\n\tcp $(TARGET) $(STAGED_TARGET)\n\ntest: $(TEST_CALC_TARGET) $(TEST_STRUTIL_TARGET)\n\t./$(TEST_CALC_TARGET)\n\t./$(TEST_STRUTIL_TARGET)\n\n$(TEST_CALC_TARGET): $(TEST_CALC_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_CALC_SRCS) -o $(TEST_CALC_TARGET)\n\n$(TEST_STRUTIL_TARGET): $(TEST_STRUTIL_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_STRUTIL_SRCS) -o $(TEST_STRUTIL_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(STAGEDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "install-depends-on-all-not-test",
+      "files": {
+        "src/utils/strutil.h": "#pragma once\n\n/* Trims leading/trailing whitespace from `s` in place and returns it. */\nchar *strutil_trim(char *s);\n",
+        "tests/test_strutil.c": "#include \"strutil.h\"\n\n#include <assert.h>\n#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n    char only_leading[] = \"   x\";\n    assert(strcmp(strutil_trim(only_leading), \"x\") == 0);\n\n    char only_trailing[] = \"x   \";\n    assert(strcmp(strutil_trim(only_trailing), \"x\") == 0);\n\n    char all_space[] = \"    \";\n    assert(strcmp(strutil_trim(all_space), \"\") == 0);\n\n    printf(\"PASS\\n\");\n    return 0;\n}\n",
+        "Makefile": "CC := gcc\nCFLAGS := -std=c11 -Wall -MMD -MP -Isrc/core -Isrc/utils\n\nCORE_SRCS := $(wildcard src/core/*.c)\nUTILS_SRCS := $(wildcard src/utils/*.c)\nCLI_SRCS := $(wildcard src/cli/*.c)\nSRCS := $(CORE_SRCS) $(UTILS_SRCS) $(CLI_SRCS)\nOBJS := $(SRCS:.c=.o)\nDEPS := $(OBJS:.o=.d)\n\nBINDIR := bin\nTARGET := $(BINDIR)/app\n\nSTAGEDIR := stage\nSTAGED_TARGET := $(STAGEDIR)/app\n\nTEST_CALC_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_calc.c\nTEST_CALC_TARGET := $(BINDIR)/test_calc\n\nTEST_STRUTIL_SRCS := $(CORE_SRCS) $(UTILS_SRCS) tests/test_strutil.c\nTEST_STRUTIL_TARGET := $(BINDIR)/test_strutil\n\n.PHONY: all clean test install\n\nall: $(TARGET)\n\n$(TARGET): $(OBJS) | $(BINDIR)\n\t$(CC) $(OBJS) -o $(TARGET)\n\n%.o: %.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n\n$(BINDIR):\n\tmkdir -p $(BINDIR)\n\n$(STAGEDIR):\n\tmkdir -p $(STAGEDIR)\n\ninstall: $(TARGET) | $(STAGEDIR)\n\tcp $(TARGET) $(STAGED_TARGET)\n\ntest: $(TEST_CALC_TARGET) $(TEST_STRUTIL_TARGET)\n\t./$(TEST_CALC_TARGET)\n\t./$(TEST_STRUTIL_TARGET)\n\n$(TEST_CALC_TARGET): $(TEST_CALC_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_CALC_SRCS) -o $(TEST_CALC_TARGET)\n\n$(TEST_STRUTIL_TARGET): $(TEST_STRUTIL_SRCS) | $(BINDIR)\n\t$(CC) $(CFLAGS) $(TEST_STRUTIL_SRCS) -o $(TEST_STRUTIL_TARGET)\n\nclean:\n\trm -rf $(BINDIR) $(STAGEDIR) $(DEPS) $(OBJS)\n\n-include $(DEPS)\n"
+      }
+    }
+  ],
+  "name": "add_makefile_buildsystem_install_requires_passing_tests",
+  "language": "makefile",
+  "framework": "make",
+  "domain": "systems",
+  "image": "optarena-tester:latest",
+  "setup_repo": "makefile-buildsystem",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}

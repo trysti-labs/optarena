@@ -38,5 +38,13 @@
   "timeout": 90,
   "reference_solution": {
     "src/main/java/com/optarena/greeting/GreetingService.java": "package com.optarena.greeting;\n\nimport org.springframework.stereotype.Service;\n\n@Service\npublic class GreetingService {\n    public String greet(String name) {\n        return \"Hello, \" + name + \"!\";\n    }\n}\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "missing-punctuation",
+      "files": {
+        "src/main/java/com/optarena/greeting/GreetingService.java": "package com.optarena.greeting;\n\nimport org.springframework.stereotype.Service;\n\n@Service\npublic class GreetingService {\n    public String greet(String name) {\n        return \"Hello, \" + name;\n    }\n}\n"
+      }
+    }
+  ]
 }

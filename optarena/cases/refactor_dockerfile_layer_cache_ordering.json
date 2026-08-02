@@ -1,0 +1,55 @@
+{
+  "description": "Reorder COPY instructions so dependency installation is cached across builds that only change application code, not invalidated on every single-line code edit",
+  "task_type": "refactoring",
+  "tags": [
+    "docker",
+    "devops",
+    "build-cache",
+    "performance"
+  ],
+  "prompts": [
+    "The Dockerfile does `COPY . .` FIRST, then `pip install -r requirements.txt` - which means Docker's layer cache invalidates the pip-install layer on EVERY code change, even a one-line edit to app code that doesn't touch requirements.txt, forcing a full dependency reinstall on every build. Reorder it: COPY ONLY requirements.txt first, run pip install (this layer now only invalidates when requirements.txt itself changes), THEN copy the rest of the application code. The final image's contents and CMD must be unchanged - this is a pure build-time optimization, not a behavior change."
+  ],
+  "setup_files": {
+    "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY . .\nRUN pip install --no-cache-dir -r requirements.txt\nEXPOSE 8000\nCMD [\"python\", \"main.py\"]\n",
+    "requirements.txt": "requests\n",
+    "main.py": "print(\"hello\")\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "Dockerfile",
+      "content_patterns": [
+        "copy requirements.txt"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_layer_order.py": "import re\nfrom pathlib import Path\n\nraw = Path(\"Dockerfile\").read_text(encoding=\"utf-8\")\njoined = re.sub(r\"\\\\\\s*\\n\", \" \", raw)\nlines = [l.strip() for l in joined.splitlines() if l.strip() and not l.strip().startswith(\"#\")]\n\ncopy_req_idx = next(\n    (i for i, l in enumerate(lines)\n     if l.upper().startswith(\"COPY\") and \"requirements.txt\" in l and l.strip() != \"COPY . .\"),\n    None,\n)\nassert copy_req_idx is not None, \"no dedicated 'COPY requirements.txt ...' instruction found\"\n\npip_idx = next(\n    (i for i, l in enumerate(lines) if l.upper().startswith(\"RUN\") and \"pip install\" in l),\n    None,\n)\nassert pip_idx is not None, \"no pip install RUN instruction found\"\nassert copy_req_idx < pip_idx, \"requirements.txt must be copied BEFORE pip install runs\"\n\nfull_copy_idx = next(\n    (i for i, l in enumerate(lines) if l.strip() in (\"COPY . .\", \"COPY . ./\")),\n    None,\n)\nassert full_copy_idx is not None, \"no 'COPY . .' for the rest of the app found\"\nassert pip_idx < full_copy_idx, (\n    \"pip install must run BEFORE the full app code is copied in, or the cache-busting bug is unfixed\")\n\nassert any(l.upper().startswith(\"EXPOSE\") and \"8000\" in l for l in lines), \"EXPOSE 8000 missing\"\ncmd_all = \" \".join(l for l in lines if l.upper().startswith((\"CMD \", \"ENTRYPOINT \")))\nassert \"main.py\" in cmd_all, \"CMD changed unexpectedly\"\n\nprint(\"PASS layer cache ordering checks\")\n"
+  },
+  "check_command": "python3 check_layer_order.py",
+  "reference_solution": {
+    "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY . .\nEXPOSE 8000\nCMD [\"python\", \"main.py\"]\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "unmodified",
+      "files": {
+        "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY . .\nRUN pip install --no-cache-dir -r requirements.txt\nEXPOSE 8000\nCMD [\"python\", \"main.py\"]\n"
+      }
+    },
+    {
+      "name": "copies-requirements-but-still-copies-everything-first-too",
+      "files": {
+        "Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\nCOPY . .\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nEXPOSE 8000\nCMD [\"python\", \"main.py\"]\n"
+      }
+    }
+  ],
+  "name": "refactor_dockerfile_layer_cache_ordering",
+  "language": "dockerfile",
+  "framework": "docker",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3
+}

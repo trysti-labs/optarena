@@ -9,52 +9,40 @@ The agent is asked to output the complete file in one code block; the driver
 writes it to the expected path (same convention as the chat baseline) since a
 bare crew has no file tools - this measures crewAI's orchestration + prompting
 stack on top of the backend.
+
+A-09: the case loop (whole-case deadline, per-step records, disruptions, token
+and cost telemetry) lives in `sdk_base.SingleFileSDKDriver`; this file is just
+"how do I ask crewAI for one completion".
 """
 
 from __future__ import annotations
 
 import os
-import re
-import time
-from pathlib import Path
 
-from ..cases import changed_files, evaluate_case, prepare_workspace, snapshot
 from ..scenario import Scenario
-from .base import CaseResult, Driver
-from .openai_chat import concrete_target
-
-_CODE_BLOCK = re.compile(r"```(?:\w+[^\n]*)?\n(.*?)```", re.DOTALL)
+from .sdk_base import SingleFileSDKDriver
 
 
-class CrewAIDriver(Driver):
+class CrewAIDriver(SingleFileSDKDriver):
     name = "crewai"
+    import_names = ("crewai",)
+    install_hint = "pip install crewai"
 
-    def prepare(self, scenario: Scenario, workspace: Path) -> None:
+    def configure_environment(self) -> None:
         # crewai.telemetry.Telemetry is a module-level singleton that reads
         # this env var once, at first construction (on import or first
-        # Agent/Crew) - must be set before `import crewai` below, or the
-        # singleton latches "enabled" for the rest of the process and every
-        # run silently phones home to crewAI's own telemetry endpoint, even
-        # for a fully local/offline scenario.
+        # Agent/Crew) - must be set before `import crewai`, or the singleton
+        # latches "enabled" for the rest of the process and every run silently
+        # phones home to crewAI's own telemetry endpoint, even for a fully
+        # local/offline scenario. prepare() calls this before the import check.
         os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
-        try:
-            import crewai  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError("crewai not installed - pip install crewai") from exc
 
-    def run_case(self, case: dict, scenario: Scenario, workspace: Path) -> CaseResult:
-        from crewai import Agent, Crew, Task, LLM
+    def open_session(self, scenario: Scenario):
+        from crewai import Agent, LLM
 
-        result = CaseResult(name=case["name"])
         backend = scenario.backend
-        prepare_workspace(workspace, case)
-        before = snapshot(workspace)
-
-        expected = case.get("expected_files", [])
-        target = concrete_target(expected[0]["path_pattern"] if expected else None)
-
-        # The key is passed explicitly to LLM() below - do NOT also write it
-        # into os.environ: that leaked the scenario's key into this process's
+        # The key is passed explicitly to LLM() - do NOT also write it into
+        # os.environ: that leaked the scenario's key into this process's
         # environment for every later driver/subprocess of the run, and
         # conversely a pre-existing host OPENAI_API_KEY silently shadowed the
         # scenario's key for any crewAI internals reading the env.
@@ -63,39 +51,40 @@ class CrewAIDriver(Driver):
             base_url=backend.openai_base,
             api_key=backend.api_key,
         )
-        coder = Agent(
+        return Agent(
             role="Software Engineer",
             goal="Produce complete, working source files exactly as requested.",
             backstory="A precise engineer who answers with one fenced code block.",
             llm=llm, verbose=False,
         )
 
-        t0 = time.monotonic()
-        try:
-            for prompt in case.get("prompts", []):
-                context = ""
-                if (workspace / target).exists():
-                    context = (
-                        f"\nCurrent content of {target.name}:\n```\n"
-                        f"{(workspace / target).read_text(encoding='utf-8', errors='replace')}\n```"
-                    )
-                task = Task(
-                    description=prompt + context +
-                    "\nReply with exactly one fenced code block containing the full file.",
-                    expected_output="One fenced code block with the complete file content.",
-                    agent=coder,
-                )
-                out = str(Crew(agents=[coder], tasks=[task], verbose=False).kickoff())
-                blocks = _CODE_BLOCK.findall(out)
-                content = blocks[0].strip() + "\n" if blocks else out.strip() + "\n"
-                dest = workspace / target
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(content, encoding="utf-8")
-        except Exception as exc:  # noqa: BLE001
-            result.error = f"{type(exc).__name__}: {exc}"
-        result.duration_s = time.monotonic() - t0
+    def complete(self, session, prompt: str, scenario: Scenario,
+                 timeout: float) -> "tuple[str, dict]":
+        from crewai import Crew, Task
 
-        result.files = changed_files(before, workspace)
-        result.failures, result.extra["oracle"] = evaluate_case(case, result.files, workspace)
-        result.passed = result.error is None and not result.failures
-        return result
+        task = Task(
+            description=prompt,
+            expected_output="One fenced code block with the complete file content.",
+            agent=session,
+        )
+        crew = Crew(agents=[session], tasks=[task], verbose=False)
+        output = crew.kickoff()
+        return str(output), _usage_from(crew)
+
+
+def _usage_from(crew) -> dict:   # noqa: ANN001 - crewAI-specific object
+    """Token usage off crewAI's own `usage_metrics`, when it reports any.
+
+    Returns {} rather than zeros when the metrics are absent - an unpriced or
+    unreported run must not read as "0 tokens, $0.00"."""
+    metrics = getattr(crew, "usage_metrics", None)
+    if metrics is None:
+        return {}
+    get = (lambda k: getattr(metrics, k, None)) if not isinstance(metrics, dict) else metrics.get
+    prompt_tokens, completion_tokens = get("prompt_tokens"), get("completion_tokens")
+    usage: dict = {}
+    if prompt_tokens is not None:
+        usage["prompt_tokens"] = int(prompt_tokens)
+    if completion_tokens is not None:
+        usage["completion_tokens"] = int(completion_tokens)
+    return usage

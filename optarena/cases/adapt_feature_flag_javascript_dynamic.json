@@ -1,0 +1,63 @@
+{
+  "name": "adapt_feature_flag_javascript_dynamic",
+  "language": "javascript",
+  "domain": "backend",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval, REACTIVE trigger: the disruption fires the first time banner.js's own text contains 'Welcome' (i.e. once the agent has produced a first attempt), then flags.NEW_UI_ENABLED flips under it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "javascript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "feature-flag",
+    "reactive"
+  ],
+  "prompts": [
+    "flags.js exports a bool NEW_UI_ENABLED via module.exports. Create banner.js with a function bannerText() that returns \"Welcome to the NEW UI!\" if NEW_UI_ENABLED else \"Welcome!\", requiring the flag live from './flags'. Export as module.exports = { bannerText }.",
+    "NEW_UI_ENABLED in flags.js may have changed. Make sure bannerText() reflects its CURRENT value, not a stale one."
+  ],
+  "setup_files": {
+    "flags.js": "module.exports = { NEW_UI_ENABLED: false };\n"
+  },
+  "disruptions": [
+    {
+      "when": {
+        "file_contains": {
+          "path": "banner.js",
+          "pattern": "Welcome"
+        }
+      },
+      "description": "flags.NEW_UI_ENABLED flipped false -> true, triggered reactively once banner.js's first draft appeared",
+      "write_files": {
+        "flags.js": "module.exports = { NEW_UI_ENABLED: true };\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "banner.js",
+      "content_patterns": [
+        "bannerText"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_banner.js": "const { NEW_UI_ENABLED } = require('./flags.js');\nconst { bannerText } = require('./banner.js');\nconst want = NEW_UI_ENABLED ? 'Welcome to the NEW UI!' : 'Welcome!';\nconst got = bannerText();\nif (got !== want) throw new Error(`bannerText() = ${JSON.stringify(got)}, want ${JSON.stringify(want)} (the CURRENT flag, not a stale value)`);\nconsole.log('PASS');\n"
+  },
+  "check_command": "node test_banner.js",
+  "reference_solution": {
+    "banner.js": "const { NEW_UI_ENABLED } = require('./flags');\n\nfunction bannerText() {\n  return NEW_UI_ENABLED ? \"Welcome to the NEW UI!\" : \"Welcome!\";\n}\n\nmodule.exports = { bannerText };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "hardcoded-stale-flag",
+      "files": {
+        "banner.js": "function bannerText() {\n  return \"Welcome!\";\n}\n\nmodule.exports = { bannerText };\n"
+      }
+    }
+  ]
+}

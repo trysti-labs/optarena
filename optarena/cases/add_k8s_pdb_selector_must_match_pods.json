@@ -1,0 +1,48 @@
+{
+  "description": "Add a PodDisruptionBudget whose selector must match the Deployment's pod labels exactly and whose minAvailable must leave room for voluntary disruption",
+  "tags": [
+    "kubernetes",
+    "devops",
+    "pdb",
+    "availability"
+  ],
+  "prompts": [
+    "k8s/deployment.yaml runs the payments-api Deployment (3 replicas) in the payments namespace. Add k8s/pdb.yaml with a policy/v1 PodDisruptionBudget named payments-api in the same namespace: its spec.selector.matchLabels must match the Deployment's pod template labels EXACTLY (not a subset, not extra labels - a mismatched selector protects zero pods), and minAvailable must be 2 (leaving room for exactly one voluntary disruption, e.g. a node drain, out of 3 replicas without an outage)."
+  ],
+  "setup_files": {
+    "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payments-api\n  namespace: payments\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: payments-api\n  template:\n    metadata:\n      labels:\n        app: payments-api\n        tier: backend\n    spec:\n      containers:\n        - name: payments-api\n          image: ghcr.io/example/payments-api:3.4.0\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "*/pdb.yaml",
+      "content_patterns": [
+        "poddisruptionbudget",
+        "minavailable"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_pdb.py": "import yaml\n\nwith open(\"k8s/deployment.yaml\") as f:\n    dep = yaml.safe_load(f)\npod_labels = dep[\"spec\"][\"template\"][\"metadata\"][\"labels\"]\n\nwith open(\"k8s/pdb.yaml\") as f:\n    pdb = yaml.safe_load(f)\n\nassert pdb[\"apiVersion\"] == \"policy/v1\" and pdb[\"kind\"] == \"PodDisruptionBudget\", (\n    f\"expected a policy/v1 PodDisruptionBudget, got {pdb.get('apiVersion')}/{pdb.get('kind')}\")\nassert pdb[\"metadata\"].get(\"namespace\") == \"payments\", \"PDB must live in the payments namespace\"\n\nselector = (pdb[\"spec\"].get(\"selector\") or {}).get(\"matchLabels\") or {}\nassert selector == pod_labels, (\n    f\"PDB selector {selector} must match the Deployment's pod labels {pod_labels} exactly - \"\n    f\"a mismatched selector protects zero pods\")\n\nassert pdb[\"spec\"].get(\"minAvailable\") == 2, (\n    f\"expected minAvailable 2, got {pdb['spec'].get('minAvailable')}\")\n\nprint(\"PASS pdb structural checks\")\n"
+  },
+  "check_command": "python3 check_pdb.py",
+  "reference_solution": {
+    "k8s/pdb.yaml": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: payments-api\n  namespace: payments\nspec:\n  minAvailable: 2\n  selector:\n    matchLabels:\n      app: payments-api\n      tier: backend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "selector-missing-a-label",
+      "files": {
+        "k8s/pdb.yaml": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: payments-api\n  namespace: payments\nspec:\n  minAvailable: 2\n  selector:\n    matchLabels:\n      app: payments-api\n"
+      }
+    }
+  ],
+  "name": "add_k8s_pdb_selector_must_match_pods",
+  "language": "yaml",
+  "framework": "kubernetes",
+  "domain": "infrastructure",
+  "image": "optarena-tester:latest",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 3,
+  "task_type": "devops"
+}

@@ -1,0 +1,45 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded cache",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "Create src/Cache.php defining namespace App and class Cache with a constructor __construct(int $capacity, int $ttl) - a max size and a time-to-live in seconds. put(string $key, $value, int $now): void stores a value timestamped at $now. get(string $key, int $now) returns the value if present AND not expired ($now - storedAt < $ttl), else null - and an expired entry must be REMOVED the moment it's observed to be stale. Both get and put must refresh a key's recency. When put() would exceed $capacity, evict the LEAST recently used entry (recency = most recent get OR put) before inserting the new one."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/Cache.php",
+      "content_patterns": [
+        "function get",
+        "function put"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/Cache.php": "<?php\nnamespace App;\n\nclass Cache\n{\n    private int $capacity;\n    private int $ttl;\n    private array $store = []; // key -> ['value' => ..., 'storedAt' => ...]\n\n    public function __construct(int $capacity, int $ttl)\n    {\n        $this->capacity = $capacity;\n        $this->ttl = $ttl;\n    }\n\n    public function put(string $key, $value, int $now): void\n    {\n        if (array_key_exists($key, $this->store)) {\n            unset($this->store[$key]);\n        } elseif (count($this->store) >= $this->capacity) {\n            $oldestKey = array_key_first($this->store);\n            unset($this->store[$oldestKey]);\n        }\n        $this->store[$key] = ['value' => $value, 'storedAt' => $now];\n    }\n\n    public function get(string $key, int $now)\n    {\n        if (!array_key_exists($key, $this->store)) {\n            return null;\n        }\n        $entry = $this->store[$key];\n        if ($now - $entry['storedAt'] >= $this->ttl) {\n            unset($this->store[$key]);\n            return null;\n        }\n        unset($this->store[$key]);\n        $this->store[$key] = $entry;\n        return $entry['value'];\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "src/Cache.php": "<?php\nnamespace App;\n\nclass Cache\n{\n    private int $capacity;\n    private int $ttl;\n    private array $store = [];\n\n    public function __construct(int $capacity, int $ttl)\n    {\n        $this->capacity = $capacity;\n        $this->ttl = $ttl;\n    }\n\n    public function put(string $key, $value, int $now): void\n    {\n        if (array_key_exists($key, $this->store)) {\n            unset($this->store[$key]);\n        } elseif (count($this->store) >= $this->capacity) {\n            $oldestKey = array_key_first($this->store);\n            unset($this->store[$oldestKey]);\n        }\n        $this->store[$key] = ['value' => $value, 'storedAt' => $now];\n    }\n\n    public function get(string $key, int $now)\n    {\n        if (!array_key_exists($key, $this->store)) {\n            return null;\n        }\n        $entry = $this->store[$key];\n        if ($now - $entry['storedAt'] >= $this->ttl) {\n            unset($this->store[$key]);\n            return null;\n        }\n        return $entry['value'];\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_lru_cache_with_ttl",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "difficulty": 3,
+  "check_command": "phpunit tests/CacheTest.php",
+  "setup_files": {},
+  "test_setup_files": {
+    "tests/CacheTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/Cache.php';\n\nfinal class CacheTest extends TestCase\n{\n    public function testCapacityEvictsLeastRecentlyUsed(): void\n    {\n        $c = new \\App\\Cache(2, 1000);\n        $c->put(\"a\", 1, 0);\n        $c->put(\"b\", 2, 1);\n        $c->get(\"a\", 2);\n        $c->put(\"c\", 3, 3);\n        $this->assertSame(1, $c->get(\"a\", 4));\n        $this->assertNull($c->get(\"b\", 4));\n        $this->assertSame(3, $c->get(\"c\", 4));\n    }\n\n    public function testGetRefreshesRecency(): void\n    {\n        $c = new \\App\\Cache(2, 1000);\n        $c->put(\"a\", 1, 0);\n        $c->put(\"b\", 2, 1);\n        $c->get(\"a\", 2);\n        $c->get(\"b\", 3);\n        $c->put(\"c\", 3, 4);\n        $this->assertNull($c->get(\"a\", 5));\n        $this->assertSame(2, $c->get(\"b\", 5));\n    }\n\n    public function testTtlExpiryIndependentOfCapacity(): void\n    {\n        $c = new \\App\\Cache(5, 10);\n        $c->put(\"a\", 1, 0);\n        $this->assertSame(1, $c->get(\"a\", 9));\n        $this->assertNull($c->get(\"a\", 10));\n    }\n}\n"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "adapt_discount_cap_sql_dynamic",
+  "language": "sql",
+  "domain": "data",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: max_discount.txt (a spec file the coupon CHECK constraint must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it and update the constraint, not leave the stale cap in place",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "sql",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write schema.sql creating a table coupons (id integer primary key, percent_off integer not null) with a CHECK constraint restricting percent_off to be no greater than the integer in max_discount.txt (currently 50).",
+    "max_discount.txt has changed. Update schema.sql's CHECK constraint so it enforces the CURRENT cap in the file."
+  ],
+  "setup_files": {
+    "max_discount.txt": "50\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "max_discount.txt lowered to a stricter cap",
+      "write_files": {
+        "max_discount.txt": "30\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "coupons",
+        "check"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_schema.py": "import sqlite3\n\nwith open('max_discount.txt', encoding='utf-8') as f:\n    cap = int(f.read().strip())\n\nwith open('schema.sql', encoding='utf-8') as f:\n    ddl = f.read()\n\nconn = sqlite3.connect(':memory:')\nconn.executescript(ddl)\n\nconn.execute('INSERT INTO coupons (id, percent_off) VALUES (1, ?)', (cap,))\nconn.commit()\n\ntry:\n    conn.execute('INSERT INTO coupons (id, percent_off) VALUES (2, ?)', (cap + 5,))\n    conn.commit()\n    raise AssertionError(f'expected percent_off > {cap} to be rejected by the CHECK constraint (stale cap not updated)')\nexcept sqlite3.IntegrityError:\n    pass\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_schema.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE coupons (\n    id INTEGER PRIMARY KEY,\n    percent_off INTEGER NOT NULL CHECK (percent_off <= 30)\n);\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-discount-cap",
+      "files": {
+        "schema.sql": "CREATE TABLE coupons (\n    id INTEGER PRIMARY KEY,\n    percent_off INTEGER NOT NULL CHECK (percent_off <= 50)\n);\n"
+      }
+    }
+  ]
+}

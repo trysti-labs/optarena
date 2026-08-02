@@ -13,7 +13,6 @@ caches_results below), rather than paying that startup cost per case.
 from __future__ import annotations
 
 import os
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -116,8 +115,15 @@ class Driver:
     # case, so cases may run concurrently (each in its own workspace).
     parallel_safe = False
     # True when prepare() executes ALL cases once and run_case() serves cached
-    # results - for a driver with expensive per-scenario startup, where
-    # repeat trials would be meaningless. No current driver needs this.
+    # results - for a driver with expensive per-scenario startup, where paying
+    # that startup per case would dominate the measurement.
+    #
+    # A-18: a supported extension point for out-of-tree drivers, deliberately
+    # kept even though no bundled driver sets it. The contract it defines is
+    # load-bearing on the runner side (M-09/F-09: the runner hands the trial
+    # count TO such a driver and runs its own loop once, while the manifest
+    # still records the REQUESTED trial count so comparability is unaffected)
+    # and is covered by CachingDriverTrialsPlumbingTests / ManifestTrialsTests.
     caches_results = False
 
     def prepare(self, scenario: Scenario, workspace: Path) -> None:
@@ -128,10 +134,3 @@ class Driver:
 
     def teardown(self) -> None:
         """Called once after the last case (kill editors, cleanup…)."""
-
-    # Convenience for subclasses.
-    @staticmethod
-    def timed(fn) -> tuple[float, object]:
-        t0 = time.monotonic()
-        out = fn()
-        return time.monotonic() - t0, out

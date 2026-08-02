@@ -1,0 +1,47 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "kotlin",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "TokenBucket.kt's allow always returns true. Implement it properly: the constructor takes (capacity: Double, refillRate: Double) - refillRate tokens are added per second, capped at capacity tokens (never above it, even after a long idle period). allow(now: Double): Boolean refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "TokenBucket.kt",
+      "content_patterns": [
+        "class TokenBucket"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/main/kotlin/com/optarena/app/TokenBucket.kt": "package com.optarena.app\n\nclass TokenBucket(private val capacity: Double, private val refillRate: Double) {\n    private var tokens: Double = capacity\n    private var last: Double? = null\n\n    fun allow(now: Double): Boolean {\n        last?.let { lastTime ->\n            val elapsed = now - lastTime\n            tokens = minOf(capacity, tokens + elapsed * refillRate)\n        }\n        last = now\n        if (tokens >= 1) {\n            tokens -= 1\n            return true\n        }\n        return false\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "src/main/kotlin/com/optarena/app/TokenBucket.kt": "package com.optarena.app\n\nclass TokenBucket(private val capacity: Double, private val refillRate: Double) {\n    private var tokens: Double = capacity\n    private var last: Double? = null\n\n    fun allow(now: Double): Boolean {\n        last?.let { lastTime ->\n            val elapsed = now - lastTime\n            tokens = tokens + elapsed * refillRate\n        }\n        last = now\n        if (tokens >= 1) {\n            tokens -= 1\n            return true\n        }\n        return false\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_kotlin_token_bucket_limiter",
+  "language": "kotlin",
+  "framework": "spring-boot",
+  "domain": "backend",
+  "image": "optarena-tester-jvm:latest",
+  "check_command_timeout": 300,
+  "timeout": 400,
+  "difficulty": 3,
+  "check_command": "mvn -o -q test -Dtest=TokenBucketTest",
+  "setup_files": {
+    "pom.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n  <modelVersion>4.0.0</modelVersion>\n  <parent>\n    <groupId>org.springframework.boot</groupId>\n    <artifactId>spring-boot-starter-parent</artifactId>\n    <version>3.3.4</version>\n  </parent>\n  <groupId>com.optarena</groupId>\n  <artifactId>kotlin-case</artifactId>\n  <version>1.0.0</version>\n\n  <properties>\n    <java.version>17</java.version>\n  </properties>\n\n  <dependencies>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-web</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>com.fasterxml.jackson.module</groupId>\n      <artifactId>jackson-module-kotlin</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-reflect</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.jetbrains.kotlin</groupId>\n      <artifactId>kotlin-stdlib</artifactId>\n    </dependency>\n    <dependency>\n      <groupId>org.springframework.boot</groupId>\n      <artifactId>spring-boot-starter-test</artifactId>\n      <scope>test</scope>\n    </dependency>\n  </dependencies>\n\n  <build>\n    <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>\n    <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>\n    <plugins>\n      <plugin>\n        <groupId>org.springframework.boot</groupId>\n        <artifactId>spring-boot-maven-plugin</artifactId>\n      </plugin>\n      <plugin>\n        <groupId>org.jetbrains.kotlin</groupId>\n        <artifactId>kotlin-maven-plugin</artifactId>\n        <configuration>\n          <args>\n            <arg>-Xjsr305=strict</arg>\n          </args>\n          <compilerPlugins>\n            <plugin>spring</plugin>\n          </compilerPlugins>\n        </configuration>\n        <dependencies>\n          <dependency>\n            <groupId>org.jetbrains.kotlin</groupId>\n            <artifactId>kotlin-maven-allopen</artifactId>\n            <version>${kotlin.version}</version>\n          </dependency>\n        </dependencies>\n        <executions>\n          <execution>\n            <id>compile</id>\n            <goals>\n              <goal>compile</goal>\n            </goals>\n          </execution>\n          <execution>\n            <id>test-compile</id>\n            <goals>\n              <goal>test-compile</goal>\n            </goals>\n          </execution>\n        </executions>\n      </plugin>\n    </plugins>\n  </build>\n</project>\n",
+    "src/main/kotlin/com/optarena/app/TokenBucket.kt": "package com.optarena.app\n\nclass TokenBucket(private val capacity: Double, private val refillRate: Double) {\n    fun allow(now: Double): Boolean {\n        return true\n    }\n}\n"
+  },
+  "test_setup_files": {
+    "src/test/kotlin/com/optarena/app/TokenBucketTest.kt": "package com.optarena.app\n\nimport org.junit.jupiter.api.Assertions.assertFalse\nimport org.junit.jupiter.api.Assertions.assertTrue\nimport org.junit.jupiter.api.Test\n\nclass TokenBucketTest {\n    @Test\n    fun startsFullAndDrains() {\n        val b = TokenBucket(3.0, 1.0)\n        assertTrue(b.allow(0.0))\n        assertTrue(b.allow(0.0))\n        assertTrue(b.allow(0.0))\n        assertFalse(b.allow(0.0))\n    }\n\n    @Test\n    fun refillsOverTime() {\n        val b = TokenBucket(3.0, 1.0)\n        repeat(3) { b.allow(0.0) }\n        assertFalse(b.allow(0.5))\n        assertTrue(b.allow(1.0))\n        assertFalse(b.allow(1.0))\n    }\n\n    @Test\n    fun refillCapsAtCapacity() {\n        val b = TokenBucket(2.0, 1.0)\n        b.allow(0.0)\n        b.allow(0.0)\n        assertTrue(b.allow(1000.0))\n        assertTrue(b.allow(1000.0))\n        assertFalse(b.allow(1000.0))\n    }\n}\n"
+  }
+}

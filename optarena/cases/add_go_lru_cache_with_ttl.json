@@ -1,0 +1,49 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded cache",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "cache.go's Cache is an unbounded map wrapper - Get/Put never evict anything. Turn it into an LRU cache with a TTL: NewCache(capacity int, ttl int64) takes a max size and a time-to-live in seconds. Put(key string, value int, now int64) stores a value timestamped at `now`. Get(key string, now int64) returns (value, true) if present AND not expired (now - storedAt < ttl), else (0, false) - and an expired entry must be REMOVED the moment it's observed to be stale. Both Get and Put must refresh a key's recency. When Put would exceed `capacity`, evict the LEAST recently used entry (recency = most recent Get OR Put) before inserting the new one."
+  ],
+  "setup_files": {
+    "go.mod": "module lrucache\n\ngo 1.21\n",
+    "cache.go": "package main\n\ntype Cache struct {\n\tcapacity int\n\tttl      int64\n\tstore    map[string]int\n}\n\nfunc NewCache(capacity int, ttl int64) *Cache {\n\treturn &Cache{capacity: capacity, ttl: ttl, store: make(map[string]int)}\n}\n\nfunc (c *Cache) Put(key string, value int, now int64) {\n\tc.store[key] = value\n}\n\nfunc (c *Cache) Get(key string, now int64) (int, bool) {\n\tv, ok := c.store[key]\n\treturn v, ok\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "cache.go",
+      "content_patterns": [
+        "func NewCache"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "cache_test.go": "package main\n\nimport \"testing\"\n\nfunc TestCapacityEvictsLeastRecentlyUsed(t *testing.T) {\n\tc := NewCache(2, 1000)\n\tc.Put(\"a\", 1, 0)\n\tc.Put(\"b\", 2, 1)\n\tc.Get(\"a\", 2)\n\tc.Put(\"c\", 3, 3)\n\tif v, ok := c.Get(\"a\", 4); !ok || v != 1 {\n\t\tt.Fatalf(\"expected a=1, got %v %v\", v, ok)\n\t}\n\tif _, ok := c.Get(\"b\", 4); ok {\n\t\tt.Fatalf(\"expected b evicted\")\n\t}\n\tif v, ok := c.Get(\"c\", 4); !ok || v != 3 {\n\t\tt.Fatalf(\"expected c=3, got %v %v\", v, ok)\n\t}\n}\n\nfunc TestGetRefreshesRecency(t *testing.T) {\n\tc := NewCache(2, 1000)\n\tc.Put(\"a\", 1, 0)\n\tc.Put(\"b\", 2, 1)\n\tc.Get(\"a\", 2)\n\tc.Get(\"b\", 3)\n\tc.Put(\"c\", 3, 4)\n\tif _, ok := c.Get(\"a\", 5); ok {\n\t\tt.Fatalf(\"expected a evicted\")\n\t}\n\tif v, ok := c.Get(\"b\", 5); !ok || v != 2 {\n\t\tt.Fatalf(\"expected b=2, got %v %v\", v, ok)\n\t}\n}\n\nfunc TestTTLExpiryIndependentOfCapacity(t *testing.T) {\n\tc := NewCache(5, 10)\n\tc.Put(\"a\", 1, 0)\n\tif v, ok := c.Get(\"a\", 9); !ok || v != 1 {\n\t\tt.Fatalf(\"expected a=1 at t=9\")\n\t}\n\tif _, ok := c.Get(\"a\", 10); ok {\n\t\tt.Fatalf(\"expected a expired at t=10\")\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module lrucache\n\ngo 1.21\n",
+    "cache.go": "package main\n\nimport \"container/list\"\n\ntype entry struct {\n\tkey      string\n\tvalue    int\n\tstoredAt int64\n}\n\ntype Cache struct {\n\tcapacity int\n\tttl      int64\n\torder    *list.List\n\tindex    map[string]*list.Element\n}\n\nfunc NewCache(capacity int, ttl int64) *Cache {\n\treturn &Cache{capacity: capacity, ttl: ttl, order: list.New(), index: make(map[string]*list.Element)}\n}\n\nfunc (c *Cache) Put(key string, value int, now int64) {\n\tif el, ok := c.index[key]; ok {\n\t\tc.order.Remove(el)\n\t\tdelete(c.index, key)\n\t} else if c.order.Len() >= c.capacity {\n\t\toldest := c.order.Back()\n\t\tif oldest != nil {\n\t\t\tc.order.Remove(oldest)\n\t\t\tdelete(c.index, oldest.Value.(*entry).key)\n\t\t}\n\t}\n\tel := c.order.PushFront(&entry{key: key, value: value, storedAt: now})\n\tc.index[key] = el\n}\n\nfunc (c *Cache) Get(key string, now int64) (int, bool) {\n\tel, ok := c.index[key]\n\tif !ok {\n\t\treturn 0, false\n\t}\n\te := el.Value.(*entry)\n\tif now-e.storedAt >= c.ttl {\n\t\tc.order.Remove(el)\n\t\tdelete(c.index, key)\n\t\treturn 0, false\n\t}\n\tc.order.MoveToFront(el)\n\treturn e.value, true\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "go.mod": "module lrucache\n\ngo 1.21\n",
+        "cache.go": "package main\n\nimport \"container/list\"\n\ntype entry struct {\n\tkey      string\n\tvalue    int\n\tstoredAt int64\n}\n\ntype Cache struct {\n\tcapacity int\n\tttl      int64\n\torder    *list.List\n\tindex    map[string]*list.Element\n}\n\nfunc NewCache(capacity int, ttl int64) *Cache {\n\treturn &Cache{capacity: capacity, ttl: ttl, order: list.New(), index: make(map[string]*list.Element)}\n}\n\nfunc (c *Cache) Put(key string, value int, now int64) {\n\tif el, ok := c.index[key]; ok {\n\t\tc.order.Remove(el)\n\t\tdelete(c.index, key)\n\t} else if c.order.Len() >= c.capacity {\n\t\toldest := c.order.Back()\n\t\tif oldest != nil {\n\t\t\tc.order.Remove(oldest)\n\t\t\tdelete(c.index, oldest.Value.(*entry).key)\n\t\t}\n\t}\n\tel := c.order.PushFront(&entry{key: key, value: value, storedAt: now})\n\tc.index[key] = el\n}\n\nfunc (c *Cache) Get(key string, now int64) (int, bool) {\n\tel, ok := c.index[key]\n\tif !ok {\n\t\treturn 0, false\n\t}\n\te := el.Value.(*entry)\n\tif now-e.storedAt >= c.ttl {\n\t\tc.order.Remove(el)\n\t\tdelete(c.index, key)\n\t\treturn 0, false\n\t}\n\treturn e.value, true\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_lru_cache_with_ttl",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

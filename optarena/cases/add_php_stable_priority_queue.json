@@ -1,0 +1,44 @@
+{
+  "description": "Fix a usort-based priority queue that breaks ties non-deterministically (usort is not stable in PHP) into an insertion-order-stable one",
+  "task_type": "feature",
+  "tags": [
+    "php",
+    "algorithms"
+  ],
+  "prompts": [
+    "Create src/StablePriorityQueue.php defining namespace App and class StablePriorityQueue with push(int $priority, string $value): void and pop(): string. The obvious usort($this->items, fn($a, $b) => $a['priority'] <=> $b['priority']) on every push is NOT enough on its own: usort is not guaranteed stable in PHP, so ties between equal-priority items can come out in any order. Add an explicit monotonically increasing insertion-order field to each pushed item and use it as the comparator's tiebreaker, so: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO)."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "**/StablePriorityQueue.php",
+      "content_patterns": [
+        "function push",
+        "function pop"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "src/StablePriorityQueue.php": "<?php\nnamespace App;\n\nclass StablePriorityQueue\n{\n    private array $items = [];\n    private int $counter = 0;\n\n    public function push(int $priority, string $value): void\n    {\n        $this->items[] = ['priority' => $priority, 'order' => $this->counter, 'value' => $value];\n        $this->counter++;\n        usort($this->items, function ($a, $b) {\n            return $a['priority'] <=> $b['priority'] ?: $a['order'] <=> $b['order'];\n        });\n    }\n\n    public function pop(): string\n    {\n        $item = array_shift($this->items);\n        return $item['value'];\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "counter-decrements-reverses-fifo",
+      "files": {
+        "src/StablePriorityQueue.php": "<?php\nnamespace App;\n\nclass StablePriorityQueue\n{\n    private array $items = [];\n    private int $counter = 0;\n\n    public function push(int $priority, string $value): void\n    {\n        $this->items[] = ['priority' => $priority, 'order' => $this->counter, 'value' => $value];\n        $this->counter--;\n        usort($this->items, function ($a, $b) {\n            return $a['priority'] <=> $b['priority'] ?: $a['order'] <=> $b['order'];\n        });\n    }\n\n    public function pop(): string\n    {\n        $item = array_shift($this->items);\n        return $item['value'];\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_php_stable_priority_queue",
+  "language": "php",
+  "framework": "phpunit",
+  "domain": "backend",
+  "image": "optarena-tester-php:latest",
+  "check_command_timeout": 300,
+  "timeout": 360,
+  "difficulty": 3,
+  "check_command": "phpunit tests/StablePriorityQueueTest.php",
+  "setup_files": {},
+  "test_setup_files": {
+    "tests/StablePriorityQueueTest.php": "<?php\nuse PHPUnit\\Framework\\TestCase;\n\nrequire_once __DIR__ . '/../src/StablePriorityQueue.php';\n\nfinal class StablePriorityQueueTest extends TestCase\n{\n    public function testPriorityOrder(): void\n    {\n        $q = new \\App\\StablePriorityQueue();\n        $q->push(5, \"low\");\n        $q->push(1, \"high\");\n        $q->push(3, \"mid\");\n        $this->assertSame(\"high\", $q->pop());\n        $this->assertSame(\"mid\", $q->pop());\n        $this->assertSame(\"low\", $q->pop());\n    }\n\n    public function testEqualPriorityIsFifoAcrossManyItems(): void\n    {\n        $q = new \\App\\StablePriorityQueue();\n        for ($i = 0; $i < 20; $i++) {\n            $q->push(1, chr(ord('a') + $i));\n        }\n        for ($i = 0; $i < 20; $i++) {\n            $this->assertSame(chr(ord('a') + $i), $q->pop());\n        }\n    }\n}\n"
+  }
+}

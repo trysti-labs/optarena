@@ -43,10 +43,13 @@ _DEFAULT_PRICES: dict[str, tuple[float, float]] = {
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
 
 
-@lru_cache(maxsize=1)
-def _table() -> dict[str, tuple[float, float]]:
+def _pricing_path() -> str:
+    return os.environ.get("OPTARENA_PRICING") or str(Path.home() / ".optarena" / "pricing.json")
+
+
+@lru_cache(maxsize=4)
+def _table_for(path: str) -> dict[str, tuple[float, float]]:
     table = dict(_DEFAULT_PRICES)
-    path = os.environ.get("OPTARENA_PRICING") or str(Path.home() / ".optarena" / "pricing.json")
     try:
         if Path(path).exists():
             data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -56,6 +59,21 @@ def _table() -> dict[str, tuple[float, float]]:
     except (OSError, ValueError):
         pass  # a broken override file should never break a run
     return table
+
+
+def _table() -> dict[str, tuple[float, float]]:
+    """A-21: keyed on the RESOLVED override path rather than cached once for
+    the whole process, so changing OPTARENA_PRICING (a matrix run pricing two
+    backends differently, or a test) actually takes effect. The file's
+    contents are still read at most once per path - this is not a per-call
+    disk hit."""
+    return _table_for(_pricing_path())
+
+
+def clear_pricing_cache() -> None:
+    """Drop the parsed override table(s) - for tests and for a long-lived
+    process that edits ~/.optarena/pricing.json in place."""
+    _table_for.cache_clear()
 
 
 def is_local_backend(base_url: str | None) -> bool:

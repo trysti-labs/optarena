@@ -1,0 +1,58 @@
+{
+  "name": "adapt_output_name_makefile_dynamic",
+  "language": "makefile",
+  "domain": "devops",
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "description": "Dynamic eval: binary_name.txt (a spec file the build target's output filename must match) is REWRITTEN between prompts (fixed after_prompt trigger); the agent must re-read it AT BUILD TIME, not bake the old name into the Makefile",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "makefile",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "requirements-drift"
+  ],
+  "prompts": [
+    "Write a Makefile with a target `build` that reads the current binary name from binary_name.txt AT BUILD TIME (e.g. via `$(shell cat binary_name.txt)`, not by copying the value into the Makefile) and creates an empty file with that exact name under dist/ (creating dist/ first if needed).",
+    "binary_name.txt may have changed since you last checked. Make sure `make build` still creates the file matching the CURRENT binary_name.txt value, not a stale hardcoded one."
+  ],
+  "setup_files": {
+    "binary_name.txt": "app\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "binary_name.txt rewritten to a new required name",
+      "write_files": {
+        "binary_name.txt": "server\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "Makefile",
+      "content_patterns": [
+        "build",
+        "binary_name.txt"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_make.py": "import subprocess\nimport shutil\nfrom pathlib import Path\n\nwith open('binary_name.txt', encoding='utf-8') as f:\n    current = f.read().strip()\nassert current, 'binary_name.txt is empty'\n\nshutil.rmtree('dist', ignore_errors=True)\nproc = subprocess.run(['make', 'build'], capture_output=True, text=True, timeout=15)\nassert proc.returncode == 0, f'make build failed: exit {proc.returncode}, stderr={proc.stderr!r}'\n\nexpected = Path('dist') / current\nassert expected.is_file(), \\\n    f'expected {expected} to exist (built from the CURRENT binary_name.txt value {current!r}) - dist/ contains: {list(Path(\"dist\").glob(\"*\")) if Path(\"dist\").is_dir() else \"(missing)\"}'\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 test_make.py",
+  "reference_solution": {
+    "Makefile": "build:\n\tmkdir -p dist\n\ttouch dist/$(shell cat binary_name.txt)\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "stale-hardcoded-name",
+      "files": {
+        "Makefile": "build:\n\tmkdir -p dist\n\ttouch dist/app\n"
+      }
+    }
+  ]
+}

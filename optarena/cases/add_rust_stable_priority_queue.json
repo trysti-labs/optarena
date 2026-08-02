@@ -1,0 +1,49 @@
+{
+  "description": "Fix a BinaryHeap-based priority queue that breaks ties by comparing payload strings directly (no FIFO guarantee) into an insertion-order-stable one",
+  "task_type": "feature",
+  "tags": [
+    "rust",
+    "algorithms",
+    "binary-heap"
+  ],
+  "prompts": [
+    "src/lib.rs's StablePriorityQueue wraps a std::collections::BinaryHeap<Item> whose Ord impl compares ONLY by priority (via Reverse for min-heap behavior) - ties between equal-priority items fall back to comparing nothing else, which BinaryHeap does not define as any particular pop order. Fix it so that: (1) items with a lower priority number come out first, and (2) items with EQUAL priority always come out in the order they were originally pushed (FIFO) - add an explicit monotonically increasing insertion-order field to Item and include it in the Ord/PartialOrd comparison as the tiebreaker (remember BinaryHeap is a MAX-heap, so wrap the whole comparison key in std::cmp::Reverse or negate appropriately to get min-priority-first, FIFO-tiebreak behavior)."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"stable_pq\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::cmp::Ordering;\nuse std::collections::BinaryHeap;\n\n#[derive(Eq, PartialEq)]\nstruct Item {\n    priority: i32,\n    value: String,\n}\n\nimpl Ord for Item {\n    fn cmp(&self, other: &Self) -> Ordering {\n        other.priority.cmp(&self.priority)\n    }\n}\n\nimpl PartialOrd for Item {\n    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {\n        Some(self.cmp(other))\n    }\n}\n\npub struct StablePriorityQueue {\n    heap: BinaryHeap<Item>,\n}\n\nimpl StablePriorityQueue {\n    pub fn new() -> Self {\n        StablePriorityQueue { heap: BinaryHeap::new() }\n    }\n\n    pub fn push(&mut self, priority: i32, value: &str) {\n        self.heap.push(Item { priority, value: value.to_string() });\n    }\n\n    pub fn pop(&mut self) -> Option<String> {\n        self.heap.pop().map(|i| i.value)\n    }\n}\n\nimpl Default for StablePriorityQueue {\n    fn default() -> Self {\n        Self::new()\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "struct StablePriorityQueue"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/pq_test.rs": "use stable_pq::StablePriorityQueue;\n\n#[test]\nfn priority_order() {\n    let mut q = StablePriorityQueue::new();\n    q.push(5, \"low\");\n    q.push(1, \"high\");\n    q.push(3, \"mid\");\n    assert_eq!(q.pop(), Some(\"high\".to_string()));\n    assert_eq!(q.pop(), Some(\"mid\".to_string()));\n    assert_eq!(q.pop(), Some(\"low\".to_string()));\n}\n\n#[test]\nfn equal_priority_is_fifo_across_many_items() {\n    let mut q = StablePriorityQueue::new();\n    for i in 0..20 {\n        let c = ((b'a' + i) as char).to_string();\n        q.push(1, &c);\n    }\n    for i in 0..20 {\n        let want = ((b'a' + i) as char).to_string();\n        assert_eq!(q.pop(), Some(want));\n    }\n}\n"
+  },
+  "reference_solution": {
+    "Cargo.toml": "[package]\nname = \"stable_pq\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "use std::cmp::Ordering;\nuse std::collections::BinaryHeap;\n\n#[derive(Eq, PartialEq)]\nstruct Item {\n    priority: i32,\n    order: u64,\n    value: String,\n}\n\nimpl Ord for Item {\n    fn cmp(&self, other: &Self) -> Ordering {\n        other\n            .priority\n            .cmp(&self.priority)\n            .then_with(|| other.order.cmp(&self.order))\n    }\n}\n\nimpl PartialOrd for Item {\n    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {\n        Some(self.cmp(other))\n    }\n}\n\npub struct StablePriorityQueue {\n    heap: BinaryHeap<Item>,\n    counter: u64,\n}\n\nimpl StablePriorityQueue {\n    pub fn new() -> Self {\n        StablePriorityQueue { heap: BinaryHeap::new(), counter: 0 }\n    }\n\n    pub fn push(&mut self, priority: i32, value: &str) {\n        self.heap.push(Item { priority, order: self.counter, value: value.to_string() });\n        self.counter += 1;\n    }\n\n    pub fn pop(&mut self) -> Option<String> {\n        self.heap.pop().map(|i| i.value)\n    }\n}\n\nimpl Default for StablePriorityQueue {\n    fn default() -> Self {\n        Self::new()\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-order-tiebreak",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"stable_pq\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n",
+        "src/lib.rs": "use std::cmp::Ordering;\nuse std::collections::BinaryHeap;\n\n#[derive(Eq, PartialEq)]\nstruct Item {\n    priority: i32,\n    value: String,\n}\n\nimpl Ord for Item {\n    fn cmp(&self, other: &Self) -> Ordering {\n        other.priority.cmp(&self.priority)\n    }\n}\n\nimpl PartialOrd for Item {\n    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {\n        Some(self.cmp(other))\n    }\n}\n\npub struct StablePriorityQueue {\n    heap: BinaryHeap<Item>,\n}\n\nimpl StablePriorityQueue {\n    pub fn new() -> Self {\n        StablePriorityQueue { heap: BinaryHeap::new() }\n    }\n\n    pub fn push(&mut self, priority: i32, value: &str) {\n        self.heap.push(Item { priority, value: value.to_string() });\n    }\n\n    pub fn pop(&mut self) -> Option<String> {\n        self.heap.pop().map(|i| i.value)\n    }\n}\n\nimpl Default for StablePriorityQueue {\n    fn default() -> Self {\n        Self::new()\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_rust_stable_priority_queue",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "cargo test --offline"
+}

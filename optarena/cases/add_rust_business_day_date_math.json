@@ -1,0 +1,49 @@
+{
+  "description": "Replace naive calendar-day addition with business-day addition that skips weekends, implemented on a dependency-free mini calendar (no chrono)",
+  "task_type": "feature",
+  "tags": [
+    "rust",
+    "dates",
+    "correctness"
+  ],
+  "prompts": [
+    "src/lib.rs's add_business_days(start_epoch_day: i64, n: i64) -> i64 just does start_epoch_day + n - it counts weekends as business days. Dates are represented as \"epoch days\" (days since 1970-01-01, a Thursday) so weekday can be computed as `(epoch_day + 3).rem_euclid(7)` (0=Monday..6=Sunday in this scheme, matching epoch_day=0 being Thursday=3). Implement it properly: n=0 returns start_epoch_day unchanged (even if start itself falls on a weekend); for n>0, step forward day by day, skipping Saturday (weekday 5) and Sunday (weekday 6), until n business days have been counted, then return that epoch day. Do not use an approximation formula like `n + 2*(n/5)` calendar-days shortcut, it gives the wrong answer depending on which weekday `start_epoch_day` falls on."
+  ],
+  "setup_files": {
+    "Cargo.toml": "[package]\nname = \"busdays\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub fn add_business_days(start_epoch_day: i64, n: i64) -> i64 {\n    start_epoch_day + n\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "src/lib.rs",
+      "content_patterns": [
+        "fn add_business_days"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/dates_test.rs": "use busdays::add_business_days;\n\n// epoch_day 0 = 1970-01-01 (Thursday).\n// 2024-05-31 (Friday) = 19874; 2024-06-03 (Monday) = 19877.\n// 2024-05-27 (Monday) = 19870.\n// 2024-06-01 (Saturday) = 19875.\n// 2024-12-27 (Friday) = 20084; 2025-01-01 (Wednesday) = 20089.\n\n#[test]\nfn zero_returns_start_unchanged() {\n    assert_eq!(add_business_days(19875, 0), 19875);\n}\n\n#[test]\nfn friday_plus_one_skips_weekend() {\n    assert_eq!(add_business_days(19874, 1), 19877);\n}\n\n#[test]\nfn monday_plus_five_lands_next_monday() {\n    assert_eq!(add_business_days(19870, 5), 19877);\n}\n\n#[test]\nfn crosses_month_and_year_boundary() {\n    assert_eq!(add_business_days(20084, 3), 20089);\n}\n\n#[test]\nfn starting_on_a_weekend_still_counts_correctly() {\n    assert_eq!(add_business_days(19875, 1), 19877);\n}\n"
+  },
+  "reference_solution": {
+    "Cargo.toml": "[package]\nname = \"busdays\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n",
+    "src/lib.rs": "pub fn add_business_days(start_epoch_day: i64, n: i64) -> i64 {\n    if n == 0 {\n        return start_epoch_day;\n    }\n    let mut current = start_epoch_day;\n    let mut counted = 0;\n    while counted < n {\n        current += 1;\n        let weekday = (current + 3).rem_euclid(7);\n        if weekday != 5 && weekday != 6 {\n            counted += 1;\n        }\n    }\n    current\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "approximation-formula-wrong-for-some-weekdays",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"busdays\"\nversion = \"0.1.1\"\nedition = \"2021\"\n\n[dependencies]\n",
+        "src/lib.rs": "pub fn add_business_days(start_epoch_day: i64, n: i64) -> i64 {\n    if n == 0 {\n        return start_epoch_day;\n    }\n    let weeks = n / 5;\n    let remainder = n % 5;\n    let calendar_days = weeks * 7 + remainder;\n    start_epoch_day + calendar_days\n}\n"
+      }
+    }
+  ],
+  "name": "add_rust_business_day_date_math",
+  "language": "rust",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-rust:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "cargo test --offline"
+}

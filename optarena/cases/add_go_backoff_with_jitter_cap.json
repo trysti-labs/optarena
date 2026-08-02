@@ -1,0 +1,49 @@
+{
+  "description": "Add full jitter to an exponential backoff formula that currently produces identical, unbounded delays for every client",
+  "task_type": "feature",
+  "tags": [
+    "go",
+    "retry",
+    "algorithms"
+  ],
+  "prompts": [
+    "retry.go's BackoffDelay(attempt int, base float64, maxDelay float64) is deterministic exponential backoff with no jitter and no cap. Change the signature to BackoffDelay(attempt int, base, maxDelay float64, rnd func() float64) and implement 'full jitter': compute cap = min(maxDelay, base * 2^attempt), then return rnd() * cap - `rnd` is an injectable function returning a float64 in [0, 1), so callers can pass a fixed function for deterministic tests. The delay must never exceed maxDelay, no matter how large `attempt` gets."
+  ],
+  "setup_files": {
+    "go.mod": "module backoffjitter\n\ngo 1.21\n",
+    "retry.go": "package main\n\nimport \"math\"\n\nfunc BackoffDelay(attempt int, base float64, maxDelay float64) float64 {\n\treturn base * math.Pow(2, float64(attempt))\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "retry.go",
+      "content_patterns": [
+        "func BackoffDelay"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "retry_test.go": "package main\n\nimport \"testing\"\n\nfunc TestUpperBoundIsTheCap(t *testing.T) {\n\tdelay := BackoffDelay(2, 1, 100, func() float64 { return 1.0 })\n\tif delay != 4 {\n\t\tt.Fatalf(\"got %v, want 4\", delay)\n\t}\n}\n\nfunc TestLowerBoundIsZero(t *testing.T) {\n\tdelay := BackoffDelay(5, 1, 100, func() float64 { return 0.0 })\n\tif delay != 0 {\n\t\tt.Fatalf(\"got %v, want 0\", delay)\n\t}\n}\n\nfunc TestDelayNeverExceedsMaxDelayForLargeAttempts(t *testing.T) {\n\tdelay := BackoffDelay(50, 1, 10, func() float64 { return 1.0 })\n\tif delay != 10 {\n\t\tt.Fatalf(\"got %v, want 10\", delay)\n\t}\n}\n\nfunc TestDefaultRandStaysInBounds(t *testing.T) {\n\tfor attempt := 0; attempt < 10; attempt++ {\n\t\tdelay := BackoffDelay(attempt, 1, 20, func() float64 { return 0.5 })\n\t\tif delay < 0 || delay > 20 {\n\t\t\tt.Fatalf(\"delay %v out of bounds at attempt %d\", delay, attempt)\n\t\t}\n\t}\n}\n"
+  },
+  "reference_solution": {
+    "go.mod": "module backoffjitter\n\ngo 1.21\n",
+    "retry.go": "package main\n\nimport \"math\"\n\nfunc BackoffDelay(attempt int, base, maxDelay float64, rnd func() float64) float64 {\n\tcap := math.Min(maxDelay, base*math.Pow(2, float64(attempt)))\n\treturn rnd() * cap\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "no-cap-on-exponent",
+      "files": {
+        "go.mod": "module backoffjitter\n\ngo 1.21\n",
+        "retry.go": "package main\n\nimport \"math\"\n\nfunc BackoffDelay(attempt int, base, maxDelay float64, rnd func() float64) float64 {\n\treturn rnd() * base * math.Pow(2, float64(attempt))\n}\n"
+      }
+    }
+  ],
+  "name": "add_go_backoff_with_jitter_cap",
+  "language": "go",
+  "framework": "stdlib",
+  "domain": "backend",
+  "image": "optarena-tester-go:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "go test ./..."
+}

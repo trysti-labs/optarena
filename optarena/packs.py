@@ -244,8 +244,8 @@ def resolve_pack(ref: str, packs_dir: Path | None = None) -> Path:
     `run --pack`. Bare name picks the highest installed version."""
     root = packs_dir or PACKS_DIR
     if "@" in ref:
-        d = root / _safe(ref.replace("@", "@"))
-        # normalize name@version -> name@version dir name
+        # A-19: was preceded by a dead `d = root / _safe(ref.replace("@", "@"))`
+        # (a no-op replace, immediately overwritten below).
         name, version = ref.split("@", 1)
         d = root / f"{_safe(name)}@{_safe(version)}"
         if d.is_dir():
@@ -254,8 +254,9 @@ def resolve_pack(ref: str, packs_dir: Path | None = None) -> Path:
     candidates = [m for m in list_installed(packs_dir) if m.get("name") == ref]
     if not candidates:
         raise FileNotFoundError(f"pack not installed: {ref} (see `optarena cases packs`)")
-    # F-11: numeric semver compare, not string compare - "1.9.0" must sort
-    # above "1.10.0" (plain string compare puts "1.10.0" first). Falls back
-    # to newest install when versions tie or are absent.
+    # F-11: numeric semver compare, not string compare - "1.10.0" must sort
+    # above "1.9.0", which a plain string compare gets backwards (lexical '9'
+    # > '1'). Falls back to newest install when versions tie or are absent.
+    # (A-20: this comment used to state the requirement inverted.)
     candidates.sort(key=lambda m: (_version_key(str(m.get("version", ""))), m.get("created_at", "")), reverse=True)
     return Path(candidates[0]["path"])

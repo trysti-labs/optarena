@@ -1,0 +1,58 @@
+{
+  "name": "adapt_removed_dependency_typescript_dynamic",
+  "language": "typescript",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "description": "Dynamic eval: a file the agent's first solution depends on is DELETED between prompts (fixed after_prompt trigger); the agent must stop depending on it",
+  "difficulty": 2,
+  "task_type": "feature",
+  "test_kind": "unit",
+  "tags": [
+    "typescript",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "deleted-dependency"
+  ],
+  "prompts": [
+    "greetingData.ts exports GREETING. Create message.ts that exports a function message(): string returning the value of GREETING, importing it from './greetingData'.",
+    "greetingData.ts has just been removed from the project. Update message.ts so it still works with NO reference to greetingData or a GREETING identifier, and message() returns exactly \"hola\"."
+  ],
+  "setup_files": {
+    "greetingData.ts": "export const GREETING = \"hola\";\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "greetingData.ts deleted",
+      "delete_files": [
+        "greetingData.ts"
+      ]
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "message.ts",
+      "content_patterns": [
+        "message"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_message.ts": "import { message } from './message';\n\nconst got = message();\nif (got !== 'hola') { throw new Error(`message() = \"${got}\", want \"hola\"`); }\nconsole.log('PASS');\n"
+  },
+  "check_command": "tsc --strict --target es2020 --module commonjs --skipLibCheck --outDir build message.ts test_message.ts && node build/test_message.js",
+  "reference_solution": {
+    "message.ts": "export function message(): string {\n  return \"hola\";\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-value",
+      "files": {
+        "message.ts": "export function message(): string {\n  return \"bonjour\";\n}\n"
+      }
+    }
+  ]
+}

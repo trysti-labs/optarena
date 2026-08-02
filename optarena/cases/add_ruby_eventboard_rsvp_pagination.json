@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (ruby-eventboard): add pagination to RsvpService#list_for_event that must compose with the existing status filter, not bypass it",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "repo-scale",
+    "difficulty-4",
+    "pagination"
+  ],
+  "prompts": [
+    "Add `RsvpService#list_for_event(event_id:, status: nil, page: 1, page_size: 20)`. `status`, when given, filters to RSVPs with that status (\"confirmed\"/\"waitlisted\"/\"canceled\"). `page` (1-based) and `page_size` (max 100) must both be positive integers - raise RsvpError otherwise. It returns a Hash `{ rsvps:, total:, page:, page_size: }`, where `rsvps` is just that page's slice and `total` is the count of ALL matching RSVPs (not just the page). Pagination must be applied AFTER the status filter, not before - `total` must reflect the filtered count, and the returned `rsvps` must be the correct page of the FILTERED result set, not a page of the unfiltered list that then gets filtered down further."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "lib/event_board/rsvp_service.rb",
+      "content_patterns": [
+        "list_for_event",
+        "page_size"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/rsvp_pagination_test.rb": "require_relative \"test_helper\"\n\nclass RsvpPaginationTest < Minitest::Test\n  include EventBoardTestSetup\n\n  def test_pagination_composes_with_status_filter\n    events, attendees, rsvps, service = build_service\n    event = events.create(title: \"Meetup\", capacity: 3)\n\n    # 3 confirmed, 5 waitlisted (capacity 3)\n    8.times do |i|\n      a = attendees.create(name: \"A#{i}\", email: \"a#{i}@example.com\")\n      service.register(event_id: event.id, attendee_id: a.id)\n    end\n\n    page1 = service.list_for_event(event_id: event.id, status: \"waitlisted\", page: 1, page_size: 2)\n    assert_equal 5, page1[:total]\n    assert_equal 2, page1[:rsvps].length\n    page1[:rsvps].each { |r| assert_equal \"waitlisted\", r.status }\n\n    page3 = service.list_for_event(event_id: event.id, status: \"waitlisted\", page: 3, page_size: 2)\n    assert_equal 1, page3[:rsvps].length\n\n    assert_raises(EventBoard::RsvpError) { service.list_for_event(event_id: event.id, page: 0) }\n  end\nend\n"
+  },
+  "reference_solution": {
+    "lib/event_board/rsvp_service.rb": "module EventBoard\n  class RsvpError < StandardError; end\n\n  class RsvpService\n    def initialize(events:, attendees:, rsvps:)\n      @events = events\n      @attendees = attendees\n      @rsvps = rsvps\n    end\n\n    def register(event_id:, attendee_id:)\n      event = @events.find(event_id)\n      raise RsvpError, \"event not found\" unless event\n      raise RsvpError, \"attendee not found\" unless @attendees.find(attendee_id)\n\n      status = confirmed_count(event_id) < event.capacity ? \"confirmed\" : \"waitlisted\"\n      @rsvps.create(event_id: event_id, attendee_id: attendee_id, status: status, created_at: Time.now.to_f)\n    end\n\n    def cancel(rsvp_id)\n      rsvp = @rsvps.find(rsvp_id)\n      raise RsvpError, \"rsvp not found\" unless rsvp\n      raise RsvpError, \"rsvp already canceled\" if rsvp.status == \"canceled\"\n\n      was_confirmed = rsvp.status == \"confirmed\"\n      rsvp.status = \"canceled\"\n\n      if was_confirmed\n        next_waiting = @rsvps.for_event(rsvp.event_id).select { |r| r.status == \"waitlisted\" }.min_by(&:id)\n        next_waiting.status = \"confirmed\" if next_waiting\n      end\n\n      rsvp\n    end\n\n    # Lists RSVPs for an event, optionally filtered by status, with\n    # pagination applied AFTER the filter. Returns a Hash with :rsvps (this\n    # page's slice), :total (count of ALL matching rsvps), :page, :page_size.\n    def list_for_event(event_id:, status: nil, page: 1, page_size: 20)\n      raise RsvpError, \"page must be a positive integer\" unless page.is_a?(Integer) && page >= 1\n      raise RsvpError, \"page_size must be between 1 and 100\" unless page_size.is_a?(Integer) && page_size >= 1 && page_size <= 100\n\n      matching = @rsvps.for_event(event_id)\n      matching = matching.select { |r| r.status == status } if status\n\n      total = matching.length\n      start = (page - 1) * page_size\n      page_rsvps = matching[start, page_size] || []\n\n      { rsvps: page_rsvps, total: total, page: page, page_size: page_size }\n    end\n\n    private\n\n    def confirmed_count(event_id)\n      @rsvps.for_event(event_id).count { |r| r.status == \"confirmed\" }\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "paginates-before-filtering",
+      "files": {
+        "lib/event_board/rsvp_service.rb": "module EventBoard\n  class RsvpError < StandardError; end\n\n  class RsvpService\n    def initialize(events:, attendees:, rsvps:)\n      @events = events\n      @attendees = attendees\n      @rsvps = rsvps\n    end\n\n    def register(event_id:, attendee_id:)\n      event = @events.find(event_id)\n      raise RsvpError, \"event not found\" unless event\n      raise RsvpError, \"attendee not found\" unless @attendees.find(attendee_id)\n\n      status = confirmed_count(event_id) < event.capacity ? \"confirmed\" : \"waitlisted\"\n      @rsvps.create(event_id: event_id, attendee_id: attendee_id, status: status, created_at: Time.now.to_f)\n    end\n\n    def cancel(rsvp_id)\n      rsvp = @rsvps.find(rsvp_id)\n      raise RsvpError, \"rsvp not found\" unless rsvp\n      raise RsvpError, \"rsvp already canceled\" if rsvp.status == \"canceled\"\n\n      was_confirmed = rsvp.status == \"confirmed\"\n      rsvp.status = \"canceled\"\n\n      if was_confirmed\n        next_waiting = @rsvps.for_event(rsvp.event_id).select { |r| r.status == \"waitlisted\" }.min_by(&:id)\n        next_waiting.status = \"confirmed\" if next_waiting\n      end\n\n      rsvp\n    end\n\n    # Lists RSVPs for an event, optionally filtered by status, with\n    # pagination applied AFTER the filter. Returns a Hash with :rsvps (this\n    # page's slice), :total (count of ALL matching rsvps), :page, :page_size.\n    def list_for_event(event_id:, status: nil, page: 1, page_size: 20)\n      raise RsvpError, \"page must be a positive integer\" unless page.is_a?(Integer) && page >= 1\n      raise RsvpError, \"page_size must be between 1 and 100\" unless page_size.is_a?(Integer) && page_size >= 1 && page_size <= 100\n\n      all_for_event = @rsvps.for_event(event_id)\n      total = all_for_event.length\n      start = (page - 1) * page_size\n      page_slice = all_for_event[start, page_size] || []\n      page_rsvps = status ? page_slice.select { |r| r.status == status } : page_slice\n\n      { rsvps: page_rsvps, total: total, page: page, page_size: page_size }\n    end\n\n    private\n\n    def confirmed_count(event_id)\n      @rsvps.for_event(event_id).count { |r| r.status == \"confirmed\" }\n    end\n  end\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_eventboard_rsvp_pagination",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "setup_repo": "ruby-eventboard",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "check_command": "rake test"
+}

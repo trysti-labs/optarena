@@ -72,7 +72,9 @@ optarena serve   # http://localhost:8300/dashboard/
    `gcc` correctly rejected it. See [Cases & the oracle](#cases--the-oracle).
 2. **Same harness for CLI and SDK agents** - headless CLI tools and
    in-process agent-framework SDKs run through the exact same case set,
-   oracle, and comparison output, so tool-vs-tool numbers are apples-to-apples.
+   oracle, per-case deadline, mid-session disruptions, per-step trajectory
+   records and cost/token accounting, so tool-vs-tool numbers are
+   apples-to-apples rather than "whatever each driver happened to implement".
 3. **Comparison-first** - per-case deltas and a verdict (more-accurate,
    faster) saved as JSON and rendered in the terminal and dashboard.
 4. **Regression testing** - `optarena regression <before> <after>` names the
@@ -117,9 +119,16 @@ directories, not bundled into the package - a wheel built and installed
 elsewhere (`pip install` from a copied/published wheel rather than a
 checkout) won't have them, and `optarena sandbox build`, `optarena serve`, and
 `setup_repo` cases will fail with a clear "not found" error rather than a
-working degraded mode. There is no supported "everything bundled in one
-wheel" install today - keep the git checkout around next to wherever
-`optarena` is installed from it.
+working degraded mode. `optarena doctor` reports which of the three are
+present. There is no supported "everything bundled in one wheel" install
+today - keep the git checkout around next to wherever `optarena` is installed
+from it.
+
+**Where results are stored**: a source checkout writes to `<repo>/results`
+(unchanged). Any other install writes to `~/.optarena/results`, alongside the
+pack registry and pricing overrides - never inside `site-packages`, where a
+`pip install -U` would be entitled to delete your run history. Override with
+`--results-dir` or `OPTARENA_RESULTS_DIR`.
 
 ## Quick start
 
@@ -152,6 +161,12 @@ optarena sandbox build --all     # everything, locally
 # Corpus self-verification (CI gate): reference solutions must PASS the real
 # oracle, broken/unmodified variants must FAIL it
 optarena cases verify            # (legacy alias: verify-corpus)
+optarena cases verify --strict   # also fail on cases with nothing that must FAIL
+
+# Housekeeping for the results store
+optarena runs prune --keep 50 --yes   # drop old runs
+optarena runs rebuild-index           # repair a corrupt/out-of-sync index.json
+optarena runs scrub-secrets --yes     # redact api_key from pre-redaction records
 
 # Preflight: which drivers/extensions/backends are ready on this machine
 optarena doctor
@@ -242,10 +257,15 @@ Actix-web/stdlib), C# (29, ASP.NET Core/plain), C (11) and C++ (7), PHP
 Kubernetes/GitHub Actions), HCL/Terraform (12), Dockerfile (10), and
 Makefile (5). Every case covers one of ten task categories - feature, bug
 fix, refactoring, testing, security, performance, devops, data
-engineering, documentation, dependency upgrade - and was hand-verified
-end-to-end - a correct reference solution passes, a broken one fails,
-through the real `--network none` container sandbox - before being counted
-as done. The testing-category cases (`add_tests_*`) are additionally
+engineering, documentation, dependency upgrade. Every case was verified
+end-to-end through the real `--network none` container sandbox before being
+counted as done: all 510 carry a `reference_solution` that must PASS the
+oracle, and 466 additionally carry something that must FAIL it (an explicit
+`broken_solutions` variant, or the implicit "unmodified workspace" check that
+bug_fix/refactoring/performance/security cases get). The remaining 44 -
+mostly `create_*` scaffolding and `add_github_actions_ci_*` cases - currently
+prove only that their oracle can pass; `optarena cases verify` names them, and
+`--strict` fails on them, so they are visible rather than assumed. The testing-category cases (`add_tests_*`) are additionally
 **mutation-checked**: the hidden oracle first runs the model's tests against
 the correct implementation (they must pass), then against deliberately
 broken variants of it (each must make the tests fail) - so a vacuous test

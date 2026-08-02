@@ -1,0 +1,47 @@
+{
+  "description": "Add LRU eviction (bounded capacity) plus per-entry TTL expiry to an unbounded cache",
+  "task_type": "feature",
+  "tags": [
+    "javascript",
+    "node",
+    "cache",
+    "algorithms"
+  ],
+  "prompts": [
+    "cache.js's Cache is an unbounded Map wrapper - get/put never evict anything. Turn it into an LRU cache with a TTL: the constructor takes (capacity, ttl) - a max size and a time-to-live in milliseconds. put(key, value, now) stores a value timestamped at `now`. get(key, now) returns the value if present AND not expired (now - storedAt < ttl), else undefined - and an expired entry must be REMOVED the moment it's observed to be stale. Both get and put must refresh a key's recency. When put() would exceed `capacity`, evict the LEAST recently used entry (recency = most recent get OR put) before inserting the new one. Keep module.exports = { Cache }."
+  ],
+  "setup_files": {
+    "cache.js": "class Cache {\n  constructor(capacity, ttl) {\n    this.capacity = capacity;\n    this.ttl = ttl;\n    this.store = new Map();\n  }\n\n  put(key, value, now) {\n    this.store.set(key, value);\n  }\n\n  get(key, now) {\n    return this.store.get(key);\n  }\n}\n\nmodule.exports = { Cache };\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "cache.js",
+      "content_patterns": [
+        "class Cache"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test_cache_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { Cache } = require(\"./cache\");\n\ntest(\"capacity evicts least recently used\", () => {\n  const c = new Cache(2, 1000);\n  c.put(\"a\", 1, 0);\n  c.put(\"b\", 2, 1);\n  c.get(\"a\", 2);\n  c.put(\"c\", 3, 3);\n  assert.strictEqual(c.get(\"a\", 4), 1);\n  assert.strictEqual(c.get(\"b\", 4), undefined);\n  assert.strictEqual(c.get(\"c\", 4), 3);\n});\n\ntest(\"get refreshes recency\", () => {\n  const c = new Cache(2, 1000);\n  c.put(\"a\", 1, 0);\n  c.put(\"b\", 2, 1);\n  c.get(\"a\", 2);\n  c.get(\"b\", 3);\n  c.put(\"c\", 3, 4);\n  assert.strictEqual(c.get(\"a\", 5), undefined);\n  assert.strictEqual(c.get(\"b\", 5), 2);\n});\n\ntest(\"ttl expiry independent of capacity\", () => {\n  const c = new Cache(5, 10);\n  c.put(\"a\", 1, 0);\n  assert.strictEqual(c.get(\"a\", 9), 1);\n  assert.strictEqual(c.get(\"a\", 10), undefined);\n  assert.strictEqual(c.get(\"a\", 20), undefined);\n});\n"
+  },
+  "check_command": "node --test test_cache_hidden.test.js",
+  "reference_solution": {
+    "cache.js": "class Cache {\n  constructor(capacity, ttl) {\n    this.capacity = capacity;\n    this.ttl = ttl;\n    this.store = new Map(); // key -> [value, storedAt]\n  }\n\n  put(key, value, now) {\n    if (this.store.has(key)) {\n      this.store.delete(key);\n    } else if (this.store.size >= this.capacity) {\n      const oldestKey = this.store.keys().next().value;\n      this.store.delete(oldestKey);\n    }\n    this.store.set(key, [value, now]);\n  }\n\n  get(key, now) {\n    if (!this.store.has(key)) {\n      return undefined;\n    }\n    const [value, storedAt] = this.store.get(key);\n    if (now - storedAt >= this.ttl) {\n      this.store.delete(key);\n      return undefined;\n    }\n    this.store.delete(key);\n    this.store.set(key, [value, storedAt]);\n    return value;\n  }\n}\n\nmodule.exports = { Cache };\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "get-does-not-refresh-recency",
+      "files": {
+        "cache.js": "class Cache {\n  constructor(capacity, ttl) {\n    this.capacity = capacity;\n    this.ttl = ttl;\n    this.store = new Map();\n  }\n\n  put(key, value, now) {\n    if (this.store.has(key)) {\n      this.store.delete(key);\n    } else if (this.store.size >= this.capacity) {\n      const oldestKey = this.store.keys().next().value;\n      this.store.delete(oldestKey);\n    }\n    this.store.set(key, [value, now]);\n  }\n\n  get(key, now) {\n    if (!this.store.has(key)) {\n      return undefined;\n    }\n    const [value, storedAt] = this.store.get(key);\n    if (now - storedAt >= this.ttl) {\n      this.store.delete(key);\n      return undefined;\n    }\n    return value;\n  }\n}\n\nmodule.exports = { Cache };\n"
+      }
+    }
+  ],
+  "name": "add_js_lru_cache_with_ttl",
+  "language": "javascript",
+  "framework": "node",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "check_command_timeout": 90,
+  "timeout": 300,
+  "difficulty": 3
+}

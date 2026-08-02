@@ -1,0 +1,48 @@
+{
+  "description": "Replace an always-allow stub with a token bucket that refills fractionally over elapsed time and caps at capacity",
+  "task_type": "feature",
+  "tags": [
+    "csharp",
+    "rate-limiting",
+    "algorithms"
+  ],
+  "prompts": [
+    "TokenBucket.cs's Allow always returns true. Implement it properly: the constructor takes (double capacity, double refillRate) - `refillRate` tokens are added per second, capped at `capacity` tokens (never above it, even after a long idle period). Allow(double now) refills the bucket based on elapsed seconds since the last call, then - if at least 1 token is available - consumes exactly 1 token and returns true; otherwise returns false and consumes nothing. The bucket starts full at construction time."
+  ],
+  "setup_files": {
+    "app.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <Compile Remove=\"tests/**\" />\n  </ItemGroup>\n\n</Project>\n",
+    "TokenBucket.cs": "public class TokenBucket\n{\n    private readonly double _capacity;\n    private readonly double _refillRate;\n\n    public TokenBucket(double capacity, double refillRate)\n    {\n        _capacity = capacity;\n        _refillRate = refillRate;\n    }\n\n    public bool Allow(double now)\n    {\n        return true;\n    }\n}\n"
+  },
+  "expected_files": [
+    {
+      "path_pattern": "TokenBucket.cs",
+      "content_patterns": [
+        "class TokenBucket"
+      ]
+    }
+  ],
+  "reference_solution": {
+    "TokenBucket.cs": "public class TokenBucket\n{\n    private readonly double _capacity;\n    private readonly double _refillRate;\n    private double _tokens;\n    private double? _last;\n\n    public TokenBucket(double capacity, double refillRate)\n    {\n        _capacity = capacity;\n        _refillRate = refillRate;\n        _tokens = capacity;\n    }\n\n    public bool Allow(double now)\n    {\n        if (_last.HasValue)\n        {\n            var elapsed = now - _last.Value;\n            _tokens = System.Math.Min(_capacity, _tokens + elapsed * _refillRate);\n        }\n        _last = now;\n        if (_tokens >= 1)\n        {\n            _tokens -= 1;\n            return true;\n        }\n        return false;\n    }\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "refill-not-capped",
+      "files": {
+        "TokenBucket.cs": "public class TokenBucket\n{\n    private readonly double _capacity;\n    private readonly double _refillRate;\n    private double _tokens;\n    private double? _last;\n\n    public TokenBucket(double capacity, double refillRate)\n    {\n        _capacity = capacity;\n        _refillRate = refillRate;\n        _tokens = capacity;\n    }\n\n    public bool Allow(double now)\n    {\n        if (_last.HasValue)\n        {\n            var elapsed = now - _last.Value;\n            _tokens = _tokens + elapsed * _refillRate;\n        }\n        _last = now;\n        if (_tokens >= 1)\n        {\n            _tokens -= 1;\n            return true;\n        }\n        return false;\n    }\n}\n"
+      }
+    }
+  ],
+  "name": "add_csharp_token_bucket_limiter",
+  "language": "csharp",
+  "framework": "xunit",
+  "domain": "backend",
+  "image": "optarena-tester-dotnet:latest",
+  "check_command_timeout": 180,
+  "timeout": 300,
+  "difficulty": 3,
+  "check_command": "dotnet test tests/tests.csproj",
+  "test_setup_files": {
+    "tests/tests.csproj": "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <Nullable>enable</Nullable>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <IsPackable>false</IsPackable>\n  </PropertyGroup>\n\n  <ItemGroup>\n    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"17.11.1\" />\n    <PackageReference Include=\"xunit\" Version=\"2.9.2\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.8.2\" />\n    <PackageReference Include=\"coverlet.collector\" Version=\"6.0.2\" />\n  </ItemGroup>\n\n  <ItemGroup>\n    <ProjectReference Include=\"../app.csproj\" />\n  </ItemGroup>\n\n</Project>\n",
+    "tests/TokenBucketTests.cs": "using Xunit;\n\npublic class TokenBucketTests\n{\n    [Fact]\n    public void StartsFullAndDrains()\n    {\n        var b = new TokenBucket(3, 1);\n        Assert.True(b.Allow(0));\n        Assert.True(b.Allow(0));\n        Assert.True(b.Allow(0));\n        Assert.False(b.Allow(0));\n    }\n\n    [Fact]\n    public void RefillsOverTime()\n    {\n        var b = new TokenBucket(3, 1);\n        for (int i = 0; i < 3; i++) b.Allow(0);\n        Assert.False(b.Allow(0.5));\n        Assert.True(b.Allow(1.0));\n        Assert.False(b.Allow(1.0));\n    }\n\n    [Fact]\n    public void RefillCapsAtCapacity()\n    {\n        var b = new TokenBucket(2, 1);\n        b.Allow(0);\n        b.Allow(0);\n        Assert.True(b.Allow(1000));\n        Assert.True(b.Allow(1000));\n        Assert.False(b.Allow(1000));\n    }\n}\n"
+  }
+}

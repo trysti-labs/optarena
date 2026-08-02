@@ -31,5 +31,13 @@
     "python",
     "algorithm",
     "sequence"
+  ],
+  "broken_solutions": [
+    {
+      "name": "skips-leading-zero",
+      "files": {
+        "fibonacci.py": "def fibonacci(n):\n    result = []\n    a, b = 1, 1\n    for _ in range(n):\n        result.append(a)\n        a, b = b, a + b\n    return result\n\n\nif __name__ == '__main__':\n    print(fibonacci(10))\n"
+      }
+    }
   ]
 }

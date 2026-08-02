@@ -89,6 +89,12 @@ CASES_DIR = Path(__file__).parent / "cases"
 DOCKER_IMAGE_DEFAULT = "optarena-tester:latest"
 DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "docker"
 
+# A-05: shape of an acceptable container image reference - see
+# validate_image_ref. Mirrors schema._IMAGE_RE (kept here as well so the
+# runtime funnel has no import-time dependency on the schema module).
+_IMAGE_REF_RE = re.compile(
+    r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?$")
+
 # Defense-in-depth flags applied to every sandbox container that runs a
 # case-defined `check_command` (both the shared DockerSandbox and the
 # ephemeral per-call fallback) - the command itself, and anything it runs,
@@ -164,13 +170,45 @@ def _sandbox_user_args() -> list[str]:
     Optional non-root sandbox execution (M-10): OPTARENA_SANDBOX_USER=uid:gid
     (e.g. "1000:1000") runs every sandbox container as that user, with HOME
     pointed at the writable tmpfs so toolchains that write dotfiles/caches
-    still work. Opt-in rather than default because none of the published
-    images create a matching account and each toolchain needs validation
-    under a non-root uid (mvn/dotnet/cargo cache paths) - flip it on, run
-    `optarena cases verify --language <x>`, and report breakage.
+    still work.
+
+    A-36: every published image now creates a matching uid 1000 account and
+    exposes its toolchain caches to it (see the Dockerfiles), and the runner
+    relaxes workspace permissions when this is set (`sandbox_user_configured`
+    / `relax_workspace_permissions`) - the bind-mounted run root is created by
+    the HOST user, so without that a non-root container uid cannot write its
+    own case directory. Still opt-in rather than the default: the run root's
+    ownership is a host property this project cannot guarantee across
+    Docker Desktop, rootless Podman and CI, so flipping the default needs
+    per-track validation on real Linux (the sandbox-nonroot CI job).
     """
     user = os.environ.get("OPTARENA_SANDBOX_USER")
     return ["--user", user, "-e", "HOME=/tmp"] if user else []
+
+
+def sandbox_user_configured() -> bool:
+    """True when OPTARENA_SANDBOX_USER asks for non-root sandbox execution."""
+    return bool(os.environ.get("OPTARENA_SANDBOX_USER"))
+
+
+def relax_workspace_permissions(path: Path) -> None:
+    """
+    A-36: make `path` writable by the (different) uid the sandbox container
+    runs as. No-op unless OPTARENA_SANDBOX_USER is set, and no-op on Windows
+    hosts, where the bind-mount layer ignores Unix permission bits anyway.
+
+    Needed because `tempfile.mkdtemp()` deliberately creates 0700 directories
+    owned by the host user: a container running as uid 1000 cannot write into
+    a workspace owned by uid 501. This is the same class of problem the
+    DAC_OVERRIDE capability solves for the ROOT sandbox - root can bypass the
+    permission check, an unprivileged uid cannot.
+    """
+    if not sandbox_user_configured() or os.name != "posix":
+        return
+    try:
+        path.chmod(0o777)
+    except OSError:
+        pass   # best-effort: the run still works if the uids happen to match
 
 # Registry of every sandbox image OptArena knows how to build, keyed by the
 # short name used with `optarena sandbox build --lang <key>`. "base" is the
@@ -275,15 +313,108 @@ def changed_files(before: dict[str, str], root: Path) -> list[str]:
     return [rel for rel, sig in current.items() if before.get(rel) != sig]
 
 
+def path_pattern_matches(rel: str, pattern: str) -> bool:
+    """
+    Does workspace-relative path `rel` satisfy an expected-file `pattern`?
+    Case-insensitive throughout (established behavior, unchanged). Two ways,
+    same as before:
+      - the file's basename alone matches the whole pattern (lets a bare
+        pattern like "Foo.java" - no directory component at all - match a
+        file at any depth, via its name)
+      - the full relative path matches the pattern as written
+
+    A-39: for a pattern with a leading "**/" component, ALSO tries the match
+    with that prefix stripped - so "**/Foo.java" is satisfied by a bare
+    "Foo.java" sitting at the workspace root, not only a nested one.
+
+    `fnmatch` has no concept of "/" as a path separator - `*` matches any
+    characters including "/" - so a "**/X" pattern can only ever match a
+    candidate that LITERALLY CONTAINS a "/" character; a flat file at the
+    root can never satisfy it under a plain `fnmatch.fnmatch` call, even
+    though every other tool's globstar convention (bash's `globstar`, rsync
+    exclude patterns, Python 3.13's own `glob.translate`/`pathlib` matching,
+    Ant filesets) defines "**" as "zero or more directories", which
+    explicitly includes the zero case. Nobody deliberately chose the
+    stricter reading here - no comment anywhere in this module addressed it
+    - and it was silently making the raw-model baseline / SDK-agent drivers
+    (which write one flat file with no directory structure - see
+    `drivers/openai_chat.py`'s `concrete_target`) fail 108 corpus cases
+    whose only problem was a `**/`-prefixed pattern, even when the file's
+    name and content were exactly right.
+
+    Deliberately narrow: only an EXACT "**/" prefix is special-cased, not
+    "**" appearing elsewhere in a pattern - that is the only shape used
+    anywhere in the built-in corpus (verified by scanning every
+    `expected_files[].path_pattern` in `optarena/cases/*.json`), so this
+    covers what's actually needed rather than reimplementing a general
+    glob-to-regex translator for shapes that don't exist here. A single "*"
+    prefix (e.g. "*/routes/foo.ts") is a different, deliberately
+    UNCHANGED case: single-star conventionally means "exactly one path
+    segment", not "zero or more". `concrete_target` has no way to invent an
+    arbitrary wrapper directory name for it, so that class of case stays
+    genuinely unsatisfiable by a flat-file-writing driver, which is correct.
+    """
+    name, rel_l, pattern_l = Path(rel).name.lower(), rel.lower(), pattern.lower()
+    if fnmatch.fnmatch(name, pattern_l) or fnmatch.fnmatch(rel_l, pattern_l):
+        return True
+    if pattern_l.startswith("**/"):
+        stripped = pattern_l[3:]
+        return fnmatch.fnmatch(rel_l, stripped) or fnmatch.fnmatch(name, stripped)
+    return False
+
+
+def baseline_incompatible(case: dict) -> "str | None":
+    """
+    A-40: can a flat-file-writing driver (`file_tools: False` in the
+    `DRIVERS` registry - the raw-model baselines and every SDK-agent driver,
+    all of which write ONE block of text to a single path with no directory
+    structure) EVER satisfy this case, regardless of what the model writes?
+    Returns a one-line reason if not, else None.
+
+    Found by tracing an unexplained 15% jvm pass rate, during a gemma4:12b
+    corpus calibration run, to cases the baseline driver could never have
+    won in the first place - the model's output was correct, sitting right
+    in the oracle's own "got:" message, just not at a path the case's
+    pattern could ever match from a flattened write. Nothing warned about
+    this before a run started; a user just saw a confusingly low pass rate.
+
+    Deliberately reuses `drivers.openai_chat.concrete_target` (what path a
+    flat-file driver actually writes to) and `path_pattern_matches` (whether
+    that path satisfies the pattern) - the SAME two functions that decide
+    the real outcome at run time - rather than a separately maintained
+    heuristic. Two independent copies of this same decision silently
+    disagreeing is exactly the bug A-39 fixed one function over
+    (`trajectory_stats`'s `_matches_expected` had drifted from
+    `check_expected`); this avoids creating a third copy.
+    """
+    if case.get("setup_repo"):
+        return "needs a starter repo (setup_repo) - a flat-file writer starts from an empty workspace"
+    expected = case.get("expected_files") or []
+    if len(expected) > 1:
+        return f"needs {len(expected)} separate files - a flat-file writer produces exactly one"
+    if not expected:
+        return None
+    pattern = expected[0].get("path_pattern", "")
+    if not pattern:
+        return None
+    # Local import: cases.py is the low-level module every driver imports
+    # FROM (drivers -> cases, never the reverse) - a module-level import here
+    # would create drivers.openai_chat -> cases -> drivers.openai_chat.
+    from .drivers.openai_chat import concrete_target
+    target = concrete_target(pattern).as_posix()
+    if path_pattern_matches(target, pattern):
+        return None
+    return (f'the only path a flat-file writer can produce for "{pattern}" is '
+           f'"{target}", which does not itself satisfy the pattern')
+
+
 def check_expected(created: list[str], expected_spec: list[dict], root: Path) -> list[str]:
     """Return failure strings; empty list ⇒ the case passed."""
     failures: list[str] = []
     for spec in expected_spec or []:
         pattern = spec["path_pattern"]
         match = next(
-            (rel for rel in created
-             if fnmatch.fnmatch(Path(rel).name.lower(), pattern.lower())
-             or fnmatch.fnmatch(rel.lower(), pattern.lower())),
+            (rel for rel in created if path_pattern_matches(rel, pattern)),
             None,
         )
         if match is None:
@@ -293,19 +424,30 @@ def check_expected(created: list[str], expected_spec: list[dict], root: Path) ->
             )
             continue
         try:
-            content = (root / match).read_text(encoding="utf-8", errors="replace").lower()
+            raw = (root / match).read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
             failures.append(f'could not read "{match}": {exc}')
             continue
+        content = raw.lower()
+        # A-17: `case_sensitive: true` opts this spec's assertions out of the
+        # historical lowercase-everything behaviour. Content was lowercased
+        # AND then matched with re.IGNORECASE, so a case could never require
+        # `class UserDTO` over `class userdto`, `SELECT` over `select`, or a
+        # Go exported identifier over an unexported one - not even with an
+        # explicitly case-sensitive regex. Default stays False so every
+        # existing case behaves exactly as before.
+        strict = bool(spec.get("case_sensitive"))
+        haystack = raw if strict else content
+        flags = 0 if strict else re.IGNORECASE
         for needle in spec.get("content_patterns", []):
-            if str(needle).lower() not in content:
+            if (str(needle) if strict else str(needle).lower()) not in haystack:
                 failures.append(f'"{match}" missing expected content "{needle}"')
         for needle in spec.get("not_content_patterns", []):
-            if str(needle).lower() in content:
+            if (str(needle) if strict else str(needle).lower()) in haystack:
                 failures.append(f'"{match}" contains forbidden content "{needle}"')
         for pattern_re in spec.get("regex_patterns", []):
             try:
-                if not re.search(pattern_re, content, re.IGNORECASE):
+                if not re.search(pattern_re, haystack, flags):
                     failures.append(f'"{match}" does not match regex "{pattern_re}"')
             except re.error as exc:
                 failures.append(f'invalid regex "{pattern_re}": {exc}')
@@ -386,12 +528,24 @@ def _docker_available(*, force_recheck: bool = False) -> bool:
 
 
 def reset_engine_health_cache() -> None:
-    """Force the next `_docker_available()` call to re-probe regardless of
-    TTL. Called once per scenario by `runner.run_scenario` (F-16) so a
-    transient failure early in a matrix/multi-scenario run doesn't suppress
-    the sandbox for every later scenario even after the engine recovers."""
-    global _docker_checked_at
+    """
+    Forget everything cached about the container engine's health, so the next
+    `_docker_available()` call re-probes regardless of TTL. Called once per
+    scenario by `runner.run_scenario` (F-16) so a transient failure early in a
+    matrix/multi-scenario run doesn't suppress the sandbox for every later
+    scenario even after the engine recovers.
+
+    A-11: this function previously had ZERO callers - the runner reached past
+    it into `_docker_available(force_recheck=True)` - while its docstring
+    claimed the runner called it. It now really is the one entry point, and it
+    also clears `_docker_warned` (A-12): that flag made the "no sandbox
+    available, refusing to run check_command" explanation print at most once
+    per PROCESS, so in a --matrix-drivers sweep every scenario after the first
+    produced refused check_commands with no stderr line saying why.
+    """
+    global _docker_checked_at, _docker_warned
     _docker_checked_at = -1.0
+    _docker_warned = False
 
 
 def docker_image_available(image: str = DOCKER_IMAGE_DEFAULT) -> bool:
@@ -425,6 +579,17 @@ GHCR_PREFIX = "ghcr.io/trysti-labs/optarena/"
 _PULL_MAX_ATTEMPTS = 3
 _pull_attempts: dict[str, int] = {}
 _pull_last_attempt_at: dict[str, float] = {}
+
+
+def reset_pull_backoff() -> None:
+    """A-13: clear per-image pull attempt/backoff state. Called once per
+    scenario by `runner.run_scenario`, for the same reason F-16 re-probes
+    engine health there: attempt counts that make sense WITHIN one run
+    shouldn't permanently write off an image for every later scenario of a
+    matrix sweep because of one transient registry failure. Also keeps these
+    dicts from growing across a long-lived process."""
+    _pull_attempts.clear()
+    _pull_last_attempt_at.clear()
 
 
 def docker_image_pull(image: str) -> bool:
@@ -487,20 +652,44 @@ def set_image_overrides(overrides: "dict[str, str] | None") -> None:
     _image_overrides = dict(overrides) if overrides else {}
 
 
+def validate_image_ref(image: str) -> str:
+    """
+    A-05: every image reference that reaches a container command line has to
+    look like an image reference. `docker run` / `podman run` parse options
+    up to the FIRST non-option token, so a value beginning with "-" is
+    consumed as a flag rather than as the image argument - i.e. a case's
+    `image` field (untrusted: case JSON is installable from a URL), a
+    scenario's `image_overrides`, or OPTARENA_SANDBOX_IMAGE could inject
+    arguments into the one command that is supposed to BE the security
+    boundary. `schema.validate_case` rejects this earlier for case files;
+    this is the funnel every path goes through, including the env var, which
+    no schema ever sees.
+    """
+    if not isinstance(image, str) or not _IMAGE_REF_RE.match(image):
+        raise ValueError(
+            f"invalid container image reference {image!r} - expected something like "
+            f"'optarena-tester:latest' or 'ghcr.io/org/img@sha256:<64 hex>'"
+        )
+    return image
+
+
 def resolve_image(image: str) -> str:
     """Apply the active run's `image_overrides` (F-15) to a resolved image
     name, if any - matched either by the exact image reference or by
     `DOCKER_IMAGES` short track name (e.g. "python"), so a scenario can pin
     either a specific unusual `image` value or a whole registered
-    track without knowing every case's exact tag."""
+    track without knowing every case's exact tag.
+
+    A-05: the returned reference is always shape-validated, whatever it came
+    from (case field, override, or OPTARENA_SANDBOX_IMAGE)."""
     if not _image_overrides:
-        return image
+        return validate_image_ref(image)
     if image in _image_overrides:
-        return _image_overrides[image]
+        return validate_image_ref(_image_overrides[image])
     for key, val in DOCKER_IMAGES.items():
         if val == image and key in _image_overrides:
-            return _image_overrides[key]
-    return image
+            return validate_image_ref(_image_overrides[key])
+    return validate_image_ref(image)
 
 
 def ensure_image(image: str) -> bool:
@@ -512,7 +701,11 @@ def ensure_image(image: str) -> bool:
     misreading that as "image missing" would trigger a pointless (and
     possibly slow) registry pull for an image that's already local.
     """
-    if docker_image_available(image) or docker_image_available(image):
+    # A-14: was written as `docker_image_available(image) or
+    # docker_image_available(image)` - correct by accident (`or`
+    # short-circuits, so the second call only happens when the first says no)
+    # but indistinguishable from a copy-paste bug at a glance.
+    if any(docker_image_available(image) for _ in range(2)):
         return True
     return docker_image_pull(image) and docker_image_available(image)
 
@@ -571,7 +764,11 @@ class DockerSandbox:
 
     def __init__(self, root: Path, image: str | None = None):
         self.root = root.resolve()
-        self.image = image or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT)
+        # A-05: validated here too - this constructor is also reachable with
+        # an OPTARENA_SANDBOX_IMAGE value that never passed through
+        # resolve_image (e.g. verify.py's own grouping).
+        self.image = validate_image_ref(
+            image or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT))
         self.name = f"optarena-sandbox-{uuid.uuid4().hex[:12]}"
         self.active = False
 
@@ -738,6 +935,7 @@ def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     info = _new_oracle_info(cmd)
     if not cmd:
         return [], info
+    normalize_workspace_line_endings(root)
     timeout = int(case.get("check_command_timeout", 60) or 60)
     docker_disabled = os.environ.get("OPTARENA_DISABLE_SANDBOX") == "1"
     unsafe_ok = _unsafe_host_exec_allowed()
@@ -839,8 +1037,18 @@ def _kill_process_tree(pid: int) -> None:
         except (ProcessLookupError, OSError):
             pass
     else:
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                       capture_output=True)
+        # No timeout here previously: if taskkill itself hangs (a stuck
+        # child, a permissions snag, a complex tree from an agent spawning
+        # Maven/Java subprocesses), this blocked run_capture - and the whole
+        # case - for an UNBOUNDED time, defeating the timeout this function
+        # exists to enforce (observed: a 300s case timeout, a 2222s actual
+        # duration). Best-effort like the proc.wait(timeout=5) right below -
+        # if taskkill itself won't finish, there's nothing more we can do.
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                           capture_output=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 # F-03: `Popen.communicate()` buffers a stream's ENTIRE output in memory
@@ -1110,12 +1318,14 @@ def trajectory_stats(case: dict, created: list[str], root: Path) -> dict:
     setup = set((case.get("setup_files") or {}).keys())
 
     def _matches_expected(rel: str) -> bool:
-        name = Path(rel).name.lower()
+        # A-39: shares path_pattern_matches with check_expected (was a
+        # separate, plain-fnmatch copy) - otherwise a file that now
+        # correctly PASSES the oracle under a "**/"-prefixed pattern would
+        # still show up here as an unexplained "off-target edit", which is
+        # exactly backwards for a file the case explicitly expected.
         for spec in expected:
-            pat = str(spec.get("path_pattern", "")).lower()
-            if not pat:
-                continue
-            if fnmatch.fnmatch(name, pat) or fnmatch.fnmatch(rel.lower(), pat):
+            pat = spec.get("path_pattern")
+            if pat and path_pattern_matches(rel, str(pat)):
                 return True
         return False
 
@@ -1206,6 +1416,51 @@ def evaluate_case_isolated(case: dict, created: list[str], live_root: Path) -> t
         shutil.rmtree(verify_root, ignore_errors=True)
 
 
+def normalize_workspace_line_endings(root: Path) -> None:
+    """
+    Best-effort CRLF/CR -> LF normalization for every text file in the case
+    workspace, run once right before ``check_command`` executes.
+
+    On a Windows host, a workspace file can end up CRLF-terminated through
+    TWO paths this project doesn't otherwise control: (1) any driver's own
+    ``write_text(..., encoding="utf-8")`` without ``newline=""`` - Python's
+    universal-newline translation on write, the same issue already handled
+    for case-authored setup content above - and (2) a third-party CLI tool
+    (aider, opencode, goose, ...) doing its OWN file I/O directly in the
+    workspace, which optarena has no write call to patch at all. A stray
+    ``\\r`` glued to `do`/`done`/`then`/etc. breaks dash/sh parsing once
+    bind-mounted into the Linux sandbox - found live via a qwen3-coder+aider
+    run where a syntactically-correct, semantically-correct generated shell
+    script failed with `Syntax error: end of file unexpected (expecting
+    "then")`, purely from CRLF corruption never touching the actual logic.
+    Normalizing the whole workspace right before the one place that actually
+    executes inside Linux covers both sources in a single spot, regardless
+    of which driver or tool produced the file.
+
+    Skips anything that looks binary (a NUL byte in the first 8KB) so this
+    never corrupts a real binary fixture, and skips symlinks (matching
+    ``copy_setup_repo``'s own defense-in-depth). Best-effort per file - one
+    unreadable/locked file must not abort the whole check.
+    """
+    for path in root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if b"\r" not in data:
+            continue
+        if b"\x00" in data[:8192]:
+            continue  # looks binary, leave it alone
+        normalized = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        if normalized != data:
+            try:
+                path.write_bytes(normalized)
+            except OSError:
+                continue
+
+
 def write_setup_files(root: Path, setup_files: dict[str, str] | None) -> None:
     # H-01: `rel` comes straight from case JSON (`setup_files`/`test_setup_files`
     # keys) - an absolute path or a "../" traversal there would write outside
@@ -1235,18 +1490,41 @@ REPOS_DIR = Path(__file__).resolve().parent.parent / "repos"
 def copy_setup_repo(root: Path, repo_name: str) -> None:
     """Copy every file from repos/<repo_name>/ into the workspace root. Used
     by L3 cases (`setup_repo`) so a 20-100 file starter app lives once on
-    disk instead of being inlined into every case JSON that shares it."""
-    src = REPOS_DIR / repo_name
+    disk instead of being inlined into every case JSON that shares it.
+
+    A-04: the SOURCE is containment-checked against REPOS_DIR, not just the
+    destination. `repo_name` comes straight from case JSON - which is
+    untrusted input, since `optarena cases install <url>` will happily
+    install a pack authored by anyone - so a value like "../.." used to walk
+    out of repos/ and recursively copy an arbitrary host directory INTO the
+    case workspace, where the agent reads it as context and the baseline/SDK
+    drivers feed it back to whatever backend URL the scenario configures.
+    That is an arbitrary-host-file-read-to-remote-endpoint primitive driven
+    by case content, and it contradicted SECURITY.md's containment guarantee.
+    `schema.validate_case` additionally rejects separators up front; this is
+    the load-bearing check.
+    """
+    repos_root = REPOS_DIR.resolve()
+    src = (repos_root / repo_name).resolve()
+    if not src.is_relative_to(repos_root) or src == repos_root:
+        raise ValueError(
+            f'setup_repo "{repo_name}" escapes the starter-repo directory ({repos_root})'
+        )
     if not src.is_dir():
         raise FileNotFoundError(f'setup_repo "{repo_name}" not found under {REPOS_DIR}')
     root = root.resolve()
     for p in src.rglob("*"):
         # Symlinks are skipped outright (defense in depth): `p.is_file()`
         # follows a symlink, so a starter repo containing one could copy
-        # arbitrary host file content into the workspace. `repo_name` itself
-        # is trusted (a project-controlled directory name, not case JSON),
-        # but starter repos shouldn't need symlinks regardless.
+        # arbitrary host file content into the workspace - including from
+        # outside repos/, which the source check above would otherwise not
+        # see. Starter repos don't need symlinks regardless.
         if p.is_symlink() or not p.is_file():
+            continue
+        # A symlinked *directory* anywhere above this file would put its real
+        # content outside src even though `p` itself isn't a symlink - check
+        # the fully-resolved source too, not just the entry we walked to.
+        if not p.resolve().is_relative_to(src):
             continue
         dest = (root / p.relative_to(src)).resolve()
         if not dest.is_relative_to(root):

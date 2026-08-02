@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (express-ts-shortlink): POST /api/links/bulk-delete must validate the whole slug batch before deleting any link - not partially delete as it goes",
+  "tags": [
+    "typescript",
+    "express",
+    "repo-scale",
+    "multi-file",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "Add a bulk delete endpoint: `POST /api/links/bulk-delete`, accepting `{\"slugs\": [...]}` and returning `{\"deleted\": [...]}`. It must be all-or-nothing: validate that EVERY slug in the request refers to an existing link BEFORE deleting any of them. If any slug is missing, respond 404 and leave every link completely untouched - not partially deleted up to the point where the missing slug was hit. Reject a non-array or non-string-array `slugs` with 400."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "*/routes/links.ts",
+      "content_patterns": [
+        "bulk-delete"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/bulk_delete_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { startServer, api } = require(\"./helpers\");\n\ntest(\"bulk-delete: removes all links when every slug exists\", async () => {\n  const { base, close } = startServer();\n  try {\n    await api(base, \"POST\", \"/api/links\", { url: \"https://a.example.com\", slug: \"link-a\" });\n    await api(base, \"POST\", \"/api/links\", { url: \"https://b.example.com\", slug: \"link-b\" });\n\n    const resp = await api(base, \"POST\", \"/api/links/bulk-delete\", { slugs: [\"link-a\", \"link-b\"] });\n    assert.strictEqual(resp.status, 200);\n\n    const checkA = await api(base, \"GET\", \"/api/links/link-a\");\n    const checkB = await api(base, \"GET\", \"/api/links/link-b\");\n    assert.strictEqual(checkA.status, 404);\n    assert.strictEqual(checkB.status, 404);\n  } finally {\n    await close();\n  }\n});\n\ntest(\"bulk-delete: is atomic - a missing slug leaves everything untouched\", async () => {\n  const { base, close } = startServer();\n  try {\n    await api(base, \"POST\", \"/api/links\", { url: \"https://a.example.com\", slug: \"link-a\" });\n    await api(base, \"POST\", \"/api/links\", { url: \"https://b.example.com\", slug: \"link-b\" });\n\n    const resp = await api(base, \"POST\", \"/api/links/bulk-delete\", {\n      slugs: [\"link-a\", \"link-b\", \"does-not-exist\"],\n    });\n    assert.strictEqual(resp.status, 404);\n\n    const checkA = await api(base, \"GET\", \"/api/links/link-a\");\n    const checkB = await api(base, \"GET\", \"/api/links/link-b\");\n    assert.strictEqual(checkA.status, 200);\n    assert.strictEqual(checkB.status, 200);\n  } finally {\n    await close();\n  }\n});\n"
+  },
+  "check_command": "tsc -p . && node --test",
+  "reference_solution": {
+    "src/routes/links.ts": "import express from \"express\";\n\nimport { MAX_URL_LENGTH } from \"../config\";\nimport { Link } from \"../models/types\";\nimport { isValidSlug, randomSlug } from \"../services/slugService\";\nimport * as store from \"../store/linkStore\";\n\nexport const linksRouter = express.Router();\n\nlinksRouter.post(\"/\", (req, res) => {\n  const body = req.body ?? {};\n  const url = typeof body.url === \"string\" ? body.url : \"\";\n  if (url.length === 0 || url.length > MAX_URL_LENGTH) {\n    res.status(400).json({ error: \"url is required\" });\n    return;\n  }\n\n  let slug: string;\n  if (body.slug !== undefined) {\n    if (typeof body.slug !== \"string\" || !isValidSlug(body.slug)) {\n      res.status(400).json({ error: \"invalid slug\" });\n      return;\n    }\n    slug = body.slug;\n  } else {\n    do {\n      slug = randomSlug();\n    } while (store.getLink(slug) !== undefined);\n  }\n\n  if (store.getLink(slug) !== undefined) {\n    res.status(409).json({ error: \"slug already taken\" });\n    return;\n  }\n\n  const link: Link = { slug, url, createdAt: new Date().toISOString() };\n  store.createLink(link);\n  res.status(201).json(link);\n});\n\nlinksRouter.post(\"/bulk-delete\", (req, res) => {\n  const body = req.body ?? {};\n  const slugs: unknown = body.slugs;\n  if (!Array.isArray(slugs) || slugs.some((s) => typeof s !== \"string\")) {\n    res.status(400).json({ error: \"slugs must be an array of strings\" });\n    return;\n  }\n  const typedSlugs = slugs as string[];\n\n  for (const slug of typedSlugs) {\n    if (store.getLink(slug) === undefined) {\n      res.status(404).json({ error: `link not found: ${slug}` });\n      return;\n    }\n  }\n\n  for (const slug of typedSlugs) {\n    store.deleteLink(slug);\n  }\n  res.status(200).json({ deleted: typedSlugs });\n});\n\nlinksRouter.get(\"/\", (_req, res) => {\n  res.status(200).json(store.listLinks());\n});\n\nlinksRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(200).json(link);\n});\n\nlinksRouter.delete(\"/:slug\", (req, res) => {\n  if (!store.deleteLink(req.params.slug)) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(204).send();\n});\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "bulk-delete-partial-mutation",
+      "files": {
+        "src/routes/links.ts": "import express from \"express\";\n\nimport { MAX_URL_LENGTH } from \"../config\";\nimport { Link } from \"../models/types\";\nimport { isValidSlug, randomSlug } from \"../services/slugService\";\nimport * as store from \"../store/linkStore\";\n\nexport const linksRouter = express.Router();\n\nlinksRouter.post(\"/\", (req, res) => {\n  const body = req.body ?? {};\n  const url = typeof body.url === \"string\" ? body.url : \"\";\n  if (url.length === 0 || url.length > MAX_URL_LENGTH) {\n    res.status(400).json({ error: \"url is required\" });\n    return;\n  }\n\n  let slug: string;\n  if (body.slug !== undefined) {\n    if (typeof body.slug !== \"string\" || !isValidSlug(body.slug)) {\n      res.status(400).json({ error: \"invalid slug\" });\n      return;\n    }\n    slug = body.slug;\n  } else {\n    do {\n      slug = randomSlug();\n    } while (store.getLink(slug) !== undefined);\n  }\n\n  if (store.getLink(slug) !== undefined) {\n    res.status(409).json({ error: \"slug already taken\" });\n    return;\n  }\n\n  const link: Link = { slug, url, createdAt: new Date().toISOString() };\n  store.createLink(link);\n  res.status(201).json(link);\n});\n\nlinksRouter.post(\"/bulk-delete\", (req, res) => {\n  const body = req.body ?? {};\n  const slugs: unknown = body.slugs;\n  if (!Array.isArray(slugs) || slugs.some((s) => typeof s !== \"string\")) {\n    res.status(400).json({ error: \"slugs must be an array of strings\" });\n    return;\n  }\n  const typedSlugs = slugs as string[];\n  const deleted: string[] = [];\n\n  for (const slug of typedSlugs) {\n    if (store.getLink(slug) === undefined) {\n      res.status(404).json({ error: `link not found: ${slug}`, deleted });\n      return;\n    }\n    store.deleteLink(slug);\n    deleted.push(slug);\n  }\n  res.status(200).json({ deleted });\n});\n\nlinksRouter.get(\"/\", (_req, res) => {\n  res.status(200).json(store.listLinks());\n});\n\nlinksRouter.get(\"/:slug\", (req, res) => {\n  const link = store.getLink(req.params.slug);\n  if (link === undefined) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(200).json(link);\n});\n\nlinksRouter.delete(\"/:slug\", (req, res) => {\n  if (!store.deleteLink(req.params.slug)) {\n    res.status(404).json({ error: \"link not found\" });\n    return;\n  }\n  res.status(204).send();\n});\n"
+      }
+    }
+  ],
+  "name": "add_shortlink_bulk_delete_atomic",
+  "language": "typescript",
+  "framework": "express",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "setup_repo": "express-ts-shortlink",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "task_type": "feature"
+}

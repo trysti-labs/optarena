@@ -37,5 +37,13 @@
   "timeout": 180,
   "reference_solution": {
     "src/main.rs": "use axum::{routing::get, Json, Router};\nuse serde_json::{json, Value};\n\nasync fn health() -> Json<Value> {\n    Json(json!({\"status\": \"ok\"}))\n}\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new().route(\"/health\", get(health));\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8004\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
-  }
+  },
+  "broken_solutions": [
+    {
+      "name": "wrong-port",
+      "files": {
+        "src/main.rs": "use axum::{routing::get, Json, Router};\nuse serde_json::{json, Value};\n\nasync fn health() -> Json<Value> {\n    Json(json!({\"status\": \"ok\"}))\n}\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new().route(\"/health\", get(health));\n    let listener = tokio::net::TcpListener::bind(\"0.0.0.0:8080\").await.unwrap();\n    axum::serve(listener, app).await.unwrap();\n}\n"
+      }
+    }
+  ]
 }

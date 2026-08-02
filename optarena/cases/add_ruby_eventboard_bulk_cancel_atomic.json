@@ -1,0 +1,46 @@
+{
+  "description": "Repo-scale (ruby-eventboard): add an atomic all-or-nothing bulk RSVP cancellation method",
+  "task_type": "feature",
+  "tags": [
+    "ruby",
+    "repo-scale",
+    "difficulty-4",
+    "transactions"
+  ],
+  "prompts": [
+    "Add `RsvpService#bulk_cancel(rsvp_ids)`. It must validate the WHOLE batch before canceling anything: raise RsvpError (and cancel NOTHING) if `rsvp_ids` is empty, or if ANY id in it does not reference an existing RSVP, or references one that's already canceled - even one bad id anywhere in the list must leave every RSVP's status completely unchanged, not just the ones after the bad id. Only once every id is confirmed valid should the whole batch actually be canceled (reusing the existing per-RSVP `cancel` logic, including its waitlist-promotion behavior). Returns the array of canceled RSVPs."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "lib/event_board/rsvp_service.rb",
+      "content_patterns": [
+        "bulk_cancel"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "test/bulk_cancel_test.rb": "require_relative \"test_helper\"\n\nclass BulkCancelTest < Minitest::Test\n  include EventBoardTestSetup\n\n  def test_bulk_cancel_applies_all_when_every_id_is_valid\n    events, attendees, rsvps, service = build_service\n    event = events.create(title: \"Meetup\", capacity: 5)\n    a1 = attendees.create(name: \"A\", email: \"a@example.com\")\n    a2 = attendees.create(name: \"B\", email: \"b@example.com\")\n    r1 = service.register(event_id: event.id, attendee_id: a1.id)\n    r2 = service.register(event_id: event.id, attendee_id: a2.id)\n\n    canceled = service.bulk_cancel([r1.id, r2.id])\n    assert_equal 2, canceled.length\n    assert_equal \"canceled\", rsvps.find(r1.id).status\n    assert_equal \"canceled\", rsvps.find(r2.id).status\n  end\n\n  def test_bulk_cancel_rejects_whole_batch_on_one_bad_id\n    events, attendees, rsvps, service = build_service\n    event = events.create(title: \"Meetup\", capacity: 5)\n    a1 = attendees.create(name: \"A\", email: \"a@example.com\")\n    r1 = service.register(event_id: event.id, attendee_id: a1.id)\n\n    assert_raises(EventBoard::RsvpError) { service.bulk_cancel([r1.id, 999_999]) }\n\n    assert_equal \"confirmed\", rsvps.find(r1.id).status\n  end\n\n  def test_bulk_cancel_promotes_waitlisted_like_single_cancel\n    events, attendees, rsvps, service = build_service\n    event = events.create(title: \"Meetup\", capacity: 1)\n    a1 = attendees.create(name: \"A\", email: \"a@example.com\")\n    a2 = attendees.create(name: \"B\", email: \"b@example.com\")\n    r1 = service.register(event_id: event.id, attendee_id: a1.id)\n    r2 = service.register(event_id: event.id, attendee_id: a2.id)\n    assert_equal \"waitlisted\", r2.status\n\n    service.bulk_cancel([r1.id])\n    assert_equal \"confirmed\", rsvps.find(r2.id).status\n  end\nend\n"
+  },
+  "reference_solution": {
+    "lib/event_board/rsvp_service.rb": "module EventBoard\n  class RsvpError < StandardError; end\n\n  class RsvpService\n    def initialize(events:, attendees:, rsvps:)\n      @events = events\n      @attendees = attendees\n      @rsvps = rsvps\n    end\n\n    def register(event_id:, attendee_id:)\n      event = @events.find(event_id)\n      raise RsvpError, \"event not found\" unless event\n      raise RsvpError, \"attendee not found\" unless @attendees.find(attendee_id)\n\n      status = confirmed_count(event_id) < event.capacity ? \"confirmed\" : \"waitlisted\"\n      @rsvps.create(event_id: event_id, attendee_id: attendee_id, status: status, created_at: Time.now.to_f)\n    end\n\n    def cancel(rsvp_id)\n      rsvp = @rsvps.find(rsvp_id)\n      raise RsvpError, \"rsvp not found\" unless rsvp\n      raise RsvpError, \"rsvp already canceled\" if rsvp.status == \"canceled\"\n\n      was_confirmed = rsvp.status == \"confirmed\"\n      rsvp.status = \"canceled\"\n\n      if was_confirmed\n        next_waiting = @rsvps.for_event(rsvp.event_id).select { |r| r.status == \"waitlisted\" }.min_by(&:id)\n        next_waiting.status = \"confirmed\" if next_waiting\n      end\n\n      rsvp\n    end\n\n    # Cancels a batch of RSVPs atomically: every id must exist and not\n    # already be canceled BEFORE any of them are actually canceled - one\n    # bad id anywhere in the batch leaves every RSVP untouched.\n    def bulk_cancel(rsvp_ids)\n      raise RsvpError, \"rsvp_ids must be non-empty\" if rsvp_ids.nil? || rsvp_ids.empty?\n\n      rsvp_ids.each do |id|\n        rsvp = @rsvps.find(id)\n        raise RsvpError, \"rsvp_ids must all reference existing, not-yet-canceled rsvps\" if rsvp.nil? || rsvp.status == \"canceled\"\n      end\n\n      rsvp_ids.map { |id| cancel(id) }\n    end\n\n    private\n\n    def confirmed_count(event_id)\n      @rsvps.for_event(event_id).count { |r| r.status == \"confirmed\" }\n    end\n  end\nend\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "not-atomic-partial-commit",
+      "files": {
+        "lib/event_board/rsvp_service.rb": "module EventBoard\n  class RsvpError < StandardError; end\n\n  class RsvpService\n    def initialize(events:, attendees:, rsvps:)\n      @events = events\n      @attendees = attendees\n      @rsvps = rsvps\n    end\n\n    def register(event_id:, attendee_id:)\n      event = @events.find(event_id)\n      raise RsvpError, \"event not found\" unless event\n      raise RsvpError, \"attendee not found\" unless @attendees.find(attendee_id)\n\n      status = confirmed_count(event_id) < event.capacity ? \"confirmed\" : \"waitlisted\"\n      @rsvps.create(event_id: event_id, attendee_id: attendee_id, status: status, created_at: Time.now.to_f)\n    end\n\n    def cancel(rsvp_id)\n      rsvp = @rsvps.find(rsvp_id)\n      raise RsvpError, \"rsvp not found\" unless rsvp\n      raise RsvpError, \"rsvp already canceled\" if rsvp.status == \"canceled\"\n\n      was_confirmed = rsvp.status == \"confirmed\"\n      rsvp.status = \"canceled\"\n\n      if was_confirmed\n        next_waiting = @rsvps.for_event(rsvp.event_id).select { |r| r.status == \"waitlisted\" }.min_by(&:id)\n        next_waiting.status = \"confirmed\" if next_waiting\n      end\n\n      rsvp\n    end\n\n    def bulk_cancel(rsvp_ids)\n      raise RsvpError, \"rsvp_ids must be non-empty\" if rsvp_ids.nil? || rsvp_ids.empty?\n\n      rsvp_ids.map { |id| cancel(id) }\n    end\n\n    private\n\n    def confirmed_count(event_id)\n      @rsvps.for_event(event_id).count { |r| r.status == \"confirmed\" }\n    end\n  end\nend\n"
+      }
+    }
+  ],
+  "name": "add_ruby_eventboard_bulk_cancel_atomic",
+  "language": "ruby",
+  "framework": "minitest",
+  "domain": "backend",
+  "image": "optarena-tester-ruby:latest",
+  "setup_repo": "ruby-eventboard",
+  "git_init": true,
+  "check_command_timeout": 120,
+  "timeout": 600,
+  "difficulty": 4,
+  "check_command": "rake test"
+}

@@ -1,0 +1,65 @@
+{
+  "name": "add_shortlink_slug_validation_fix_dynamic",
+  "language": "typescript",
+  "framework": "express",
+  "domain": "backend",
+  "image": "optarena-tester-node:latest",
+  "setup_repo": "express-ts-shortlink",
+  "git_init": true,
+  "check_command_timeout": 180,
+  "timeout": 900,
+  "description": "Repo-scale dynamic eval: isValidSlug's length-and-pattern check was refactored into a broken if/else (checks bounds OR pattern depending on length, never both); the fix is REVERTED after prompt 1 (fixed after_prompt trigger) and must be reapplied",
+  "difficulty": 5,
+  "task_type": "bug_fix",
+  "tags": [
+    "typescript",
+    "express",
+    "l3",
+    "repo-scale",
+    "multi-file",
+    "dynamic",
+    "disruption",
+    "adaptation",
+    "reverted-fix",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Custom slugs are passing validation when they shouldn't - e.g. 'AB' (too short AND uppercase) is being accepted as a valid custom slug. Find and fix the bug in src/services/slugService.ts's isValidSlug; it must enforce the length bounds AND the lowercase alphanumeric-hyphen pattern together, not one or the other depending on the slug's length.",
+    "isValidSlug regressed again - overly-short or badly-formatted custom slugs are being accepted. Reapply the length-and-pattern fix in src/services/slugService.ts."
+  ],
+  "setup_files": {
+    "src/services/slugService.ts": "import { RANDOM_SLUG_LENGTH, SLUG_MAX_LENGTH, SLUG_MIN_LENGTH } from \"../config\";\n\nconst SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;\nconst ALPHABET = \"abcdefghijklmnopqrstuvwxyz0123456789\";\n\n/** A valid slug is 3-30 chars of lowercase a-z0-9 groups joined by single hyphens. */\nexport function isValidSlug(slug: string): boolean {\n  if (slug.length >= SLUG_MIN_LENGTH) {\n    return slug.length <= SLUG_MAX_LENGTH;\n  }\n  return SLUG_PATTERN.test(slug);\n}\n\nexport function randomSlug(): string {\n  let out = \"\";\n  for (let i = 0; i < RANDOM_SLUG_LENGTH; i++) {\n    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];\n  }\n  return out;\n}\n"
+  },
+  "disruptions": [
+    {
+      "after_prompt": 1,
+      "description": "slugService.ts reverted back to the broken if/else, undoing prompt 1's fix",
+      "write_files": {
+        "src/services/slugService.ts": "import { RANDOM_SLUG_LENGTH, SLUG_MAX_LENGTH, SLUG_MIN_LENGTH } from \"../config\";\n\nconst SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;\nconst ALPHABET = \"abcdefghijklmnopqrstuvwxyz0123456789\";\n\n/** A valid slug is 3-30 chars of lowercase a-z0-9 groups joined by single hyphens. */\nexport function isValidSlug(slug: string): boolean {\n  if (slug.length >= SLUG_MIN_LENGTH) {\n    return slug.length <= SLUG_MAX_LENGTH;\n  }\n  return SLUG_PATTERN.test(slug);\n}\n\nexport function randomSlug(): string {\n  let out = \"\";\n  for (let i = 0; i < RANDOM_SLUG_LENGTH; i++) {\n    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];\n  }\n  return out;\n}\n"
+      }
+    }
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "*/services/slugService.ts",
+      "content_patterns": [
+        "SLUG_PATTERN"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "tests/slug_fix_hidden.test.js": "const test = require(\"node:test\");\nconst assert = require(\"node:assert\");\n\nconst { startServer, api } = require(\"./helpers\");\n\ntest(\"custom slug validation enforces length AND pattern together\", async () => {\n  const { base, close } = startServer();\n  try {\n    const tooShortButPatternOk = await api(base, \"POST\", \"/api/links\", { url: \"https://example.com\", slug: \"ab\" });\n    assert.strictEqual(tooShortButPatternOk.status, 400);\n\n    const rightLengthBadPattern = await api(base, \"POST\", \"/api/links\", { url: \"https://example.com\", slug: \"ABCDEF\" });\n    assert.strictEqual(rightLengthBadPattern.status, 400);\n\n    const rightLengthBadChars = await api(base, \"POST\", \"/api/links\", { url: \"https://example.com\", slug: \"abc_def\" });\n    assert.strictEqual(rightLengthBadChars.status, 400);\n\n    const valid = await api(base, \"POST\", \"/api/links\", { url: \"https://example.com\", slug: \"my-story\" });\n    assert.strictEqual(valid.status, 201);\n  } finally {\n    await close();\n  }\n});\n"
+  },
+  "check_command": "tsc -p . && node --test",
+  "reference_solution": {
+    "src/services/slugService.ts": "import { RANDOM_SLUG_LENGTH, SLUG_MAX_LENGTH, SLUG_MIN_LENGTH } from \"../config\";\n\nconst SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;\nconst ALPHABET = \"abcdefghijklmnopqrstuvwxyz0123456789\";\n\n/** A valid slug is 3-30 chars of lowercase a-z0-9 groups joined by single hyphens. */\nexport function isValidSlug(slug: string): boolean {\n  return (\n    slug.length >= SLUG_MIN_LENGTH &&\n    slug.length <= SLUG_MAX_LENGTH &&\n    SLUG_PATTERN.test(slug)\n  );\n}\n\nexport function randomSlug(): string {\n  let out = \"\";\n  for (let i = 0; i < RANDOM_SLUG_LENGTH; i++) {\n    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];\n  }\n  return out;\n}\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "bounds-only-no-pattern-check",
+      "files": {
+        "src/services/slugService.ts": "import { RANDOM_SLUG_LENGTH, SLUG_MAX_LENGTH, SLUG_MIN_LENGTH } from \"../config\";\n\nconst ALPHABET = \"abcdefghijklmnopqrstuvwxyz0123456789\";\n\n/** A valid slug is 3-30 chars of lowercase a-z0-9 groups joined by single hyphens. */\nexport function isValidSlug(slug: string): boolean {\n  return slug.length >= SLUG_MIN_LENGTH && slug.length <= SLUG_MAX_LENGTH;\n}\n\nexport function randomSlug(): string {\n  let out = \"\";\n  for (let i = 0; i < RANDOM_SLUG_LENGTH; i++) {\n    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];\n  }\n  return out;\n}\n"
+      }
+    }
+  ]
+}

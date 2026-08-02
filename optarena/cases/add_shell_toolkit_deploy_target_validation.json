@@ -1,0 +1,47 @@
+{
+  "description": "Repo-scale (shell-toolkit): deploy.sh must call validate_env for DEPLOY_TARGET AND actually respect its exit code",
+  "tags": [
+    "shell",
+    "bash",
+    "repo-scale",
+    "difficulty-4"
+  ],
+  "prompts": [
+    "deploy.sh must require a `DEPLOY_TARGET` environment variable before deploying: call the existing `validate_env` helper (lib/validate.sh already defines it, but nothing currently calls it) with `DEPLOY_TARGET`, after the version check. It's not enough to just call it - deploy.sh must actually check its exit code and abort with a non-zero exit if validation fails, not just invoke it and continue regardless. On success, log `deploying version $VERSION to $DEPLOY_TARGET` (include the target in the message)."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "deploy.sh",
+      "content_patterns": [
+        "validate_env",
+        "DEPLOY_TARGET"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_env_validation.py": "import os\nimport subprocess\n\nenv_without_target = {k: v for k, v in os.environ.items() if k != 'DEPLOY_TARGET'}\n\nr = subprocess.run(\n    ['bash', 'deploy.sh', '-v', '1.2.3'],\n    capture_output=True, text=True, timeout=15, env=env_without_target,\n)\nassert r.returncode != 0, (\n    f'expected deploy.sh to fail when DEPLOY_TARGET is unset, but it exited 0: {r.stdout!r}')\n\nenv_with_target = dict(env_without_target)\nenv_with_target['DEPLOY_TARGET'] = 'staging'\nr2 = subprocess.run(\n    ['bash', 'deploy.sh', '-v', '1.2.3'],\n    capture_output=True, text=True, timeout=15, env=env_with_target,\n)\nassert r2.returncode == 0, (r2.stdout, r2.stderr)\nassert 'staging' in r2.stdout, r2.stdout\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_env_validation.py",
+  "reference_solution": {
+    "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\n\nVERSION=\"\"\nwhile getopts \"v:\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\n\nif ! validate_env DEPLOY_TARGET; then\n    log_error \"aborting: required environment is not configured\"\n    exit 1\nfi\n\nlog_info \"deploying version $VERSION to $DEPLOY_TARGET\"\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "env-check-result-ignored",
+      "files": {
+        "deploy.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"$SCRIPT_DIR/lib/logging.sh\"\nsource \"$SCRIPT_DIR/lib/validate.sh\"\nsource \"$SCRIPT_DIR/lib/backup.sh\"\n\nVERSION=\"\"\nwhile getopts \"v:\" opt; do\n    case \"$opt\" in\n        v) VERSION=\"$OPTARG\" ;;\n        *)\n            log_error \"usage: deploy.sh -v VERSION\"\n            exit 1\n            ;;\n    esac\ndone\n\nif [ -z \"$VERSION\" ]; then\n    log_error \"missing -v VERSION\"\n    exit 1\nfi\n\nif ! validate_version \"$VERSION\"; then\n    exit 1\nfi\n\nvalidate_env DEPLOY_TARGET || true\n\nlog_info \"deploying version $VERSION\"\n"
+      }
+    }
+  ],
+  "name": "add_shell_toolkit_deploy_target_validation",
+  "language": "shell",
+  "framework": "bash",
+  "domain": "devops",
+  "image": "optarena-tester:latest",
+  "setup_repo": "shell-toolkit",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 4,
+  "task_type": "feature"
+}

@@ -1,0 +1,56 @@
+{
+  "description": "Repo-scale (sql-ecommerce): order_discounts must be subtracted using the SAME cancelled-order exclusion as the gross total - a discount attached to a cancelled order must not be subtracted",
+  "tags": [
+    "sql",
+    "sqlite",
+    "repo-scale",
+    "multi-file",
+    "difficulty-5"
+  ],
+  "prompts": [
+    "Add a `cancelled` status to the `orders.status` CHECK constraint in schema.sql. Add a new table `order_discounts` (`id INTEGER PRIMARY KEY`, `order_id INTEGER NOT NULL REFERENCES orders(id)`, `discount_cents INTEGER NOT NULL CHECK (discount_cents > 0)`). In views.sql: `customer_order_totals`'s `total_cents` must (1) exclude order_items from cancelled orders from the gross total, exactly as before, AND (2) subtract each customer's order_discounts - but a discount row attached to a CANCELLED order must NOT be subtracted, since that order's revenue was already excluded from the gross total; subtracting its discount too would incorrectly reduce the customer's total for an order that doesn't count at all. Both the gross-total exclusion and the discount exclusion must use the same cancelled-order rule. `product_sales_summary` must also exclude cancelled orders' units, and is unaffected by discounts."
+  ],
+  "expected_files": [
+    {
+      "path_pattern": "schema.sql",
+      "content_patterns": [
+        "cancelled",
+        "order_discounts"
+      ]
+    },
+    {
+      "path_pattern": "views.sql",
+      "content_patterns": [
+        "order_discounts"
+      ]
+    }
+  ],
+  "test_setup_files": {
+    "check_discounts_exclude_cancelled.py": "import sqlite3\nfrom pathlib import Path\n\nschema = Path('schema.sql').read_text(encoding='utf-8')\nviews = Path('views.sql').read_text(encoding='utf-8')\n\ncon = sqlite3.connect(':memory:')\ncon.executescript(schema)\ncon.executescript(views)\ncon.executescript(\"\"\"\nINSERT INTO customers VALUES (1, 'Ada', 'ada@example.com');\nINSERT INTO products VALUES (1, 'Widget', 1000);\nINSERT INTO orders VALUES (1, 1, 'paid', '2026-01-01');\nINSERT INTO orders VALUES (2, 1, 'cancelled', '2026-01-02');\nINSERT INTO order_items VALUES (1, 1, 1, 10, 1000);\nINSERT INTO order_items VALUES (2, 2, 1, 5, 1000);\nINSERT INTO order_discounts VALUES (1, 2, 100);\n\"\"\")\n\nrow = con.execute(\n    'SELECT total_cents FROM customer_order_totals WHERE customer_id = 1'\n).fetchone()\n\nassert row[0] == 10000, (\n    f'expected total_cents 10000 (only the paid order counts, and the discount attached to the '\n    f'cancelled order must NOT be subtracted since that order was already excluded), got {row[0]}')\n\nprint('PASS')\n"
+  },
+  "check_command": "python3 check_discounts_exclude_cancelled.py",
+  "reference_solution": {
+    "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped', 'cancelled')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n\nCREATE TABLE order_discounts (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    discount_cents INTEGER NOT NULL CHECK (discount_cents > 0)\n);\n",
+    "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(gross.total_cents, 0) - COALESCE(disc.total_discount_cents, 0) AS total_cents\nFROM customers c\nLEFT JOIN (\n    SELECT o.customer_id, SUM(oi.quantity * oi.unit_price_cents) AS total_cents\n    FROM orders o\n    JOIN order_items oi ON oi.order_id = o.id\n    WHERE o.status != 'cancelled'\n    GROUP BY o.customer_id\n) gross ON gross.customer_id = c.id\nLEFT JOIN (\n    SELECT o.customer_id, SUM(od.discount_cents) AS total_discount_cents\n    FROM orders o\n    JOIN order_discounts od ON od.order_id = o.id\n    WHERE o.status != 'cancelled'\n    GROUP BY o.customer_id\n) disc ON disc.customer_id = c.id;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN oi.quantity ELSE 0 END), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nLEFT JOIN orders o ON o.id = oi.order_id\nGROUP BY p.id, p.name;\n"
+  },
+  "broken_solutions": [
+    {
+      "name": "discounts-subtracted-for-cancelled-orders-too",
+      "files": {
+        "schema.sql": "CREATE TABLE customers (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    email TEXT NOT NULL UNIQUE\n);\n\nCREATE TABLE products (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    price_cents INTEGER NOT NULL CHECK (price_cents >= 0)\n);\n\nCREATE TABLE orders (\n    id INTEGER PRIMARY KEY,\n    customer_id INTEGER NOT NULL REFERENCES customers(id),\n    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped', 'cancelled')),\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE order_items (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    product_id INTEGER NOT NULL REFERENCES products(id),\n    quantity INTEGER NOT NULL CHECK (quantity > 0),\n    unit_price_cents INTEGER NOT NULL\n);\n\nCREATE TABLE order_discounts (\n    id INTEGER PRIMARY KEY,\n    order_id INTEGER NOT NULL REFERENCES orders(id),\n    discount_cents INTEGER NOT NULL CHECK (discount_cents > 0)\n);\n",
+        "views.sql": "CREATE VIEW customer_order_totals AS\nSELECT c.id AS customer_id,\n       c.name,\n       COALESCE(gross.total_cents, 0) - COALESCE(disc.total_discount_cents, 0) AS total_cents\nFROM customers c\nLEFT JOIN (\n    SELECT o.customer_id, SUM(oi.quantity * oi.unit_price_cents) AS total_cents\n    FROM orders o\n    JOIN order_items oi ON oi.order_id = o.id\n    WHERE o.status != 'cancelled'\n    GROUP BY o.customer_id\n) gross ON gross.customer_id = c.id\nLEFT JOIN (\n    SELECT o.customer_id, SUM(od.discount_cents) AS total_discount_cents\n    FROM orders o\n    JOIN order_discounts od ON od.order_id = o.id\n    GROUP BY o.customer_id\n) disc ON disc.customer_id = c.id;\n\nCREATE VIEW product_sales_summary AS\nSELECT p.id AS product_id,\n       p.name,\n       COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN oi.quantity ELSE 0 END), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nLEFT JOIN orders o ON o.id = oi.order_id\nGROUP BY p.id, p.name;\n"
+      }
+    }
+  ],
+  "name": "add_sql_ecommerce_discounts_exclude_cancelled_orders",
+  "language": "sql",
+  "framework": "sqlite",
+  "domain": "backend",
+  "image": "optarena-tester-python:latest",
+  "setup_repo": "sql-ecommerce",
+  "git_init": true,
+  "check_command_timeout": 60,
+  "timeout": 300,
+  "difficulty": 5,
+  "task_type": "feature"
+}
