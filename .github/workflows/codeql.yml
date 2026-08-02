@@ -30,16 +30,21 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # tests/ and repos/ (starter-repo fixtures for the corpus, not part of
+      # the optarena package) would otherwise dominate the findings with
+      # fixture-code noise - the same reasoning ruff's own `ruff check
+      # optarena tests` scoping already applies, minus tests here since test
+      # code is a legitimate CodeQL target on its own. `with:` inputs are
+      # always scalar strings in the workflow schema (a literal `- item`
+      # YAML sequence here is invalid workflow syntax - "A sequence was not
+      # expected" - even though paths-ignore is logically a list); a
+      # multi-line block string, one path per line, is CodeQL's own
+      # documented way to pass a path list through this input.
       - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           languages: python
-          # tests/ and repos/ (starter-repo fixtures for the corpus, not
-          # part of the optarena package) would otherwise dominate the
-          # findings with fixture-code noise - the same reasoning ruff's own
-          # `ruff check optarena tests` scoping already applies, minus tests
-          # here since test code is a legitimate CodeQL target on its own.
-          paths-ignore:
-            - repos/**
+          paths-ignore: |
+            repos/**
       - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           category: "/language:python"
