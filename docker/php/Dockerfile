@@ -39,8 +39,19 @@ RUN curl -fsSL https://getcomposer.org/installer -o /tmp/composer-setup.php \
 # own domain (more reliable in a build context than a keyserver network);
 # fingerprint independently cross-checked against the key ID PHPUnit's own
 # docs publish (0x4AA394086372C20A) before pinning it here.
-RUN curl -fsSL https://phar.phpunit.de/phpunit-11.5.56.phar -o /usr/local/bin/phpunit \
-    && curl -fsSL https://phar.phpunit.de/phpunit-11.5.56.phar.asc -o /tmp/phpunit.phar.asc \
+#
+# Was pinned to 11.5.56 until this pass: phar.phpunit.de has since pruned
+# every 11.x release from its distribution server entirely (confirmed via
+# its own directory listing), so the URL still returned bytes but they no
+# longer matched the .asc signature ("BAD signature", not "not found" -
+# every image-vuln-scan matrix leg building this image fresh caught it,
+# since no prior job built docker/php from scratch on every run). Bumped to
+# 12.0.0, the version PHPUnit's own docs state as the minimum requiring PHP
+# 8.3 - matching this image's php:8.3-cli base exactly. Verified locally
+# before pinning here: `gpg --verify` reports "Good signature" against the
+# same Sebastian Bergmann key used above, not just a downloaded file.
+RUN curl -fsSL https://phar.phpunit.de/phpunit-12.0.0.phar -o /usr/local/bin/phpunit \
+    && curl -fsSL https://phar.phpunit.de/phpunit-12.0.0.phar.asc -o /tmp/phpunit.phar.asc \
     && curl -fsSL https://sebastian-bergmann.de/gpg.asc -o /tmp/phpunit-signer.asc \
     && gpg --import /tmp/phpunit-signer.asc \
     && gpg --verify /tmp/phpunit.phar.asc /usr/local/bin/phpunit \

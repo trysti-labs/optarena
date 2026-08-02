@@ -63,7 +63,16 @@ def variants_for(case: dict) -> list[tuple[str, dict | None, bool]]:
 def _run_variant(case: dict, files: dict | None, ws: Path) -> list[str]:
     """One variant through the real oracle; returns its failure strings."""
     ws.mkdir(parents=True, exist_ok=True)
-    relax_workspace_permissions(ws)   # A-36: no-op unless OPTARENA_SANDBOX_USER is set
+    # A-36 / non-root sandbox: POSIX requires execute (traversal) permission
+    # on EVERY directory in the path, not just the leaf. `ws` is nested two
+    # levels under the mkdtemp `root` (root/case_name/variant_name) - relaxing
+    # only `ws` left `root/case_name` (and `root` itself, relaxed separately
+    # in verify_cases) blocking traversal for a non-root container user, so
+    # every file under it was unreachable ("Permission denied") even though
+    # the leaf directory and the file itself were wide open. Relax the whole
+    # chain, not just the leaf.
+    relax_workspace_permissions(ws.parent)
+    relax_workspace_permissions(ws)   # no-op unless OPTARENA_SANDBOX_USER is set
     prepare_workspace(ws, case)
     # Dynamic cases: apply every disruption to reach the fully-perturbed final
     # world, THEN lay the variant's solution over it - so a reference solution is
@@ -79,6 +88,14 @@ def _run_variant(case: dict, files: dict | None, ws: Path) -> list[str]:
         # so the real check_command judges it - not the expected-file check.
         write_setup_files(ws, files)
         created = sorted(files.keys())
+    # A second relax pass, now that the workspace is FULLY populated - the
+    # two calls above ran before prepare_workspace/write_setup_files existed,
+    # so they fixed traversal (reading) but not writing into content created
+    # afterward: a setup_repo fixture's copied subdirectories, or overwriting
+    # an existing setup_files script (see relax_workspace_permissions' own
+    # docstring for the concrete failures this closes). Recursive, so this
+    # one call covers everything just written, not just `ws` itself.
+    relax_workspace_permissions(ws)
     failures, _info = evaluate_case(case, created, ws)
     return failures
 
@@ -119,6 +136,7 @@ def verify_cases(cases: list[dict], root: Path | None = None) -> tuple[list[str]
     owns_workspace = root is None
     root = root or Path(tempfile.mkdtemp(prefix="optarena_verify_"))
     root.mkdir(parents=True, exist_ok=True)
+    relax_workspace_permissions(root)  # see _run_variant: the whole chain needs this, not just the leaf
 
     # One sandbox per distinct image any verified case needs, but only ONE
     # ALIVE AT A TIME (grouped by image, not all started up front) - the

@@ -1,0 +1,86 @@
+version: 2
+updates:
+  # target-branch: v0.1 on every entry below - the repo's default branch
+  # (main) is 20 commits behind v0.1 and on a genuinely separate line of
+  # development (confirmed: main's tip predates this session's work
+  # entirely), not just "a bit stale". Without this, Dependabot defaults to
+  # opening PRs against main, which meant every PR's CI ran against
+  # already-fixed bugs that still look broken there (e.g. sandbox-nonroot
+  # failing on the exact verify.py permissions bug already fixed on v0.1).
+  # Revisit if/when main and v0.1 converge.
+
+  # Root package's optional driver-SDK extras (crewai, openai-agents,
+  # smolagents, langgraph, autogen, semantic-kernel) plus the CI-only `test`
+  # extra (pytest/pytest-cov/pytest-randomly) - each is its own supply-chain
+  # surface even though the core package itself is dependency-free.
+  - package-ecosystem: pip
+    directory: "/"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      driver-sdks:
+        patterns:
+          - "*"
+
+  # Pinned-by-SHA actions (see every workflow's own comments on why) still
+  # need bumping when a real new release lands - Dependabot understands the
+  # `# vX` trailing comment convention and opens a PR updating both the SHA
+  # and the comment together, not just the comment.
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # One entry per Dockerfile directory - Dependabot's docker ecosystem is
+  # scoped per-directory, tracking each FROM line's base-image tag. Matches
+  # the same 9 contexts dockerfile-lint/image-vuln-scan/images-lock-check
+  # all already iterate over.
+  - package-ecosystem: docker
+    directory: "/docker"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/python"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/node"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/go"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/jvm"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/rust"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/dotnet"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/php"
+    target-branch: v0.1
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/docker/ruby"
+    target-branch: v0.1
+    schedule:
+      interval: weekly

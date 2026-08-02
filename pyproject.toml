@@ -22,6 +22,13 @@ smolagents = ["smolagents"]
 langgraph = ["langgraph", "langchain-openai"]
 autogen = ["autogen-agentchat", "autogen-ext[openai]"]
 semantic-kernel = ["semantic-kernel"]
+# CI/dev tooling only - never a runtime dependency of the package itself.
+# pytest runs the same unittest.TestCase suite `python -m unittest` always
+# has (no rewrite needed); pytest-randomly randomizes test order so shared
+# mutable state (e.g. a leaked temp dir, a module-level mock that only
+# passes because of file order) fails loudly instead of hiding until
+# something else runs first; pytest-cov measures/enforces coverage.
+test = ["pytest>=8", "pytest-cov>=5", "pytest-randomly>=3"]
 
 [project.scripts]
 optarena = "optarena.cli:main_exit"
@@ -37,6 +44,24 @@ optarena = ["cases/*.json"]
 # top-level siblings of optarena/, not part of this package. This is a
 # source-checkout tool, not a wheel with everything embedded - see the
 # "Source-checkout install only" note in README.md before changing this.
+
+[tool.coverage.run]
+source = ["optarena"]
+branch = true
+omit = ["optarena/__main__.py"]
+
+[tool.coverage.report]
+# The 6 optional SDK-driver wrapper modules (crewai_sdk.py, langgraph_sdk.py,
+# etc.) score 28-38% in CI, because their whole SDK-specific code path is
+# only reachable with the real third-party package installed, which CI does
+# not install for any of them (the same reason those extras are optional at
+# all). Real baseline measured 2026-08-02: 77% branch coverage repo-wide.
+# Gated a few points below that (not at it) so this is a regression trip
+# wire, not a fragile pass/fail hinging on incidental cross-platform
+# variance between the OS this was measured on and whichever runs it in CI.
+fail_under = 75
+show_missing = true
+exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]
 
 [tool.ruff.lint]
 # Explicit rather than "whatever ruff's current default happens to be" -

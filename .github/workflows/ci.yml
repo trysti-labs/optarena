@@ -5,6 +5,14 @@ on:
     branches: [main, v0.1]
   pull_request:
 
+# A push to an open PR previously left the superseded run's ~9 jobs (several
+# 15-40 minutes, Docker-heavy) running to completion alongside the new one -
+# pure wasted runner time on a result nobody will read. Scoped per-workflow-
+# per-ref so unrelated branches/PRs never cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Every job below got an explicit timeout-minutes this session - none had
   # one before, so a hang (a container that stops responding, a deadlocked
@@ -54,9 +62,46 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
-      - name: Unit tests (no Docker)
+      # pytest, not bare `python -m unittest discover`: same test suite
+      # (pytest runs unittest.TestCase classes natively, no rewrite), but it
+      # unlocks two things unittest can't do - pytest-randomly (below) and
+      # coverage measurement/enforcement. CI-only tooling, not a runtime
+      # dependency of the package (see the `test` extra's own comment).
+      - name: Install test tooling
+        run: pip install -e .[test]
+      # pytest-randomly (auto-loads once installed, no flag needed) runs the
+      # suite in a different order every invocation and prints the seed it
+      # used on failure - the same class of bug a 2026-08-02 sweep found by
+      # hand (~35 tempfile.mkdtemp() sites with no addCleanup, several
+      # `tearDown()`s that only restored mocked module state) is exactly what
+      # order-dependence catches automatically going forward instead of
+      # needing another manual audit.
+      # Coverage on every leg, one run (not a second full test pass just to
+      # add --cov) - so a Windows- or macOS-only code path (this project has
+      # real ones, e.g. cases.py's _kill_process_tree taskkill-vs-killpg
+      # branch) isn't silently invisible on the legs that don't exercise it.
+      # fail_under lives in pyproject.toml's [tool.coverage.report] (75%,
+      # ~2pp below the 77% measured baseline - a regression trip wire, not a
+      # fragile exact-match gate) and applies uniformly across the matrix;
+      # XML export + the uploaded artifact are limited to one canonical leg
+      # since combining coverage.py data correctly across a 12-way matrix
+      # needs its own combine step, and 12 near-duplicate artifacts add
+      # nothing --term-missing in the log doesn't already show.
+      - name: Unit tests + coverage (no Docker)
         shell: bash
-        run: OPTARENA_DISABLE_SANDBOX=1 python -m unittest discover tests -v
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ] && [ "${{ matrix.python-version }}" = "3.11" ]; then
+            OPTARENA_DISABLE_SANDBOX=1 python -m pytest tests/ -v --cov=optarena --cov-branch --cov-report=xml --cov-report=term-missing
+          else
+            OPTARENA_DISABLE_SANDBOX=1 python -m pytest tests/ -v --cov=optarena --cov-branch --cov-report=term-missing
+          fi
+      - name: Upload coverage report
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 14
 
   # Corpus self-verification: every case's reference_solution must PASS the
   # real container-sandboxed oracle, every broken/unmodified variant must FAIL.
@@ -254,6 +299,119 @@ jobs:
         with:
           dockerfile: ${{ matrix.context }}/Dockerfile
           config: .hadolint.yaml
+
+  # hadolint (above) checks Dockerfile *authoring* patterns; nothing
+  # previously scanned the *built* image for actual CVEs in the OS/language
+  # packages baked into it - the gap matters more than usual here because
+  # these 9 images are published to a public registry (GHCR) and pulled
+  # directly by users, not just used internally. Builds fresh (not pulled
+  # from GHCR) so a PR's own Dockerfile changes are what gets scanned, not
+  # whatever was last published - catching a newly-introduced vulnerable
+  # package before it reaches production, not after.
+  image-vuln-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      # `name` exists purely for the artifact step below: GitHub Actions
+      # expressions have no string-replace function, and artifact names
+      # reject "/" (confirmed live: every context with a "/" - 8 of 9 legs -
+      # failed "Upload SARIF as an artifact" outright, matrix.context itself
+      # was never a safe name despite forward slash not looking like an
+      # obviously-dangerous character).
+      matrix:
+        include:
+          - context: docker
+            image: optarena-tester:latest
+            name: base
+          - context: docker/python
+            image: optarena-tester-python:latest
+            name: python
+          - context: docker/node
+            image: optarena-tester-node:latest
+            name: node
+          - context: docker/go
+            image: optarena-tester-go:latest
+            name: go
+          - context: docker/jvm
+            image: optarena-tester-jvm:latest
+            name: jvm
+          - context: docker/rust
+            image: optarena-tester-rust:latest
+            name: rust
+          - context: docker/dotnet
+            image: optarena-tester-dotnet:latest
+            name: dotnet
+          - context: docker/php
+            image: optarena-tester-php:latest
+            name: php
+          - context: docker/ruby
+            image: optarena-tester-ruby:latest
+            name: ruby
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Build the image
+        run: docker build -t ${{ matrix.image }} -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }}
+      # Non-blocking for now, deliberately: the first real scan of these 9
+      # images (2026-08-02) turned up a genuine, non-trivial CRITICAL/HIGH
+      # backlog in transitive dependencies baked into the base layers (e.g.
+      # CVE-2026-33186/grpc, CVE-2025-68121/stdlib - real findings, not a
+      # scanner or wiring problem, confirmed by running Trivy directly
+      # against a locally-built image). Shipping this hard-blocking on day
+      # one would stop every PR on a backlog nobody has triaged yet, which
+      # is the exact mistake the tool's own guidance warns against. Report
+      # first (still fails the STEP so it's visible, still uploads SARIF to
+      # the Security tab for tracking) via continue-on-error at the job
+      # level; once the existing backlog is triaged, remove
+      # continue-on-error here so new CRITICAL/HIGH findings block PRs again.
+      - name: Trivy vulnerability scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+      # Not a Security-tab upload (was, until confirmed 2026-08-02: both
+      # org's repos have default_workflow_permissions locked to "read" at
+      # the org level, greyed out in Settings with no way for a repo admin
+      # to change it - a workflow's own `permissions:` block can only ever
+      # narrow that ceiling, never widen it, so security-events: write can
+      # never be granted here. That made this step a guaranteed failure on
+      # every single run forever (confirmed: "Resource not accessible by
+      # integration" on 100% of legs) - pure noise, not a real signal, once
+      # the ceiling is confirmed permanent rather than a one-off. Findings
+      # stay inspectable as a downloadable artifact instead; re-add the
+      # Security-tab upload if the org ever flips that setting.
+      - name: Upload SARIF as an artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          # matrix.image contains ":" and matrix.context contains "/" -
+          # both rejected by artifact-name validation (confirmed live for
+          # the "/" case: every context with one failed outright). matrix.name
+          # is a plain word, added to the matrix specifically for this.
+          name: trivy-${{ matrix.name }}
+          path: trivy-results.sarif
+          retention-days: 14
+
+  # GitHub's own dependency-review-action, PR-only (it diffs the PR's
+  # lockfile/manifest changes against a vulnerability database - there's
+  # nothing to diff outside a PR). Complements Dependabot: Dependabot files
+  # PRs for vulnerabilities in dependencies already merged, this blocks a PR
+  # from introducing a new vulnerable dependency in the first place.
+  dependency-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
 
   images-lock-check:
     runs-on: ubuntu-latest

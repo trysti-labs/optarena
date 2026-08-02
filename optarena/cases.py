@@ -193,20 +193,45 @@ def sandbox_user_configured() -> bool:
 
 def relax_workspace_permissions(path: Path) -> None:
     """
-    A-36: make `path` writable by the (different) uid the sandbox container
-    runs as. No-op unless OPTARENA_SANDBOX_USER is set, and no-op on Windows
-    hosts, where the bind-mount layer ignores Unix permission bits anyway.
+    A-36: make `path`, AND EVERYTHING ALREADY UNDER IT, writable by the
+    (different) uid the sandbox container runs as. No-op unless
+    OPTARENA_SANDBOX_USER is set, and no-op on Windows hosts, where the
+    bind-mount layer ignores Unix permission bits anyway.
 
     Needed because `tempfile.mkdtemp()` deliberately creates 0700 directories
     owned by the host user: a container running as uid 1000 cannot write into
     a workspace owned by uid 501. This is the same class of problem the
     DAC_OVERRIDE capability solves for the ROOT sandbox - root can bypass the
     permission check, an unprivileged uid cannot.
+
+    Recursive, not just the top directory: a real bug lived here too. A
+    single `path.chmod()` only affects `path` itself - it does not cascade
+    to files/subdirectories already inside it. Calling this before the
+    workspace has any content (the original call sites) made the top-level
+    directory traversable, which fixed READING files in it (644 files are
+    world-readable regardless of the parent's own mode, once you can reach
+    them). It did nothing for WRITING into content created afterward - a
+    `setup_repo` fixture's copied subdirectories, or overwriting an existing
+    `setup_files`-written script - since those inherit normal restrictive
+    permissions from however they were created, not from this call. Confirmed
+    live: `cases verify --language shell` under a non-root sandbox went from
+    100% "Permission denied" reading hidden tests (directory-traversal bug,
+    fixed by relaxing the chain) to 5 failures specifically in cases whose
+    check_command WRITES into the workspace (a shell-toolkit deploy script's
+    backup file, a mutation-check script overwriting a setup_files script) -
+    exactly the write-after-relax gap this recursive walk closes. Callers
+    must call this AFTER the workspace is fully populated (setup_repo copy +
+    setup_files + solution files), not before - see verify.py's _run_variant.
     """
     if not sandbox_user_configured() or os.name != "posix":
         return
     try:
         path.chmod(0o777)
+        for child in path.rglob("*"):
+            try:
+                child.chmod(0o777)
+            except OSError:
+                pass   # best-effort per-entry: one bad entry shouldn't abort the rest
     except OSError:
         pass   # best-effort: the run still works if the uids happen to match
 
