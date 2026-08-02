@@ -358,15 +358,27 @@ jobs:
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           exit-code: "1"
-      # Best-effort: the Security tab's code-scanning alerts need GitHub
-      # Advanced Security, which a private mirror of this repo may not have
-      # enabled - harmless no-op there, SARIF is still generated above.
-      - name: Upload results to the Security tab
+      # Not a Security-tab upload (was, until confirmed 2026-08-02: both
+      # org's repos have default_workflow_permissions locked to "read" at
+      # the org level, greyed out in Settings with no way for a repo admin
+      # to change it - a workflow's own `permissions:` block can only ever
+      # narrow that ceiling, never widen it, so security-events: write can
+      # never be granted here. That made this step a guaranteed failure on
+      # every single run forever (confirmed: "Resource not accessible by
+      # integration" on 100% of legs) - pure noise, not a real signal, once
+      # the ceiling is confirmed permanent rather than a one-off. Findings
+      # stay inspectable as a downloadable artifact instead; re-add the
+      # Security-tab upload if the org ever flips that setting.
+      - name: Upload SARIF as an artifact
         if: always()
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          sarif_file: trivy-results.sarif
+          # matrix.image (e.g. "optarena-tester:latest") contains ":", which
+          # artifact names reject - matrix.context (e.g. "docker/python") is
+          # already unique per leg and has no disallowed characters.
+          name: trivy-${{ matrix.context }}
+          path: trivy-results.sarif
+          retention-days: 14
 
   # GitHub's own dependency-review-action, PR-only (it diffs the PR's
   # lockfile/manifest changes against a vulnerability database - there's

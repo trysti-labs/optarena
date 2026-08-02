@@ -7,6 +7,16 @@ name: codeql
 # handling is already treated as security-sensitive throughout this project
 # (see AUDIT.md's S-1 through S-4), which is exactly what CodeQL's Python
 # query pack looks for.
+#
+# Does NOT upload to the Security tab (see `upload: false` below) - both of
+# this project's repos have default_workflow_permissions locked to "read"
+# at the org level (greyed out in Settings, not something a repo admin can
+# change), and a workflow's own `permissions:` block can only ever narrow
+# that ceiling, never widen it. security-events: write can never be granted
+# here, confirmed live (every attempted upload failed with "Resource not
+# accessible by integration" on 100% of runs). Findings are still produced
+# and kept as a downloadable artifact instead of silently discarded; switch
+# back to a real Security-tab upload if the org ever changes that setting.
 on:
   push:
     branches: [main, v0.1]
@@ -27,7 +37,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       # tests/ and repos/ (starter-repo fixtures for the corpus, not part of
@@ -48,3 +57,19 @@ jobs:
       - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           category: "/language:python"
+          # upload: true (the default) tries to both call the Security-tab
+          # upload API AND a workflow-run lookup for telemetry, neither of
+          # which this org's read-only token ceiling permits - confirmed
+          # live: the workflow-run lookup failed even with
+          # security-events: write requested, and the actual upload would
+          # fail the same way. false here means analyze just writes the
+          # SARIF locally and stops; the artifact step below is what
+          # actually preserves the findings.
+          upload: false
+          output: codeql-results
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: codeql-results
+          path: codeql-results
+          retention-days: 14
