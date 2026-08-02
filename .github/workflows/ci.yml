@@ -313,26 +313,41 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # `name` exists purely for the artifact step below: GitHub Actions
+      # expressions have no string-replace function, and artifact names
+      # reject "/" (confirmed live: every context with a "/" - 8 of 9 legs -
+      # failed "Upload SARIF as an artifact" outright, matrix.context itself
+      # was never a safe name despite forward slash not looking like an
+      # obviously-dangerous character).
       matrix:
         include:
           - context: docker
             image: optarena-tester:latest
+            name: base
           - context: docker/python
             image: optarena-tester-python:latest
+            name: python
           - context: docker/node
             image: optarena-tester-node:latest
+            name: node
           - context: docker/go
             image: optarena-tester-go:latest
+            name: go
           - context: docker/jvm
             image: optarena-tester-jvm:latest
+            name: jvm
           - context: docker/rust
             image: optarena-tester-rust:latest
+            name: rust
           - context: docker/dotnet
             image: optarena-tester-dotnet:latest
+            name: dotnet
           - context: docker/php
             image: optarena-tester-php:latest
+            name: php
           - context: docker/ruby
             image: optarena-tester-ruby:latest
+            name: ruby
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Build the image
@@ -373,10 +388,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          # matrix.image (e.g. "optarena-tester:latest") contains ":", which
-          # artifact names reject - matrix.context (e.g. "docker/python") is
-          # already unique per leg and has no disallowed characters.
-          name: trivy-${{ matrix.context }}
+          # matrix.image contains ":" and matrix.context contains "/" -
+          # both rejected by artifact-name validation (confirmed live for
+          # the "/" case: every context with one failed outright). matrix.name
+          # is a plain word, added to the matrix specifically for this.
+          name: trivy-${{ matrix.name }}
           path: trivy-results.sarif
           retention-days: 14
 
