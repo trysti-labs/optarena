@@ -18,8 +18,18 @@ permissions:
   # P1-03: keyless cosign signing and GitHub's own build-provenance
   # attestation both work by exchanging THIS token for a short-lived
   # signing certificate from Sigstore's Fulcio CA - no stored signing key,
-  # no secret to rotate or leak. Neither step below needs anything else.
+  # no secret to rotate or leak.
   id-token: write
+  # `actions/attest-build-provenance` additionally needs this to persist
+  # the attestation to GitHub's own attestation store via the REST API -
+  # id-token alone (the OIDC exchange for the Fulcio cert) is not enough.
+  # Missing this produced a real, live failure: "Failed to persist
+  # attestation: Resource not accessible by integration" on every one of
+  # the 9 matrix jobs in the first real run of this step, which then
+  # skipped the cosign steps too (default `if: success()` step gating) -
+  # confirmed via `gh run view`'s actual per-job conclusion (`failure`),
+  # not just the misleading "Complete job: success" housekeeping step.
+  attestations: write
 
 jobs:
   publish:
