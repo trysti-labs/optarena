@@ -38,7 +38,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       # tests/ and repos/ (starter-repo fixtures for the corpus, not part of
       # the optarena package) would otherwise dominate the findings with
       # fixture-code noise - the same reasoning ruff's own `ruff check
