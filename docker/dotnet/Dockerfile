@@ -17,7 +17,7 @@
 # it carries none of the NuGet-package-pin risk a real SDK version change
 # would (offline.nuget.config's package pins live entirely in warmup.csproj
 # and each case's own .csproj, independent of the base OS image).
-FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:3c0edbfe1549dd93fb789dc96299a40df865ad7bffefcaf38e8c05940686d641
+FROM mcr.microsoft.com/dotnet/sdk:9.0@sha256:cb9d975bf57fd1b0915858d1db1184bea20f7f746f0536323fcab49673144e8c
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         python3 \
