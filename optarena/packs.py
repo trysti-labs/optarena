@@ -189,7 +189,22 @@ def verify_pack_signature(pack: dict, trusted_publishers_file: "Path | None" = N
     if not sig:
         return {"signed": False, "signer": None, "trusted": False, "tampered": False,
                 "detail": "pack is not signed"}
-    signer_id = sig.get("signer") or ""
+    # P1-10: `pack["signature"]` is untrusted input (part of the pack JSON
+    # being verified, not derived independently) - a malformed shape (not a
+    # dict, or missing/non-string required fields) can't be safely used at
+    # all. Treated as `tampered=True`, not merely "unsigned": a pack that
+    # carries something signature-SHAPED but unparseable is a stronger red
+    # flag than carrying nothing, and `tampered` is the one state
+    # `load_pack` already refuses unconditionally (even local, even with
+    # `--allow-unsigned`) - the same conservative treatment belongs here.
+    if (not isinstance(sig, dict)
+            or not isinstance(sig.get("signer"), str) or not sig.get("signer")
+            or not isinstance(sig.get("sig"), str) or not sig.get("sig")):
+        return {"signed": True, "signer": (sig.get("signer") if isinstance(sig, dict) else None),
+                "trusted": False, "tampered": True,
+                "detail": "malformed signature block (not a well-formed {signer, sig} object) - "
+                          "refusing rather than guessing what it means"}
+    signer_id = sig["signer"]
     signers_file = trusted_publishers_file or TRUSTED_PUBLISHERS_FILE
     if not Path(signers_file).is_file():
         return {"signed": True, "signer": signer_id, "trusted": False, "tampered": False,
@@ -199,11 +214,21 @@ def verify_pack_signature(pack: dict, trusted_publishers_file: "Path | None" = N
     blob = _signable_blob(pack)
     with tempfile.TemporaryDirectory(prefix="optarena_packverify_") as td:
         sig_path = Path(td) / "pack.blob.sig"
-        sig_path.write_text(sig.get("sig") or "", encoding="utf-8")
+        sig_path.write_text(sig["sig"], encoding="utf-8")
         try:
             proc = subprocess.run(
+                # P1-10: the namespace is ALWAYS the fixed constant, never
+                # `sig.get("namespace")` - a namespace is a domain-separation
+                # boundary the VERIFIER dictates, not something the
+                # untrusted pack itself gets to choose. Reading it from the
+                # pack let a signature a trusted publisher made for an
+                # unrelated purpose (or under a namespace of an attacker's
+                # choosing that the same key happens to have signed
+                # something under) verify successfully here even though it
+                # was never meant to authorize an optarena pack - confirmed
+                # live as a real, reproducible bypass before this fix.
                 ["ssh-keygen", "-Y", "verify", "-f", str(signers_file),
-                 "-I", signer_id, "-n", sig.get("namespace") or _SIGN_NAMESPACE, "-s", str(sig_path)],
+                 "-I", signer_id, "-n", _SIGN_NAMESPACE, "-s", str(sig_path)],
                 input=blob, capture_output=True, timeout=30,
             )
         except OSError as exc:
@@ -456,6 +481,65 @@ def list_installed(packs_dir: Path | None = None) -> list[dict]:
                 continue
     out.sort(key=lambda m: m.get("created_at", ""), reverse=True)
     return out
+
+
+def verify_installed_pack(cases_dir: "str | Path") -> "dict | None":
+    """
+    P1-10: re-derive a pack's trust state from what's ACTUALLY on disk in
+    ``cases_dir`` right now, rather than trusting ``_pack.json``'s
+    install-time snapshot forever. ``install_pack`` writes
+    ``pack["verification"]`` (computed once, in memory, against the
+    pre-install content) verbatim into ``_pack.json`` - nothing previously
+    re-checked it, so editing an installed case file after installation
+    left every subsequent run still reporting the pack as signed and
+    trusted, silently. Called at manifest-build time (every run that
+    resolves cases through an installed pack), not just once at install.
+
+    Returns ``None`` (not an error) when ``cases_dir`` isn't an installed
+    pack at all (no ``_pack.json``) - same convention the caller already
+    used before this existed. When it IS a pack, the on-disk case files are
+    re-hashed with the exact same ``content_hash`` install-time used; if it
+    no longer matches the hash recorded in ``_pack.json``, the returned
+    ``verification`` is forced to ``trusted: False, tampered: True``
+    regardless of what the stored snapshot said - a modified pack must
+    never keep reporting itself as still-trusted. Unchanged content skips
+    re-running signature verification entirely (redundant work with no
+    security benefit - the stored verification was already computed
+    against this exact content).
+    """
+    cases_dir = Path(cases_dir)
+    manifest_path = cases_dir / "_pack.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        man = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    verification = man.get("verification") or {}
+    try:
+        cases: dict[str, dict] = {}
+        for p in sorted(cases_dir.glob("*.json")):
+            if p.name == "_pack.json":
+                continue
+            cases[p.name] = json.loads(p.read_text(encoding="utf-8"))
+        actual_hash = content_hash(cases)
+    except (OSError, ValueError) as exc:
+        verification = {
+            "signed": bool(verification.get("signed")), "signer": verification.get("signer"),
+            "trusted": False, "tampered": True,
+            "detail": f"could not re-read the installed case files to verify their content: {exc}"}
+        return {"name": man.get("name"), "version": man.get("version"),
+                "hash": man.get("hash"), "verification": verification}
+    stored_hash = man.get("hash")
+    if actual_hash != stored_hash:
+        verification = {
+            "signed": bool(verification.get("signed")), "signer": verification.get("signer"),
+            "trusted": False, "tampered": True,
+            "detail": f"installed content hash ({actual_hash}) no longer matches the hash "
+                      f"recorded at install time ({stored_hash}) - case files were modified "
+                      f"after installation"}
+    return {"name": man.get("name"), "version": man.get("version"),
+            "hash": man.get("hash"), "verification": verification}
 
 
 def resolve_pack(ref: str, packs_dir: Path | None = None) -> Path:

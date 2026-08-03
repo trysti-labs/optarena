@@ -87,92 +87,114 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # P1-01: build+push ONLY the immutable :<git-sha> tag here - NOT
-      # :latest. :latest is what the tool's own pull fallback
-      # (optarena/_cases/_sandbox.py ensure_image) and `optarena sandbox
-      # pull` resolve to by default, so it is the one tag that actually
-      # matters for "did a vulnerable image reach users" - promoting it
-      # only after the scan gate below passes means a deliberately
-      # introduced new CRITICAL/HIGH finding can push an immutable
-      # sha-tagged artifact (evidence trail) but can never move :latest.
-      #
-      # This two-step shape (push a staging tag, scan it, promote on pass)
-      # is not a workaround: buildx can't `docker load` a multi-platform
-      # result into the local engine at all (a manifest list spanning two
-      # platforms only exists once pushed to a registry), so scanning
-      # BEFORE any push is not an option here - the doc's own suggested
-      # resolution ("push to a private/staging tag first and promote the
-      # verified digest afterward") is the only shape that actually fits
-      # buildx's multi-arch constraints.
-      - name: Build and push (immutable digest tag only)
-        id: build
+      # P1-08: install the raw Trivy CLI (the same binary trivy-action
+      # itself wraps internally, confirmed by reading its action.yaml) so
+      # each platform's scan below can pass an explicit `--platform`. This
+      # is needed because P1-08's own root cause is that the trivy-action
+      # composite action's action.yaml (checked directly against the exact
+      # pinned commit ci.yml/this file already use) has NO `platform` input
+      # at all - Trivy's own default multi-arch resolution silently picks
+      # the runner's native platform (amd64) when given an ambiguous
+      # manifest list, and the action gives no way to override that.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+      # P1-01/P1-08: build+push EACH platform to its own immutable
+      # :<git-sha>-<arch> tag independently - NOT a combined multi-arch
+      # manifest yet, and NOT :latest. Building each platform separately
+      # (rather than `--platform linux/amd64,linux/arm64` in one
+      # invocation) makes each pushed digest genuinely single-platform, so
+      # the scan below of THAT specific digest is unambiguous - confirmed
+      # live that Trivy's default resolution actually fails outright
+      # ("no child with platform linux/amd64 in index") when asked to scan
+      # an arm64-only push without an explicit --platform, which is the
+      # exact ambiguity this restructuring removes at the source rather
+      # than patching around.
+      - name: Build and push amd64
+        id: build-amd64
         run: |
           BASE=ghcr.io/trysti-labs/optarena/${{ matrix.image }}
-          # P1-03: --metadata-file captures the PUSHED digest so scanning,
-          # signing, and attestation all target the exact immutable image
-          # this run produced, not a mutable tag that could be repointed.
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            -t "$BASE:${{ github.sha }}" \
+          docker buildx build --platform linux/amd64 \
+            -t "$BASE:${{ github.sha }}-amd64" \
             -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }} \
-            --push --metadata-file metadata.json
-          echo "digest=$(jq -r '.["containerimage.digest"]' metadata.json)" >> "$GITHUB_OUTPUT"
+            --push --metadata-file metadata-amd64.json
+          echo "digest=$(jq -r '.["containerimage.digest"]' metadata-amd64.json)" >> "$GITHUB_OUTPUT"
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
 
-      # P1-01: scan the PUSHED digest directly from the registry - the exact
-      # bits :latest would be promoted to below, not a separately-built copy
-      # (ci.yml's own image-vuln-scan job builds its own local single-arch
-      # image for PRs; that catches regressions early but says nothing about
-      # THIS specific published artifact, which is the actual gap this
-      # closes). `docker/login-action` above already wrote registry
-      # credentials to the runner's docker config, which Trivy's default
-      # image-scanning backend reuses automatically for a registry
-      # reference. No explicit platform selection: this trivy-action version
-      # (confirmed against its own action.yaml - v0.36.0 pinned above) has no
-      # `platform` input at all; Trivy's own default multi-arch resolution
-      # picks the runner's native platform (amd64 on ubuntu-latest), which
-      # already matches what ci.yml's own PR-time scan builds and checks.
-      - name: Trivy vulnerability scan (JSON, for baseline check)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ steps.build.outputs.base }}@${{ steps.build.outputs.digest }}
-          format: json
-          output: trivy-results.json
-          severity: CRITICAL,HIGH
-
-      # P1-01: the actual publish gate - a genuinely NEW CRITICAL/HIGH
-      # finding (not already in docker/vuln-baseline/<image>.json) fails
-      # this step, which stops every step below by default (`if:
-      # success()`) - promotion, signing, and attestation never run, so
-      # :latest never moves and no image described as "released" carries an
-      # un-triaged finding. Reuses the exact same script/baseline files
-      # ci.yml's own scan already gates on, so a PR and the real publish run
-      # apply identical policy.
-      - name: Check against the accepted-vulnerability baseline
-        run: python docker/check_vuln_baseline.py ${{ matrix.image }} trivy-results.json
-
-      # P1-01: promote the scanned digest to :latest only now that the gate
-      # above passed. `imagetools create` re-tags the EXISTING manifest list
-      # already pushed above - it does not rebuild, so the bits :latest
-      # points at afterward are byte-identical to what was just scanned.
-      - name: Promote to :latest (scan gate passed)
+      - name: Build and push arm64
+        id: build-arm64
         run: |
+          BASE=ghcr.io/trysti-labs/optarena/${{ matrix.image }}
+          docker buildx build --platform linux/arm64 \
+            -t "$BASE:${{ github.sha }}-arm64" \
+            -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }} \
+            --push --metadata-file metadata-arm64.json
+          echo "digest=$(jq -r '.["containerimage.digest"]' metadata-arm64.json)" >> "$GITHUB_OUTPUT"
+
+      # P1-08: scan each platform's own pushed digest, with the platform
+      # made explicit rather than relying on default resolution - verified
+      # live that this is what actually makes the arm64 scan work at all
+      # (buildx attaches a build-provenance attestation manifest even to a
+      # nominally single-platform push, so the pushed ref is still an
+      # index, not a bare single manifest - `--platform` is required, not
+      # merely defensive).
+      - name: Scan the amd64 digest
+        run: |
+          trivy image --platform linux/amd64 --format json \
+            --output trivy-amd64.json --severity CRITICAL,HIGH \
+            "${{ steps.build-amd64.outputs.base }}@${{ steps.build-amd64.outputs.digest }}"
+
+      - name: Scan the arm64 digest
+        run: |
+          trivy image --platform linux/arm64 --format json \
+            --output trivy-arm64.json --severity CRITICAL,HIGH \
+            "${{ steps.build-amd64.outputs.base }}@${{ steps.build-arm64.outputs.digest }}"
+
+      # P1-01/P1-08: the actual publish gate, run once per platform - a
+      # genuinely NEW CRITICAL/HIGH finding on EITHER architecture (not
+      # already in docker/vuln-baseline/<image>.json) fails this step,
+      # which stops every step below by default (`if: success()`) -
+      # combining, promotion, signing, and attestation never run, so
+      # :latest never moves and no image described as "released" carries
+      # an un-triaged finding on either platform. Reuses the exact same
+      # script/baseline files ci.yml's own scan already gates on.
+      - name: Check the amd64 scan against the accepted-vulnerability baseline
+        run: python docker/check_vuln_baseline.py ${{ matrix.image }} trivy-amd64.json
+
+      - name: Check the arm64 scan against the accepted-vulnerability baseline
+        run: python docker/check_vuln_baseline.py ${{ matrix.image }} trivy-arm64.json
+
+      # P1-08: combine the two independently-scanned digests into one real
+      # multi-arch manifest list - `imagetools create` re-tags/merges the
+      # EXISTING pushed digests, it does not rebuild, so the combined
+      # image's bits are byte-identical to what was just scanned on each
+      # platform. Still NOT :latest - that promotion is now the LAST step,
+      # after signing and attestation both succeed against this combined
+      # digest, not before (the other half of P1-08: a failed sign/attest
+      # must never leave :latest already pointing at this digest).
+      - name: Combine into a multi-arch manifest (not yet :latest)
+        id: combine
+        run: |
+          BASE=${{ steps.build-amd64.outputs.base }}
           docker buildx imagetools create \
-            -t "${{ steps.build.outputs.base }}:latest" \
-            "${{ steps.build.outputs.base }}@${{ steps.build.outputs.digest }}"
+            -t "$BASE:${{ github.sha }}" \
+            "$BASE@${{ steps.build-amd64.outputs.digest }}" \
+            "$BASE@${{ steps.build-arm64.outputs.digest }}"
+          DIGEST=$(docker buildx imagetools inspect "$BASE:${{ github.sha }}" | awk '/^Digest:/{print $2}')
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
 
       # P1-03: SLSA build provenance - attests WHICH workflow run, commit,
-      # and repo produced this exact image digest, published to GitHub's
-      # own attestation store (visible on the package page) and, via
-      # push-to-registry, alongside the image itself so `cosign
-      # verify-attestation` (or any other Sigstore-aware client) can check
-      # it without knowing to look on GitHub specifically. Digest-based, so
-      # it covers both the :<sha> and (now-promoted) :latest tags equally -
-      # tag promotion order relative to this step doesn't matter.
+      # and repo produced this exact combined multi-arch image digest,
+      # published to GitHub's own attestation store (visible on the
+      # package page) and, via push-to-registry, alongside the image
+      # itself so `cosign verify-attestation` (or any other Sigstore-aware
+      # client) can check it without knowing to look on GitHub
+      # specifically.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-name: ${{ steps.build.outputs.base }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-name: ${{ steps.combine.outputs.base }}
+          subject-digest: ${{ steps.combine.outputs.digest }}
           push-to-registry: true
 
       - name: Install cosign
@@ -186,4 +208,19 @@ jobs:
       # published alongside the image. `--yes` skips the interactive
       # confirmation prompt this needs in a non-interactive CI shell.
       - name: Sign the image (keyless)
-        run: cosign sign --yes "${{ steps.build.outputs.base }}@${{ steps.build.outputs.digest }}"
+        run: cosign sign --yes "${{ steps.combine.outputs.base }}@${{ steps.combine.outputs.digest }}"
+
+      # P1-08: promotion is now the LAST step in the job, after the scan
+      # gate on both platforms AND signing AND attestation have all
+      # already succeeded - a failure in any earlier step (default `if:
+      # success()`) means :latest simply never moves, instead of the
+      # previous ordering where a signing/attestation failure could leave
+      # :latest already pointing at a digest the job never finished
+      # vetting. `imagetools create` re-tags the already-combined,
+      # already-signed manifest list - it does not rebuild, so :latest
+      # ends up byte-identical to what was just signed.
+      - name: Promote to :latest (scanned, signed, and attested)
+        run: |
+          docker buildx imagetools create \
+            -t "${{ steps.combine.outputs.base }}:latest" \
+            "${{ steps.combine.outputs.base }}@${{ steps.combine.outputs.digest }}"

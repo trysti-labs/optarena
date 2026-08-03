@@ -1,12 +1,66 @@
 # Changelog
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-OptArena hasn't cut a versioned release yet (pre-PyPI-publish, still
-`0.1.0`), so this starts from the current `v0.1` branch state rather than
-reconstructing full project history - see `git log` for everything before
-this file existed.
+This starts from the current `v0.1` branch state rather than reconstructing
+full project history - see `git log` for everything before this file
+existed.
 
-## [Unreleased]
+## [0.1.0] - 2026-08-03
+
+First tagged release. Three external/internal review rounds against the live
+source (each independently re-verified against real code and infrastructure,
+not taken on trust) found and closed a real security/product-readiness gap
+list before this tag - see ARCH.md §10.3 for the architectural summary.
+
+### Fixed (August 2026 security/release hardening)
+
+- **Publish pipeline**: image publication is now structurally gated on a
+  successful vulnerability scan of the exact digest being published (it
+  previously ran as a separate, unlinked workflow); each platform
+  (`linux/amd64`, `linux/arm64`) is scanned independently before being
+  combined into one multi-arch manifest, and `:latest` is promoted only
+  after signing and attestation both succeed, not before.
+- **Vulnerability baseline**: matching identity now binds to installed
+  version, scan target, and package type (not just CVE + package name), so
+  a version bump or a newly-available fix correctly invalidates a stale
+  acceptance; a Trivy disposition-status change toward "affected"/"fixed"
+  does too.
+- **Secret redaction** now removes complete multiline PEM private-key
+  blocks (body and footer), not just the header line.
+- **Path containment** extended to every reactive-disruption trigger field
+  and hardened against Windows alias forms (trailing dot/space, alternate
+  data streams, reserved device names) across all case-controlled paths.
+- **Case-pack authenticity**: real `ssh-keygen`-based publisher signing and
+  an explicit local trust keyring, not just a content hash; signature
+  verification is bound to a fixed namespace (never one the pack itself
+  claims) and installed-pack trust is re-derived from disk on every run
+  rather than cached at install time.
+- **Workspace resource containment**: a soft disk/file quota now covers the
+  agent's own execution phase, not just `check_command` - closing three
+  real bypass channels (a fast writer finishing inside one poll interval,
+  directory-only entries not counting toward the quota, and the driver
+  phase being entirely unwrapped).
+- **Reproducibility**: run manifests now record effective generation
+  parameters (temperature/top_p/seed, honored by both baseline drivers and
+  all six SDK drivers), a best-effort backend/provider version, and a
+  build-commit fallback for wheel installs with no `.git` directory.
+  `ORACLE_VERSION` gained a concrete bump-vs-don't-bump decision procedure.
+- **Live CI coverage** extended to all six optional SDK drivers (a
+  zero-secret local-Ollama smoke job), plus a hard version-drift gate for
+  every driver pinned to a tested version.
+- Precise remediation messages (not a bare "not found") when a
+  source-checkout-only feature (`setup_repo`, `optarena sandbox build`) is
+  used from a wheel install.
+- Raw vs. eligible/adjusted pass-rate denominators are now shown in the CLI
+  console, HTML reports, and comparisons (previously dashboard-only),
+  including a real "common eligible case set" computation across two runs.
+
+### Added
+
+- `GOVERNANCE.md`: maintainers, decision process, security-response
+  ownership, support channels, supported branches, and the deprecation/
+  compatibility policy for the case schema, drivers, results, and oracle
+  versions.
 
 ### Fixed (second internal audit - historical findings archived in DEV_NOTES/, not part of this public repo)
 

@@ -1,6 +1,6 @@
 # OptArena - Architecture
 
-_Last updated: 2026-07-25 (v0.1 branch)_
+_Last updated: 2026-08-03 (v0.1 branch)_
 
 OptArena is a **local-first testing and comparison framework for AI coding
 tools**. It runs the same task cases through real tools - a headless CLI
@@ -52,6 +52,11 @@ contracts.
 optarena/                       repo root
 ├── ARCH.md                     this document
 ├── README.md                   user-facing quick start
+├── GOVERNANCE.md                maintainers, decision process, versioning/deprecation policy
+├── CONTRIBUTING.md              setup, checks, adding a driver/case, PR flow
+├── SECURITY.md                  vulnerability reporting + the real trust-boundary model
+├── CODE_OF_CONDUCT.md
+├── CHANGELOG.md                 Keep-a-Changelog format
 ├── pyproject.toml              packaging; console script `optarena`
 ├── .gitignore
 ├── optarena/                   ── the Python package (stdlib only) ──
@@ -60,27 +65,36 @@ optarena/                       repo root
 │   ├── cli/                    argparse CLI: run / compare / list / serve
 │   │   ├── __init__.py           argparse wiring (main) + re-exports
 │   │   ├── _run.py                run / compare / regression
-│   │   ├── _cases_cmds.py         cases list/show/init/validate/verify/pack/install
+│   │   ├── _cases_cmds.py         cases list/show/init/validate/verify/pack/install/trust-publisher
 │   │   ├── _runs_cmds.py          runs show/rebuild-index/prune/scrub-secrets
-│   │   ├── _doctor.py             preflight checks
+│   │   ├── _doctor.py             preflight checks (drivers, sandbox, source-checkout assets, version drift)
 │   │   ├── _sandbox_cmds.py       sandbox build/pull/status
 │   │   ├── _serve.py              results dashboard HTTP server
 │   │   └── _scan_report.py        scan / report (JUnit/HTML/SARIF)
-│   ├── scenario.py             Scenario + Backend dataclasses (JSON files)
+│   ├── scenario.py             Scenario + Backend dataclasses (JSON files; Backend carries
+│   │                            temperature/top_p/seed alongside kind/base_url/model/api_key)
 │   ├── cases.py                case-engine facade (see _cases/ for the implementation)
 │   ├── _cases/                 case loading + the filesystem oracle, split by concern
 │   │   ├── _corpus.py             case loading/filtering
 │   │   ├── _snapshot.py           workspace hashing + expected-file assertions
-│   │   ├── _sandbox.py            container engine, DockerSandbox, check_command exec
+│   │   ├── _sandbox.py            container engine, DockerSandbox, check_command exec,
+│   │   │                          workspace-quota watchdog (§3.1)
 │   │   ├── _workspace_setup.py    setup_files/setup_repo/git_init/disruptions
 │   │   └── _evaluate.py           ties the assertion oracle + check_command together
 │   ├── runner/                 executes one scenario → RunRecord
-│   │   ├── _manifest.py           manifest-building (case hashes, versions, platform)
+│   │   ├── _manifest.py           manifest-building (case hashes, ORACLE_VERSION, driver/
+│   │   │                          provider versions, generation params, pack identity, build commit)
 │   │   ├── _results.py            RunRecord, trial-merging, console formatting
-│   │   └── _execution.py          case execution, --parallel worker pool, run_scenario
-│   ├── metrics.py              aggregates + per-case deltas
+│   │   └── _execution.py          case execution, --parallel worker pool, run_scenario,
+│   │                              capability-exclusion + workspace-quota wiring per case
+│   ├── metrics.py              aggregates + per-case deltas (raw, adjusted, and eligible pass rates)
 │   ├── store.py                results persistence + index
-│   ├── compare.py              A/B comparison + terminal table
+│   ├── compare.py              A/B comparison + terminal table + common-eligible-case-set
+│   ├── packs.py                case packs: build/sign/verify/install/trust (§3.4)
+│   ├── security.py             secret/injection static scanning + redaction (§9.1)
+│   ├── report.py               JUnit XML / self-contained HTML / SARIF report generation
+│   ├── events.py               RunEvents - the print()/--json-events output abstraction
+│   ├── verify.py               `optarena cases verify` - corpus self-verification (§10.2)
 │   ├── cases/                  task catalogue (*.json) - NOT the same as _cases/ above
 │   ├── pricing.py               USD cost estimation from token usage
 │   └── drivers/                ── tool adapters ──
@@ -89,6 +103,7 @@ optarena/                       repo root
 │       ├── openai_chat.py      raw-model baselines (OpenAI + Ollama protocol)
 │       ├── aider_cli.py        aider CLI driver
 │       ├── cli_agents.py       generic headless-CLI driver (Claude Code/Codex/OpenCode/Goose/Qwen Code)
+│       ├── sdk_base.py         shared case loop (deadline, disruptions, telemetry) for all 6 SDK drivers
 │       ├── crewai_sdk.py       optional SDK-agent driver
 │       ├── openai_agents_sdk.py   optional SDK-agent driver (OpenAI Agents SDK)
 │       ├── smolagents_sdk.py      optional SDK-agent driver (smolagents)
@@ -104,7 +119,19 @@ optarena/                       repo root
 │   ├── jvm/Dockerfile            + maven, ~/.m2 warmed with spring-boot-starter-*
 │   ├── go/Dockerfile             + go, module cache warmed with gin
 │   ├── rust/Dockerfile           + cargo, registry cache warmed with axum/tokio
-│   └── dotnet/Dockerfile         + dotnet SDK, NuGet cache warmed + offline.nuget.config
+│   ├── dotnet/Dockerfile         + dotnet SDK, NuGet cache warmed + offline.nuget.config
+│   ├── check_vuln_baseline.py    Trivy-scan-vs-accepted-baseline gate (§9.2)
+│   ├── check_images_lock.py      dependency-lock validation for all 9 images
+│   └── vuln-baseline/*.json      per-image accepted-vulnerability baselines
+├── .github/workflows/           CI, scheduled integration smoke, signed image publishing
+│   ├── ci.yml                    unit tests + coverage, corpus verify, image-vuln-scan, wheel-smoke
+│   ├── publish-images.yml        per-platform build → scan → combine → attest → sign → :latest (§9.2)
+│   ├── integration-smoke.yml     weekly live CLI+SDK driver smoke against local Ollama
+│   └── codeql.yml
+├── scripts/
+│   ├── embed_build_commit.py     writes the git commit into the wheel at build time (§3.3)
+│   └── check_no_infra_errors.py  CI helper for integration-smoke.yml
+├── repos/                       starter repos for setup_repo (L3) cases - source-checkout only
 ├── scenarios/                  example scenario JSON files
 └── results/                    run records (gitignored)
     ├── runs/<run_id>.json
@@ -114,7 +141,10 @@ optarena/                       repo root
 
 Pure Python, stdlib-only core; SDK drivers each pull in exactly one optional
 framework package (`pip install optarena[<extra>]`), lazily imported so an
-uninstalled framework never breaks the drivers you do have.
+uninstalled framework never breaks the drivers you do have. `docker/`,
+`repos/`, and `dashboard/` are source-checkout-only assets, not packaged into
+the wheel - see README's "Source-checkout install only" note and
+`optarena doctor`.
 
 ---
 
@@ -282,6 +312,24 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   Every one of these was verified by mounting a **fresh** project (not the
   warmup files, which are deleted from the image) into a container run with
   `--network none` and confirming `build`/`test` succeeds purely from cache.
+- **Workspace disk/file quota.** The container's own storage-driver flags
+  (`--storage-opt size=`) can't quota a bind mount at all - `/workspace` is
+  always a host bind mount, never the container's own writable layer - so
+  quota enforcement is host-side polling instead: `_WorkspaceQuotaWatchdog`
+  (`_sandbox.py`) polls the workspace's real usage every 2s (default 4 GiB /
+  50,000 files/directories, `OPTARENA_WORKSPACE_MAX_BYTES`/`_FILES`) for the
+  duration of BOTH the driver/agent's own execution and the `check_command`
+  call, killing the in-flight process/container on a breach where a kill
+  handle exists (host exec, ephemeral container, shared-sandbox `reap()`) and
+  always running one final synchronous check immediately after the call
+  returns (closing the gap a poll interval alone would miss for a fast
+  writer). A driver-phase breach has no generic kill handle across every
+  driver kind, so it can't be stopped early there - but the result is never
+  silently trusted: `CaseResult.extra["workspace_quota_exceeded"]` and a
+  forced failure either way. A soft, best-effort ceiling, not a
+  kernel-enforced one - portable across Windows/macOS/Linux and every
+  execution path uniformly, which no storage-driver-specific alternative
+  would be.
 - **Trade-off of one shared container:** all cases/trials in a run share one
   network namespace (unlike the old per-call ephemeral containers, which
   each got a fresh one). A case that binds a fixed port across repeated
@@ -355,6 +403,51 @@ local servers that ignore it.
 deliberately distinct from `error` (infrastructure problems - tool crashed,
 backend refused). A comparison where one side has `error`s is a broken
 experiment, not a lost one.
+
+Every `RunRecord` also carries a `manifest` (`runner/_manifest.py`): the
+immutable identity of *what* a run measured, not just its outcome -
+`oracle_version` (bumped only when a change to the oracle/sandbox contract
+can flip a pass/fail verdict; see the constant's own docstring for the exact
+decision procedure), `case_set_hash`, `trials`, `driver_version` and
+`backend_provider_version` (best-effort, e.g. Ollama's `/api/version`),
+`backend_temperature`/`top_p`/`seed` (recorded regardless of whether the
+driver honors them - see §6.2's generation-parameter note), platform/Python
+version, and `git_commit`/`git_dirty` (falls back to a build-time-embedded
+commit - `scripts/embed_build_commit.py` - for a wheel install with no
+`.git` directory). `compare.manifest_compatibility` hard-gates a comparison's
+aggregate verdict on `(oracle_version, case_set_hash, trials)` matching;
+driver/backend deliberately do NOT gate it, since tool-vs-tool and
+backend-vs-backend comparisons are the whole point.
+
+### 3.4 Case packs (`packs.py`)
+
+A pack is one self-describing JSON file bundling a directory of cases with a
+name, semantic version, and a sha256 content hash - `optarena cases pack`
+builds one, `optarena cases install` (local file, or `https://` URL - plain
+`http://` refused unless explicitly opted into) installs it to
+`~/.optarena/packs/<name>@<version>/`, and `optarena run --pack <name>`
+resolves it as `cases_dir`.
+
+- **Integrity**: the content hash detects corruption/tampering in transit,
+  checked on every load.
+- **Authenticity**: `optarena cases pack --sign-key <ssh-key>` signs the
+  pack's identity (name/version/hash/case_count) with `ssh-keygen -Y sign`
+  (real Ed25519/RSA/ECDSA - stdlib-only, so this shells out rather than
+  vendoring crypto, the same pattern the image-signing pipeline below uses).
+  Verification (`verify_pack_signature`) always checks against the fixed
+  `optarena-pack` namespace - never one the pack itself claims, which would
+  let a signature made for an unrelated purpose verify here. A signer must
+  be added to a local, explicit trusted-publisher keyring
+  (`optarena cases trust-publisher`) before a pack from them is `trusted`;
+  an unsigned or untrusted-signer REMOTE pack is refused unless
+  `--allow-unsigned` is passed. A signature that's present but fails
+  cryptographic verification (`tampered`) is refused unconditionally, even
+  for a local file with `--allow-unsigned`.
+- **Trust is re-derived every run, not cached at install time**:
+  `verify_installed_pack` re-hashes the case files actually on disk each
+  time a run resolves an installed pack, so editing a file after
+  installation is caught (`tampered: True`) rather than the run's manifest
+  replaying a stale "trusted" snapshot from install time.
 
 ---
 
@@ -522,6 +615,17 @@ They also enable *model vs model* and *endpoint vs endpoint* comparisons with
 no tool in the loop. Multi-turn cases feed the current file content back into
 the next prompt.
 
+**Generation parameters.** `Backend.temperature`/`top_p`/`seed` are honored
+by both raw-model baselines (in the actual request body/`options`) and all
+six SDK drivers below (each confirmed to forward them into its underlying
+completion call - `crewai.LLM`, `ChatOpenAI`, `agents.ModelSettings`,
+autogen's `create_args`, semantic-kernel's execution settings, smolagents'
+`OpenAIServerModel` kwargs). CLI-agent drivers (aider, Claude Code, Codex,
+OpenCode, Goose, Qwen Code) are external binaries with their own sampling
+settings and no per-request override this harness controls - the fields are
+still recorded in every run's manifest regardless of driver, since "what was
+configured" is worth knowing even for a driver that doesn't act on it.
+
 ### 6.3 SDK-agent drivers
 
 All six (`crewai_sdk.py`, `openai_agents_sdk.py`, `smolagents_sdk.py`,
@@ -636,7 +740,42 @@ the scenario; results are local JSON; the dashboard server binds `127.0.0.1`.
 No telemetry. Subprocess-based drivers (CLI agents) build the child
 environment via `subprocess_env()`'s explicit allowlist (§8.2), not the full
 parent environment, so a scenario's backend key never leaks host secrets into
-an untrusted agent subprocess.
+an untrusted agent subprocess. See SECURITY.md for the complete trust-boundary
+write-up (what a case-defined `check_command` can and can't touch, the
+container hardening flags, the host-execution confirmation gate for CLI
+agents) and how to report a vulnerability.
+
+### 9.1 Secret/injection scanning and redaction (`security.py`)
+
+`optarena scan`/`--security-scan` statically scans changed files for
+hardcoded secrets and common injection patterns (`os.system`, `shell=True`,
+SQL f-strings, etc.) per-language, feeding `optarena report --format sarif`
+for GitHub code-scanning integration. `redact_secret_patterns()` is applied
+before anything is persisted (saved run records, indexes, stderr, exception
+text, reports) - including a whole-block redaction for multiline PEM private
+keys specifically (a single-line, header-only pattern can't remove a key
+body spanning many lines; `scan_text()`'s own line-by-line finding-detection
+and the whole-text redaction path are deliberately two different code paths
+for this reason).
+
+### 9.2 Vulnerability gate and signed image publishing
+
+`docker/check_vuln_baseline.py` compares a fresh Trivy scan against a
+per-image checked-in baseline (`docker/vuln-baseline/<image>.json`) of
+already-triaged findings, keyed on `(target, package type, package,
+installed version, CVE ID)` - a version bump, a newly-available fix, a
+severity increase, or a Trivy disposition-status change toward
+"affected"/"fixed" all invalidate an old acceptance and fail the gate, even
+though the rest of the key still matches. `ci.yml` runs this as a blocking
+PR check; `publish-images.yml` runs the same script as the actual release
+gate: each platform (`linux/amd64`, `linux/arm64`) is built, pushed, and
+scanned **independently** (a combined multi-arch scan silently resolves to
+only the scanner's native platform - confirmed live, not assumed), both
+must pass before the two digests are combined into one real multi-arch
+manifest, which is then attested (`actions/attest-build-provenance`) and
+signed (`cosign sign`, keyless via Sigstore/Fulcio) - and only THEN is
+`:latest` promoted to it, so a signing/attestation failure never leaves
+`:latest` pointing at a digest the pipeline didn't finish vetting.
 
 ---
 
@@ -647,8 +786,9 @@ Near-term:
   `opencode`/`goose`/`qwen-code`/`codex` descriptors shipped (experimental);
   all six planned SDK-agent frameworks (crewAI, OpenAI Agents SDK,
   smolagents, LangGraph, AutoGen, Semantic Kernel) shipped as of this branch.
-- **IDE UI automation** - lives on `main` only as of this branch (`v0.1`);
-  see the note in §1.
+- **IDE UI automation** - not part of this branch; still a possible future
+  driver category (VS Code/JetBrains extension automation) alongside the
+  CLI/raw-API/SDK drivers this branch ships.
 - **Remaining driver telemetry** - `aider` and `claude-code` report real
   token/cost (and `claude-code` turns) as of §10.2; `opencode`/`goose`/
   `qwen-code`/`codex` still report duration only pending a `parse_metrics`
@@ -826,3 +966,47 @@ is retried once before falling through to a pull attempt, since Docker
 Desktop's resource-saver wake-up made the first probe time out on an image
 that was, in fact, already present - misreading that as "missing" would
 have triggered a pointless network pull every time.
+
+### 10.3 August 2026 security/product remediation (pre-`v0.1.0` release hardening)
+
+Several review rounds (an internal pass, then two independent external
+reviews of the live source, each re-verified against real code/infra rather
+than taken on trust) found and closed a real security/product-readiness gap
+list before the `v0.1.0` release tag. Highlights, each verified live against
+real infrastructure, not just reviewed:
+
+- **Git-controlled command execution, host-path escapes, and Windows
+  process-tree leaks** (the original P0 set) - closed; 23 regression tests.
+- **Publish pipeline**: the vulnerability scan is now structurally in the
+  same dependency chain as publication (§9.2), each platform scanned
+  independently, `:latest` promoted only after signing/attestation succeed.
+- **Vulnerability baseline**: matching identity bound to installed
+  version/target/package-type, a newly-available fix or severity/status
+  increase invalidates an old acceptance (§9.2).
+- **Complete secret redaction**: multiline PEM blocks, not just headers
+  (§9.1).
+- **Path containment**: every case-controlled path field (reactive
+  disruption triggers included) rejects traversal, absolute paths, `.git`
+  segments, Windows alias forms (trailing dot/space, ADS, reserved device
+  names) at schema-validation time, before a driver/model is ever invoked.
+- **Pack authenticity**: real `ssh-keygen`-based signing/trust (§3.4),
+  fixed-namespace verification, and per-run re-derived (not install-time
+  cached) trust state.
+- **Workspace resource containment**: a soft disk/file quota covering both
+  the agent's own execution and `check_command` (§3.1 above).
+- **Reproducibility metadata**: generation parameters, provider version,
+  build-commit fallback for wheel installs, and a concrete
+  `ORACLE_VERSION` bump policy (§3.3/§6.2).
+- **Live CI coverage** extended to all optional SDK drivers via a
+  zero-secret local-Ollama smoke job (`integration-smoke.yml`), plus a hard
+  version-drift gate for the drivers that pin an exact tested version.
+  `claude-code`/`codex` (real paid accounts) remain explicitly out of scope
+  for the OSS `v0.1` release.
+- **Governance**: `GOVERNANCE.md` (maintainers, decision process,
+  deprecation/version policy for the case schema/drivers/results/oracle).
+
+Full detail and per-finding evidence lived in `issues.md` during this pass;
+that tracker is retired in dev notes once the branch history was compressed
+for the `v0.1.0` release tag, since it served as a working log, not a
+permanent record - the code and this document are the source of truth going
+forward.

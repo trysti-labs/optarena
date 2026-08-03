@@ -1006,6 +1006,9 @@ class WorkspaceQuotaWatchdogTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
 
     def test_workspace_usage_counts_real_files(self):
+        """P1-09: byte totals come from regular files only; the entry count
+        includes the one directory too (`sub`) - 2 root files + 1
+        directory + 1 nested file = 4, not 3."""
         from optarena._cases._sandbox import _workspace_usage
         (self.ws / "a.txt").write_bytes(b"x" * 100)
         (self.ws / "b.txt").write_bytes(b"y" * 250)
@@ -1014,7 +1017,19 @@ class WorkspaceQuotaWatchdogTests(unittest.TestCase):
         (sub / "c.txt").write_bytes(b"z" * 50)
         total, count = _workspace_usage(self.ws)
         self.assertEqual(total, 400)
-        self.assertEqual(count, 3)
+        self.assertEqual(count, 4)
+
+    def test_workspace_usage_counts_empty_directories(self):
+        """P1-09: reproduces the review's own live finding - creating N
+        empty directories used to report (0 bytes, 0 files), a real bypass
+        of the file/inode-count quota. Directories now count toward the
+        entry total even with zero file content."""
+        from optarena._cases._sandbox import _workspace_usage
+        for i in range(20):
+            (self.ws / f"dir{i}").mkdir()
+        total, count = _workspace_usage(self.ws)
+        self.assertEqual(total, 0)          # no file bytes - correct, directories carry none
+        self.assertEqual(count, 20)         # but they must not be invisible to the entry count
 
     def test_workspace_usage_skips_symlinks(self):
         target = Path(tempfile.mkdtemp(prefix="optarena_test_quotawatch_target_"))
@@ -1046,6 +1061,56 @@ class WorkspaceQuotaWatchdogTests(unittest.TestCase):
         self.assertEqual(len(triggered), 1)
         self.assertIn("byte", triggered[0])
         self.assertIsNotNone(watchdog.triggered_reason)
+
+    def test_check_final_catches_a_fast_writer_the_poll_would_miss(self):
+        """P1-09: the review's own live reproduction - a poll interval long
+        enough that the background thread never gets a chance to fire
+        before the caller stops the watchdog (matching a command that
+        writes past the quota and exits within one poll tick). Without
+        `check_final()`, this reports no violation at all."""
+        from optarena._cases._sandbox import _WorkspaceQuotaWatchdog
+        watchdog = _WorkspaceQuotaWatchdog(
+            self.ws, on_exceeded=lambda _r: None, max_bytes=500, max_files=10_000, interval=10.0)
+        watchdog.start()
+        (self.ws / "big.bin").write_bytes(b"x" * 1000)   # over quota, immediately
+        watchdog.stop()   # stopped well inside the 10s interval - the poll never ran
+        self.assertIsNone(watchdog.triggered_reason, "the poll should not have fired yet")
+        reason = watchdog.check_final()
+        self.assertIsNotNone(reason)
+        self.assertIn("byte", reason)
+        self.assertEqual(watchdog.triggered_reason, reason)
+
+    def test_check_final_is_a_noop_when_poll_already_triggered(self):
+        """check_final() must not overwrite an already-recorded reason or
+        call on_exceeded a second time - the wrapped process is already
+        gone by the time it runs."""
+        from optarena._cases._sandbox import _WorkspaceQuotaWatchdog
+        calls = []
+        watchdog = _WorkspaceQuotaWatchdog(
+            self.ws, on_exceeded=calls.append, max_bytes=500, max_files=10_000, interval=0.05)
+        watchdog.start()
+        try:
+            (self.ws / "big.bin").write_bytes(b"x" * 1000)
+            for _ in range(100):
+                if watchdog.triggered_reason:
+                    break
+                time.sleep(0.05)
+        finally:
+            watchdog.stop()
+        first_reason = watchdog.triggered_reason
+        self.assertIsNotNone(first_reason)
+        self.assertEqual(watchdog.check_final(), first_reason)
+        self.assertEqual(len(calls), 1)   # on_exceeded still only ever called once
+
+    def test_check_final_returns_none_when_under_quota(self):
+        from optarena._cases._sandbox import _WorkspaceQuotaWatchdog
+        watchdog = _WorkspaceQuotaWatchdog(
+            self.ws, on_exceeded=lambda _r: None, max_bytes=10_000, max_files=10_000, interval=10.0)
+        watchdog.start()
+        (self.ws / "small.bin").write_bytes(b"x" * 10)
+        watchdog.stop()
+        self.assertIsNone(watchdog.check_final())
+        self.assertIsNone(watchdog.triggered_reason)
 
     def test_watchdog_triggers_on_file_count_quota(self):
         from optarena._cases._sandbox import _WorkspaceQuotaWatchdog
@@ -2426,8 +2491,12 @@ class CheckVulnBaselineTests(unittest.TestCase):
 
     def _scan(self, findings, target="ghcr.io/x/img:sha123 (debian 12)"):
         """findings: list of dicts - cve, pkg, installed="1.0", fixed="",
-        severity="CRITICAL", pkg_type="deb". Builds one Trivy Results[]
-        entry with the real field names/shape (PkgIdentifier.PURL etc)."""
+        severity="CRITICAL", pkg_type="deb", status="affected". Builds one
+        Trivy Results[] entry with the real field names/shape
+        (PkgIdentifier.PURL etc). `status` defaults to "affected" to match
+        `_accepted`'s own default - existing tests that never mention
+        status stay internally consistent (no spurious P2-05 status-change
+        problem) without either helper's caller needing to say so."""
         vulns = []
         for f in findings:
             installed = f.get("installed", "1.0")
@@ -2438,15 +2507,16 @@ class CheckVulnBaselineTests(unittest.TestCase):
                 "InstalledVersion": installed,
                 "FixedVersion": f.get("fixed", ""),
                 "Severity": f.get("severity", "CRITICAL"),
+                "Status": f.get("status", "affected"),
                 "PkgIdentifier": {"PURL": f"pkg:{pkg_type}/debian/{f['pkg']}@{installed}"},
             })
         return {"Results": [{"Target": target, "Vulnerabilities": vulns}]}
 
     def _accepted(self, cve, pkg, installed="1.0", fixed="", severity="CRITICAL",
-                  pkg_type="deb", target="debian 12"):
+                  pkg_type="deb", target="debian 12", status="affected"):
         return {"id": cve, "package": pkg, "package_type": pkg_type,
                 "installed_version": installed, "fixed_version": fixed,
-                "severity": severity, "target": target}
+                "severity": severity, "target": target, "status": status}
 
     def _write_baseline(self, baseline_dir, accepted, expires_at="2099-01-01", **extra):
         (baseline_dir / "img.json").write_text(json.dumps({
@@ -2566,6 +2636,73 @@ class CheckVulnBaselineTests(unittest.TestCase):
             with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
                 problems = self.mod.check("img", self._scan(
                     [{"cve": "CVE-2020-1", "pkg": "pkg", "severity": "HIGH"}]))
+        self.assertEqual(problems, [])
+
+    def test_status_change_to_affected_invalidates_acceptance(self):
+        """P2-05: accepted while "under_investigation" (Trivy hadn't
+        concluded yet) - now confirmed "affected". A real, unresolved
+        vulnerability the accepting human never actually reviewed as such."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [
+                self._accepted("CVE-2020-1", "pkg", status="under_investigation")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "status": "affected"}]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("status changed", problems[0])
+        self.assertIn("under_investigation", problems[0])
+        self.assertIn("affected", problems[0])
+
+    def test_status_change_to_fixed_invalidates_acceptance(self):
+        """P2-05: "fixed" is caught by this check too, as defense-in-depth
+        alongside the existing fixed_version check - Trivy can report
+        Status="fixed" for some ecosystems without FixedVersion being
+        populated, so this isn't purely redundant with that check."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [
+                self._accepted("CVE-2020-1", "pkg", status="will_not_fix")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "status": "fixed"}]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("status changed", problems[0])
+
+    def test_status_change_away_from_affected_does_not_fail(self):
+        """P2-05: the directionally-safe case - Trivy (or a vendor) later
+        decided this finding doesn't actually apply, or won't be fixed.
+        Less concerning than before, not more - must not re-block CI."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [
+                self._accepted("CVE-2020-1", "pkg", status="affected")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "status": "not_affected"}]))
+        self.assertEqual(problems, [])
+
+    def test_status_unchanged_does_not_fail(self):
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [
+                self._accepted("CVE-2020-1", "pkg", status="affected")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "status": "affected"}]))
+        self.assertEqual(problems, [])
+
+    def test_status_change_between_two_non_affected_states_does_not_fail(self):
+        """Neither side of the transition is "affected"/"fixed" - e.g.
+        under_investigation -> will_not_fix. Not the concerning direction
+        this check exists to catch."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [
+                self._accepted("CVE-2020-1", "pkg", status="under_investigation")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "status": "will_not_fix"}]))
         self.assertEqual(problems, [])
 
     def test_target_change_invalidates_acceptance(self):
@@ -4823,6 +4960,142 @@ class PackSigningTests(unittest.TestCase):
             self.assertEqual(info["version"], "3.0.0")
             self.assertTrue(info["verification"]["trusted"])
 
+    def test_signature_made_under_a_different_namespace_is_refused(self):
+        """P1-10: `verify_pack_signature` must always verify against the
+        fixed `_SIGN_NAMESPACE`, never a namespace the pack itself
+        declares - otherwise a signature a trusted publisher made for some
+        OTHER purpose under a namespace of the attacker's choosing verifies
+        successfully here even though it was never meant to authorize an
+        optarena pack. Reproduces the review's own live exploit: a REAL
+        ssh-keygen signature, from a REAL trusted key, made under a
+        namespace that is NOT "optarena-pack"."""
+        import subprocess
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            blob = packs._signable_blob(pack)
+            data_path = Path(d) / "pack.blob"
+            data_path.write_bytes(blob)
+            # Sign the IDENTICAL blob, but under a namespace the attacker
+            # picked ("some-other-tool"), not "optarena-pack" - a real,
+            # valid ssh-keygen signature, just for a different purpose.
+            subprocess.run(
+                ["ssh-keygen", "-Y", "sign", "-f", str(priv), "-n", "some-other-tool", str(data_path)],
+                capture_output=True, timeout=30, check=True)
+            forged_sig = data_path.with_name(data_path.name + ".sig").read_text(encoding="utf-8")
+            pack["signature"] = {"signer": "acme-corp", "namespace": "some-other-tool", "sig": forged_sig}
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub, trusted_publishers_file=signers_file)
+            result = packs.verify_pack_signature(pack, trusted_publishers_file=signers_file)
+            self.assertFalse(result["trusted"], "a signature for a different namespace must never verify")
+
+    def test_signature_under_the_real_namespace_from_the_same_key_still_works(self):
+        """Control for the test above - the SAME key, the SAME blob, signed
+        under the correct namespace, must still verify as trusted. Proves
+        the fix rejects the wrong namespace specifically, not signing in
+        general."""
+        import subprocess
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            blob = packs._signable_blob(pack)
+            data_path = Path(d) / "pack.blob"
+            data_path.write_bytes(blob)
+            subprocess.run(
+                ["ssh-keygen", "-Y", "sign", "-f", str(priv), "-n", packs._SIGN_NAMESPACE, str(data_path)],
+                capture_output=True, timeout=30, check=True)
+            real_sig = data_path.with_name(data_path.name + ".sig").read_text(encoding="utf-8")
+            pack["signature"] = {"signer": "acme-corp", "sig": real_sig}
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub, trusted_publishers_file=signers_file)
+            result = packs.verify_pack_signature(pack, trusted_publishers_file=signers_file)
+            self.assertTrue(result["trusted"])
+
+    def test_malformed_signature_block_is_refused_not_crashed(self):
+        """P1-10: `pack["signature"]` is untrusted input - a wrong shape
+        must be refused (tampered=True, the same unconditional-refusal
+        state a broken crypto signature gets), not crash `.get()` on a
+        non-dict, and not silently treated as merely 'unsigned'."""
+        from optarena import packs
+        # `{}` deliberately excluded - an empty dict is falsy in Python, so
+        # `if not sig` (the existing, correct "no signature at all" check)
+        # catches it before this malformed-shape check ever runs, and
+        # rightly so: an empty object carries no more information than a
+        # missing field would.
+        for bad_sig in ("just-a-string", ["a", "list"], 42, {"signer": "x"},
+                        {"signer": "x", "sig": 123}, {"signer": 123, "sig": "y"}):
+            with self.subTest(bad_sig=bad_sig):
+                pack = {"name": "p", "version": "1.0.0", "hash": "sha256:x", "case_count": 1,
+                        "signature": bad_sig}
+                result = packs.verify_pack_signature(pack)
+                self.assertTrue(result["signed"])
+                self.assertFalse(result["trusted"])
+                self.assertTrue(result["tampered"], f"malformed shape {bad_sig!r} must be tampered=True")
+
+    def test_installed_pack_modified_after_install_is_no_longer_reported_trusted(self):
+        """P1-10: the exact stale-trust bug - `_pack_info`/
+        `verify_installed_pack` must re-derive trust from what's actually
+        on disk NOW, not replay `_pack.json`'s install-time snapshot
+        forever. Edits a real installed case file directly on disk, exactly
+        as the review's own reproduction did, and confirms the NEXT run's
+        manifest reflects that instead of stale 'trusted'."""
+        from optarena import packs
+        from optarena.runner._manifest import _pack_info
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub, trusted_publishers_file=signers_file)
+            with mock.patch.object(packs, "TRUSTED_PUBLISHERS_FILE", signers_file):
+                loaded = packs.load_pack(str(packs.write_pack(pack, Path(d) / "p.optpack.json")))
+                reg = Path(d) / "reg"
+                dest = packs.install_pack(loaded, packs_dir=reg)
+
+            # Confirmed trusted immediately after install.
+            self.assertTrue(_pack_info(str(dest))["verification"]["trusted"])
+
+            # Now tamper with the installed case file directly on disk -
+            # no re-signing, no re-installing, exactly what a local
+            # filesystem edit (or an attacker with local access) looks like.
+            case_file = next(dest.glob("*.json"))
+            self.assertNotEqual(case_file.name, "_pack.json")
+            data = json.loads(case_file.read_text(encoding="utf-8"))
+            data["prompts"] = ["a completely different, malicious prompt"]
+            case_file.write_text(json.dumps(data), encoding="utf-8")
+
+            info = _pack_info(str(dest))
+            self.assertFalse(info["verification"]["trusted"],
+                             "a modified installed pack must not still report as trusted")
+            self.assertTrue(info["verification"]["tampered"])
+            self.assertIn("modified after installation", info["verification"]["detail"])
+
+    def test_installed_pack_unmodified_reruns_stay_trusted_without_reverifying_crypto(self):
+        """Control for the test above - untouched content must keep
+        reporting the original (already-correct) verification, not
+        silently flip to untrusted just because the check now runs on
+        every call."""
+        from optarena import packs
+        from optarena.runner._manifest import _pack_info
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub, trusted_publishers_file=signers_file)
+            with mock.patch.object(packs, "TRUSTED_PUBLISHERS_FILE", signers_file):
+                loaded = packs.load_pack(str(packs.write_pack(pack, Path(d) / "p.optpack.json")))
+                reg = Path(d) / "reg"
+                dest = packs.install_pack(loaded, packs_dir=reg)
+            self.assertTrue(_pack_info(str(dest))["verification"]["trusted"])
+            self.assertTrue(_pack_info(str(dest))["verification"]["trusted"])   # a second, later run
+
 
 class PackVersionSortTests(unittest.TestCase):
     """F-11: version comparisons must be numeric, not lexical - "1.9.0" is a
@@ -5528,6 +5801,64 @@ class RunnerCapabilityExclusionWiringTests(unittest.TestCase):
                 "expected_files": [{"path_pattern": "a.py"}]}
         result = _run_case(driver, case, sc, self.ws, trials=1)
         self.assertNotIn("capability_excluded", result.extra)
+
+
+class RunnerWorkspaceQuotaWiringTests(unittest.TestCase):
+    """P1-09: `_run_case` must not silently trust a result the driver
+    produced if the workspace blew its quota WHILE the driver was running -
+    the watchdog previously only ever wrapped check_command, so a runaway
+    or malicious agent's own write phase (which for a `cli`-kind driver
+    happens on the real host filesystem) was invisible to it entirely."""
+
+    def setUp(self):
+        from optarena._cases import _sandbox as sandbox_mod
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_driverquota_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+        # _WorkspaceQuotaWatchdog reads these module globals fresh at
+        # instantiation time (not import time - see its own docstring), so
+        # patching the module attributes directly, not the env var the
+        # module only reads once at import, is what actually takes effect.
+        self._patch_bytes = mock.patch.object(sandbox_mod, "_WORKSPACE_MAX_BYTES", 500)
+        self._patch_files = mock.patch.object(sandbox_mod, "_WORKSPACE_MAX_FILES", 10_000)
+        self._patch_bytes.start()
+        self._patch_files.start()
+        self.addCleanup(self._patch_bytes.stop)
+        self.addCleanup(self._patch_files.stop)
+
+    @staticmethod
+    def _case():
+        return {"name": "c", "prompts": ["do it"], "expected_files": [{"path_pattern": "a.py"}]}
+
+    def _scenario(self):
+        return Scenario(name="s", driver="aider", backend=Backend(base_url="http://x", model="m"))
+
+    def test_driver_exceeding_quota_fails_the_case_even_if_driver_reported_pass(self):
+        from optarena.runner import _run_case
+
+        def _fake_run_case(case, scenario, ws):
+            (ws / "runaway.bin").write_bytes(b"x" * 1000)   # over the 500-byte quota
+            return CaseResult(name="c", passed=True)   # the driver itself thinks it succeeded
+
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.side_effect = _fake_run_case
+        result = _run_case(driver, self._case(), self._scenario(), self.ws, trials=1)
+        self.assertFalse(result.passed)
+        self.assertTrue(result.extra.get("workspace_quota_exceeded"))
+        self.assertTrue(any("workspace quota exceeded during agent execution" in f
+                            for f in result.failures))
+
+    def test_driver_under_quota_is_unaffected(self):
+        from optarena.runner import _run_case
+
+        def _fake_run_case(case, scenario, ws):
+            (ws / "fine.bin").write_bytes(b"x" * 10)
+            return CaseResult(name="c", passed=True)
+
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.side_effect = _fake_run_case
+        result = _run_case(driver, self._case(), self._scenario(), self.ws, trials=1)
+        self.assertTrue(result.passed)
+        self.assertNotIn("workspace_quota_exceeded", result.extra)
 
 
 class ImageOverrideResolutionTests(unittest.TestCase):

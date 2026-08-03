@@ -186,6 +186,29 @@ def check(image: str, trivy_json: dict, today: "datetime.date | None" = None) ->
             problems.append(
                 f"{image}: {cve} ({pkg} {installed}) severity increased "
                 f"{entry.get('severity')} -> {detail['severity']} - re-triage and refresh the baseline")
+        # P2-05: Trivy's disposition `status` was collected into `detail`
+        # since P1-02 but never actually compared - a real gap, not a
+        # disclosed scope cut (found and fixed in the same pass as this
+        # comment). Only fails in the direction that actually needs a
+        # human: the finding is now unambiguously live ("affected"/"fixed"
+        # - Trivy has concluded the package really is impacted, a fix
+        # exists or doesn't) but was accepted under a DIFFERENT status
+        # ("not_affected", "will_not_fix", "end_of_life",
+        # "under_investigation", or unset) - i.e. Trivy's own classification
+        # became MORE concrete/concerning since a human last reviewed it.
+        # The reverse (affected -> will_not_fix/not_affected, a vendor or
+        # Trivy decision that's now LESS concerning) does not need to
+        # re-block CI - matching the same "flag only when it gets worse"
+        # shape the severity check above already uses, not an unconditional
+        # any-change trigger that would also fire on directionally-safe
+        # reclassifications and add noise without adding safety.
+        old_status = (entry.get("status") or "").lower()
+        new_status = (detail["status"] or "").lower()
+        if new_status in ("affected", "fixed") and old_status not in ("affected", "fixed"):
+            problems.append(
+                f"{image}: {cve} ({pkg} {installed}) status changed "
+                f"{entry.get('status') or 'unset'!r} -> {detail['status']!r} - "
+                f"re-triage and refresh the baseline")
     return problems
 
 

@@ -707,18 +707,35 @@ _WORKSPACE_QUOTA_POLL_INTERVAL_S = 2.0
 
 
 def _workspace_usage(root: Path) -> "tuple[int, int]":
-    """(total_bytes, file_count) under `root`, best-effort - tolerant of
+    """(total_bytes, entry_count) under `root`, best-effort - tolerant of
     files vanishing or changing mid-walk (the very process this polls is
     actively writing/deleting while this runs), matching `snapshot()`'s own
     OSError-tolerant walk. Symlinks are not followed (same reasoning as
     `snapshot()`: a symlink's target isn't this workspace's own disk usage
-    to count against its quota)."""
+    to count against its quota).
+
+    P1-09: `entry_count` counts DIRECTORIES too, not just regular files - a
+    directory only contributed real disk usage (a Debian ext4 directory
+    entry is itself several KB, and a filesystem has a hard limit on total
+    inode count independent of file content) but was previously invisible
+    to `_WORKSPACE_MAX_FILES` entirely; confirmed live that creating many
+    empty directories reported (0 bytes, 0 files) before this fix, a real,
+    reproducible bypass of the file-count quota specifically. Bytes are
+    still summed from regular files only - a bare directory entry's own
+    on-disk size isn't a meaningful signal for the BYTE quota the way it is
+    for the file/inode-count one.
+    """
     total = 0
     count = 0
     try:
         for p in root.rglob("*"):
             try:
-                if p.is_symlink() or not p.is_file():
+                if p.is_symlink():
+                    continue
+                if p.is_dir():
+                    count += 1
+                    continue
+                if not p.is_file():
                     continue
                 total += p.stat().st_size
                 count += 1
@@ -730,12 +747,26 @@ def _workspace_usage(root: Path) -> "tuple[int, int]":
 
 
 class _WorkspaceQuotaWatchdog:
-    """Background poller for the duration of one check_command call. Calls
-    ``on_exceeded(reason)`` at most once, the first time the workspace
-    crosses either quota, then stops polling - the caller is expected to
-    have killed/aborted the in-flight command by the time ``on_exceeded``
-    returns (or promptly afterward); this class does not track how many
-    times the same case ends up over quota, only whether it ever was."""
+    """Background poller for the duration of one check_command/driver call.
+    Calls ``on_exceeded(reason)`` at most once, the first time the
+    workspace crosses either quota, then stops polling - the caller is
+    expected to have killed/aborted the in-flight command by the time
+    ``on_exceeded`` returns (or promptly afterward); this class does not
+    track how many times the same case ends up over quota, only whether it
+    ever was.
+
+    P1-09: polling alone has an inherent blind spot - a command that
+    crosses the quota and exits before the NEXT poll tick is never caught,
+    confirmed live as a real, reproducible bypass. ``check_final()`` closes
+    that gap: call it once, synchronously, immediately after the wrapped
+    call returns (regardless of how), in addition to - not instead of -
+    the background poll. This does not make the quota hard-enforced (a
+    command can still transiently exceed it and exit before EITHER the
+    poll or the final check would have caught it if it's fast enough - no
+    userspace poller can close that to zero), but it removes the
+    poll-interval-sized window that made a fast writer's bypass trivial
+    and reliable rather than a narrow race.
+    """
 
     def __init__(self, root: Path, on_exceeded,
                  max_bytes: "int | None" = None, max_files: "int | None" = None,
@@ -769,18 +800,41 @@ class _WorkspaceQuotaWatchdog:
         lifetime; otherwise the human-readable reason it fired."""
         return self._triggered_reason
 
+    def _check_usage(self) -> "str | None":
+        """One usage check against both thresholds - the shared logic
+        behind both the background poll and ``check_final()``. Returns a
+        reason string (also the same one ``triggered_reason`` will report)
+        if either threshold is crossed, else None."""
+        total_bytes, total_entries = _workspace_usage(self._root)
+        if total_bytes > self._max_bytes:
+            return f"workspace exceeded {self._max_bytes} byte(s) (was {total_bytes})"
+        if total_entries > self._max_files:
+            return f"workspace exceeded {self._max_files} file(s)/director{'y' if total_entries == 1 else 'ies'} (was {total_entries})"
+        return None
+
+    def check_final(self) -> "str | None":
+        """P1-09: one last synchronous check, meant to be called right
+        after the wrapped call returns - closes the poll-interval-sized
+        timing gap a fast writer could otherwise exploit. A no-op (returns
+        the existing reason immediately) if the background poll already
+        caught a violation; never calls ``on_exceeded`` a second time (the
+        wrapped process has already finished by the time this runs, so
+        there's nothing left to kill - only the verdict needs to change).
+        """
+        if self._triggered_reason is not None:
+            return self._triggered_reason
+        reason = self._check_usage()
+        if reason is not None:
+            self._triggered_reason = reason
+        return reason
+
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
-            total_bytes, total_files = _workspace_usage(self._root)
-            if total_bytes > self._max_bytes:
-                self._triggered_reason = (
-                    f"workspace exceeded {self._max_bytes} byte(s) (was {total_bytes})")
-            elif total_files > self._max_files:
-                self._triggered_reason = (
-                    f"workspace exceeded {self._max_files} file(s) (was {total_files})")
-            else:
+            reason = self._check_usage()
+            if reason is None:
                 continue
-            self._on_exceeded(self._triggered_reason)
+            self._triggered_reason = reason
+            self._on_exceeded(reason)
             return
 
 
@@ -895,6 +949,10 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
             return [f'check_command could not run ({engine} exec): {exc}'], info
     finally:
         watchdog.stop()
+        # P1-09: a fast writer that crosses the quota and exits inside one
+        # poll interval would otherwise never be caught - this closes that
+        # gap without waiting for another poll tick.
+        watchdog.check_final()
     # P1-07: checked AFTER the call, regardless of how it returned - a
     # quota-triggered reap() makes the exec's own exit code/timeout status
     # unreliable as a signal (it looks like an ordinary killed process), so
@@ -1247,6 +1305,10 @@ def _run_check_command_local(cmd: str, root: Path, timeout: int, info: dict) -> 
             return [f'check_command could not run: {exc}'], info
     finally:
         watchdog.stop()
+        # P1-09: a fast writer that crosses the quota and exits inside one
+        # poll interval would otherwise never be caught - this closes that
+        # gap without waiting for another poll tick.
+        watchdog.check_final()
     # P1-07: checked regardless of how run_capture returned - a quota kill
     # makes proc.returncode look like an ordinary killed process (e.g. -9),
     # not distinguishably "aborted for cause", so the watchdog's own state
@@ -1315,6 +1377,10 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
             return [f'check_command could not run ({engine}): {exc}'], info
     finally:
         watchdog.stop()
+        # P1-09: a fast writer that crosses the quota and exits inside one
+        # poll interval would otherwise never be caught - this closes that
+        # gap without waiting for another poll tick.
+        watchdog.check_final()
     if watchdog.triggered_reason:
         info["duration_s"] = round(time.monotonic() - t0, 2)
         info["workspace_quota_exceeded"] = True

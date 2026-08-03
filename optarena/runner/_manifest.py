@@ -64,7 +64,6 @@ def _source_revision() -> dict:
     reports both fields as None rather than failing the run.
     """
     import subprocess
-    from pathlib import Path
     repo_root = Path(__file__).resolve().parent.parent.parent
     try:
         commit = subprocess.run(
@@ -176,20 +175,18 @@ def _pack_info(cases_dir: "str | None") -> "dict | None":
     scenario file that points ``cases_dir`` directly at an installed pack
     path, not just the ``--pack`` CLI shorthand. Returns ``None`` (not an
     error) for the common case of cases NOT coming from a pack at all.
+
+    P1-10: delegates to ``packs.verify_installed_pack`` rather than reading
+    ``_pack.json``'s ``verification`` field directly - that field was a
+    stale, install-time-only snapshot, never re-derived from what's
+    actually on disk, so a case file edited after installation still
+    reported "trusted" in every subsequent run's manifest. Every run now
+    gets a freshly re-hashed verdict instead.
     """
     if not cases_dir:
         return None
-    manifest_path = Path(cases_dir) / "_pack.json"
-    if not manifest_path.is_file():
-        return None
-    try:
-        man = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return {
-        "name": man.get("name"), "version": man.get("version"), "hash": man.get("hash"),
-        "verification": man.get("verification"),
-    }
+    from ..packs import verify_installed_pack
+    return verify_installed_pack(cases_dir)
 
 
 def build_manifest(scenario: Scenario, cases: list[dict], requested_trials: int,

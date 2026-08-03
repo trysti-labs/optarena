@@ -53,13 +53,16 @@ drifting out of sync.
 
 ## Supported release branches
 
-- **`main`** is the primary development branch and the one new contributions
-  should target.
-- **`v0.1`** is the current active release line (matching `pyproject.toml`'s
-  `0.1.0`). As of this writing `v0.1` has diverged ahead of `main` by several
-  commits from the same August 2026 remediation work this file is part of -
-  a known, disclosed gap the maintainer intends to reconcile (fast-forward or
-  merge `main` back up to `v0.1`), not a second permanently-diverging branch.
+- **`main`** is the primary development branch and the one new
+  contributions should target. It was rebuilt for the `v0.1.0` tag from
+  `v0.1`'s history (146 commits compressed into a clean, reviewable ~27,
+  re-authored under one consistent identity - the working history behind
+  that compression, including the account it was previously authored
+  under and the external-review commits it absorbed, isn't preserved
+  as-is; the code and this document are the record going forward).
+- **`v0.1`** was the working branch for everything up to the `v0.1.0`
+  release and is no longer the one to target - `main` supersedes it as of
+  this tag.
 - OptArena is pre-1.0 (`Development Status :: 4 - Beta`). There is no
   guarantee of behavioral compatibility between `0.x` releases yet - see
   "Versioning and compatibility" below for what *is* guaranteed even at this
@@ -121,9 +124,11 @@ silent-incompatibility problem this policy exists to prevent:
   you depend on it, not discovered after.
 - `DRIVERS[...]["tested_with"]` records the last version each driver was
   confirmed working against via a real invocation; `doctor` flags drift
-  between that and the installed version, and `integration-smoke.yml`'s
-  scheduled CI now fails hard on drift for the drivers it covers (see
-  `issues.md`'s P2-03 entry for the exact mechanism).
+  between that and the installed version (advisory only for local/
+  interactive use), and `integration-smoke.yml`'s scheduled CI hard-fails
+  on that same drift signal (via `doctor --json`) for the drivers it
+  covers - a local run staying advisory while unattended CI gates on it is
+  deliberate, not an inconsistency.
 - Removing a driver entirely: announce it in `CHANGELOG.md` under
   `Deprecated` for at least one release before deletion, unless the removal
   is forced by an upstream tool disappearing entirely (nothing to keep

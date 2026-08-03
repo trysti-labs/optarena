@@ -50,7 +50,35 @@ def _run_case(driver, case: dict, scenario: Scenario, root: Path, trials: int,
         # A-36: a non-root sandbox uid can't write into a workspace the HOST
         # user created 0700. No-op unless OPTARENA_SANDBOX_USER is set.
         cases_mod.relax_workspace_permissions(ws)
-        r = driver.run_case(case, scenario, ws)
+        # P1-09: the workspace-quota watchdog previously wrapped ONLY
+        # check_command - the driver/agent's own write phase (which for a
+        # `cli`-kind driver runs on the real host filesystem, per
+        # SECURITY.md's trust model) was completely unguarded, so a runaway
+        # or malicious agent could fill the host disk before check_command
+        # ever ran. There is no generic handle here to forcibly kill an
+        # in-flight `driver.run_case()` call the way check_command's own
+        # paths can kill their subprocess/container (a CLI driver's
+        # subprocess, an SDK driver's worker process, and a baseline
+        # driver's HTTP request all have different internal shutdown
+        # mechanisms this call site can't reach into) - `on_exceeded` is a
+        # no-op here, a real, disclosed asymmetry with check_command's
+        # early termination. What this DOES guarantee: the result is never
+        # silently trusted if the workspace blew its quota at any point
+        # during driver execution, via the poll during the call AND
+        # `check_final()`'s synchronous check immediately after it returns
+        # (closing the same fast-writer timing gap check_command's own
+        # paths were just fixed for).
+        watchdog = cases_mod._WorkspaceQuotaWatchdog(ws, on_exceeded=lambda _reason: None).start()
+        try:
+            r = driver.run_case(case, scenario, ws)
+        finally:
+            watchdog.stop()
+            watchdog.check_final()
+        if watchdog.triggered_reason:
+            r.passed = False
+            r.failures.append(
+                f"workspace quota exceeded during agent execution: {watchdog.triggered_reason}")
+            r.extra["workspace_quota_exceeded"] = True
         if capability_excluded:
             r.extra["capability_excluded"] = capability_excluded
         if security_scan:
