@@ -10,7 +10,7 @@
 # silently replaced upstream, changing oracle behavior between identical
 # OptArena commits). The tag stays for readability; the digest is what's
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
-FROM ruby:3.3-slim@sha256:fb6613e39db7b37efb7976390f0fcd4da2ea018a74770ae4a01d21a4c441f637
+FROM ruby:4.0-slim@sha256:abd7528c4df35d151e2643d5efb845e442a26e36a4babc6459bee508619137a2
 
 # P1-03: apt-get upgrade picks up any OS-level security patch published for
 # this exact Debian release since the base image was last rebuilt.
