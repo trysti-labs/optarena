@@ -65,6 +65,13 @@ Found something that looks like a real vulnerability rather than a bug?
 Please don't open a public issue for it - see [SECURITY.md](./SECURITY.md)
 for how to report it and what OptArena's actual trust model is.
 
+## Governance
+
+See [GOVERNANCE.md](./GOVERNANCE.md) for who maintains this project, how
+decisions get made, and the deprecation/compatibility policy for the case
+schema, drivers, results, and oracle versions - worth a read before proposing
+a breaking change.
+
 ## Pull requests
 
 - Keep the change scoped - a bug fix doesn't need a drive-by refactor.

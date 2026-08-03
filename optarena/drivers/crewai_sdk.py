@@ -46,10 +46,20 @@ class CrewAIDriver(SingleFileSDKDriver):
         # environment for every later driver/subprocess of the run, and
         # conversely a pre-existing host OPENAI_API_KEY silently shadowed the
         # scenario's key for any crewAI internals reading the env.
+        # P2-02: generation parameters - confirmed live that LLM (a pydantic
+        # model over litellm) declares temperature/top_p/seed as real fields.
+        kwargs = {}
+        if backend.temperature is not None:
+            kwargs["temperature"] = backend.temperature
+        if backend.top_p is not None:
+            kwargs["top_p"] = backend.top_p
+        if backend.seed is not None:
+            kwargs["seed"] = backend.seed
         llm = LLM(
             model=f"openai/{backend.model}",
             base_url=backend.openai_base,
             api_key=backend.api_key,
+            **kwargs,
         )
         return Agent(
             role="Software Engineer",

@@ -28,7 +28,10 @@ class SemanticKernelDriver(AsyncSingleFileSDKDriver):
     async def aopen_session(self, scenario: Scenario):
         from openai import AsyncOpenAI
         from semantic_kernel.agents import ChatCompletionAgent
-        from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion
+        from semantic_kernel.connectors.ai.open_ai import (
+            OpenAIChatCompletion, OpenAIChatPromptExecutionSettings,
+        )
+        from semantic_kernel.functions import KernelArguments
 
         backend = scenario.backend
         # No base_url kwarg on OpenAIChatCompletion itself - point it at the
@@ -37,11 +40,25 @@ class SemanticKernelDriver(AsyncSingleFileSDKDriver):
         # scenario's key leak into, or get shadowed by, the process env).
         client = AsyncOpenAI(base_url=backend.openai_base,
                              api_key=backend.api_key or "optarena")
+        # P2-02: generation parameters - confirmed live that
+        # OpenAIChatPromptExecutionSettings declares temperature/top_p/seed
+        # as real fields; bound to the agent via KernelArguments the same
+        # way execution settings are normally attached.
+        settings_kwargs = {}
+        if backend.temperature is not None:
+            settings_kwargs["temperature"] = backend.temperature
+        if backend.top_p is not None:
+            settings_kwargs["top_p"] = backend.top_p
+        if backend.seed is not None:
+            settings_kwargs["seed"] = backend.seed
+        arguments = (KernelArguments(settings=OpenAIChatPromptExecutionSettings(**settings_kwargs))
+                     if settings_kwargs else None)
         agent = ChatCompletionAgent(
             service=OpenAIChatCompletion(ai_model_id=backend.model, async_client=client),
             name="software_engineer",
             instructions="You are a precise engineer who answers with one fenced code "
                          "block containing the complete file content, and nothing else.",
+            arguments=arguments,
         )
         # `thread` carries the conversation across this case's prompts.
         return {"agent": agent, "client": client, "thread": None}

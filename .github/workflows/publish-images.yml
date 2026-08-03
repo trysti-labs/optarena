@@ -67,6 +67,9 @@ jobs:
             context: docker/ruby
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
       # F-14: images were built with plain `docker build` on the amd64
       # runner only, so anyone on an ARM64 host (Apple Silicon Docker
       # Desktop, ARM64 Podman) either paid QEMU emulation or couldn't use
@@ -84,37 +87,87 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
+      # P1-01: build+push ONLY the immutable :<git-sha> tag here - NOT
+      # :latest. :latest is what the tool's own pull fallback
+      # (optarena/_cases/_sandbox.py ensure_image) and `optarena sandbox
+      # pull` resolve to by default, so it is the one tag that actually
+      # matters for "did a vulnerable image reach users" - promoting it
+      # only after the scan gate below passes means a deliberately
+      # introduced new CRITICAL/HIGH finding can push an immutable
+      # sha-tagged artifact (evidence trail) but can never move :latest.
+      #
+      # This two-step shape (push a staging tag, scan it, promote on pass)
+      # is not a workaround: buildx can't `docker load` a multi-platform
+      # result into the local engine at all (a manifest list spanning two
+      # platforms only exists once pushed to a registry), so scanning
+      # BEFORE any push is not an option here - the doc's own suggested
+      # resolution ("push to a private/staging tag first and promote the
+      # verified digest afterward") is the only shape that actually fits
+      # buildx's multi-arch constraints.
+      - name: Build and push (immutable digest tag only)
         id: build
         run: |
           BASE=ghcr.io/trysti-labs/optarena/${{ matrix.image }}
-          # :latest stays the default the tool's own pull fallback uses
-          # (unchanged behaviour) - the immutable :<git-sha> tag alongside it
-          # is what a CI run or a user's own scenario/CI config can pin to,
-          # so "which exact image did this result come from" is always
-          # answerable instead of resolving to whatever :latest happens to
-          # be at pull time (Phase 2.3 - content-addressed images).
-          #
-          # --push (not build-then-push): buildx can't `docker load` a
-          # multi-platform result into the local engine - a manifest list
-          # spanning two platforms only exists once pushed to a registry.
-          #
-          # P1-03: --metadata-file captures the PUSHED digest so signing/
-          # attestation below targets the exact immutable image this run
-          # produced, not a mutable tag that could be repointed later.
+          # P1-03: --metadata-file captures the PUSHED digest so scanning,
+          # signing, and attestation all target the exact immutable image
+          # this run produced, not a mutable tag that could be repointed.
           docker buildx build --platform linux/amd64,linux/arm64 \
-            -t "$BASE:latest" -t "$BASE:${{ github.sha }}" \
+            -t "$BASE:${{ github.sha }}" \
             -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }} \
             --push --metadata-file metadata.json
           echo "digest=$(jq -r '.["containerimage.digest"]' metadata.json)" >> "$GITHUB_OUTPUT"
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      # P1-01: scan the PUSHED digest directly from the registry - the exact
+      # bits :latest would be promoted to below, not a separately-built copy
+      # (ci.yml's own image-vuln-scan job builds its own local single-arch
+      # image for PRs; that catches regressions early but says nothing about
+      # THIS specific published artifact, which is the actual gap this
+      # closes). `docker/login-action` above already wrote registry
+      # credentials to the runner's docker config, which Trivy's default
+      # image-scanning backend reuses automatically for a registry
+      # reference. No explicit platform selection: this trivy-action version
+      # (confirmed against its own action.yaml - v0.36.0 pinned above) has no
+      # `platform` input at all; Trivy's own default multi-arch resolution
+      # picks the runner's native platform (amd64 on ubuntu-latest), which
+      # already matches what ci.yml's own PR-time scan builds and checks.
+      - name: Trivy vulnerability scan (JSON, for baseline check)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.build.outputs.base }}@${{ steps.build.outputs.digest }}
+          format: json
+          output: trivy-results.json
+          severity: CRITICAL,HIGH
+
+      # P1-01: the actual publish gate - a genuinely NEW CRITICAL/HIGH
+      # finding (not already in docker/vuln-baseline/<image>.json) fails
+      # this step, which stops every step below by default (`if:
+      # success()`) - promotion, signing, and attestation never run, so
+      # :latest never moves and no image described as "released" carries an
+      # un-triaged finding. Reuses the exact same script/baseline files
+      # ci.yml's own scan already gates on, so a PR and the real publish run
+      # apply identical policy.
+      - name: Check against the accepted-vulnerability baseline
+        run: python docker/check_vuln_baseline.py ${{ matrix.image }} trivy-results.json
+
+      # P1-01: promote the scanned digest to :latest only now that the gate
+      # above passed. `imagetools create` re-tags the EXISTING manifest list
+      # already pushed above - it does not rebuild, so the bits :latest
+      # points at afterward are byte-identical to what was just scanned.
+      - name: Promote to :latest (scan gate passed)
+        run: |
+          docker buildx imagetools create \
+            -t "${{ steps.build.outputs.base }}:latest" \
+            "${{ steps.build.outputs.base }}@${{ steps.build.outputs.digest }}"
 
       # P1-03: SLSA build provenance - attests WHICH workflow run, commit,
       # and repo produced this exact image digest, published to GitHub's
       # own attestation store (visible on the package page) and, via
       # push-to-registry, alongside the image itself so `cosign
       # verify-attestation` (or any other Sigstore-aware client) can check
-      # it without knowing to look on GitHub specifically.
+      # it without knowing to look on GitHub specifically. Digest-based, so
+      # it covers both the :<sha> and (now-promoted) :latest tags equally -
+      # tag promotion order relative to this step doesn't matter.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:

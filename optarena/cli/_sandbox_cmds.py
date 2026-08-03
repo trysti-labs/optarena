@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sys
 
-from ..cases import DOCKER_IMAGES, container_engine, dockerfile_for, docker_image_available
+from ..cases import DOCKER_IMAGES, DOCKERFILE_DIR, container_engine, dockerfile_for, docker_image_available
 
 
 def cmd_docker(args) -> int:
@@ -43,7 +43,20 @@ def cmd_docker(args) -> int:
         image = DOCKER_IMAGES[lang]
         dockerfile = dockerfile_for(lang)
         if not dockerfile.exists():
-            print(f"no Dockerfile at {dockerfile} - skipping {lang}", file=sys.stderr)
+            # P2-01: docker/ is a source-checkout-only asset (see README's
+            # "Source-checkout install only" note) - a wheel install has no
+            # Dockerfiles for ANY lang, not a broken one for this lang, so
+            # say that plainly instead of a generic missing-file message.
+            if not DOCKERFILE_DIR.is_dir():
+                print(
+                    f"no Dockerfile at {dockerfile} - docker/ is a source-checkout-only "
+                    f"asset, not bundled into an installed wheel (see README.md's "
+                    f"\"Source-checkout install only\" note); run from a git checkout "
+                    f"instead of a wheel install to use `optarena sandbox build`",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"no Dockerfile at {dockerfile} - skipping {lang}", file=sys.stderr)
             overall = 1
             continue
         engine = container_engine()

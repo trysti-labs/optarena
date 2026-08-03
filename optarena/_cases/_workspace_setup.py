@@ -66,6 +66,18 @@ def copy_setup_repo(root: Path, repo_name: str) -> None:
             f'setup_repo "{repo_name}" escapes the starter-repo directory ({repos_root})'
         )
     if not src.is_dir():
+        # P2-01: distinguish "this install has no repos/ at all" (a wheel
+        # install - repos/ is a source-checkout-only asset, see README's
+        # "Source-checkout install only" note) from "repos/ exists but this
+        # particular name is wrong" - the same case name fails both ways
+        # without this, and only one of them is fixable by editing the case.
+        if not repos_root.is_dir():
+            raise FileNotFoundError(
+                f'setup_repo "{repo_name}" needs {REPOS_DIR}, which does not exist - '
+                f"starter repos are a source-checkout-only asset, not bundled into an "
+                f"installed wheel (see README.md's \"Source-checkout install only\" note); "
+                f"run from a git checkout instead of a wheel install to use setup_repo cases"
+            )
         raise FileNotFoundError(f'setup_repo "{repo_name}" not found under {REPOS_DIR}')
     root = root.resolve()
     for p in src.rglob("*"):
@@ -153,7 +165,17 @@ def _disruption_ready(dis: dict, root: Path, after_index: int) -> bool:
         return dis["after_prompt"] == after_index
     when = dis.get("when") or {}
     if "file_exists" in when:
-        return (root / when["file_exists"]).exists()
+        # P1-04: `root / when["file_exists"]` alone is not a containment
+        # check - pathlib's `/` operator silently DISCARDS `root` entirely
+        # when the right-hand side is an absolute path (the same H-01
+        # gotcha `write_setup_files` already guards against), so an
+        # absolute `file_exists` value checked the real HOST filesystem,
+        # not the workspace. schema.py now rejects a traversal/absolute
+        # value before a case is even loaded (defense layer one); this
+        # resolved-and-relative_to check is the runtime layer, same
+        # pattern `file_contains` right below already uses.
+        target = (root / when["file_exists"]).resolve()
+        return target.is_relative_to(root) and target.exists()
     if "file_contains" in when:
         fc = when["file_contains"]
         target = (root / fc["path"]).resolve()

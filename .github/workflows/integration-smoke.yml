@@ -9,13 +9,14 @@
 # and produces a result the harness can grade), which is a materially
 # different, and previously entirely untested, failure surface.
 #
-# Scoped to `backend: scenario` CLI drivers only (aider, opencode, goose,
-# qwen-code) - these can point at a fully local, self-hosted Ollama with NO
-# secrets and NO paid API usage. `backend: fixed` tools (Claude Code,
-# Codex - real Anthropic/OpenAI accounts) and the optional SDK drivers
-# aren't covered here; extending this to them is a natural next step once
-# there's a secrets budget/owner decision to make, not attempted in this
-# pass.
+# Scoped to `backend: scenario` drivers - CLI (aider, opencode, goose,
+# qwen-code) in the `smoke` job below, and the six optional SDK drivers
+# (crewai, openai-agents, smolagents, langgraph, autogen, semantic-kernel) in
+# the `sdk-smoke` job (P2-03) - all of which can point at a fully local,
+# self-hosted Ollama with NO secrets and NO paid API usage. `backend: fixed`
+# tools (Claude Code, Codex - real Anthropic/OpenAI accounts) remain out of
+# scope: they need a real paid account, which is a secrets-budget/ownership
+# decision for the maintainer, not something this workflow can self-fund.
 name: integration-smoke
 
 on:
@@ -45,20 +46,57 @@ jobs:
           python-version: "3.11"
       - name: Install optarena
         run: pip install -e .
+      # P2-03: every tool pinned to the exact version DRIVERS' own
+      # `tested_with` (optarena/drivers/__init__.py) records as last
+      # confirmed working, not "whatever curl/pip/npm resolve to today" -
+      # a silent upstream release landing between scheduled runs previously
+      # had no visibility here at all, only in `doctor`'s advisory note on
+      # the NEXT run that happened to install something newer. pip/npm
+      # already verify package integrity against the registry's own hash
+      # metadata once a version is pinned (no separate step needed); the two
+      # curl|bash installer SCRIPTS (opencode, goose) have no
+      # upstream-published checksum to verify against, so the sha256 below
+      # is a self-established trust anchor - captured directly from each
+      # URL on 2026-08-03 (see the exact pinned URL each check verifies) -
+      # not one either project vouches for. If either script legitimately
+      # changes, this fails loudly instead of silently trusting new content;
+      # update the pinned hash deliberately when that happens.
       - name: Install the driver under test
         run: |
           case "${{ matrix.driver }}" in
-            aider)     pip install aider-chat ;;
-            opencode)  curl -fsSL https://opencode.ai/install | bash ;;
-            goose)     curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash ;;
-            qwen-code) npm install -g @qwen-code/qwen-code ;;
+            aider)
+              pip install aider-chat==0.86.2
+              ;;
+            opencode)
+              curl -fsSL https://opencode.ai/install -o /tmp/opencode-install.sh
+              echo "fc3c1b2123f49b6df545a7622e5127d21cd794b15134fc3b66e1ca49f7fb297e  /tmp/opencode-install.sh" | sha256sum -c -
+              bash /tmp/opencode-install.sh --version 1.18.5
+              ;;
+            goose)
+              # Pinned to the v1.41.0 RELEASE asset (immutable once
+              # published) - not the "stable" tag, a floating pointer GitHub
+              # repoints to a different release over time, which is exactly
+              # the reproducibility gap this pins closed.
+              curl -fsSL https://github.com/block/goose/releases/download/v1.41.0/download_cli.sh -o /tmp/goose-install.sh
+              echo "54d64de9b10befba030d3fdc4f6c316de55557c203abeaa9525c04f450c34280  /tmp/goose-install.sh" | sha256sum -c -
+              bash /tmp/goose-install.sh
+              ;;
+            qwen-code)
+              npm install -g @qwen-code/qwen-code@0.21.0
+              ;;
           esac
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # Self-hosted, local, zero-secret backend - the whole point of scoping
       # this workflow to `backend: scenario` drivers in the first place.
+      # Same pin-and-verify treatment as the CLI drivers above: an explicit
+      # OLLAMA_VERSION (the installer script itself already supports this -
+      # confirmed by reading it, not guessed) and a self-established sha256
+      # of the installer script, captured 2026-08-03.
       - name: Install and start Ollama
         run: |
-          curl -fsSL https://ollama.com/install.sh | sh
+          curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
+          echo "25f64b810b947145095956533e1bdf56eacea2673c55a7e586be4515fc882c9f  /tmp/ollama-install.sh" | sha256sum -c -
+          OLLAMA_VERSION=0.30.5 sh /tmp/ollama-install.sh
           ollama serve &
           for i in $(seq 1 30); do
             curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1 && break
@@ -106,9 +144,141 @@ jobs:
       # optarena/drivers/__init__.py's DRIVERS registry (status/owner
       # fields) and "record tested driver/SDK versions" in `doctor`
       # (compares live-detected version against DRIVERS[...]["tested_with"])
-      # - this step surfaces both for a human reviewing a scheduled run,
-      # without needing to fail the job over a version drift (that's an
-      # advisory `doctor` check, not a hard gate here).
+      # - this step surfaces both for a human reviewing a scheduled run. The
+      # next step turns the same signal into a hard gate (P2-03).
       - name: doctor (versions actually used this run)
         if: always()
         run: python -m optarena doctor --base-url http://localhost:11434 --kind ollama || true
+      # P2-03: version drift was previously only an advisory note buried in
+      # doctor's human-readable output - real, but invisible unless someone
+      # went looking. `doctor --json`'s `checks[].detail` carries the exact
+      # same "not re-verified against this version" text; grepping it here
+      # turns the identical signal into a hard, visible failure of THIS
+      # scheduled job specifically. Deliberately NOT changed in `_doctor.py`
+      # itself - a local interactive `optarena doctor` on a developer's own
+      # machine (that upgraded aider yesterday) failing outright would be
+      # actively unhelpful; a weekly unattended CI run silently ignoring the
+      # same signal would not.
+      - name: Fail if any driver version has drifted from tested_with
+        if: always()
+        run: |
+          python -m optarena doctor --base-url http://localhost:11434 --kind ollama --json > /tmp/doctor.json || true
+          python -c "
+          import json
+          report = json.load(open('/tmp/doctor.json'))
+          drifted = [c for c in report['checks'] if 'not re-verified' in (c.get('detail') or '')]
+          for c in drifted:
+              print(f\"::warning::driver version drift: {c['label']} - {c['detail']}\")
+          if drifted:
+              raise SystemExit(f'{len(drifted)} driver(s) have drifted from their tested_with version')
+          "
+
+  # P2-03: the six optional SDK/agent-framework drivers had zero live CI
+  # coverage - mock-only, same gap the CLI drivers had before the `smoke`
+  # job above existed. Each points at the identical local, self-hosted,
+  # zero-secret Ollama backend as the CLI drivers (`backend: scenario` in
+  # DRIVERS - see optarena/drivers/__init__.py), so there is no
+  # secrets-budget blocker here the way there is for `backend: fixed` tools.
+  # A separate job, not another leg of the `smoke` matrix above: these need
+  # a pip extra install, not a curl/npm binary install, and none of them
+  # touch PATH.
+  sdk-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # extra: the pyproject.toml optional-dependency group (also
+          # exercises the documented `pip install optarena[<extra>]` UX
+          # itself, not just the underlying package). pip_name/version: the
+          # exact package DRIVERS[...]["tested_with"] records as last
+          # confirmed working - pinned the same way the CLI legs above pin
+          # aider/opencode/goose/qwen-code, for the same reproducibility
+          # reason (P2-03's "pin every tested CLI/SDK version").
+          - driver: crewai
+            extra: crewai
+            pip_name: crewai
+            version: "1.14.3"
+          - driver: openai-agents
+            extra: openai-agents
+            pip_name: openai-agents
+            version: "0.18.3"
+          - driver: smolagents
+            extra: smolagents
+            pip_name: smolagents
+            version: "1.24.0"
+          - driver: langgraph
+            extra: langgraph
+            pip_name: langgraph
+            version: "1.2.9"
+          - driver: autogen
+            extra: autogen
+            pip_name: autogen-agentchat
+            version: "0.7.5"
+          - driver: semantic-kernel
+            extra: semantic-kernel
+            pip_name: semantic-kernel
+            version: "1.44.0"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Install optarena with the driver's SDK extra, pinned to tested_with
+        run: |
+          pip install -e ".[${{ matrix.extra }}]"
+          pip install "${{ matrix.pip_name }}==${{ matrix.version }}"
+      - name: Install and start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
+          echo "25f64b810b947145095956533e1bdf56eacea2673c55a7e586be4515fc882c9f  /tmp/ollama-install.sh" | sha256sum -c -
+          OLLAMA_VERSION=0.30.5 sh /tmp/ollama-install.sh
+          ollama serve &
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1 && break
+            sleep 1
+          done
+      - name: Pull a small model
+        run: ollama pull qwen2.5-coder:1.5b
+      - name: Build the base sandbox image
+        run: docker build -t optarena-tester:latest -f docker/Dockerfile docker
+      # Same case, same acceptance logic as the CLI `smoke` job above -
+      # `create_fibonacci` is baseline/SDK-compatible (cases.baseline_incompatible
+      # returns None for it: no multi-file edit, no shell access requirement),
+      # and the same exit-2-or-infrastructure-error distinction applies: a
+      # small local model doing worse than a frontier model is not a failure
+      # of THIS check.
+      - name: Run the smoke case
+        run: |
+          set +e
+          python -m optarena run \
+            --driver ${{ matrix.driver }} --kind ollama \
+            --base-url http://localhost:11434 --model qwen2.5-coder:1.5b \
+            --cases create_fibonacci --name sdk-smoke-${{ matrix.driver }} \
+            --timeout 120
+          run_exit=$?
+          set -e
+          if [ "$run_exit" -eq 2 ]; then
+            echo "::error::optarena run exited 2 (setup/infrastructure error) - the integration itself is broken"
+            exit 1
+          fi
+          latest=$(ls -t results/runs/*sdk-smoke-${{ matrix.driver }}*.json | head -1)
+          python scripts/check_no_infra_errors.py "$latest"
+      - name: doctor (versions actually used this run)
+        if: always()
+        run: python -m optarena doctor --base-url http://localhost:11434 --kind ollama || true
+      - name: Fail if this driver's version has drifted from tested_with
+        if: always()
+        run: |
+          python -m optarena doctor --base-url http://localhost:11434 --kind ollama --json > /tmp/doctor.json || true
+          python -c "
+          import json
+          report = json.load(open('/tmp/doctor.json'))
+          drifted = [c for c in report['checks']
+                     if c['label'] == '${{ matrix.driver }} version' and 'not re-verified' in (c.get('detail') or '')]
+          for c in drifted:
+              print(f\"::warning::driver version drift: {c['label']} - {c['detail']}\")
+          if drifted:
+              raise SystemExit(f'{len(drifted)} driver(s) have drifted from their tested_with version')
+          "

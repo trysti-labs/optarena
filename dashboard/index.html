@@ -326,11 +326,29 @@ function bindTips(root) {
 /* Views */
 function tilesHTML(run) {
   const s = run.summary || {};
+  const m = run.manifest || {};
   const b = (run.scenario || {}).backend || {};
+  // P2-07: capability-aware denominator, alongside (not replacing) pass_rate -
+  // only rendered when some case was structurally unwinnable for this driver
+  // (a baseline/SDK driver against a case needing multiple files, etc).
+  const eligibleLine = s.eligible_pass_rate != null
+    ? `<div class="delta">eligible-only: ${fmtPct(s.eligible_pass_rate)} (${num(s.capability_excluded_cases)} excluded)</div>` : "";
+  // F-10: an infrastructure error (container engine down, exec failed) is the
+  // ENVIRONMENT's fault, not the model's - adjusted_pass_rate excludes those
+  // cases from the denominator, the same lens P2-07 applies for capability.
+  const infraLine = s.infrastructure_errors
+    ? `<div class="delta" style="color:var(--red)">${num(s.infrastructure_errors)} infrastructure error(s) · adjusted: ${fmtPct(s.adjusted_pass_rate)}</div>` : "";
+  // P2-05: total_cost_usd can be a PARTIAL total (some cases hit an unpriced
+  // remote model) - showing it bare reads as complete when it isn't.
+  const unpricedNote = s.unpriced_cases ? ` (+${num(s.unpriced_cases)} unpriced)` : "";
+  // P2-04: the external driver/SDK version this run actually drove - the
+  // one piece that changes silently underneath a comparison otherwise.
+  const driverVersion = m.driver_version ? ` · ${esc(m.driver_version)}` : "";
   return `<div class="tiles">
     <div class="tile"><div class="label">Pass rate</div>
       <div class="value">${fmtPct(s.pass_rate)}</div>
-      <div class="delta">${num(s.passed, "?")}/${num(s.cases, "?")} cases${s.pass_rate_ci ? " · 95% CI" + ciStr(s) : ""}</div></div>
+      <div class="delta">${num(s.passed, "?")}/${num(s.cases, "?")} cases${s.pass_rate_ci ? " · 95% CI" + ciStr(s) : ""}</div>
+      ${eligibleLine}${infraLine}</div>
     <div class="tile"><div class="label">Clean passes</div>
       <div class="value">${s.clean_passes != null ? num(s.clean_passes) + "/" + num(s.cases) : "-"}</div>
       <div class="delta">${s.clean_passes != null
@@ -342,9 +360,9 @@ function tilesHTML(run) {
       <div class="delta">total ${fmtS(s.total_duration_s)}</div></div>
     <div class="tile"><div class="label">Driver</div>
       <div class="value" style="font-size:1.1rem">${esc((run.scenario || {}).driver || "")}</div>
-      <div class="delta">${esc(b.model || "")} @ ${esc(String(b.base_url || "").replace(/^https?:\/\//, ""))}</div></div>
+      <div class="delta">${esc(b.model || "")} @ ${esc(String(b.base_url || "").replace(/^https?:\/\//, ""))}${driverVersion}</div></div>
     <div class="tile"><div class="label">Cost / efficiency</div>
-      <div class="value">${s.total_cost_usd != null ? fmtUsd(s.total_cost_usd) : "-"}</div>
+      <div class="value">${s.total_cost_usd != null ? fmtUsd(s.total_cost_usd) + unpricedNote : (unpricedNote ? "-" + unpricedNote : "-")}</div>
       <div class="delta">${s.total_tokens
           ? fmtNum(s.total_tokens) + " tokens" + (s.tokens_per_pass ? " · " + fmtNum(s.tokens_per_pass) + "/pass" : "")
           : "no cost/token telemetry reported"}</div></div>
@@ -502,9 +520,14 @@ function compareHTML(runA, runB) {
   const cheaperVal = suppressed ? "(suppressed)"
     : !bothCosts ? "unknown"
     : esc(sa.total_cost_usd <= sb.total_cost_usd ? labelA : labelB);
+  // P2-05: even when both sides report SOME cost, either total can still be
+  // partial (an unpriced remote model in the mix) - flag it rather than let
+  // a partial-vs-complete comparison read as a clean apples-to-apples verdict.
+  const unpricedNote = (sa.unpriced_cases || sb.unpriced_cases)
+    ? ` (A:+${num(sa.unpriced_cases || 0)} B:+${num(sb.unpriced_cases || 0)} unpriced)` : "";
   const cheaperNote = !bothCosts && !suppressed
     ? "no cost data for one or both runs"
-    : `${fmtCost(sa.total_cost_usd)} vs ${fmtCost(sb.total_cost_usd)}`;
+    : `${fmtCost(sa.total_cost_usd)} vs ${fmtCost(sb.total_cost_usd)}${unpricedNote}`;
 
   const verdict = `${compatBanner}<div class="tiles" style="margin-bottom:14px">
     <div class="tile"><div class="label">More accurate</div>

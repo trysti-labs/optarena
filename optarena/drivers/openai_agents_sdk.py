@@ -26,7 +26,7 @@ class OpenAIAgentsDriver(SingleFileSDKDriver):
     install_hint = "pip install openai-agents"
 
     def open_session(self, scenario: Scenario):
-        from agents import Agent, OpenAIChatCompletionsModel, RunConfig
+        from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, RunConfig
         from openai import AsyncOpenAI
 
         backend = scenario.backend
@@ -36,11 +36,23 @@ class OpenAIAgentsDriver(SingleFileSDKDriver):
         # process environment for later drivers in the same run.
         client = AsyncOpenAI(base_url=backend.openai_base,
                              api_key=backend.api_key or "optarena")
+        # P2-02: generation parameters - confirmed live that ModelSettings
+        # declares temperature/top_p directly; seed has no dedicated field
+        # here, so it goes through extra_body (passed straight into the
+        # underlying chat.completions.create call).
+        settings_kwargs = {}
+        if backend.temperature is not None:
+            settings_kwargs["temperature"] = backend.temperature
+        if backend.top_p is not None:
+            settings_kwargs["top_p"] = backend.top_p
+        if backend.seed is not None:
+            settings_kwargs["extra_body"] = {"seed": backend.seed}
         agent = Agent(
             name="Software Engineer",
             instructions="You are a precise engineer who answers with one fenced code block "
                          "containing the complete file content, and nothing else.",
             model=OpenAIChatCompletionsModel(model=backend.model, openai_client=client),
+            model_settings=ModelSettings(**settings_kwargs),
         )
         # Tracing defaults to ON and, independently of the explicit client
         # above, reads the host's ambient OPENAI_API_KEY (not backend.api_key)

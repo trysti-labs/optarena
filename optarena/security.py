@@ -53,8 +53,16 @@ RULES: list[Rule] = [
     # ── secrets (any file type) ──────────────────────────────────────────────
     Rule("aws-access-key", "AWS access key ID committed", "error",
          r"\bAKIA[0-9A-Z]{16}\b", is_secret=True),
+    # P1-03: this rule's own .re only ever matches the HEADER line - correct
+    # and sufficient for scan_text's per-line finding detection below
+    # (seeing the header at all is enough evidence to flag "a private key
+    # is here"), but NOT sufficient for redaction - see _redact_pem_blocks,
+    # which handles the actual multiline body/footer separately. Added
+    # "ENCRYPTED " to the prefix alternation (was missing - confirmed a
+    # real gap: an encrypted PKCS#8 key's header didn't match at all
+    # before this).
     Rule("private-key", "Private key committed", "error",
-         r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", is_secret=True),
+         r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----", is_secret=True),
     Rule("github-token", "GitHub token committed", "error",
          r"\bgh[pousr]_[A-Za-z0-9]{36,}\b", is_secret=True),
     Rule("provider-api-key", "Provider API key committed", "error",
@@ -111,6 +119,42 @@ _SECRET_PATTERN_RULES = [r for r in RULES if r.is_secret]
 #: assume (`{6,}` in hardcoded-secret, `{16}`+ in the shaped ones).
 _MIN_KNOWN_SECRET_LEN = 6
 
+# P1-03: full-block PEM redaction, deliberately separate from the RULES-based
+# `private-key` rule above. `scan_text` (the finding-scanner) processes a
+# file LINE BY LINE - `rule.re.search(line)` against one line at a time - so
+# a pattern spanning multiple lines could never match there regardless of
+# `re.DOTALL`; the header-only rule is correct and sufficient for THAT use
+# (flagging that a key is present). Redaction is different: replacing only
+# the header left the base64 key body and `-----END ... KEY-----` footer
+# fully intact and reconstructable in any persisted output. These two
+# patterns operate on the WHOLE text (used only by `redact_secret_patterns`
+# below, never by `scan_text`), so a `[\s\S]*?` non-greedy span (matches
+# across newlines with no `re.DOTALL` needed) can reach all the way to the
+# real footer. Two passes: a well-formed BEGIN...END block first, then a
+# bounded fallback for a BEGIN marker with no matching END anywhere after it
+# (a truncated/malformed block - e.g. output cut off mid-capture) - the
+# fallback still redacts from BEGIN to the end of the text rather than
+# leaving a live, unredacted key body exposed just because the footer never
+# arrived.
+_PEM_BLOCK_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----"
+    r"[\s\S]*?"
+    r"-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----"
+)
+_PEM_UNCLOSED_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*"
+)
+
+
+def _redact_pem_blocks(text: str) -> str:
+    """Replace every complete PEM private-key block (header through its
+    matching END marker) with a single placeholder, then catch any
+    remaining BEGIN marker that never found a matching END (malformed/
+    truncated) and redact from there to the end of the text."""
+    text = _PEM_BLOCK_RE.sub("«redacted»", text)
+    text = _PEM_UNCLOSED_RE.sub("«redacted»", text)
+    return text
+
 
 def redact_known_secrets(text: str, known_secrets: "Iterable[str | None]") -> str:
     """
@@ -140,9 +184,16 @@ def redact_secret_patterns(text: str) -> str:
     to know about, since it only knows this run's own configured values.
     Reuses the same shaped rules ``scan_text`` uses to find secrets in
     agent-changed files - one definition of "looks like a token", not two.
+
+    P1-03: the whole-PEM-block pass runs FIRST - a private key's base64
+    body/footer are not "shaped like a token" the way an AWS/GitHub/``sk-``
+    key is (those are matched and replaced whole by their own single rule
+    below), so the per-rule loop alone only ever redacted the header line
+    and left the actual key material intact.
     """
     if not text:
         return text
+    text = _redact_pem_blocks(text)
     for rule in _SECRET_PATTERN_RULES:
         text = rule.re.sub("«redacted»", text)
     return text

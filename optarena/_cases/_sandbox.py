@@ -676,6 +676,114 @@ def _cargo_clean_prefix(root: Path) -> str:
     return f"cargo clean --offline -p {shlex.quote(m.group(1))} >/dev/null 2>&1; "
 
 
+# P1-07: `snapshot()` (see _snapshot.py) bounds how much of the workspace
+# the POST-HOC inspection pass reads/hashes - it says nothing about how much
+# an agent or check_command may WRITE while actually running. `/workspace`
+# always reaches the sandbox as a Docker BIND MOUNT (`-v {root}:/workspace`
+# - see DockerSandbox.start/_run_check_command_docker), and a bind mount
+# cannot be size-quota'd via Docker's own `--storage-opt size=` at all -
+# that flag only ever applies to a container's own writable layer (needs
+# the overlay2 storage driver with pquota configured on the DAEMON host,
+# outside this project's control) or a volume formatted with a
+# quota-capable filesystem, never an arbitrary bind-mounted host directory.
+# `/tmp`'s `--tmpfs size=1g` (_HARDENING_ARGS) works for a different reason
+# - tmpfs is RAM-backed and Docker sizes it directly at mount time - and
+# doesn't help here either, since check_command's real output lands in
+# /workspace, not /tmp.
+#
+# Given that real constraint, this is host-side polling: a background
+# thread periodically walks the workspace tree during execution and kills
+# the in-flight command if either threshold is crossed. This has an
+# inherent poll-interval's worth of detection lag - a genuinely adversarial
+# writer could still transiently exceed the quota between polls before
+# being killed - so it is a soft, best-effort ceiling against a runaway or
+# malicious agent/check_command, not a hard kernel-enforced one. It is,
+# however, portable across Windows/macOS/Linux hosts and both the host-exec
+# and container-exec paths uniformly, unlike any Docker-storage-driver- or
+# host-filesystem-specific alternative would be.
+_WORKSPACE_MAX_BYTES = int(os.environ.get("OPTARENA_WORKSPACE_MAX_BYTES", 4 * 1024 ** 3))  # 4 GiB
+_WORKSPACE_MAX_FILES = int(os.environ.get("OPTARENA_WORKSPACE_MAX_FILES", 50_000))
+_WORKSPACE_QUOTA_POLL_INTERVAL_S = 2.0
+
+
+def _workspace_usage(root: Path) -> "tuple[int, int]":
+    """(total_bytes, file_count) under `root`, best-effort - tolerant of
+    files vanishing or changing mid-walk (the very process this polls is
+    actively writing/deleting while this runs), matching `snapshot()`'s own
+    OSError-tolerant walk. Symlinks are not followed (same reasoning as
+    `snapshot()`: a symlink's target isn't this workspace's own disk usage
+    to count against its quota)."""
+    total = 0
+    count = 0
+    try:
+        for p in root.rglob("*"):
+            try:
+                if p.is_symlink() or not p.is_file():
+                    continue
+                total += p.stat().st_size
+                count += 1
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return total, count
+
+
+class _WorkspaceQuotaWatchdog:
+    """Background poller for the duration of one check_command call. Calls
+    ``on_exceeded(reason)`` at most once, the first time the workspace
+    crosses either quota, then stops polling - the caller is expected to
+    have killed/aborted the in-flight command by the time ``on_exceeded``
+    returns (or promptly afterward); this class does not track how many
+    times the same case ends up over quota, only whether it ever was."""
+
+    def __init__(self, root: Path, on_exceeded,
+                 max_bytes: "int | None" = None, max_files: "int | None" = None,
+                 interval: "float | None" = None):
+        # Module globals read HERE (at instantiation), not bound as mutable
+        # default argument values at class-definition time - the latter
+        # would freeze whatever OPTARENA_WORKSPACE_MAX_BYTES/etc. resolved
+        # to at import time forever, making both the env-var override and
+        # `mock.patch`-ing these constants in tests silently no-ops for any
+        # watchdog constructed without explicitly passing every argument.
+        self._root = root
+        self._on_exceeded = on_exceeded
+        self._max_bytes = max_bytes if max_bytes is not None else _WORKSPACE_MAX_BYTES
+        self._max_files = max_files if max_files is not None else _WORKSPACE_MAX_FILES
+        self._interval = interval if interval is not None else _WORKSPACE_QUOTA_POLL_INTERVAL_S
+        self._stop = threading.Event()
+        self._triggered_reason: "str | None" = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> "_WorkspaceQuotaWatchdog":
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=self._interval + 5)
+
+    @property
+    def triggered_reason(self) -> "str | None":
+        """None if the quota was never exceeded during this watchdog's
+        lifetime; otherwise the human-readable reason it fired."""
+        return self._triggered_reason
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            total_bytes, total_files = _workspace_usage(self._root)
+            if total_bytes > self._max_bytes:
+                self._triggered_reason = (
+                    f"workspace exceeded {self._max_bytes} byte(s) (was {total_bytes})")
+            elif total_files > self._max_files:
+                self._triggered_reason = (
+                    f"workspace exceeded {self._max_files} file(s) (was {total_files})")
+            else:
+                continue
+            self._on_exceeded(self._triggered_reason)
+            return
+
+
 def run_check_command(case: dict, root: Path) -> tuple[list[str], dict]:
     """
     Run the case's optional ``check_command`` and return
@@ -768,17 +876,33 @@ def _run_check_command_sandbox(cmd: str, root: Path, timeout: int, sandbox: "Doc
     engine = container_engine()
     info["engine"] = engine
     t0 = time.monotonic()
+    # P1-07: on_exceeded reuses `sandbox.reap()` - the exact same
+    # kill-every-process-in-the-container mechanism the timeout path below
+    # already uses - so a quota breach unblocks the in-flight `exec` call
+    # the same way a timeout does, rather than needing a second kill path.
+    watchdog = _WorkspaceQuotaWatchdog(root, on_exceeded=lambda _reason: sandbox.reap()).start()
     try:
-        proc = sandbox.exec(cmd, root, timeout)
-    except subprocess.TimeoutExpired:
+        try:
+            proc = sandbox.exec(cmd, root, timeout)
+        except subprocess.TimeoutExpired:
+            info["duration_s"] = round(time.monotonic() - t0, 2)
+            info["timed_out"] = True
+            sandbox.reap()
+            return [f'check_command timed out after {timeout}s ({engine} exec): {cmd}'], info
+        except (OSError, ValueError) as exc:
+            info["duration_s"] = round(time.monotonic() - t0, 2)
+            info["infrastructure_error"] = True  # F-10: the engine/container couldn't even exec, not a test failure
+            return [f'check_command could not run ({engine} exec): {exc}'], info
+    finally:
+        watchdog.stop()
+    # P1-07: checked AFTER the call, regardless of how it returned - a
+    # quota-triggered reap() makes the exec's own exit code/timeout status
+    # unreliable as a signal (it looks like an ordinary killed process), so
+    # the watchdog's own state is what actually decides this, not proc.
+    if watchdog.triggered_reason:
         info["duration_s"] = round(time.monotonic() - t0, 2)
-        info["timed_out"] = True
-        sandbox.reap()
-        return [f'check_command timed out after {timeout}s ({engine} exec): {cmd}'], info
-    except (OSError, ValueError) as exc:
-        info["duration_s"] = round(time.monotonic() - t0, 2)
-        info["infrastructure_error"] = True  # F-10: the engine/container couldn't even exec, not a test failure
-        return [f'check_command could not run ({engine} exec): {exc}'], info
+        info["workspace_quota_exceeded"] = True
+        return [f'check_command aborted: {watchdog.triggered_reason}'], info
     info["duration_s"] = round(time.monotonic() - t0, 2)
     info["ran"] = True
     info["exit_code"] = proc.returncode
@@ -983,7 +1107,7 @@ def _drain_bounded(stream, max_keep: int = _MAX_CAPTURE_BYTES):
     return empty.join(chunks)[-max_keep:]
 
 
-def run_capture(cmd, *, timeout: int, **kwargs) -> subprocess.CompletedProcess:
+def run_capture(cmd, *, timeout: int, pid_callback=None, **kwargs) -> subprocess.CompletedProcess:
     """
     Like ``subprocess.run(..., capture_output=True, timeout=timeout)`` but
     (a) on timeout kills the whole process TREE, not just the direct child
@@ -995,6 +1119,18 @@ def run_capture(cmd, *, timeout: int, **kwargs) -> subprocess.CompletedProcess:
     (check_command on the host, and the CLI-agent drivers) - container paths
     don't need it, the container boundary already is the process-group
     boundary (see ``DockerSandbox.reap``).
+
+    P1-07: ``pid_callback(pid, job)``, if given, is invoked once right after
+    the process is spawned and (on Windows) assigned to its job object -
+    before this function's own blocking wait. This is the hook
+    ``_run_check_command_local``'s workspace-quota watchdog uses to kill the
+    tree EARLY (via the same ``_kill_process_tree`` this function's own
+    timeout path uses) without needing this function's main wait loop to
+    know anything about quotas itself - an external kill just makes
+    ``proc.wait(timeout=timeout)`` below return early, exactly as if the
+    process had exited on its own; the caller distinguishes "killed for
+    quota" from "exited normally" via its own watchdog state, not via
+    anything this function reports.
     """
     kwargs.setdefault("stdout", subprocess.PIPE)
     kwargs.setdefault("stderr", subprocess.PIPE)
@@ -1014,6 +1150,8 @@ def run_capture(cmd, *, timeout: int, **kwargs) -> subprocess.CompletedProcess:
     proc = subprocess.Popen(cmd, **kwargs)
     if job is not None:
         job.assign(proc.pid)  # best-effort; _kill_process_tree's taskkill fallback covers a False here too
+    if pid_callback is not None:
+        pid_callback(proc.pid, job)
 
     # Two reader threads, not proc.communicate() - stdout/stderr must be
     # drained CONCURRENTLY (not one-then-the-other) or the child can deadlock
@@ -1078,19 +1216,45 @@ def run_capture(cmd, *, timeout: int, **kwargs) -> subprocess.CompletedProcess:
 def _run_check_command_local(cmd: str, root: Path, timeout: int, info: dict) -> tuple[list[str], dict]:
     info["sandbox"] = "host"
     t0 = time.monotonic()
+    # P1-07: run_capture's pid_callback hands us the just-spawned pid/job -
+    # captured here so the watchdog can kill the tree directly via the
+    # SAME _kill_process_tree the timeout path already uses, without
+    # run_capture's own wait loop needing to know anything about quotas.
+    spawned: dict = {}
+
+    def _on_start(pid, job):
+        spawned["pid"], spawned["job"] = pid, job
+
+    def _on_exceeded(_reason):
+        if "pid" in spawned:
+            _kill_process_tree(spawned["pid"], spawned.get("job"))
+
+    watchdog = _WorkspaceQuotaWatchdog(root, on_exceeded=_on_exceeded).start()
     try:
-        proc = run_capture(
-            cmd, shell=True, cwd=root, timeout=timeout,
-            text=True, encoding="utf-8", errors="replace",
-        )
-    except subprocess.TimeoutExpired:
+        try:
+            proc = run_capture(
+                cmd, shell=True, cwd=root, timeout=timeout,
+                text=True, encoding="utf-8", errors="replace",
+                pid_callback=_on_start,
+            )
+        except subprocess.TimeoutExpired:
+            info["duration_s"] = round(time.monotonic() - t0, 2)
+            info["timed_out"] = True
+            return [f'check_command timed out after {timeout}s: {cmd}'], info
+        except OSError as exc:
+            info["duration_s"] = round(time.monotonic() - t0, 2)
+            info["infrastructure_error"] = True  # F-10: couldn't even launch the command - not a test failure
+            return [f'check_command could not run: {exc}'], info
+    finally:
+        watchdog.stop()
+    # P1-07: checked regardless of how run_capture returned - a quota kill
+    # makes proc.returncode look like an ordinary killed process (e.g. -9),
+    # not distinguishably "aborted for cause", so the watchdog's own state
+    # is the actual signal, not the raw exit code.
+    if watchdog.triggered_reason:
         info["duration_s"] = round(time.monotonic() - t0, 2)
-        info["timed_out"] = True
-        return [f'check_command timed out after {timeout}s: {cmd}'], info
-    except OSError as exc:
-        info["duration_s"] = round(time.monotonic() - t0, 2)
-        info["infrastructure_error"] = True  # F-10: couldn't even launch the command - not a test failure
-        return [f'check_command could not run: {exc}'], info
+        info["workspace_quota_exceeded"] = True
+        return [f'check_command aborted: {watchdog.triggered_reason}'], info
     info["duration_s"] = round(time.monotonic() - t0, 2)
     info["ran"] = True
     info["exit_code"] = proc.returncode
@@ -1121,23 +1285,40 @@ def _run_check_command_docker(cmd: str, root: Path, timeout: int, image: str, in
         "sh", "-c", cmd,
     ]
     t0 = time.monotonic()
-    try:
-        proc = subprocess.run(
-            docker_cmd, capture_output=True, text=True,
-            timeout=timeout + 15, encoding="utf-8", errors="replace",
-        )
-    except subprocess.TimeoutExpired:
+
+    def _kill_ephemeral_container(_reason):
+        # P1-07: `docker rm -f` immediately SIGKILLs and removes the
+        # container - the same cleanup the timeout path below already runs,
+        # just triggered by a quota breach instead of a timeout, and early
+        # enough to unblock the `subprocess.run` below rather than waiting
+        # out its own (much longer) timeout+15 ceiling.
         try:
             subprocess.run([engine, "rm", "-f", name], capture_output=True, timeout=15)
         except (OSError, subprocess.TimeoutExpired):
             pass  # best-effort; the engine's own GC reclaims a leftover container eventually
+
+    watchdog = _WorkspaceQuotaWatchdog(root, on_exceeded=_kill_ephemeral_container).start()
+    try:
+        try:
+            proc = subprocess.run(
+                docker_cmd, capture_output=True, text=True,
+                timeout=timeout + 15, encoding="utf-8", errors="replace",
+            )
+        except subprocess.TimeoutExpired:
+            _kill_ephemeral_container("timeout")
+            info["duration_s"] = round(time.monotonic() - t0, 2)
+            info["timed_out"] = True
+            return [f'check_command timed out after {timeout}s ({engine}): {cmd}'], info
+        except OSError as exc:
+            info["duration_s"] = round(time.monotonic() - t0, 2)
+            info["infrastructure_error"] = True  # F-10: couldn't even start the container - not a test failure
+            return [f'check_command could not run ({engine}): {exc}'], info
+    finally:
+        watchdog.stop()
+    if watchdog.triggered_reason:
         info["duration_s"] = round(time.monotonic() - t0, 2)
-        info["timed_out"] = True
-        return [f'check_command timed out after {timeout}s ({engine}): {cmd}'], info
-    except OSError as exc:
-        info["duration_s"] = round(time.monotonic() - t0, 2)
-        info["infrastructure_error"] = True  # F-10: couldn't even start the container - not a test failure
-        return [f'check_command could not run ({engine}): {exc}'], info
+        info["workspace_quota_exceeded"] = True
+        return [f'check_command aborted: {watchdog.triggered_reason}'], info
     info["duration_s"] = round(time.monotonic() - t0, 2)
     info["ran"] = True
     info["exit_code"] = proc.returncode

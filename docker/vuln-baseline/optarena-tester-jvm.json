@@ -12,22 +12,82 @@
     {
       "id": "CVE-2024-47554",
       "package": "commons-io:commons-io",
-      "severity": "HIGH"
+      "package_type": "maven",
+      "installed_version": "2.11.0",
+      "fixed_version": "2.14.0",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "Java"
+    },
+    {
+      "id": "CVE-2024-47554",
+      "package": "commons-io:commons-io",
+      "package_type": "maven",
+      "installed_version": "2.6",
+      "fixed_version": "2.14.0",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "Java"
     },
     {
       "id": "CVE-2025-67030",
       "package": "org.codehaus.plexus:plexus-utils",
-      "severity": "HIGH"
+      "package_type": "maven",
+      "installed_version": "3.4.1",
+      "fixed_version": "4.0.3, 3.6.1",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "Java"
+    },
+    {
+      "id": "CVE-2025-67030",
+      "package": "org.codehaus.plexus:plexus-utils",
+      "package_type": "maven",
+      "installed_version": "3.5.1",
+      "fixed_version": "4.0.3, 3.6.1",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "Java"
+    },
+    {
+      "id": "CVE-2025-67030",
+      "package": "org.codehaus.plexus:plexus-utils",
+      "package_type": "maven",
+      "installed_version": "4.0.1",
+      "fixed_version": "4.0.3, 3.6.1",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "Java"
+    },
+    {
+      "id": "CVE-2025-67030",
+      "package": "org.codehaus.plexus:plexus-utils",
+      "package_type": "maven",
+      "installed_version": "4.0.2",
+      "fixed_version": "4.0.3, 3.6.1",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "Java"
     },
     {
       "id": "CVE-2026-56740",
       "package": "org.jline:jline-remote-telnet",
-      "severity": "HIGH"
+      "package_type": "maven",
+      "installed_version": "3.3.1",
+      "fixed_version": "4.2.1",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "Java"
     },
     {
       "id": "CVE-2026-56741",
       "package": "org.jline:jline-remote-telnet",
-      "severity": "HIGH"
+      "package_type": "maven",
+      "installed_version": "3.3.1",
+      "fixed_version": "4.2.1",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "Java"
     }
   ]
 }

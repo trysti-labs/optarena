@@ -27,6 +27,8 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -37,6 +39,21 @@ from .schema import validate_case, validate_unique_case_names
 PACK_FORMAT = 1
 PACKS_DIR = Path.home() / ".optarena" / "packs"
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$", re.IGNORECASE)
+
+# P1-06: a publisher's public identity, one per line, in the exact format
+# `ssh-keygen -Y verify`'s `-f` (allowed-signers) option expects:
+# "<identity> <key-type> <base64-key>" (the same format `ssh` itself uses
+# for its own known_hosts/authorized_keys - not an optarena invention).
+# Explicit trusted-publisher keyring (P1-06's own resolution wording) - a
+# pack signed by an identity NOT in this file is not "verified", however
+# well-formed the signature itself is; see `add_trusted_publisher`.
+TRUSTED_PUBLISHERS_FILE = Path.home() / ".optarena" / "trusted_publishers"
+
+# Binds a signature to "an optarena pack", specifically - the same detached
+# SSH signature over the same bytes could otherwise be replayed as if it
+# authorized something else entirely (ssh-keygen's own "sign for a
+# different purpose" confusion this namespace exists to prevent).
+_SIGN_NAMESPACE = "optarena-pack"
 
 
 def _version_key(v: str) -> tuple:
@@ -82,6 +99,155 @@ def content_hash(cases: dict[str, dict]) -> str:
     return "sha256:" + h.hexdigest()
 
 
+def _signable_blob(pack: dict) -> bytes:
+    """Canonical bytes a signature covers: name, version, content hash, and
+    case count - the pack's own core identity, not the whole file. `hash`
+    already commits to every case's exact content (content_hash), so
+    signing it transitively covers the case bodies without needing to sign
+    (or verify) a potentially large blob directly - the same "sign the
+    digest, not the payload" shape this project's Docker image signing
+    already uses (cosign/attest-build-provenance sign an image DIGEST).
+    Stable regardless of dict key order or which OTHER fields (a live
+    `signature` block, timestamps, the actual case bodies) are present."""
+    core = {"name": pack["name"], "version": pack["version"],
+            "hash": pack["hash"], "case_count": pack["case_count"]}
+    return json.dumps(core, sort_keys=True, ensure_ascii=False).encode("utf-8")
+
+
+def sign_pack(pack: dict, key_path: "str | Path", signer_id: "str | None" = None) -> dict:
+    """
+    P1-06: sign a pack's identity (name/version/hash/case_count) with an SSH
+    private key, embedding the detached signature and signer identity into
+    the pack. Uses ``ssh-keygen -Y sign`` (OpenSSH >=8.0's own file-signing
+    feature - real Ed25519/RSA/ECDSA signatures, not a hand-rolled scheme)
+    via `subprocess` rather than adding a pip cryptography dependency to
+    this stdlib-only package - the same "shell out to an established
+    external tool for real signing" shape this project's Docker image
+    publishing already uses for cosign, just invoked from the CLI itself
+    instead of only from CI.
+
+    ``signer_id`` is the identity string recorded in the signature and
+    later matched against a verifier's trusted-publisher keyring - defaults
+    to the key file's own name (e.g. signing with ``trysti-labs.key``
+    records signer ``"trysti-labs.key"``) when not given explicitly.
+    """
+    key_path = Path(key_path)
+    if not key_path.is_file():
+        raise FileNotFoundError(f"signing key not found: {key_path}")
+    signer_id = signer_id or key_path.stem
+    blob = _signable_blob(pack)
+    with tempfile.TemporaryDirectory(prefix="optarena_packsign_") as td:
+        data_path = Path(td) / "pack.blob"
+        data_path.write_bytes(blob)
+        try:
+            proc = subprocess.run(
+                ["ssh-keygen", "-Y", "sign", "-f", str(key_path), "-n", _SIGN_NAMESPACE, str(data_path)],
+                capture_output=True, text=True, timeout=30,
+            )
+        except OSError as exc:
+            raise ValueError(
+                f"could not run ssh-keygen to sign this pack (is OpenSSH installed?): {exc}") from exc
+        if proc.returncode != 0:
+            raise ValueError(f"pack signing failed: {(proc.stderr or proc.stdout).strip()}")
+        sig_path = data_path.with_name(data_path.name + ".sig")
+        signature = sig_path.read_text(encoding="utf-8")
+    pack["signature"] = {"signer": signer_id, "namespace": _SIGN_NAMESPACE, "sig": signature}
+    return pack
+
+
+def verify_pack_signature(pack: dict, trusted_publishers_file: "Path | None" = None) -> dict:
+    """
+    P1-06: returns ``{"signed": bool, "signer": str | None, "trusted": bool,
+    "tampered": bool, "detail": str}`` - never raises. Signature
+    verification is information for the CALLER to act on (refuse an
+    install, print a warning), not an exception path on its own: an
+    unsigned pack is the common, expected, and still-installable case, not
+    a malformed one.
+
+    "Trusted" means: signed, AND the signer identity is present in
+    ``trusted_publishers_file`` (an explicit, locally-maintained keyring -
+    see ``add_trusted_publisher``) with a key that verifies against
+    ``ssh-keygen -Y verify``. A well-formed signature from an UNKNOWN
+    signer (not in the keyring, or no keyring configured at all) is
+    reported as signed-but-not-trusted, same as no signature at all for
+    any decision that gates on trust.
+
+    "Tampered" is a NARROWER, stronger signal than "not trusted": it means
+    the signer identity WAS found in the keyring, but the cryptographic
+    check against that specific key still failed - i.e. this pack's
+    content changed after signing, or something is impersonating a known
+    identity without holding its private key. Distinguished from "identity
+    simply not in my keyring yet" by ``ssh-keygen -Y verify``'s own stderr
+    (confirmed live: an unknown identity produces only "Could not verify
+    signature.", while a known identity with a bad signature additionally
+    prints "Signature verification failed: incorrect signature." first) -
+    `load_pack` refuses a tampered pack unconditionally, even a local file,
+    since this is never a legitimate "haven't decided to trust this yet"
+    state the way an unknown signer is.
+    """
+    sig = pack.get("signature")
+    if not sig:
+        return {"signed": False, "signer": None, "trusted": False, "tampered": False,
+                "detail": "pack is not signed"}
+    signer_id = sig.get("signer") or ""
+    signers_file = trusted_publishers_file or TRUSTED_PUBLISHERS_FILE
+    if not Path(signers_file).is_file():
+        return {"signed": True, "signer": signer_id, "trusted": False, "tampered": False,
+                "detail": f"signed by {signer_id!r}, but no trusted-publisher keyring exists at "
+                          f"{signers_file} - nothing can be verified as trusted yet "
+                          f"(see `optarena cases trust-publisher`)"}
+    blob = _signable_blob(pack)
+    with tempfile.TemporaryDirectory(prefix="optarena_packverify_") as td:
+        sig_path = Path(td) / "pack.blob.sig"
+        sig_path.write_text(sig.get("sig") or "", encoding="utf-8")
+        try:
+            proc = subprocess.run(
+                ["ssh-keygen", "-Y", "verify", "-f", str(signers_file),
+                 "-I", signer_id, "-n", sig.get("namespace") or _SIGN_NAMESPACE, "-s", str(sig_path)],
+                input=blob, capture_output=True, timeout=30,
+            )
+        except OSError as exc:
+            return {"signed": True, "signer": signer_id, "trusted": False, "tampered": False,
+                    "detail": f"could not run ssh-keygen to verify this signature "
+                              f"(is OpenSSH installed?): {exc}"}
+        except subprocess.TimeoutExpired:
+            return {"signed": True, "signer": signer_id, "trusted": False, "tampered": False,
+                    "detail": "ssh-keygen verification timed out"}
+    if proc.returncode == 0:
+        return {"signed": True, "signer": signer_id, "trusted": True, "tampered": False,
+                "detail": f"good signature from trusted publisher {signer_id!r}"}
+    tail = (proc.stderr or proc.stdout or b"").decode(errors="replace").strip()
+    tampered = "signature verification failed" in tail.lower()
+    return {"signed": True, "signer": signer_id, "trusted": False, "tampered": tampered,
+            "detail": f"signature present but NOT verified as trusted ({tail or 'no matching trusted key'})"}
+
+
+def add_trusted_publisher(identity: str, public_key_path: "str | Path",
+                           trusted_publishers_file: "Path | None" = None) -> None:
+    """Append (or replace, if ``identity`` already has an entry) a publisher
+    to the local trusted-publisher keyring, in ``ssh-keygen -Y verify``'s
+    own allowed-signers line format. This is the explicit, locally-owned
+    trust decision P1-06 asks for - nothing is auto-trusted from a pack
+    itself; a publisher's public key has to be added here deliberately,
+    out of band from installing any specific pack."""
+    pubkey_path = Path(public_key_path)
+    if not pubkey_path.is_file():
+        raise FileNotFoundError(f"public key not found: {pubkey_path}")
+    key_line = pubkey_path.read_text(encoding="utf-8").strip()
+    if not key_line or len(key_line.split()) < 2:
+        raise ValueError(f"{pubkey_path} does not look like an SSH public key "
+                         f"(expected '<type> <base64-key> [comment]')")
+    key_type, key_b64 = key_line.split()[0], key_line.split()[1]
+    signers_file = Path(trusted_publishers_file or TRUSTED_PUBLISHERS_FILE)
+    signers_file.parent.mkdir(parents=True, exist_ok=True)
+    existing_lines = []
+    if signers_file.is_file():
+        existing_lines = [ln for ln in signers_file.read_text(encoding="utf-8").splitlines()
+                          if ln.strip() and not ln.split()[0] == identity]
+    existing_lines.append(f"{identity} {key_type} {key_b64}")
+    signers_file.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+
+
 def build_pack(cases_dir: str | Path, name: str, version: str) -> dict:
     """Read every ``*.json`` case from *cases_dir* (validated) into a pack dict."""
     if not _NAME_RE.match(name):
@@ -116,7 +282,7 @@ def write_pack(pack: dict, out: str | Path | None = None) -> Path:
     return out
 
 
-def load_pack(source: str, allow_insecure: bool = False) -> dict:
+def load_pack(source: str, allow_insecure: bool = False, allow_unsigned: bool = False) -> dict:
     """Load a pack from a local path or an http(s) URL, validating its shape and
     that its declared hash matches its contents (tamper/corruption check).
 
@@ -130,8 +296,19 @@ def load_pack(source: str, allow_insecure: bool = False) -> dict:
     a substitute for transport security. `https://` is required unless the
     caller explicitly passes `allow_insecure=True` (CLI: `--allow-insecure`),
     for local/offline testing against a plain-http fixture server.
+
+    P1-06: HTTPS authenticates the TRANSPORT endpoint, not the pack's
+    AUTHOR - a compromised or malicious host serving over valid HTTPS can
+    still serve a hostile pack with a self-consistent hash. A REMOTE
+    (http/https) pack that isn't signed by a publisher in the local
+    trusted-publisher keyring (see `verify_pack_signature`) is refused
+    unless the caller explicitly passes `allow_unsigned=True` (CLI:
+    `--allow-unsigned`) - a LOCAL file path is never gated on this: a pack
+    already sitting on this machine's filesystem needed no network trust
+    decision to get there.
     """
-    if re.match(r"^https?://", source):
+    is_remote = bool(re.match(r"^https?://", source))
+    if is_remote:
         if source.startswith("http://") and not allow_insecure:
             raise ValueError(
                 f"refusing to install a pack over plain http: {source!r} - "
@@ -193,6 +370,30 @@ def load_pack(source: str, allow_insecure: bool = False) -> dict:
         raise ValueError(f"pack hash mismatch (declared {pack['hash']}, computed {actual}) "
                          "- refusing to install a tampered/corrupt pack")
     pack["hash"] = actual
+    # P1-06: verified AFTER `hash` is recomputed above (not the pack's own
+    # possibly-stale/tampered declared value) - the signature covers
+    # `_signable_blob`, which reads `pack["hash"]` at call time, so this
+    # ordering is what makes the signature actually bind to the REAL
+    # content, not whatever hash the pack merely claims for itself.
+    pack["verification"] = verify_pack_signature(pack)
+    if pack["verification"]["tampered"]:
+        # P1-06: a known signer identity whose signature does NOT verify is
+        # never a legitimate "not yet trusted" state - it means the content
+        # changed after signing (or something is impersonating a known
+        # identity). Refused unconditionally, including a local file - no
+        # flag bypasses this, unlike the softer "unknown signer" gate below.
+        raise ValueError(
+            f"refusing to install a pack with a BROKEN signature: {pack['verification']['detail']} "
+            f"- this pack's content does not match what {pack['verification']['signer']!r} actually "
+            f"signed (tampered, corrupted, or an impersonation attempt)"
+        )
+    if is_remote and not pack["verification"]["trusted"] and not allow_unsigned:
+        raise ValueError(
+            f"refusing to install an unsigned/untrusted remote pack: "
+            f"{pack['verification']['detail']} - pass --allow-unsigned if you understand "
+            f"the risk, or install from a publisher already in your trusted keyring "
+            f"(see `optarena cases trust-publisher`)"
+        )
     return pack
 
 

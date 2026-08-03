@@ -90,6 +90,19 @@ def compare_runs(run_a: dict, run_b: dict, force: bool = False) -> dict:
     regressed_n = sum(1 for r in rows if r["a_passed"] and r["b_passed"] is False)
     improved_n = sum(1 for r in rows if r["a_passed"] is False and r["b_passed"])
     p_value = mcnemar_exact_p(regressed_n, improved_n)
+    # P2-04: "cross-driver comparisons state the exact common eligible case
+    # set" - a case only belongs here if BOTH runs actually attempted it
+    # (present with a verdict) AND neither run's driver was structurally
+    # incapable of it (capability_excluded). Two runs can each have a fine
+    # eligible_pass_rate individually while still not sharing the same
+    # eligible set - e.g. driver A excludes case X (no file tools) while
+    # driver B excludes case Y (no shell access) - so this is its own
+    # computation, not just "intersect the two eligible_pass_rate values".
+    common_eligible_cases = sorted(
+        r["case"] for r in rows
+        if r["a_passed"] is not None and r["b_passed"] is not None
+        and not r["a_capability_excluded"] and not r["b_capability_excluded"]
+    )
     verdict = {
         "pass_rate_delta": round(sb["pass_rate"] - sa["pass_rate"], 3),
         "mean_duration_delta_s": round(
@@ -106,6 +119,12 @@ def compare_runs(run_a: dict, run_b: dict, force: bool = False) -> dict:
         "accuracy_p_value": round(p_value, 4),
         "accuracy_significant": p_value < 0.05,
         "n_discordant": regressed_n + improved_n,
+        # P2-04: raw case count (len(rows), the union of both runs) is
+        # already implicit elsewhere in this dict - these two fields are the
+        # eligible view, explicit rather than requiring the caller to
+        # recompute the intersection itself.
+        "eligible_case_count": len(common_eligible_cases),
+        "eligible_cases": common_eligible_cases,
     }
     return {
         "compared_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -370,6 +389,17 @@ def format_table(cmp: dict) -> str:
         f"  pass rate:     {_rate(sa)}  vs  {_rate(sb)}"
         f"   -> more accurate: {_winner(v['more_accurate'])}",
     ]
+    # P2-04: the pass rate above is always over the RAW case union
+    # (len(cmp["cases"])) - when either driver structurally couldn't
+    # attempt some cases, that raw rate silently penalizes it for cases it
+    # never had a chance at. Only shown when it differs from the raw count,
+    # so an ordinary comparison (nothing excluded) doesn't grow a line that
+    # always says the same trivial thing.
+    n_raw = len(cmp["cases"])
+    if v.get("eligible_case_count", n_raw) != n_raw:
+        lines.append(
+            f"  eligible set:  {v['eligible_case_count']}/{n_raw} case(s) both drivers could "
+            f"actually attempt (excludes each driver's own capability-excluded cases)")
     # Significance of the accuracy delta (paired exact McNemar). Only meaningful
     # when a winner wasn't suppressed and there's a real accuracy gap.
     if not v.get("suppressed") and v.get("accuracy_p_value") is not None and v["more_accurate"] != "tie":

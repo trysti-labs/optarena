@@ -46,6 +46,20 @@ class Backend:
     # default is) - there is no per-request override for those drivers;
     # raising their context requires OLLAMA_CONTEXT_LENGTH on the server.
     num_ctx: int | None = None
+    # P2-02: generation parameters. Honored by the two raw-model baseline
+    # drivers (openai-chat, ollama-chat) and all six SDK drivers (each
+    # confirmed live to forward temperature/top_p/seed into its underlying
+    # completion call - crewai.LLM, ChatOpenAI, agents.ModelSettings,
+    # autogen's create_args, semantic-kernel's execution settings, and
+    # smolagents' OpenAIServerModel **kwargs all declare or document these
+    # fields directly). Not honored by CLI-agent drivers (aider, Claude Code,
+    # Codex, OpenCode, Goose, Qwen Code) - those are external binaries with
+    # their own sampling settings and no per-request override this harness
+    # controls. Recorded in every run's manifest regardless of driver, since
+    # "what was configured" is worth knowing even for a driver that ignores it.
+    temperature: float | None = None
+    top_p: float | None = None
+    seed: int | None = None
 
     @property
     def openai_base(self) -> str:
