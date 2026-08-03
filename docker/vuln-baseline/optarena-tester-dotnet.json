@@ -7,7 +7,7 @@
     "CRITICAL",
     "HIGH"
   ],
-  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py.",
+  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py. P1-08 (2026-08-03): publish-images.yml now scans linux/arm64 independently, not just linux/amd64 - this surfaced 5 findings (CVE-2026-47302/47304/50525/50527/50648, System.Security.Cryptography.Xml 8.0.3, bundled inside PowerShell's arm64 build at usr/share/powershell/.store/powershell.linux.arm64/...) that were already reviewed and accepted for the identical CVE/package/version under the x64 build path - the match key binds on target, so an arch-specific file path is a structurally different key even for the same underlying vulnerability. Not a new risk, just a new key; mirrored with the same disposition, not re-justified from scratch.",
   "accepted_vulnerabilities": [
     {
       "id": "CVE-2026-53615",
@@ -1088,6 +1088,56 @@
       "severity": "HIGH",
       "status": "fixed",
       "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+    },
+    {
+      "id": "CVE-2026-47302",
+      "package": "System.Security.Cryptography.Xml",
+      "package_type": "nuget",
+      "installed_version": "8.0.3",
+      "fixed_version": "10.0.10, 9.0.18, 8.0.4",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+    },
+    {
+      "id": "CVE-2026-47304",
+      "package": "System.Security.Cryptography.Xml",
+      "package_type": "nuget",
+      "installed_version": "8.0.3",
+      "fixed_version": "10.0.10, 9.0.18, 8.0.4",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+    },
+    {
+      "id": "CVE-2026-50525",
+      "package": "System.Security.Cryptography.Xml",
+      "package_type": "nuget",
+      "installed_version": "8.0.3",
+      "fixed_version": "10.0.10, 9.0.18, 8.0.4",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+    },
+    {
+      "id": "CVE-2026-50527",
+      "package": "System.Security.Cryptography.Xml",
+      "package_type": "nuget",
+      "installed_version": "8.0.3",
+      "fixed_version": "10.0.10, 9.0.18, 8.0.4",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+    },
+    {
+      "id": "CVE-2026-50648",
+      "package": "System.Security.Cryptography.Xml",
+      "package_type": "nuget",
+      "installed_version": "8.0.3",
+      "fixed_version": "10.0.10, 9.0.18, 8.0.4",
+      "severity": "HIGH",
+      "status": "fixed",
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     }
   ]
 }
