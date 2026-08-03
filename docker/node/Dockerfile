@@ -10,7 +10,9 @@
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
 FROM node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# P1-03: apt-get upgrade picks up any OS-level security patch published for
+# this exact Debian release since the base image was last rebuilt.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         python3 \
         python-is-python3 \
     && rm -rf /var/lib/apt/lists/*

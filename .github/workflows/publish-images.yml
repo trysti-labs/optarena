@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
   packages: write
+  # P1-03: keyless cosign signing and GitHub's own build-provenance
+  # attestation both work by exchanging THIS token for a short-lived
+  # signing certificate from Sigstore's Fulcio CA - no stored signing key,
+  # no secret to rotate or leak. Neither step below needs anything else.
+  id-token: write
 
 jobs:
   publish:
@@ -70,6 +75,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push
+        id: build
         run: |
           BASE=ghcr.io/trysti-labs/optarena/${{ matrix.image }}
           # :latest stays the default the tool's own pull fallback uses
@@ -82,7 +88,39 @@ jobs:
           # --push (not build-then-push): buildx can't `docker load` a
           # multi-platform result into the local engine - a manifest list
           # spanning two platforms only exists once pushed to a registry.
+          #
+          # P1-03: --metadata-file captures the PUSHED digest so signing/
+          # attestation below targets the exact immutable image this run
+          # produced, not a mutable tag that could be repointed later.
           docker buildx build --platform linux/amd64,linux/arm64 \
             -t "$BASE:latest" -t "$BASE:${{ github.sha }}" \
             -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }} \
-            --push
+            --push --metadata-file metadata.json
+          echo "digest=$(jq -r '.["containerimage.digest"]' metadata.json)" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      # P1-03: SLSA build provenance - attests WHICH workflow run, commit,
+      # and repo produced this exact image digest, published to GitHub's
+      # own attestation store (visible on the package page) and, via
+      # push-to-registry, alongside the image itself so `cosign
+      # verify-attestation` (or any other Sigstore-aware client) can check
+      # it without knowing to look on GitHub specifically.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ steps.build.outputs.base }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # P1-03: a general-purpose Sigstore signature (separate from, and
+      # more widely recognized by third-party tooling than, the GitHub-
+      # specific attestation above) - keyless: cosign exchanges the
+      # id-token above for a short-lived cert from Fulcio, signs with it,
+      # and the signature + a transparency-log entry (Rekor) both get
+      # published alongside the image. `--yes` skips the interactive
+      # confirmation prompt this needs in a non-interactive CI shell.
+      - name: Sign the image (keyless)
+        run: cosign sign --yes "${{ steps.build.outputs.base }}@${{ steps.build.outputs.digest }}"

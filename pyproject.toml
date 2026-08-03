@@ -9,11 +9,26 @@ description = "Local-first testing & comparison framework for AI coding tools (C
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
+authors = [{ name = "Trysti Labs", email = "arun@trysti.com" }]
+keywords = ["ai-agents", "benchmark", "llm", "coding-agent", "evaluation"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
 ]
 # The core is intentionally dependency-free (stdlib only).
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/trysti-labs/optarena"
+Repository = "https://github.com/trysti-labs/optarena"
+Issues = "https://github.com/trysti-labs/optarena/issues"
 
 [project.optional-dependencies]
 crewai = ["crewai>=0.80"]

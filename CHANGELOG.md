@@ -8,7 +8,7 @@ this file existed.
 
 ## [Unreleased]
 
-### Fixed (second internal audit - see AUDIT_2.md)
+### Fixed (second internal audit - historical findings archived in DEV_NOTES/, not part of this public repo)
 
 - **`--parallel` no longer loses completed work.** Checkpoints during a
   parallel run serialized zero cases (the completion callback closed over a

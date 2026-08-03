@@ -34,6 +34,7 @@ from ..cases import (
     evaluate_case_isolated, prepare_workspace, run_capture, snapshot,
 )
 from ..scenario import Scenario
+from ..security import redact_secrets
 from .base import CaseResult, Driver, subprocess_env
 
 
@@ -233,6 +234,14 @@ class CLIAgentDriver(Driver):
                              passthrough=self.spec.get("auth_env", ()))
         env = {k: v for k, v in env.items()
                if not any(k.startswith(p) for p in self.spec["scrub_env_prefixes"])}
+        # P1-01: every credential this subprocess actually has access to -
+        # the scenario's own backend key, plus whatever auth_env passthrough
+        # keys resolved to. Redacted out of anything captured FROM the
+        # subprocess below (stderr, exception text) before it's stored,
+        # since a tool can echo an env var it was handed - intentionally
+        # (a verbose auth error) or not (a crash dump, a debug log line).
+        known_secrets = [scenario.backend.api_key] + [
+            env.get(k) for k in self.spec.get("auth_env", ())]
 
         steps: list[dict] = []
         n_prompts = len(case.get("prompts", []))
@@ -326,11 +335,15 @@ class CLIAgentDriver(Driver):
                     # PASS.
                     result.execution_ok = False
                     result.extra.setdefault("stderr", "")
-                    result.extra["stderr"] += (proc.stderr or "")[-800:]
+                    result.extra["stderr"] += redact_secrets(
+                        (proc.stderr or "")[-800:], known_secrets)
         except subprocess.TimeoutExpired:
             result.error = f"{self.name} timed out after {timeout}s"
         except Exception as exc:  # noqa: BLE001 - report, don't crash the run
-            result.error = f"{type(exc).__name__}: {exc}"
+            # P1-01: an HTTP client's own exception text can embed a
+            # credential (a URL query param, a header dump) - redact the
+            # same way stderr above is.
+            result.error = redact_secrets(f"{type(exc).__name__}: {exc}", known_secrets)
         finally:
             # A driver's env-builder can create a scratch file (e.g.
             # opencode's per-run config carrying the backend's API key) -

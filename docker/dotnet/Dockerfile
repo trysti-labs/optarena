@@ -11,9 +11,15 @@
 # silently replaced upstream, changing oracle behavior between identical
 # OptArena commits). The tag stays for readability; the digest is what's
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
-FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:89ce6291bde9acdf59594e79fb8277c6d84c46e4b1f5bf126a4f18766e4bd597
+#
+# P1-03: refreshed to the latest published digest for the SAME "8.0" tag
+# (2026-08-02) - a same-tag security-patch republish, not a version bump, so
+# it carries none of the NuGet-package-pin risk a real SDK version change
+# would (offline.nuget.config's package pins live entirely in warmup.csproj
+# and each case's own .csproj, independent of the base OS image).
+FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:3c0edbfe1549dd93fb789dc96299a40df865ad7bffefcaf38e8c05940686d641
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         python3 \
     && rm -rf /var/lib/apt/lists/*
 

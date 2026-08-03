@@ -12,7 +12,9 @@
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
 FROM ruby:3.3-slim@sha256:fb6613e39db7b37efb7976390f0fcd4da2ea018a74770ae4a01d21a4c441f637
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# P1-03: apt-get upgrade picks up any OS-level security patch published for
+# this exact Debian release since the base image was last rebuilt.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         python3 \
     && rm -rf /var/lib/apt/lists/*
 

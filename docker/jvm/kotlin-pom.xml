@@ -10,7 +10,8 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.3.4</version>
+    <!-- P1-03: kept in lockstep with scratch-pom.xml's own version - see its comment. -->
+    <version>3.5.16</version>
   </parent>
   <groupId>com.optarena</groupId>
   <artifactId>kotlin-warmup</artifactId>

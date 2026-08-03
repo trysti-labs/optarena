@@ -35,8 +35,8 @@
     },
     "optarena-tester-go": {
       "dockerfile": "docker/go/Dockerfile",
-      "base_image": "golang:1.22-bookworm",
-      "base_digest": "sha256:3d699e4d15d0f8f13c9195c0632a16702b8cbdece2955af1c23b37ae5d55a253",
+      "base_image": "golang:1.26.5-bookworm",
+      "base_digest": "sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651",
       "pinned_dependencies": {
         "github.com/gin-gonic/gin": "v1.10.0",
         "github.com/gofiber/fiber/v2": "v2.52.5"
@@ -50,10 +50,12 @@
       "dockerfile": "docker/jvm/Dockerfile",
       "base_image": "maven:3.9-eclipse-temurin-17",
       "base_digest": "sha256:1ed5d1f54416b706707b4f3238f63a20bb06aab27c6d240090a2bb9ad895ed45",
-      "pinned_dependencies": {},
+      "pinned_dependencies": {
+        "spring-boot-starter-parent": "3.5.16"
+      },
       "dependency_lockfile": null,
       "known_gaps": [
-        "Maven resolves the warmup pom.xml's dependency versions (already pinned in scratch-pom.xml/kotlin-pom.xml) against Maven Central at build time with no dependency-tree lockfile equivalent to package-lock.json/Cargo.lock - Maven's ecosystem has no first-class lockfile mechanism analogous to npm/cargo, so this is a real gap without a direct 'clear fix'."
+        "Maven resolves the warmup pom.xml's full dependency-tree versions (managed by spring-boot-starter-parent, tracked above) against Maven Central at build time with no dependency-tree lockfile equivalent to package-lock.json/Cargo.lock - Maven's ecosystem has no first-class lockfile mechanism analogous to npm/cargo, so the top-level parent version is what's tracked here, not every transitive version it resolves to."
       ]
     },
     "optarena-tester-rust": {
@@ -67,7 +69,7 @@
     "optarena-tester-dotnet": {
       "dockerfile": "docker/dotnet/Dockerfile",
       "base_image": "mcr.microsoft.com/dotnet/sdk:8.0",
-      "base_digest": "sha256:89ce6291bde9acdf59594e79fb8277c6d84c46e4b1f5bf126a4f18766e4bd597",
+      "base_digest": "sha256:3c0edbfe1549dd93fb789dc96299a40df865ad7bffefcaf38e8c05940686d641",
       "pinned_dependencies": {},
       "dependency_lockfile": null,
       "known_gaps": [
@@ -77,9 +79,9 @@
     "optarena-tester-php": {
       "dockerfile": "docker/php/Dockerfile",
       "base_image": "php:8.3-cli",
-      "base_digest": "sha256:2a3f699b6cb31e5638c5432e4d37d4047853ba6351a692c91e0a073af00a55cc",
+      "base_digest": "sha256:326ad1aa5b226ac4e5dc59d52cf2ee686f1bba334388287cdea84eb261088e06",
       "pinned_dependencies": {
-        "phpunit": "11.5.56"
+        "phpunit": "12.0.0"
       },
       "dependency_lockfile": null,
       "known_gaps": [

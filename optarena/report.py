@@ -133,6 +133,10 @@ def to_html(run: dict) -> str:
 
     clean = f'{s["clean_passes"]}/{s["cases"]}' if s.get("clean_passes") is not None else "-"
     cost = f'${s["total_cost_usd"]:.2f}' if s.get("total_cost_usd") is not None else "-"
+    if s.get("unpriced_cases"):
+        # P2-05: a total built from only SOME cases' known prices must not
+        # read as complete - "$0.42" implies every case is accounted for.
+        cost += f" (+{s['unpriced_cases']} case(s) unpriced)"
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OptArena report - {escape(scenario.get('name', ''))}</title>

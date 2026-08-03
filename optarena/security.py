@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Iterable
 
 # Files/dirs never worth scanning (tests are graded separately; vendored deps
 # aren't the agent's output).
@@ -91,6 +92,85 @@ def _is_placeholder(value: str) -> bool:
     return bool(_PLACEHOLDER.match(value.strip()))
 
 
+def _redacted_snippet(line: str, m: "re.Match[str]") -> str:
+    """P1-02: a secret-rule finding used to store up to 160 raw characters of
+    the matched line, which contains the very secret the rule just detected
+    - the persisted finding (saved to disk, shown in reports, potentially
+    uploaded as SARIF) could leak the credential it was warning about. Keep
+    the surrounding line for triage context (which variable, which call) but
+    replace exactly the matched span - the captured group when the rule has
+    one, the whole match otherwise - with a fixed placeholder."""
+    start, end = m.span(m.lastindex) if m.lastindex else m.span(0)
+    return (line[:start] + "«redacted»" + line[end:]).strip()[:160]
+
+
+_SECRET_PATTERN_RULES = [r for r in RULES if r.is_secret]
+#: Below this length, a "known secret" is too likely to collide with
+#: ordinary output (a short placeholder default, a single word) to redact
+#: blindly - matches the minimum length the pattern rules themselves already
+#: assume (`{6,}` in hardcoded-secret, `{16}`+ in the shaped ones).
+_MIN_KNOWN_SECRET_LEN = 6
+
+
+def redact_known_secrets(text: str, known_secrets: "Iterable[str | None]") -> str:
+    """
+    P1-01: replace every occurrence of any value in ``known_secrets`` (the
+    ACTUAL credentials this run was configured with - a scenario's
+    ``backend.api_key``, an ``auth_env`` passthrough value) with a fixed
+    placeholder. This is the load-bearing layer: it doesn't depend on
+    guessing a token's shape, so it catches a provider whose keys don't
+    match any of the pattern rules below at all.
+    """
+    if not text:
+        return text
+    for secret in known_secrets:
+        if secret and len(secret) >= _MIN_KNOWN_SECRET_LEN:
+            text = text.replace(secret, "«redacted»")
+    return text
+
+
+def redact_secret_patterns(text: str) -> str:
+    """
+    P1-01: defense in depth for ``redact_known_secrets`` - redact anything
+    matching a known credential SHAPE (AWS access key, GitHub token, a
+    provider ``sk-...`` key, a PEM private-key header) regardless of
+    whether it's a value this run was explicitly configured with. Catches a
+    DIFFERENT credential a tool echoes by accident (a stray host env var it
+    read, a config file it printed) that ``redact_known_secrets`` has no way
+    to know about, since it only knows this run's own configured values.
+    Reuses the same shaped rules ``scan_text`` uses to find secrets in
+    agent-changed files - one definition of "looks like a token", not two.
+    """
+    if not text:
+        return text
+    for rule in _SECRET_PATTERN_RULES:
+        text = rule.re.sub("«redacted»", text)
+    return text
+
+
+def redact_secrets(text: str, known_secrets: "Iterable[str | None]" = ()) -> str:
+    """Both layers together - the one call site drivers/storage should use."""
+    return redact_secret_patterns(redact_known_secrets(text, known_secrets))
+
+
+def redact_secrets_recursive(obj, known_secrets: "Iterable[str | None]" = ()):
+    """
+    P1-01: walk an arbitrary JSON-shaped structure (a saved run record, a
+    CaseResult dict) and apply ``redact_secrets`` to every string it
+    contains. This is the blanket, driver-agnostic safety net - storage
+    calls this once on the whole record right before writing it to disk, so
+    a FUTURE driver that forgets to redact its own stderr/exception text
+    still can't leak a pattern-shaped secret into a saved run.
+    """
+    if isinstance(obj, str):
+        return redact_secrets(obj, known_secrets)
+    if isinstance(obj, dict):
+        return {k: redact_secrets_recursive(v, known_secrets) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact_secrets_recursive(v, known_secrets) for v in obj]
+    return obj
+
+
 def scan_text(text: str, rel_path: str) -> list[dict]:
     """Findings for one file's contents. ``rel_path`` sets the extension filter
     and is reported as the finding location."""
@@ -110,26 +190,48 @@ def scan_text(text: str, rel_path: str) -> list[dict]:
                 captured = m.group(1) if m.groups() else m.group(0)
                 if _is_placeholder(captured):
                     continue
+                snippet = _redacted_snippet(line, m)
+            else:
+                snippet = line.strip()[:160]
             findings.append({
                 "rule": rule.id, "title": rule.title, "level": rule.level,
                 "message": rule.title, "file": rel_path, "line": lineno,
-                "snippet": line.strip()[:160],
+                "snippet": snippet,
             })
     return findings
+
+
+#: P1-06: `optarena scan <dir>` can be pointed at an arbitrary directory
+#: (not just a managed sandbox workspace), so this caps how many files a
+#: single scan will open - independent of `cases.py`'s own snapshot cap,
+#: since this function has no guarantee it was reached via that path.
+_SCAN_MAX_FILES = 20_000
 
 
 def scan_workspace(files: list[str], root: Path) -> dict:
     """Scan the agent's changed ``files`` (relative paths under ``root``).
     Returns ``{"findings": [...], "counts": {level: n}, "total": n}`` - always a
     dict, so callers can store it unconditionally."""
-    root = Path(root)
+    root = Path(root).resolve()
     findings: list[dict] = []
-    for rel in files:
+    for i, rel in enumerate(files):
+        if i >= _SCAN_MAX_FILES:
+            break
         if any(part in _SKIP_PARTS for part in Path(rel).parts):
             continue
         p = root / rel
         try:
-            if not p.is_file() or p.stat().st_size > 1_000_000:
+            # P1-06: `is_symlink()` catches a symlinked FILE; a symlinked
+            # DIRECTORY earlier in the path isn't caught by that alone, so
+            # the fully resolved path is also confirmed still inside root -
+            # otherwise `rel` (relative-looking, e.g. from a case pack's own
+            # bookkeeping rather than cases.snapshot's already-safe output)
+            # could have its target read from outside the workspace entirely.
+            if p.is_symlink() or not p.is_file():
+                continue
+            if not p.resolve().is_relative_to(root):
+                continue
+            if p.stat().st_size > 1_000_000:
                 continue
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:

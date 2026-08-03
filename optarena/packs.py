@@ -116,10 +116,28 @@ def write_pack(pack: dict, out: str | Path | None = None) -> Path:
     return out
 
 
-def load_pack(source: str) -> dict:
+def load_pack(source: str, allow_insecure: bool = False) -> dict:
     """Load a pack from a local path or an http(s) URL, validating its shape and
-    that its declared hash matches its contents (tamper/corruption check)."""
+    that its declared hash matches its contents (tamper/corruption check).
+
+    P1-07: a pack is executable-ish content (its cases drive host-side
+    workspace preparation and agent prompts), fetched over the network from
+    a URL the user typed - plain `http://` has no confidentiality or
+    integrity against an on-path attacker, who could swap in a malicious
+    pack en route. The content hash check below catches accidental
+    corruption but is self-declared by the pack itself, so a swapped pack
+    just carries a matching hash for its own (malicious) content - it is not
+    a substitute for transport security. `https://` is required unless the
+    caller explicitly passes `allow_insecure=True` (CLI: `--allow-insecure`),
+    for local/offline testing against a plain-http fixture server.
+    """
     if re.match(r"^https?://", source):
+        if source.startswith("http://") and not allow_insecure:
+            raise ValueError(
+                f"refusing to install a pack over plain http: {source!r} - "
+                "use an https:// URL, or pass --allow-insecure if you "
+                "understand the risk (e.g. a local test server)"
+            )
         with urllib.request.urlopen(source, timeout=30) as resp:  # noqa: S310 - user-supplied URL, documented
             raw_bytes = resp.read(_MAX_PACK_BYTES + 1)
             if len(raw_bytes) > _MAX_PACK_BYTES:

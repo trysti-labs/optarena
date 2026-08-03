@@ -57,14 +57,31 @@ optarena/                       repo root
 ├── optarena/                   ── the Python package (stdlib only) ──
 │   ├── __init__.py
 │   ├── __main__.py             python -m optarena
-│   ├── cli.py                  argparse CLI: run / compare / list / serve
+│   ├── cli/                    argparse CLI: run / compare / list / serve
+│   │   ├── __init__.py           argparse wiring (main) + re-exports
+│   │   ├── _run.py                run / compare / regression
+│   │   ├── _cases_cmds.py         cases list/show/init/validate/verify/pack/install
+│   │   ├── _runs_cmds.py          runs show/rebuild-index/prune/scrub-secrets
+│   │   ├── _doctor.py             preflight checks
+│   │   ├── _sandbox_cmds.py       sandbox build/pull/status
+│   │   ├── _serve.py              results dashboard HTTP server
+│   │   └── _scan_report.py        scan / report (JUnit/HTML/SARIF)
 │   ├── scenario.py             Scenario + Backend dataclasses (JSON files)
-│   ├── cases.py                case loading + the filesystem oracle
-│   ├── runner.py               executes one scenario → RunRecord
+│   ├── cases.py                case-engine facade (see _cases/ for the implementation)
+│   ├── _cases/                 case loading + the filesystem oracle, split by concern
+│   │   ├── _corpus.py             case loading/filtering
+│   │   ├── _snapshot.py           workspace hashing + expected-file assertions
+│   │   ├── _sandbox.py            container engine, DockerSandbox, check_command exec
+│   │   ├── _workspace_setup.py    setup_files/setup_repo/git_init/disruptions
+│   │   └── _evaluate.py           ties the assertion oracle + check_command together
+│   ├── runner/                 executes one scenario → RunRecord
+│   │   ├── _manifest.py           manifest-building (case hashes, versions, platform)
+│   │   ├── _results.py            RunRecord, trial-merging, console formatting
+│   │   └── _execution.py          case execution, --parallel worker pool, run_scenario
 │   ├── metrics.py              aggregates + per-case deltas
 │   ├── store.py                results persistence + index
 │   ├── compare.py              A/B comparison + terminal table
-│   ├── cases/                  task catalogue (*.json)
+│   ├── cases/                  task catalogue (*.json) - NOT the same as _cases/ above
 │   ├── pricing.py               USD cost estimation from token usage
 │   └── drivers/                ── tool adapters ──
 │       ├── __init__.py         registry (name → Driver, lazy imports)
@@ -148,7 +165,7 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   first-class filter as `language`: `cases.filter_cases(cases, language=,
   framework=)` ANDs both together, used by both `optarena run
   --language/--framework` and `optarena list cases --language/--framework`.
-  The corpus is 510 cases spanning 18 languages/frameworks (Python,
+  The corpus is 836 cases spanning 18 languages/frameworks (Python,
   JavaScript/TypeScript, Java, Kotlin, Go, Rust, C#, C/C++, PHP, Ruby, SQL,
   Shell, YAML, Terraform, Dockerfile, Makefile) at the per-track allocation the spec's own
   Phase 1 table asks for - see §10.1 for the full breakdown and what's
@@ -663,19 +680,16 @@ Structural:
 
 ### 10.1 Benchmark corpus status
 
-The corpus stands at **510 cases** across 18 languages/frameworks (the
-original 120-case Phase 1 allocation has since been expanded through a
-Phase 2 band). Every case was verified end-to-end before being counted, run
+The corpus stands at **836 cases** across 18 languages/frameworks (the
+original 120-case Phase 1 allocation has since been expanded through several
+later bands). Every case was verified end-to-end before being counted, run
 through the real oracle (`evaluate_case`/`DockerSandbox`), not just claimed.
-All 510 ship an explicit `reference_solution` (proven to PASS); 466 also ship
-something proven to FAIL - an explicit `broken_solutions` variant, or the
-implicit "unmodified workspace" check that bug_fix/refactoring/performance/
-security cases receive. `optarena cases verify` skips no case, but for the
-remaining 44 (mostly `create_*` scaffolding and `add_github_actions_ci_*`) it
-can only prove the oracle ACCEPTS a correct solution, not that it REJECTS a
-wrong one - which is the failure class verification exists to catch. Those 44
-are named by `cases verify` on every run and are a hard error under
-`cases verify --strict`; closing the gap is tracked corpus work.
+All 836 ship an explicit `reference_solution` (proven to PASS), and every one
+also ships something proven to FAIL - an explicit `broken_solutions` variant,
+or the implicit "unmodified workspace" check that bug_fix/refactoring/
+performance/security cases receive. `optarena cases verify --strict` fails
+the build if a case is ever added without a discriminating variant, so this
+is a standing invariant, not a one-time count.
 
 **Built:**
 - Case schema extended with `framework`/`domain`/`difficulty`/`task_type`/
@@ -692,7 +706,7 @@ are named by `cases verify` on every run and are a hard error under
   (`CHECKPOINT_DISABLE=1`, no network phone-home) and pyyaml/sqlite3 for the
   SQL/Shell/Docker-Compose/Terraform tracks, none of which need a
   per-language toolchain image.
-- 510 cases across all 18 language tracks, each tagged with the spec's task
+- 836 cases across all 18 language tracks, each tagged with the spec's task
   categories (feature/bug_fix/refactoring/testing/security/performance/
   devops/data_engineering/documentation/dependency_upgrade) and difficulty 1-3.
 - **A corpus-wide oracle bug found and fixed during verification**: 6 of the

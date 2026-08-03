@@ -406,7 +406,7 @@ class RunCommandTests(CliBaseTest):
         return _Stub()
 
     def test_successful_run_returns_0_and_saves_a_record(self):
-        with mock.patch("optarena.runner.get_driver", return_value=self._driver()):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._driver()):
             code, out, err = _run_cli(["run", "--driver", "ollama-chat", "--name", "t",
                                        "--cases-dir", str(self.cases_dir)])
         self.assertEqual(code, 0, err)
@@ -414,7 +414,7 @@ class RunCommandTests(CliBaseTest):
         self.assertEqual(len(list((self.results / "runs").glob("*.json"))), 1)
 
     def test_failed_case_returns_1(self):
-        with mock.patch("optarena.runner.get_driver", return_value=self._driver(passed=False)):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._driver(passed=False)):
             code, _, _ = _run_cli(["run", "--driver", "ollama-chat", "--name", "t",
                                    "--cases-dir", str(self.cases_dir)])
         self.assertEqual(code, 1)
@@ -422,7 +422,7 @@ class RunCommandTests(CliBaseTest):
     def test_empty_case_selection_is_refused(self):
         # H-06 through the CLI: a filter matching nothing must not read as
         # "all green".
-        with mock.patch("optarena.runner.get_driver", return_value=self._driver()):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._driver()):
             code, _, err = _run_cli(["run", "--driver", "ollama-chat", "--name", "t",
                                      "--cases-dir", str(self.cases_dir),
                                      "--language", "klingon"])
@@ -430,7 +430,7 @@ class RunCommandTests(CliBaseTest):
         self.assertIn("0 cases", err)
 
     def test_json_events_stream_is_parseable(self):
-        with mock.patch("optarena.runner.get_driver", return_value=self._driver()):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._driver()):
             code, out, _ = _run_cli(["run", "--driver", "ollama-chat", "--name", "t",
                                      "--cases-dir", str(self.cases_dir),
                                      "--quiet", "--json-events"])
@@ -443,7 +443,7 @@ class RunCommandTests(CliBaseTest):
 
     def test_manifest_records_the_tool_version(self):
         from optarena import __version__
-        with mock.patch("optarena.runner.get_driver", return_value=self._driver()):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._driver()):
             _run_cli(["run", "--driver", "ollama-chat", "--name", "t",
                       "--cases-dir", str(self.cases_dir)])
         record = json.loads(next((self.results / "runs").glob("*.json")).read_text(encoding="utf-8"))
@@ -483,7 +483,7 @@ class BaselineIncompatiblePreflightWarningTests(CliBaseTest):
         return _Stub()
 
     def test_warns_for_a_file_tools_free_driver(self):
-        with mock.patch("optarena.runner.get_driver", return_value=self._driver()):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._driver()):
             code, out, err = _run_cli(["run", "--driver", "ollama-chat", "--name", "t",
                                        "--cases-dir", str(self.cases_dir)])
         self.assertEqual(code, 0, err)
@@ -504,14 +504,14 @@ class BaselineIncompatiblePreflightWarningTests(CliBaseTest):
         self.assertNotIn("NOTE:", out)
 
     def test_quiet_suppresses_the_warning(self):
-        with mock.patch("optarena.runner.get_driver", return_value=self._driver()):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._driver()):
             code, out, err = _run_cli(["run", "--driver", "ollama-chat", "--name", "t",
                                        "--cases-dir", str(self.cases_dir), "--quiet"])
         self.assertEqual(code, 0, err)
         self.assertNotIn("NOTE:", out)
 
     def test_no_warning_when_no_case_is_incompatible(self):
-        with mock.patch("optarena.runner.get_driver", return_value=self._driver()):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._driver()):
             code, out, err = _run_cli(["run", "--driver", "ollama-chat", "--name", "t",
                                        "--cases-dir", str(self.cases_dir), "--cases", "winnable"])
         self.assertEqual(code, 0, err)

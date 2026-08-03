@@ -51,11 +51,31 @@ def concrete_target(pattern: str | None) -> Path:
     Glob-bearing directory parts are dropped and glob metacharacters in the
     basename become "output" ("*_test.go" -> "output_test.go", "*.tf" ->
     "output.tf"), which still satisfies the basename glob match.
+
+    P0-02: schema.validate_case already refuses a `path_pattern` containing
+    an absolute path or a '..'/'.git' segment before a case is ever loaded
+    (schema.reject_unsafe_relpath). This is the write-site re-check: a
+    literal '..' segment has no glob metacharacter, so the stripping below
+    would otherwise pass it straight through into `workspace / target`, and
+    every caller of this function (run_case in this module and in
+    sdk_base.py) writes model output to that path with no further
+    containment check of its own. Raising here - inside each caller's
+    existing `except Exception` case-error handler - is the load-bearing
+    fix; this function is the one place both callers share.
     """
     if not pattern:
         return Path("output.txt")
-    parts = Path(pattern).parts
-    dirs = [p for p in parts[:-1] if not any(ch in p for ch in "*?[]")]
+    p = Path(pattern)
+    # Explicit leading-slash/backslash check, not just Path.is_absolute():
+    # PureWindowsPath treats "/etc/passwd" (no drive letter) as NOT
+    # absolute, so a POSIX-style absolute pattern would slip past
+    # is_absolute() alone on a Windows host.
+    if (p.is_absolute() or pattern.startswith(("/", "\\"))
+            or any(part == ".." for part in p.parts)
+            or any(part.lower() == ".git" for part in p.parts)):
+        raise ValueError(f"expected_files path_pattern is unsafe: {pattern!r}")
+    parts = p.parts
+    dirs = [d for d in parts[:-1] if not any(ch in d for ch in "*?[]")]
     name = re.sub(r"[*?\[\]]+", "output", parts[-1]) if parts else "output.txt"
     return Path(*dirs, name)
 
@@ -108,7 +128,11 @@ class OpenAIChatDriver(Driver):
 
         expected = case.get("expected_files", [])
         # The baseline writes files itself: target the first expected path per prompt.
-        target = concrete_target(expected[0]["path_pattern"] if expected else None)
+        try:
+            target = concrete_target(expected[0]["path_pattern"] if expected else None)
+        except ValueError as exc:
+            result.error = str(exc)
+            return result
 
         steps: list[dict] = []
         n_prompts = len(case.get("prompts", []))

@@ -247,25 +247,24 @@ the generated code and asserts on its actual behavior. Pair it with
 `test_setup_files` - real test code (pytest-style asserts, a Node script, a
 compile-and-run harness) written into the workspace **after** the model's
 run, so the model never sees what it's graded against. The built-in
-catalogue is **510 cases across 18 languages and frameworks**:
-Python (120, FastAPI/Flask/Django/
-SQLAlchemy/Pydantic/Typer/pandas), JavaScript (58) and TypeScript (29,
-Express/NestJS/React/Vue/plain Node), Java (35, Spring Boot/plain),
-Kotlin (18, Spring Boot/plain), Go (35, Gin/stdlib), Rust (29, Axum/
-Actix-web/stdlib), C# (29, ASP.NET Core/plain), C (11) and C++ (7), PHP
-(19) and Ruby (20), SQL (25), Shell (16), YAML (32, Docker Compose/
-Kubernetes/GitHub Actions), HCL/Terraform (12), Dockerfile (10), and
-Makefile (5). Every case covers one of ten task categories - feature, bug
+catalogue is **836 cases across 18 languages and frameworks**:
+Python (150, FastAPI/Flask/Django/
+SQLAlchemy/Pydantic/Typer/pandas), JavaScript (81) and TypeScript (49,
+Express/NestJS/React/Vue/plain Node), Java (56, Spring Boot/plain),
+Kotlin (35, Spring Boot/plain), Go (56, Gin/stdlib), Rust (49, Axum/
+Actix-web/stdlib), C# (49, ASP.NET Core/plain), C (25) and C++ (19), PHP
+(37) and Ruby (38), SQL (43), Shell (29), YAML (50, Docker Compose/
+Kubernetes/GitHub Actions), HCL/Terraform (25), Dockerfile (25), and
+Makefile (20). Every case covers one of ten task categories - feature, bug
 fix, refactoring, testing, security, performance, devops, data
 engineering, documentation, dependency upgrade. Every case was verified
 end-to-end through the real `--network none` container sandbox before being
-counted as done: all 510 carry a `reference_solution` that must PASS the
-oracle, and 466 additionally carry something that must FAIL it (an explicit
-`broken_solutions` variant, or the implicit "unmodified workspace" check that
-bug_fix/refactoring/performance/security cases get). The remaining 44 -
-mostly `create_*` scaffolding and `add_github_actions_ci_*` cases - currently
-prove only that their oracle can pass; `optarena cases verify` names them, and
-`--strict` fails on them, so they are visible rather than assumed. The testing-category cases (`add_tests_*`) are additionally
+counted as done: all 836 carry a `reference_solution` that must PASS the
+oracle, and every one of them also carries something that must FAIL it (an
+explicit `broken_solutions` variant, or the implicit "unmodified workspace"
+check that bug_fix/refactoring/performance/security cases get) - `optarena
+cases verify --strict` fails the build if a future case is ever added
+without one, so this stays true rather than just being true today. The testing-category cases (`add_tests_*`) are additionally
 **mutation-checked**: the hidden oracle first runs the model's tests against
 the correct implementation (they must pass), then against deliberately
 broken variants of it (each must make the tests fail) - so a vacuous test
@@ -277,7 +276,7 @@ and `express-ts-shortlink`).
 
 **Trust model - what these public cases are (and are not).** The corpus ships
 in the open, *including* every case's hidden tests and `reference_solution`
-(all 510 cases carry one), plus `broken_solutions` on most cases - that
+(all 836 cases carry one), plus `broken_solutions` on most cases - that
 openness is what lets `verify-corpus` prove each oracle can pass (the reference
 solution, for every case) and fail (a broken/unmodified variant), and lets you
 audit exactly what a PASS means.
