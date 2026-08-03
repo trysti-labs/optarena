@@ -21,11 +21,21 @@ boundary:
    available, OptArena refuses to run them** - host execution requires an
    explicit opt-in (`OPTARENA_DISABLE_SANDBOX=1` or `OPTARENA_ALLOW_UNSAFE_HOST_EXEC=1`).
    All case-supplied file paths are containment-checked before anything is
-   read or written: `setup_files`, `test_setup_files`, disruption
-   writes/deletes, and `setup_repo` all reject traversal (`../`), absolute
-   paths, and symlinked escapes, in both directions (a `setup_repo` naming a
-   directory outside `repos/` is refused, not just a destination outside the
-   workspace). A case's `image` is validated as a container image reference,
+   read or written, at two layers: schema validation rejects an unsafe path
+   before a case is even loaded (before any model/API call it could waste),
+   and every write site re-checks immediately before touching disk.
+   `setup_files`, `test_setup_files`, `reference_solution`,
+   `broken_solutions[].files`, `expected_files[].path_pattern`, disruption
+   `write_files`/`delete_files`, and `setup_repo` all reject traversal
+   (`../`), absolute paths, and symlinked escapes, in both directions (a
+   `setup_repo` naming a directory outside `repos/` is refused, not just a
+   destination outside the workspace). The same paths also reject any `.git`
+   segment: `git_init` runs host-native `git init`/`add`/`commit` after a
+   case's files are written, so a case-controlled `.git/config` or
+   `.gitattributes` could otherwise get a malicious filter/hook executed on
+   the host during `git add`. `git_init` additionally runs with a minimal
+   explicit environment (no inherited host env, no system/global gitconfig,
+   an empty scratch `HOME`) as a second, independent layer. A case's `image` is validated as a container image reference,
    so it cannot smuggle flags onto the engine's command line. Only load case
    packs from sources you trust enough to run in that sandbox: the pack format
    carries a content hash, which detects corruption and accidental tampering,
@@ -43,8 +53,12 @@ boundary:
    mount; custom `--cases-dir` packs never share a container (each gets an
    ephemeral one mounting only its own workspace).
 
-2. **The coding agents under evaluation.** CLI agents (aider, Claude Code,
-   Codex, …) run headlessly with auto-approval flags - that is the point of
+2. **The coding agents under evaluation.** `optarena run` refuses to start a
+   `cli`-kind driver (aider, Claude Code, Codex, opencode, goose, qwen-code)
+   without confirmation: an interactive terminal gets a y/N prompt, and
+   non-interactive use (CI, scripts) requires
+   `--yes-i-understand-host-execution` explicitly. CLI agents run headlessly
+   with auto-approval flags - that is the point of
    the evaluation - but receive an **explicit environment allowlist** (PATH,
    HOME, locale, temp dirs, plus exactly the provider credential the scenario
    configures), never a copy of your full shell environment. SDK/agent-

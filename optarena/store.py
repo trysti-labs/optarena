@@ -23,6 +23,8 @@ import time
 import uuid
 from pathlib import Path
 
+from .security import redact_secrets_recursive
+
 
 def _looks_like_source_checkout(root: Path) -> bool:
     """Is `root` the repository this package was installed from in editable
@@ -172,6 +174,24 @@ def _upsert_index_entry(entry: dict) -> None:
         _write_atomic(index_path, json.dumps(entries, indent=2))
 
 
+def _redact_before_write(data: dict) -> dict:
+    """
+    P1-01: blanket, driver-agnostic safety net - pattern-based secret
+    redaction (AWS keys, GitHub tokens, provider `sk-...` keys, PEM private
+    key headers) across every string in the record, applied right before it
+    hits disk. `backend.api_key` is already `None` by this point
+    (`scenario.to_dict(redact=True)`, set when the RunRecord is built) - this
+    is for anything ELSE: a driver's captured stderr/exception text that
+    already went through its own known-secret redaction (see
+    drivers/cli_agents.py, aider_cli.py) but could still carry a
+    DIFFERENT, unanticipated credential shape, or a future driver that adds
+    stderr capture without wiring that redaction in at all. No known-secret
+    values are threaded through here (the record no longer has the live
+    credential in scope by this point) - pattern-shape matching only.
+    """
+    return redact_secrets_recursive(data)
+
+
 def save_checkpoint(record) -> Path:
     """Persist a RunRecord IN PROGRESS (F-02, ``record.status == "running"``).
     Unlike ``save_run``, overwriting the same run_id repeatedly is expected -
@@ -181,8 +201,9 @@ def save_checkpoint(record) -> Path:
     F-07's O(n) cost on every single case."""
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     path = RUNS_DIR / f"{record.run_id}.json"
-    _write_atomic(path, json.dumps(record.to_dict(), indent=2))
-    _upsert_index_entry(_index_entry(record.to_dict(), path))
+    data = _redact_before_write(record.to_dict())
+    _write_atomic(path, json.dumps(data, indent=2))
+    _upsert_index_entry(_index_entry(data, path))
     return path
 
 
@@ -209,8 +230,9 @@ def save_run(record) -> Path:
             raise FileExistsError(
                 f"run_id collision: {path} already exists - refusing to overwrite a saved run"
             )
-    _write_atomic(path, json.dumps(record.to_dict(), indent=2))
-    _upsert_index_entry(_index_entry(record.to_dict(), path))
+    data = _redact_before_write(record.to_dict())
+    _write_atomic(path, json.dumps(data, indent=2))
+    _upsert_index_entry(_index_entry(data, path))
     return path
 
 

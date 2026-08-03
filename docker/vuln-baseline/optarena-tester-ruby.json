@@ -1,0 +1,188 @@
+{
+  "image": "optarena-tester-ruby",
+  "generated_at": "2026-08-02",
+  "expires_at": "2026-11-02",
+  "owner": "arun@trysti.com",
+  "scan_severity": [
+    "CRITICAL",
+    "HIGH"
+  ],
+  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py.",
+  "accepted_vulnerabilities": [
+    {
+      "id": "CVE-2026-53615",
+      "package": "bsdutils",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-41992",
+      "package": "gzip",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-54369",
+      "package": "libacl1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "libblkid1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "liblastlog2-2",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "libmount1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "libncursesw6",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-11940",
+      "package": "libpython3.13-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-15308",
+      "package": "libpython3.13-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-7210",
+      "package": "libpython3.13-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-11940",
+      "package": "libpython3.13-stdlib",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-15308",
+      "package": "libpython3.13-stdlib",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-7210",
+      "package": "libpython3.13-stdlib",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "libsmartcols1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "libtinfo6",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "libuuid1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "login",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "mount",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "ncurses-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "ncurses-bin",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-13221",
+      "package": "perl-base",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-42496",
+      "package": "perl-base",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-42497",
+      "package": "perl-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-48962",
+      "package": "perl-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-57432",
+      "package": "perl-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-57433",
+      "package": "perl-base",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-8376",
+      "package": "perl-base",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-9538",
+      "package": "perl-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-11940",
+      "package": "python3.13",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-15308",
+      "package": "python3.13",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-7210",
+      "package": "python3.13",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-11940",
+      "package": "python3.13-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-15308",
+      "package": "python3.13-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-7210",
+      "package": "python3.13-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "util-linux",
+      "severity": "HIGH"
+    }
+  ]
+}

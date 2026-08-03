@@ -5,7 +5,7 @@ name: codeql
 # and different from `optarena scan` (which runs against model-generated
 # output, not this codebase). Directly relevant here: subprocess/argv/env
 # handling is already treated as security-sensitive throughout this project
-# (see AUDIT.md's S-1 through S-4), which is exactly what CodeQL's Python
+# (see SECURITY.md), which is exactly what CodeQL's Python
 # query pack looks for.
 #
 # Does NOT upload to the Security tab (see `upload: false` below) - both of

@@ -1,0 +1,33 @@
+{
+  "image": "optarena-tester-jvm",
+  "generated_at": "2026-08-02",
+  "expires_at": "2026-11-02",
+  "owner": "arun@trysti.com",
+  "scan_severity": [
+    "CRITICAL",
+    "HIGH"
+  ],
+  "note": "Baseline refreshed after the P1-03 Spring Boot bump (3.3.4 -> 3.5.16, 2026-08-02): 86 -> 16 CRITICAL/HIGH findings (81% reduction) - tomcat-embed-core, jackson-databind, commons-io, plexus-utils, spring-webmvc all moved to patched versions. Both the Java (56 cases, 129 variants) and Kotlin (35 cases, 86 variants) corpora re-verified against the real oracle and pass clean. Remaining findings are mostly Linux kernel-header/Debian perl-tooling noise (see the shared note in other baselines) plus whatever this Spring Boot line has not backported a fix for yet. Re-triage before expiry.",
+  "accepted_vulnerabilities": [
+    {
+      "id": "CVE-2024-47554",
+      "package": "commons-io:commons-io",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-67030",
+      "package": "org.codehaus.plexus:plexus-utils",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-56740",
+      "package": "org.jline:jline-remote-telnet",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-56741",
+      "package": "org.jline:jline-remote-telnet",
+      "severity": "HIGH"
+    }
+  ]
+}

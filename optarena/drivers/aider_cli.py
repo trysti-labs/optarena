@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..cases import changed_files, evaluate_case, prepare_workspace, run_capture, snapshot
 from ..scenario import Scenario
+from ..security import redact_secrets
 from .base import CaseResult, Driver, subprocess_env
 
 # aider prints one line per message like:
@@ -120,6 +121,10 @@ class AiderDriver(Driver):
             "OPENAI_API_BASE": backend.openai_base,
             "OPENAI_BASE_URL": backend.openai_base,
         })
+        # P1-01: redacted out of anything captured FROM aider below (stderr,
+        # exception text) before it's stored - aider can echo an env var it
+        # was handed, intentionally (a verbose auth error) or not.
+        known_secrets = [backend.api_key]
 
         t0 = time.monotonic()
         n_prompts = len(case.get("prompts", []))
@@ -163,11 +168,11 @@ class AiderDriver(Driver):
                     # from being graded an unqualified PASS.
                     result.execution_ok = False
                     result.extra.setdefault("stderr", "")
-                    result.extra["stderr"] += proc.stderr[-800:]
+                    result.extra["stderr"] += redact_secrets(proc.stderr[-800:], known_secrets)
         except subprocess.TimeoutExpired:
             result.error = f"aider timed out after {timeout}s"
         except Exception as exc:  # noqa: BLE001
-            result.error = f"{type(exc).__name__}: {exc}"
+            result.error = redact_secrets(f"{type(exc).__name__}: {exc}", known_secrets)
         result.duration_s = time.monotonic() - t0
 
         result.files = changed_files(before, workspace)

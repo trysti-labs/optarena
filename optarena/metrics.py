@@ -145,6 +145,17 @@ def aggregate(case_dicts: list[dict]) -> dict:
                      + c.get("extra", {}).get("completion_tokens", 0))
                  for c in case_dicts)
     cost = sum(c.get("extra", {}).get("cost_usd", 0) or 0 for c in case_dicts)
+    # P2-05: a case with real token usage but cost_usd is None (pricing.
+    # estimate_cost couldn't find a price for the model) - as opposed to a
+    # case with no usage at all (nothing to price). `total_cost_usd` below
+    # silently treats both the same as "contributes 0" when summed, which
+    # would otherwise let an unpriced-model run report a clean, complete-
+    # looking total that is actually missing data.
+    unpriced_cases = sum(
+        1 for c in case_dicts
+        if c.get("extra", {}).get("cost_usd") is None
+        and (c.get("extra", {}).get("prompt_tokens") or c.get("extra", {}).get("completion_tokens"))
+    )
     files_changed = [len(c.get("files", []) or []) for c in case_dicts]
     # Flaky = a --trials case that neither always passed nor always failed.
     # The majority verdict hides this; a "2/3" is a weaker claim than "3/3".
@@ -182,6 +193,22 @@ def aggregate(case_dicts: list[dict]) -> dict:
     non_infra_total = total - infra_errors
     adjusted_pass_rate = (round(passed / non_infra_total, 3)
                            if infra_errors and non_infra_total > 0 else None)
+    # P2-07: same shape as adjusted_pass_rate above, for a different reason
+    # a case shouldn't count against a driver - runner._run_case records
+    # `capability_excluded` (via cases.baseline_incompatible) when the
+    # DRIVER structurally cannot satisfy the case regardless of model
+    # output (no file-editing tools, case needs >1 file or a starter repo).
+    # `pass_rate` itself is untouched - still every case, still comparable
+    # to older runs - `eligible_pass_rate` is the "of the cases this driver
+    # could possibly have won" second lens, with the excluded count and
+    # reasons never silently dropped.
+    capability_excluded_cases = [
+        c for c in case_dicts if c.get("extra", {}).get("capability_excluded")
+    ]
+    eligible_total = total - len(capability_excluded_cases)
+    eligible_passed = passed - sum(1 for c in capability_excluded_cases if c.get("passed"))
+    eligible_pass_rate = (round(eligible_passed / eligible_total, 3)
+                           if capability_excluded_cases and eligible_total > 0 else None)
     return {
         "cases": total,
         "passed": passed,
@@ -197,6 +224,14 @@ def aggregate(case_dicts: list[dict]) -> dict:
         # always-null field.
         "infrastructure_errors": infra_errors or None,
         "adjusted_pass_rate": adjusted_pass_rate,
+        # P2-07: None when nothing was excluded, same convention as
+        # infrastructure_errors/adjusted_pass_rate above.
+        "capability_excluded_cases": len(capability_excluded_cases) or None,
+        "eligible_pass_rate": eligible_pass_rate,
+        "capability_exclusion_reasons": (
+            sorted({c["extra"]["capability_excluded"] for c in capability_excluded_cases})
+            if capability_excluded_cases else None
+        ),
         # F-09: sum of ACTUAL work across all trials (was silently summing
         # each case's per-trial MEAN, understating total work under
         # --trials N by roughly a factor of N).
@@ -206,6 +241,9 @@ def aggregate(case_dicts: list[dict]) -> dict:
         "p95_duration_s": _percentile(durations, 95),
         "total_tokens": tokens or None,
         "total_cost_usd": round(cost, 4) if cost else None,
+        # P2-05: None when every priced case's cost is actually known, so
+        # this field only appears when the total above is genuinely partial.
+        "unpriced_cases": unpriced_cases or None,
         "mean_files_changed": round(statistics.mean(files_changed), 1) if files_changed else 0.0,
         "flaky_cases": flaky,
         # Trajectory: clean passes and total off-target (unrequested) edits.

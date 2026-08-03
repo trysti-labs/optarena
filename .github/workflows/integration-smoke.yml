@@ -1,0 +1,114 @@
+# P2-06: the core unit suite validates driver LOGIC (deadline handling,
+# disruptions, token accounting) against fake binaries and mocked HTTP - it
+# has never actually invoked a real CLI tool end to end. This workflow does:
+# a real `pip install`, a real Ollama server, a real subprocess exec of the
+# actual tool, through the actual sandbox container, against the actual
+# oracle. It is not asking "did the model get the task right" (a small
+# local model often won't) - it is asking "does the integration itself
+# work" (the tool starts, accepts the invocation shape this project builds,
+# and produces a result the harness can grade), which is a materially
+# different, and previously entirely untested, failure surface.
+#
+# Scoped to `backend: scenario` CLI drivers only (aider, opencode, goose,
+# qwen-code) - these can point at a fully local, self-hosted Ollama with NO
+# secrets and NO paid API usage. `backend: fixed` tools (Claude Code,
+# Codex - real Anthropic/OpenAI accounts) and the optional SDK drivers
+# aren't covered here; extending this to them is a natural next step once
+# there's a secrets budget/owner decision to make, not attempted in this
+# pass.
+name: integration-smoke
+
+on:
+  schedule:
+    # Weekly, not on every push - a live external-tool invocation is exactly
+    # the kind of check that's valuable periodically and expensive/flaky to
+    # run on every commit (network-dependent pip installs, a real model
+    # pull, real subprocess timing).
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: [aider, opencode, goose, qwen-code]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Install optarena
+        run: pip install -e .
+      - name: Install the driver under test
+        run: |
+          case "${{ matrix.driver }}" in
+            aider)     pip install aider-chat ;;
+            opencode)  curl -fsSL https://opencode.ai/install | bash ;;
+            goose)     curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash ;;
+            qwen-code) npm install -g @qwen-code/qwen-code ;;
+          esac
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # Self-hosted, local, zero-secret backend - the whole point of scoping
+      # this workflow to `backend: scenario` drivers in the first place.
+      - name: Install and start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1 && break
+            sleep 1
+          done
+      - name: Pull a small model
+        # A real coding-capable model, but the smallest practical one - this
+        # workflow is checking the INTEGRATION works, not the model's
+        # coding ability, so model quality doesn't matter here.
+        run: ollama pull qwen2.5-coder:1.5b
+      - name: Build the base sandbox image
+        run: docker build -t optarena-tester:latest -f docker/Dockerfile docker
+      # P2-06's "small, cheap smoke corpus": one fast, dependency-light case
+      # (no framework/network deps, default base image, ~120s timeout) -
+      # this is deliberately NOT a correctness benchmark run, just enough to
+      # exercise prepare()/run_case()/the real oracle end to end.
+      - name: Run the smoke case
+        # `optarena run` exits 1 whenever any case fails (by design - it
+        # doubles as a CI gate for a real evaluation run), which a small
+        # local model legitimately doing worse than a paid frontier model
+        # would trigger constantly - that is not what THIS check is for.
+        # Confirmed directly (a real aider+gemma3:1b run against this same
+        # case): exit 1, but `summary.infrastructure_errors` is None - the
+        # oracle correctly failed the model's wrong answer, the integration
+        # itself worked. Only fail this job on exit 2 (couldn't even attempt
+        # the run - binary missing, driver crashed, sandbox setup failed) or
+        # a nonzero `infrastructure_errors` count (F-10: the ENVIRONMENT, not
+        # the model, is why a case failed) in the saved run.
+        run: |
+          set +e
+          python -m optarena run \
+            --driver ${{ matrix.driver }} --kind ollama \
+            --base-url http://localhost:11434 --model qwen2.5-coder:1.5b \
+            --cases create_fibonacci --name smoke-${{ matrix.driver }} \
+            --timeout 120 --yes-i-understand-host-execution
+          run_exit=$?
+          set -e
+          if [ "$run_exit" -eq 2 ]; then
+            echo "::error::optarena run exited 2 (setup/infrastructure error) - the integration itself is broken"
+            exit 1
+          fi
+          latest=$(ls -t results/runs/*smoke-${{ matrix.driver }}*.json | head -1)
+          python scripts/check_no_infra_errors.py "$latest"
+      # P2-06: "define support tier/owner for every driver" already lives in
+      # optarena/drivers/__init__.py's DRIVERS registry (status/owner
+      # fields) and "record tested driver/SDK versions" in `doctor`
+      # (compares live-detected version against DRIVERS[...]["tested_with"])
+      # - this step surfaces both for a human reviewing a scheduled run,
+      # without needing to fail the job over a version drift (that's an
+      # advisory `doctor` check, not a hard gate here).
+      - name: doctor (versions actually used this run)
+        if: always()
+        run: python -m optarena doctor --base-url http://localhost:11434 --kind ollama || true

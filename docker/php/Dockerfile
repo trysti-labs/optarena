@@ -10,9 +10,13 @@
 # silently replaced upstream, changing oracle behavior between identical
 # OptArena commits). The tag stays for readability; the digest is what's
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
-FROM php:8.3-cli@sha256:2a3f699b6cb31e5638c5432e4d37d4047853ba6351a692c91e0a073af00a55cc
+#
+# P1-03: refreshed to the latest published digest for the SAME "8.3-cli" tag
+# (2026-08-02) - a same-version security-patch republish, not a PHP version
+# bump.
+FROM php:8.3-cli@sha256:326ad1aa5b226ac4e5dc59d52cf2ee686f1bba334388287cdea84eb261088e06
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         curl \
         unzip \
         git \

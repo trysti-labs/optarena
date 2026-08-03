@@ -10,9 +10,24 @@
 # silently replaced upstream, changing oracle behavior between identical
 # OptArena commits). The tag stays for readability; the digest is what's
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
-FROM golang:1.22-bookworm@sha256:3d699e4d15d0f8f13c9195c0632a16702b8cbdece2955af1c23b37ae5d55a253
+#
+# P1-03: was golang:1.22-bookworm. 1.22 is out of Go's own support window
+# (only the two most recent minors get security fixes), which is exactly why
+# a live Trivy scan (2026-08-02) found 285 stdlib CVEs baked into this
+# image's toolchain binaries alone - patches exist upstream in later Go
+# releases, they just were never in an image this pin could pull. Bumped to
+# the latest stable release at scan time. Safe under Go's own compatibility
+# promise: no corpus case pins a `toolchain` directive (checked directly -
+# zero matches across optarena/cases/*.json), and every case's `go X.Y`
+# directive is a MINIMUM version a newer toolchain satisfies automatically,
+# not an exact requirement.
+FROM golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# P1-03: apt-get upgrade picks up any OS-level security patch published for
+# this exact Debian release since the base image was last rebuilt - cheap
+# insurance for future rebuilds even when, as now, it's a no-op because the
+# base is already current.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         python3 \
     && rm -rf /var/lib/apt/lists/*
 

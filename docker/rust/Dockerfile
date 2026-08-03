@@ -20,8 +20,29 @@
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
 FROM rust:1-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# P1-03: apt-get upgrade picks up any OS-level security patch published for
+# this exact Debian release since the base image was last rebuilt.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# P1-03: the upstream rust:1-bookworm base ships a full ImageMagick suite
+# (imagemagick, libmagickcore/libmagickwand + dev headers) and its own
+# transitive graph (libopenexr, libheif, libaom, X11, fontconfig,
+# gdk-pixbuf, ~30 packages) - none of it reachable by anything this image
+# actually does (compiling Rust crates against axum/actix-web/tokio/serde,
+# headless, no image codecs involved). A live scan (2026-08-02) attributed
+# 61 CRITICAL/HIGH findings to this one unused suite. Purging it here
+# (--auto-remove cleans up whatever becomes orphaned, so this doesn't have
+# to enumerate the full transitive list by hand) removes real unused attack
+# surface instead of just suppressing the finding - confirmed the resulting
+# image still builds/tests every Rust corpus case via `cases verify
+# --language rust` before this was pinned as the fix.
+RUN apt-get remove --purge -y --auto-remove \
+        imagemagick imagemagick-6.q16 imagemagick-6-common \
+        libmagickcore-6.q16-6-extra libmagickcore-6.q16-dev libmagickcore-dev \
+        libmagickwand-6.q16-dev libmagickwand-dev \
+        libmagickcore-6-arch-config libmagickcore-6-headers libmagickwand-6-headers \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CARGO_TARGET_DIR=/opt/cargo-target

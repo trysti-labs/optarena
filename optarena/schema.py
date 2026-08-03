@@ -45,12 +45,40 @@ def _is_number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def reject_unsafe_relpath(rel: str, where: str) -> None:
+    """P0-01/P0-02: every case-controlled "workspace-relative path" field
+    (setup_files/test_setup_files/reference_solution/broken_solutions keys,
+    disruption write_files/delete_files, expected_files path_pattern) goes
+    through here. Two distinct escapes, one check: a ".." segment can write
+    outside the workspace root entirely; a ".git" segment stays inside the
+    workspace but lands in a place `cases.git_init_workspace`'s host-native
+    `git add -A` will pick up as real repo config/hooks/filters and execute
+    on the host - see SECURITY.md for both. Runtime call sites
+    (cases.write_setup_files, drivers.openai_chat.concrete_target, ...)
+    additionally re-check with a resolved-path containment assertion right
+    before the write; this is the earlier, cheaper gate that rejects a bad
+    case before any model/API call is made.
+    """
+    if not isinstance(rel, str) or not rel:
+        raise _err(where, f"path must be a non-empty string, got {rel!r}")
+    if "\x00" in rel:
+        raise _err(where, f"path contains a NUL byte: {rel!r}")
+    if rel.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", rel):
+        raise _err(where, f"path must be workspace-relative, got {rel!r}")
+    for seg in re.split(r"[/\\]+", rel):
+        if seg == "..":
+            raise _err(where, f"path may not contain '..': {rel!r}")
+        if seg.lower() == ".git":
+            raise _err(where, f"path may not touch .git: {rel!r}")
+
+
 def _validate_string_map(value, where: str) -> None:
     if not isinstance(value, dict):
         raise _err(where, "must be an object of {relative_path: content}")
     for k, v in value.items():
         if not isinstance(k, str) or not k:
             raise _err(where, f"key {k!r} must be a non-empty string (a relative path)")
+        reject_unsafe_relpath(k, where)
         if not isinstance(v, str):
             raise _err(f"{where}.{k}", "value must be a string")
 
@@ -229,6 +257,7 @@ def validate_case(data: dict, source: str = "<case>") -> None:
                 raise _err(where, f"unknown key(s): {', '.join(sorted(unknown_e))}")
             if not isinstance(spec.get("path_pattern"), str) or not spec["path_pattern"]:
                 raise _err(where, "'path_pattern' must be a non-empty string")
+            reject_unsafe_relpath(spec["path_pattern"], f"{where}.path_pattern")
             for list_key in ("content_patterns", "not_content_patterns", "regex_patterns"):
                 if list_key in spec:
                     _validate_string_list(spec[list_key], f"{where}.{list_key}")
@@ -313,6 +342,8 @@ def validate_case(data: dict, source: str = "<case>") -> None:
                 _validate_string_map(dis["write_files"], f"{where}.write_files")
             if "delete_files" in dis:
                 _validate_string_list(dis["delete_files"], f"{where}.delete_files")
+                for rel in dis["delete_files"]:
+                    reject_unsafe_relpath(rel, f"{where}.delete_files")
             if "description" in dis and dis["description"] is not None and not isinstance(dis["description"], str):
                 raise _err(where, "'description' must be a string")
 

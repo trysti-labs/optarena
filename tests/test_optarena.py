@@ -20,6 +20,7 @@ from optarena.cases import (
     DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES, DockerSandbox, REPOS_DIR, _HARDENING_ARGS, baseline_incompatible,
     check_expected, classify_failure, diff_stats, dockerfile_for, evaluate_case, filter_cases, load_cases,
     normalize_workspace_line_endings, path_pattern_matches, prepare_workspace, run_capture, run_check_command,
+    write_setup_files,
 )
 from optarena.compare import (
     _cheaper, compare_runs, format_regression, format_table,
@@ -30,6 +31,7 @@ from optarena.drivers.base import CaseResult, subprocess_env
 from optarena.drivers.aider_cli import AiderDriver, parse_aider_metrics
 from optarena.drivers.cli_agents import CLIAgentDriver, parse_claude_json_metrics
 from optarena.drivers.openai_chat import concrete_target
+from optarena.drivers.sdk_base import SingleFileSDKDriver
 from optarena.metrics import aggregate, case_deltas
 from optarena.pricing import estimate_cost, is_local_backend, price_for
 from optarena.runner import _merge_trials, run_scenario, safe_run_name
@@ -305,7 +307,7 @@ class ImageReferenceValidationTests(unittest.TestCase):
                                "image_overrides": {"python": "--privileged"}})
 
     def test_resolve_image_validates_env_override(self):
-        import optarena.cases as cases_mod
+        import optarena._cases._sandbox as cases_mod
         d = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         with mock.patch.dict(os.environ, {"OPTARENA_SANDBOX_IMAGE": "--privileged"}):
@@ -325,7 +327,7 @@ class DockerCheckCommandTests(unittest.TestCase):
     def setUp(self):
         self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_"))
         self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
-        import optarena.cases as cases_mod
+        import optarena._cases._sandbox as cases_mod
         self.cases_mod = cases_mod
         # Reset the module-level docker-availability cache before each test.
         self._orig = (cases_mod._docker_checked_at, cases_mod._docker_ok,
@@ -492,7 +494,7 @@ class SharedSandboxTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         (self.root / "case_a").mkdir()
         (self.root / "case_b" / "t1").mkdir(parents=True)
-        import optarena.cases as cases_mod
+        import optarena._cases._sandbox as cases_mod
         self.cases_mod = cases_mod
         self._orig = (cases_mod._docker_checked_at, cases_mod._docker_ok,
                       cases_mod._docker_warned, dict(cases_mod._active_sandboxes))
@@ -590,7 +592,7 @@ class RunScenarioEmptyCasesTests(unittest.TestCase):
 
     def test_empty_case_set_refused_by_default(self):
         sc = Scenario(name="x", driver="aider", cases=[], cases_dir=str(self.empty_dir))
-        with mock.patch("optarena.runner.get_driver") as get_driver_mock:
+        with mock.patch("optarena.runner._execution.get_driver") as get_driver_mock:
             with self.assertRaises(ValueError) as ctx:
                 run_scenario(sc)
             get_driver_mock.assert_not_called()
@@ -599,7 +601,7 @@ class RunScenarioEmptyCasesTests(unittest.TestCase):
     def test_empty_case_set_allowed_with_flag(self):
         sc = Scenario(name="x", driver="aider", cases=[], cases_dir=str(self.empty_dir))
         fake_driver = mock.Mock(parallel_safe=False, caches_results=False)
-        with mock.patch("optarena.runner.get_driver", return_value=fake_driver):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=fake_driver):
             rec = run_scenario(sc, allow_empty=True)
         fake_driver.prepare.assert_called_once()
         fake_driver.teardown.assert_called_once()
@@ -634,8 +636,8 @@ class ParallelSandboxSharingTests(unittest.TestCase):
 
     def test_no_sandbox_started_when_parallel(self):
         sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
-        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
-             mock.patch("optarena.runner.DockerSandbox") as sandbox_cls:
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._fake_driver()), \
+             mock.patch("optarena.runner._execution.DockerSandbox") as sandbox_cls:
             run_scenario(sc, parallel=4)
         sandbox_cls.assert_not_called()
 
@@ -643,8 +645,8 @@ class ParallelSandboxSharingTests(unittest.TestCase):
         # C-05: a custom cases_dir is untrusted input - it must never share
         # one whole-run-root mount across its cases, even serially.
         sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
-        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
-             mock.patch("optarena.runner.DockerSandbox") as sandbox_cls:
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._fake_driver()), \
+             mock.patch("optarena.runner._execution.DockerSandbox") as sandbox_cls:
             run_scenario(sc, parallel=1)
         sandbox_cls.assert_not_called()
 
@@ -652,9 +654,9 @@ class ParallelSandboxSharingTests(unittest.TestCase):
         # The built-in catalogue (repo-controlled, self-verified) keeps the
         # fast shared-container path for serial runs.
         sc = Scenario(name="x", driver="aider", cases=["create_factorial"])
-        with mock.patch("optarena.runner.get_driver",
+        with mock.patch("optarena.runner._execution.get_driver",
                         return_value=self._fake_driver("create_factorial")), \
-             mock.patch("optarena.runner.DockerSandbox") as sandbox_cls:
+             mock.patch("optarena.runner._execution.DockerSandbox") as sandbox_cls:
             run_scenario(sc, parallel=1)
         sandbox_cls.assert_called_once()
 
@@ -688,8 +690,8 @@ class ParallelDurabilityTests(unittest.TestCase):
         driver.run_case.side_effect = lambda case, sc, ws: CaseResult(
             name=case["name"], passed=True, duration_s=0.1)
         seen = []
-        with mock.patch("optarena.runner.get_driver", return_value=driver), \
-             mock.patch("optarena.runner.store.save_checkpoint",
+        with mock.patch("optarena.runner._execution.get_driver", return_value=driver), \
+             mock.patch("optarena.runner._execution.store.save_checkpoint",
                         side_effect=lambda rec: seen.append(len(rec.cases))):
             record = run_scenario(self._scenario(), parallel=3)
         self.assertEqual(seen, [1, 2, 3, 4])
@@ -710,8 +712,8 @@ class ParallelDurabilityTests(unittest.TestCase):
         thread = __import__("threading").Thread(
             target=lambda: done.append(run_scenario(self._scenario(), parallel=2)),
             daemon=True)
-        with mock.patch("optarena.runner.get_driver", return_value=driver), \
-             mock.patch("optarena.runner.store.save_checkpoint"):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=driver), \
+             mock.patch("optarena.runner._execution.store.save_checkpoint"):
             thread.start()
             thread.join(timeout=60)
         self.assertFalse(thread.is_alive(), "parallel run hung on a worker exception")
@@ -736,8 +738,8 @@ class ParallelDurabilityTests(unittest.TestCase):
         driver = mock.Mock(parallel_safe=True, caches_results=False)
         driver.run_case.side_effect = _hang_after_two
         saved = []
-        with mock.patch("optarena.runner.get_driver", return_value=driver), \
-             mock.patch("optarena.runner.store.save_checkpoint",
+        with mock.patch("optarena.runner._execution.get_driver", return_value=driver), \
+             mock.patch("optarena.runner._execution.store.save_checkpoint",
                         side_effect=lambda rec: saved.append([c["name"] for c in rec.cases])):
             gate.set()
             run_scenario(self._scenario(), parallel=2)
@@ -800,7 +802,7 @@ class CachingDriverTrialsPlumbingTests(unittest.TestCase):
         driver = mock.Mock(parallel_safe=False, caches_results=True, trials=1)
         driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
         sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
-        with mock.patch("optarena.runner.get_driver", return_value=driver):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=driver):
             run_scenario(sc, trials=3)
         # the trial count reached the driver...
         self.assertEqual(driver.trials, 3)
@@ -853,18 +855,176 @@ class RunCaptureTests(unittest.TestCase):
         self.assertFalse(sentinel.exists(),
                          "child outlived the timed-out parent - process tree not killed")
 
+    def test_grandchild_killed_even_if_immediate_parent_already_exited(self):
+        """P0-03: the scenario `taskkill /T`'s parent-PID tree-walk is
+        weakest against - by the time cleanup runs, the immediate child has
+        already exited (its PID could even be reused by something
+        unrelated), so a walk keyed on live parent-child PID links can miss
+        the grandchild entirely. A Windows Job Object's membership doesn't
+        depend on the immediate parent still being alive; on POSIX, process
+        GROUP membership (set once, at session creation) doesn't either -
+        this is a real cross-platform regression test, not Windows-only."""
+        import subprocess as sp
+        import sys
+        import time
+        tmp = Path(tempfile.mkdtemp(prefix="optarena_treekill_gc_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        sentinel = tmp / "grandchild_ran.txt"
+        grandchild = tmp / "grandchild.py"
+        grandchild.write_text(
+            "import time\n"
+            "time.sleep(3)\n"
+            f"open(r'{sentinel}', 'w').close()\n",
+            encoding="utf-8")
+        child = tmp / "child.py"
+        child.write_text(
+            "import subprocess, sys\n"
+            f"subprocess.Popen([sys.executable, r'{grandchild}'])\n"
+            # exits immediately - the grandchild's recorded parent is gone
+            # well before the top-level timeout fires
+            "\n",
+            encoding="utf-8")
+        parent = tmp / "parent.py"
+        parent.write_text(
+            "import subprocess, sys, time\n"
+            f"subprocess.Popen([sys.executable, r'{child}'])\n"
+            "time.sleep(30)\n",
+            encoding="utf-8")
+        with self.assertRaises(sp.TimeoutExpired):
+            run_capture([sys.executable, str(parent)], timeout=1)
+        time.sleep(5)
+        self.assertFalse(sentinel.exists(),
+                         "grandchild outlived the timed-out ancestor after its own "
+                         "immediate parent had already exited")
+
+    @unittest.skipUnless(os.name != "posix", "Windows Job Object behavior")
+    def test_detached_grandchild_process_group_still_killed(self):
+        """P0-03: a grandchild spawned into its OWN new console/process
+        group (CREATE_NEW_PROCESS_GROUP - common for tools that want to
+        survive a Ctrl+C sent to their parent's group) must still be caught.
+        Job Object membership is unaffected by process-group detachment -
+        only an explicit breakaway request (which this job's LimitFlags do
+        not permit) would let a descendant escape it."""
+        import subprocess as sp
+        import sys
+        import time
+        tmp = Path(tempfile.mkdtemp(prefix="optarena_treekill_detach_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        sentinel = tmp / "detached_ran.txt"
+        detached = tmp / "detached.py"
+        detached.write_text(
+            "import time\n"
+            "time.sleep(3)\n"
+            f"open(r'{sentinel}', 'w').close()\n",
+            encoding="utf-8")
+        child = tmp / "child.py"
+        child.write_text(
+            "import subprocess, sys, time\n"
+            f"subprocess.Popen([sys.executable, r'{detached}'], "
+            "creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)\n"
+            "time.sleep(30)\n",
+            encoding="utf-8")
+        with self.assertRaises(sp.TimeoutExpired):
+            run_capture([sys.executable, str(child)], timeout=1)
+        time.sleep(5)
+        self.assertFalse(sentinel.exists(),
+                         "detached grandchild (own process group) outlived the "
+                         "timed-out parent")
+
     def test_output_capture_is_bounded_not_unbounded(self):
         # F-03: a misbehaving process dumping way more than any oracle tail
         # actually uses must not make run_capture buffer all of it - confirms
         # captured stdout stays near _MAX_CAPTURE_BYTES, not the ~2MB the
         # child actually writes.
         import sys
-        from optarena.cases import _MAX_CAPTURE_BYTES
+        from optarena._cases._sandbox import _MAX_CAPTURE_BYTES
         proc = run_capture(
             [sys.executable, "-c", "import sys; sys.stdout.write('x' * (2 * 1024 * 1024))"],
             timeout=30, text=True)
         self.assertEqual(proc.returncode, 0)
         self.assertLess(len(proc.stdout), 2 * _MAX_CAPTURE_BYTES)
+
+
+@unittest.skipUnless(os.name != "posix", "Windows Job Object behavior")
+class WindowsJobObjectTests(unittest.TestCase):
+    """P0-03: _WindowsJob directly, not just through run_capture's
+    integration - proves the primitive itself does what its docstring
+    claims (real termination, not just 'the test process happened to be
+    reaped some other way')."""
+
+    def test_create_and_close(self):
+        from optarena._cases._sandbox import _WindowsJob
+        job = _WindowsJob()
+        self.assertIsNotNone(job.handle)
+        job.close()
+        self.assertIsNone(job.handle)
+
+    def test_assign_and_terminate_actually_kills_the_process(self):
+        import subprocess as sp
+        import sys
+        from optarena._cases._sandbox import _WindowsJob
+        proc = sp.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        job = _WindowsJob()
+        try:
+            self.assertTrue(job.assign(proc.pid))
+            self.assertTrue(job.terminate())
+            proc.wait(timeout=5)
+            self.assertIsNotNone(proc.returncode)
+        finally:
+            job.close()
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    def test_assign_to_already_exited_pid_fails_gracefully(self):
+        import subprocess as sp
+        import sys
+        from optarena._cases._sandbox import _WindowsJob
+        proc = sp.Popen([sys.executable, "-c", "pass"])
+        proc.wait(timeout=5)
+        job = _WindowsJob()
+        try:
+            self.assertFalse(job.assign(proc.pid))
+        finally:
+            job.close()
+
+    def test_grandchild_spawned_after_assignment_is_also_a_member(self):
+        """The property the whole fix depends on: Windows automatically
+        adds a job member's OWN children to the same job - assignment
+        doesn't need to happen again for each new descendant."""
+        import subprocess as sp
+        import sys
+        import time
+        from optarena._cases._sandbox import _WindowsJob
+        tmp = Path(tempfile.mkdtemp(prefix="optarena_test_jobobject_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        sentinel = tmp / "grandchild_ran.txt"
+        grandchild = tmp / "grandchild.py"
+        grandchild.write_text(
+            f"import time\ntime.sleep(3)\nopen(r'{sentinel}', 'w').close()\n",
+            encoding="utf-8")
+        child = tmp / "child.py"
+        child.write_text(
+            f"import subprocess, sys, time\n"
+            f"subprocess.Popen([sys.executable, r'{grandchild}'])\n"
+            f"time.sleep(30)\n",
+            encoding="utf-8")
+        proc = sp.Popen([sys.executable, str(child)])
+        job = _WindowsJob()
+        try:
+            self.assertTrue(job.assign(proc.pid))
+            time.sleep(0.5)  # let the child actually spawn the grandchild
+            self.assertTrue(job.terminate())
+            proc.wait(timeout=5)
+        finally:
+            job.close()
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+        time.sleep(4)
+        self.assertFalse(sentinel.exists(),
+                         "grandchild survived - it was not a member of the "
+                         "job its parent was assigned to")
 
 
 class WorkspaceCleanupTests(unittest.TestCase):
@@ -887,8 +1047,8 @@ class WorkspaceCleanupTests(unittest.TestCase):
     def test_run_scenario_removes_its_workspace(self):
         made = Path(tempfile.mkdtemp(prefix="optarena_test_madews_"))
         sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
-        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
-             mock.patch("optarena.runner.tempfile.mkdtemp", return_value=str(made)):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._fake_driver()), \
+             mock.patch("optarena.runner._execution.tempfile.mkdtemp", return_value=str(made)):
             run_scenario(sc)
         self.assertFalse(made.exists(), "run workspace was not cleaned up")
 
@@ -896,8 +1056,8 @@ class WorkspaceCleanupTests(unittest.TestCase):
         made = Path(tempfile.mkdtemp(prefix="optarena_test_keptws_"))
         self.addCleanup(lambda: __import__("shutil").rmtree(made, ignore_errors=True))
         sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
-        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()), \
-             mock.patch("optarena.runner.tempfile.mkdtemp", return_value=str(made)):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._fake_driver()), \
+             mock.patch("optarena.runner._execution.tempfile.mkdtemp", return_value=str(made)):
             run_scenario(sc, keep_workspace=True)
         self.assertTrue(made.exists(), "workspace should have been kept for debugging")
 
@@ -905,7 +1065,7 @@ class WorkspaceCleanupTests(unittest.TestCase):
         supplied = Path(tempfile.mkdtemp(prefix="optarena_test_suppliedws_"))
         self.addCleanup(lambda: __import__("shutil").rmtree(supplied, ignore_errors=True))
         sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
-        with mock.patch("optarena.runner.get_driver", return_value=self._fake_driver()):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=self._fake_driver()):
             run_scenario(sc, workspace_root=supplied)
         self.assertTrue(supplied.exists(),
                         "a caller-supplied workspace must not be deleted by run_scenario")
@@ -1054,6 +1214,173 @@ class ExecutionOkTests(unittest.TestCase):
         self.assertEqual(result.failures, [])
         self.assertFalse(result.execution_ok)
         self.assertFalse(result.passed)
+
+
+class SecretRedactionTests(unittest.TestCase):
+    """
+    P1-01: a CLI agent's captured stderr (and exception text) is untrusted
+    output the tool itself controls - it can echo an environment variable
+    it was handed, intentionally (a verbose auth error) or not (a crash
+    dump). Canary-secret tests at three layers: the redaction primitives
+    themselves, the two CLI drivers that capture raw stderr, and the
+    storage layer that persists whatever a driver produced (the blanket
+    safety net for a driver that forgets its own redaction).
+    """
+
+    CANARY = "sk-CANARY0123456789ABCDEFGHIJKLMNOPQRSTUVWX"  # matches provider-api-key shape
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_secretredact_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+
+    @staticmethod
+    def _case():
+        return {"name": "c", "prompts": ["do it"], "expected_files": []}
+
+    # ── primitives ───────────────────────────────────────────────────────
+    def test_redact_known_secrets_exact_value(self):
+        from optarena.security import redact_known_secrets
+        text = f"auth failed, tried key={self.CANARY}"
+        self.assertNotIn(self.CANARY, redact_known_secrets(text, [self.CANARY]))
+
+    def test_redact_known_secrets_ignores_short_values(self):
+        """A short 'secret' (a placeholder default, a single word) is too
+        likely to collide with ordinary output to redact blindly."""
+        from optarena.security import redact_known_secrets
+        self.assertEqual(redact_known_secrets("the cat sat", ["cat"]), "the cat sat")
+
+    def test_redact_secret_patterns_catches_unknown_shaped_secret(self):
+        """Defense in depth: a token this call site was never TOLD about
+        (not in known_secrets) but that matches a known shape still gets
+        redacted."""
+        from optarena.security import redact_secret_patterns
+        text = f"leaked: {self.CANARY}"
+        self.assertNotIn(self.CANARY, redact_secret_patterns(text))
+
+    def test_redact_secrets_recursive_walks_nested_structure(self):
+        from optarena.security import redact_secrets_recursive
+        data = {"a": [{"b": f"key is {self.CANARY}"}, "clean"], "c": 42, "d": None}
+        out = redact_secrets_recursive(data)
+        self.assertNotIn(self.CANARY, json.dumps(out))
+        self.assertEqual(out["c"], 42)
+        self.assertIsNone(out["d"])
+        self.assertEqual(out["a"][1], "clean")
+
+    # ── CLI agent driver: non-zero exit (stderr) ────────────────────────
+    def test_cli_agent_stderr_canary_redacted(self):
+        driver = CLIAgentDriver("codex")
+        driver._binary = "fake-codex"
+        sc = Scenario(name="x", driver="codex",
+                      backend=Backend(api_key=self.CANARY))
+        fake = mock.Mock(returncode=1, stdout="", stderr=f"auth error: {self.CANARY}")
+        with mock.patch("optarena.drivers.cli_agents.run_capture", return_value=fake):
+            result = driver.run_case(self._case(), sc, self.ws)
+        self.assertNotIn(self.CANARY, result.extra.get("stderr", ""))
+        self.assertNotIn(self.CANARY, json.dumps(result.to_dict()))
+
+    def test_aider_stderr_canary_redacted(self):
+        driver = AiderDriver()
+        driver._aider = "fake-aider"
+        sc = Scenario(name="x", driver="aider",
+                      backend=Backend(api_key=self.CANARY))
+        fake = mock.Mock(returncode=1, stdout="", stderr=f"auth error: {self.CANARY}")
+        with mock.patch("optarena.drivers.aider_cli.run_capture", return_value=fake):
+            result = driver.run_case(self._case(), sc, self.ws)
+        self.assertNotIn(self.CANARY, result.extra.get("stderr", ""))
+        self.assertNotIn(self.CANARY, json.dumps(result.to_dict()))
+
+    # ── exception path ───────────────────────────────────────────────────
+    def test_cli_agent_exception_message_canary_redacted(self):
+        driver = CLIAgentDriver("codex")
+        driver._binary = "fake-codex"
+        sc = Scenario(name="x", driver="codex",
+                      backend=Backend(api_key=self.CANARY))
+
+        def _raise(*_a, **_kw):
+            raise RuntimeError(f"connection failed for key {self.CANARY}")
+
+        with mock.patch("optarena.drivers.cli_agents.run_capture", side_effect=_raise):
+            result = driver.run_case(self._case(), sc, self.ws)
+        self.assertIsNotNone(result.error)
+        self.assertNotIn(self.CANARY, result.error)
+
+    def test_aider_exception_message_canary_redacted(self):
+        driver = AiderDriver()
+        driver._aider = "fake-aider"
+        sc = Scenario(name="x", driver="aider",
+                      backend=Backend(api_key=self.CANARY))
+
+        def _raise(*_a, **_kw):
+            raise RuntimeError(f"connection failed for key {self.CANARY}")
+
+        with mock.patch("optarena.drivers.aider_cli.run_capture", side_effect=_raise):
+            result = driver.run_case(self._case(), sc, self.ws)
+        self.assertIsNotNone(result.error)
+        self.assertNotIn(self.CANARY, result.error)
+
+    # ── timeout path ─────────────────────────────────────────────────────
+    def test_cli_agent_timeout_never_surfaces_canary(self):
+        """A timeout's partial captured output never makes it into the
+        result at all today - this pins that behavior explicitly rather
+        than leaving it as an untested assumption."""
+        import subprocess as sp
+        driver = CLIAgentDriver("codex")
+        driver._binary = "fake-codex"
+        sc = Scenario(name="x", driver="codex",
+                      backend=Backend(api_key=self.CANARY))
+
+        def _timeout(*_a, **_kw):
+            raise sp.TimeoutExpired("fake-codex", 1, output="", stderr=self.CANARY)
+
+        with mock.patch("optarena.drivers.cli_agents.run_capture", side_effect=_timeout):
+            result = driver.run_case(self._case(), sc, self.ws)
+        self.assertNotIn(self.CANARY, json.dumps(result.to_dict()))
+
+    # ── storage layer: the blanket safety net ───────────────────────────
+    def test_store_save_run_redacts_pattern_secret_in_case_extra(self):
+        """Simulates a driver that (for whatever reason - a bug, a future
+        driver that forgot) let a pattern-shaped secret through to a
+        CaseResult - the storage layer must still catch it before it
+        reaches disk, since that's what the dashboard reads from."""
+        from optarena import store
+        from optarena.runner import RunRecord
+        d = Path(tempfile.mkdtemp(prefix="optarena_test_storeredact_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with mock.patch.object(store, "RESULTS_DIR", d), \
+             mock.patch.object(store, "RUNS_DIR", d / "runs"):
+            rec = RunRecord(
+                run_id="test-run-1",
+                scenario={"name": "x", "driver": "codex",
+                          "backend": {"api_key": None}},
+                started_at="2026-01-01T00:00:00",
+                cases=[{"name": "c", "passed": False,
+                       "extra": {"stderr": f"boom: {self.CANARY}"}}],
+                status="completed",
+            )
+            path = store.save_run(rec)
+            on_disk = path.read_text(encoding="utf-8")
+        self.assertNotIn(self.CANARY, on_disk)
+        self.assertIn("redacted", on_disk)  # json.dumps escapes the marker's non-ASCII quotes by default
+
+    # ── retroactive scrub of already-saved runs ─────────────────────────
+    def test_runs_scrub_secrets_catches_pattern_secret_not_just_api_key(self):
+        from optarena import cli, store
+        d = Path(tempfile.mkdtemp(prefix="optarena_test_scrubredact_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        runs_dir = d / "runs"
+        runs_dir.mkdir(parents=True)
+        rec = {
+            "run_id": "old-run", "scenario": {"backend": {"api_key": None}},
+            "cases": [{"name": "c", "extra": {"stderr": f"boom: {self.CANARY}"}}],
+        }
+        (runs_dir / "old-run.json").write_text(json.dumps(rec), encoding="utf-8")
+        with mock.patch.object(store, "RUNS_DIR", runs_dir), \
+             mock.patch.object(store, "rebuild_index"):
+            args = argparse.Namespace(yes=True)
+            rc = cli.cmd_runs_scrub_secrets(args)
+        self.assertEqual(rc, 0)
+        on_disk = (runs_dir / "old-run.json").read_text(encoding="utf-8")
+        self.assertNotIn(self.CANARY, on_disk)
 
 
 class DynamicDriverIntegrationTests(unittest.TestCase):
@@ -1530,6 +1857,437 @@ class ConcreteTargetTests(unittest.TestCase):
     def test_none_defaults(self):
         self.assertEqual(concrete_target(None), Path("output.txt"))
 
+    def test_traversal_and_git_paths_rejected(self):
+        """P0-02: write-site defense in depth. schema.validate_case is the
+        primary gate, but concrete_target is what both openai_chat.run_case
+        and sdk_base.run_case actually build a write path from - a '..' or
+        '.git' segment has no glob metacharacter and would otherwise survive
+        the basename-stripping below untouched."""
+        for pattern in ("../outside.py", "a/../../outside.py", "/etc/passwd",
+                        ".git/config", "a/.git/hooks/pre-commit"):
+            with self.assertRaises(ValueError):
+                concrete_target(pattern)
+
+
+class WriteSetupFilesGitPathTests(unittest.TestCase):
+    """P0-01 runtime layer: write_setup_files is the actual write site
+    behind setup_files, test_setup_files, and disruption write_files - this
+    is the last point that can still refuse a .git/.. path if a caller ever
+    reaches it with content that bypassed schema.validate_case."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="optarena_test_gitpath_"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+    def test_git_config_write_rejected(self):
+        with self.assertRaises(ValueError):
+            write_setup_files(self.root, {".git/config": "[core]\n"})
+        self.assertFalse((self.root / ".git").exists())
+
+    def test_traversal_write_rejected(self):
+        with self.assertRaises(ValueError):
+            write_setup_files(self.root, {"../outside.py": "x"})
+
+    def test_ordinary_paths_still_work(self):
+        write_setup_files(self.root, {"a/b.py": "x", "gitignore_but_not_dot_git": "y"})
+        self.assertEqual((self.root / "a" / "b.py").read_text(), "x")
+
+
+def _try_symlink(target: Path, link: Path) -> bool:
+    """True on success. Windows requires an elevated privilege or Developer
+    Mode to create a symlink at all - skip the test rather than fail it on a
+    host that doesn't have that (this project's own CI matrix includes
+    windows-latest, where this may or may not be enabled; POSIX runners are
+    unaffected)."""
+    try:
+        os.symlink(target, link)
+        return True
+    except OSError:
+        return False
+
+
+class WorkspaceInspectionLimitsTests(unittest.TestCase):
+    """P1-06: workspace snapshotting/diffing/scanning must not follow a
+    symlink outside the workspace, and must not walk/hash/read an unbounded
+    amount of data - a case's check_command and an agent's own actions have
+    real disk access inside the workspace."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="optarena_test_wslimits_"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+    def test_symlinked_file_is_skipped_not_followed(self):
+        from optarena.cases import snapshot
+        outside = Path(tempfile.mkdtemp(prefix="optarena_test_wslimits_outside_"))
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        secret = outside / "secret.txt"
+        secret.write_text("host secret content", encoding="utf-8")
+        link = self.root / "link.txt"
+        if not _try_symlink(secret, link):
+            self.skipTest("cannot create symlinks in this environment (needs elevated "
+                          "privilege / Developer Mode on Windows)")
+        (self.root / "real.txt").write_text("real", encoding="utf-8")
+        snap = snapshot(self.root)
+        self.assertIn("real.txt", snap)
+        self.assertNotIn("link.txt", snap)
+
+    def test_symlinked_directory_is_not_traversed_into(self):
+        """A symlinked directory earlier in the walked path isn't caught by
+        a leaf-level is_symlink() check on the FILE - the resolved path
+        must still be confirmed inside root."""
+        from optarena.cases import snapshot
+        outside = Path(tempfile.mkdtemp(prefix="optarena_test_wslimits_outsidedir_"))
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        (outside / "leaked.txt").write_text("leaked", encoding="utf-8")
+        link_dir = self.root / "linked_dir"
+        if not _try_symlink(outside, link_dir):
+            self.skipTest("cannot create symlinks in this environment (needs elevated "
+                          "privilege / Developer Mode on Windows)")
+        snap = snapshot(self.root)
+        self.assertFalse(any("leaked" in k for k in snap),
+                         f"content from outside the workspace leaked into the snapshot: {snap}")
+
+    def test_entry_count_cap_stops_the_walk(self):
+        from optarena.cases import snapshot
+        import optarena._cases._snapshot as cases_mod
+        with mock.patch.object(cases_mod, "_SNAPSHOT_MAX_ENTRIES", 5):
+            for i in range(20):
+                (self.root / f"f{i}.txt").write_text("x", encoding="utf-8")
+            snap = snapshot(self.root)
+        self.assertLessEqual(len(snap), 5)
+
+    def test_oversized_file_gets_size_only_signature_not_full_read(self):
+        from optarena.cases import snapshot
+        import optarena._cases._snapshot as cases_mod
+        with mock.patch.object(cases_mod, "_SNAPSHOT_MAX_FILE_BYTES", 10):
+            (self.root / "big.txt").write_text("x" * 100, encoding="utf-8")
+            snap = snapshot(self.root)
+        self.assertTrue(snap["big.txt"].startswith("size-only:"))
+
+    def test_size_only_signature_still_detects_a_change(self):
+        """changed_files must still notice a re-write of an oversized file
+        (different size), even though the signature isn't a full hash."""
+        from optarena.cases import changed_files, snapshot
+        import optarena._cases._snapshot as cases_mod
+        with mock.patch.object(cases_mod, "_SNAPSHOT_MAX_FILE_BYTES", 10):
+            (self.root / "big.txt").write_text("x" * 100, encoding="utf-8")
+            before = snapshot(self.root)
+            (self.root / "big.txt").write_text("x" * 200, encoding="utf-8")
+            changed = changed_files(before, self.root)
+        self.assertIn("big.txt", changed)
+
+    def test_check_expected_rejects_oversized_file_instead_of_reading_it(self):
+        from optarena.cases import check_expected
+        import optarena._cases._snapshot as cases_mod
+        with mock.patch.object(cases_mod, "_SNAPSHOT_MAX_FILE_BYTES", 10):
+            (self.root / "big.py").write_text("x" * 100, encoding="utf-8")
+            failures = check_expected(
+                ["big.py"], [{"path_pattern": "big.py", "content_patterns": ["x"]}], self.root)
+        self.assertTrue(failures)
+        self.assertIn("too large", failures[0])
+
+    def test_scan_workspace_symlink_skipped(self):
+        from optarena.security import scan_workspace
+        outside = Path(tempfile.mkdtemp(prefix="optarena_test_wslimits_scan_"))
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        secret = outside / "secret.py"
+        secret.write_text('password = "hunter2sekrit"', encoding="utf-8")
+        link = self.root / "link.py"
+        if not _try_symlink(secret, link):
+            self.skipTest("cannot create symlinks in this environment (needs elevated "
+                          "privilege / Developer Mode on Windows)")
+        res = scan_workspace(["link.py"], self.root)
+        self.assertEqual(res["total"], 0)
+
+    def test_scan_workspace_file_count_cap(self):
+        from optarena import security
+        files = [f"f{i}.py" for i in range(10)]
+        for f in files:
+            (self.root / f).write_text("x = 1\n", encoding="utf-8")
+        with mock.patch.object(security, "_SCAN_MAX_FILES", 3), \
+             mock.patch.object(security, "scan_text", wraps=security.scan_text) as m:
+            security.scan_workspace(files, self.root)
+        self.assertLessEqual(m.call_count, 3)
+
+
+class CargoCleanPrefixTests(unittest.TestCase):
+    """The actual fix for 22 false verify-corpus results on the Rust
+    corpus: cargo's build-cache identity for a local path package is
+    (name, version, deps, profile) - it does NOT include the package's own
+    absolute directory (confirmed live with
+    CARGO_LOG=cargo::core::compiler::fingerprint=trace). Two variants of the
+    same case, or two different cases that happen to share a generic
+    package name ("webapp"/"conc_case"/"dedup_perf" all do), can then have a
+    LATER cargo test silently reuse an EARLIER build's already-compiled
+    test binary - an oracle-violating broken_solutions variant read as
+    passing. _cargo_clean_prefix is what run_check_command prepends to
+    every check_command to force a real rebuild of just that one package
+    (not its dependencies) before each run."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="optarena_test_cargoclean_"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+
+    def test_no_cargo_toml_is_a_no_op(self):
+        from optarena._cases._sandbox import _cargo_clean_prefix
+        self.assertEqual(_cargo_clean_prefix(self.root), "")
+
+    def test_extracts_package_name_from_cargo_toml(self):
+        from optarena._cases._sandbox import _cargo_clean_prefix
+        (self.root / "Cargo.toml").write_text(
+            '[package]\nname = "sum_total"\nversion = "0.1.0"\nedition = "2021"\n',
+            encoding="utf-8")
+        prefix = _cargo_clean_prefix(self.root)
+        self.assertIn("cargo clean", prefix)
+        self.assertIn("-p sum_total", prefix)
+        self.assertTrue(prefix.endswith("; "))
+
+    def test_malformed_cargo_toml_is_a_safe_no_op(self):
+        from optarena._cases._sandbox import _cargo_clean_prefix
+        (self.root / "Cargo.toml").write_text("not actually toml\n", encoding="utf-8")
+        self.assertEqual(_cargo_clean_prefix(self.root), "")
+
+    def test_package_name_is_shell_quoted(self):
+        """Defense in depth: the name ultimately comes from case-JSON
+        content. Cargo itself only allows a small charset, but this must
+        not trust that blindly."""
+        from optarena._cases._sandbox import _cargo_clean_prefix
+        (self.root / "Cargo.toml").write_text(
+            '[package]\nname = "evil; rm -rf /"\nversion = "0.1.0"\n', encoding="utf-8")
+        prefix = _cargo_clean_prefix(self.root)
+        self.assertNotIn("rm -rf /", prefix.split("cargo clean", 1)[1].split(">", 1)[0]
+                          .replace("'evil; rm -rf /'", ""))
+        # the dangerous fragment must be inside a quoted argument, not a
+        # bare shell-interpretable segment
+        self.assertIn("'evil; rm -rf /'", prefix)
+
+    def test_run_check_command_prepends_it_for_rust_workspace(self):
+        """End to end through the real dispatch point, not just the helper
+        in isolation - proves it actually reaches the executed command."""
+        (self.root / "Cargo.toml").write_text(
+            '[package]\nname = "demo_pkg"\nversion = "0.1.0"\n', encoding="utf-8")
+        case = {"name": "c", "check_command": "cargo test --offline"}
+        with mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"}), \
+             mock.patch("optarena._cases._sandbox._run_check_command_local") as m:
+            m.return_value = ([], {})
+            run_check_command(case, self.root)
+        executed_cmd = m.call_args[0][0]
+        self.assertIn("cargo clean", executed_cmd)
+        self.assertIn("-p demo_pkg", executed_cmd)
+        self.assertTrue(executed_cmd.endswith("cargo test --offline"))
+
+    def test_run_check_command_unaffected_for_non_rust_workspace(self):
+        case = {"name": "c", "check_command": "python3 -m pytest"}
+        with mock.patch.dict(os.environ, {"OPTARENA_DISABLE_SANDBOX": "1"}), \
+             mock.patch("optarena._cases._sandbox._run_check_command_local") as m:
+            m.return_value = ([], {})
+            run_check_command(case, self.root)
+        self.assertEqual(m.call_args[0][0], "python3 -m pytest")
+
+
+def _load_standalone_script(dirname: str, name: str):
+    """<dirname>/<name>.py are standalone CI scripts, not part of the
+    optarena package (docker/ has no __init__.py, and putting it on
+    sys.path would shadow the real third-party `docker` SDK package) -
+    load by file path."""
+    import importlib.util
+    path = Path(__file__).resolve().parent.parent / dirname / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_docker_script(name: str):
+    return _load_standalone_script("docker", name)
+
+
+def _load_check_images_lock():
+    return _load_docker_script("check_images_lock")
+
+
+class CheckImagesLockPinnedDependenciesTests(unittest.TestCase):
+    """P1-04: the checker used to validate base_digest and lockfile
+    existence but never the pinned_dependencies values themselves - which is
+    exactly how images.lock.json's phpunit entry (11.5.56) silently drifted
+    from docker/php/Dockerfile's actual installed version (12.0.0) with no
+    CI failure. These exercise _check_pinned_dependencies directly against
+    small fixtures rather than the real repo files, so they stay meaningful
+    regardless of what versions are currently pinned."""
+
+    def setUp(self):
+        self.mod = _load_check_images_lock()
+
+    def test_matching_version_passes(self):
+        entry = {"dockerfile": "x/Dockerfile", "pinned_dependencies": {"phpunit": "12.0.0"}}
+        dockerfile_text = "RUN curl -fsSL https://phar.phpunit.de/phpunit-12.0.0.phar\n"
+        self.assertEqual(self.mod._check_pinned_dependencies("x", entry, dockerfile_text), [])
+
+    def test_drifted_version_fails(self):
+        """The exact real-world case this check exists for: the lock says
+        one version, the Dockerfile actually installs a different one."""
+        entry = {"dockerfile": "x/Dockerfile", "pinned_dependencies": {"phpunit": "11.5.56"}}
+        dockerfile_text = "RUN curl -fsSL https://phar.phpunit.de/phpunit-12.0.0.phar\n"
+        errors = self.mod._check_pinned_dependencies("x", entry, dockerfile_text)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("11.5.56", errors[0])
+        self.assertIn("12.0.0", errors[0])
+
+    def test_dependency_never_mentioned_fails(self):
+        entry = {"dockerfile": "x/Dockerfile", "pinned_dependencies": {"phpunit": "12.0.0"}}
+        self.assertTrue(self.mod._check_pinned_dependencies("x", entry, "FROM debian:trixie\n"))
+
+    def test_real_lock_file_currently_passes(self):
+        self.assertEqual(self.mod.check(), [])
+
+
+class CheckVulnBaselineTests(unittest.TestCase):
+    """P1-03: docker/check_vuln_baseline.py is what makes the image-vuln-scan
+    CI job actually blocking - a genuinely NEW CRITICAL/HIGH finding must
+    fail it, while the documented, already-triaged backlog in
+    docker/vuln-baseline/*.json must not (that's the whole point of a
+    baseline instead of a blanket continue-on-error)."""
+
+    def setUp(self):
+        self.mod = _load_docker_script("check_vuln_baseline")
+
+    def _scan(self, findings):
+        """findings: list of (cve_id, package_name)."""
+        return {"Results": [{"Vulnerabilities": [
+            {"VulnerabilityID": cve, "PkgName": pkg, "Severity": "CRITICAL"}
+            for cve, pkg in findings
+        ]}]}
+
+    def test_missing_baseline_file_is_a_problem_not_a_crash(self):
+        problems = self.mod.check("no-such-image", self._scan([]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("no baseline file", problems[0])
+
+    def test_new_finding_not_in_baseline_fails(self):
+        """The actual point of this mechanism: a CVE that isn't already
+        documented as accepted must fail, not silently pass."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            (baseline_dir / "img.json").write_text(json.dumps({
+                "image": "img", "expires_at": "2099-01-01",
+                "accepted_vulnerabilities": [{"id": "CVE-2020-1", "package": "old-pkg"}],
+            }), encoding="utf-8")
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [("CVE-2020-1", "old-pkg"), ("CVE-2026-9999", "new-pkg")]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("CVE-2026-9999", problems[0])
+        self.assertIn("new-pkg", problems[0])
+
+    def test_baseline_findings_alone_pass_clean(self):
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            (baseline_dir / "img.json").write_text(json.dumps({
+                "image": "img", "expires_at": "2099-01-01",
+                "accepted_vulnerabilities": [{"id": "CVE-2020-1", "package": "old-pkg"}],
+            }), encoding="utf-8")
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan([("CVE-2020-1", "old-pkg")]))
+        self.assertEqual(problems, [])
+
+    def test_expired_baseline_fails_even_with_no_new_findings(self):
+        """Forces periodic re-triage instead of the acceptance silently
+        becoming permanent."""
+        import datetime
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            (baseline_dir / "img.json").write_text(json.dumps({
+                "image": "img", "expires_at": "2020-01-01", "owner": "someone",
+                "accepted_vulnerabilities": [{"id": "CVE-2020-1", "package": "old-pkg"}],
+            }), encoding="utf-8")
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check(
+                    "img", self._scan([("CVE-2020-1", "old-pkg")]),
+                    today=datetime.date(2026, 1, 1))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("expired", problems[0])
+
+    def test_same_cve_across_multiple_targets_deduplicated(self):
+        """The same CVE+package can legitimately appear in multiple vendored
+        copies (two .deps.json files bundling the same library) - that's a
+        detail of where it was found, not a second vulnerability to demand
+        a second baseline entry for."""
+        scan = {"Results": [
+            {"Vulnerabilities": [{"VulnerabilityID": "CVE-2020-1", "PkgName": "p", "Severity": "HIGH"}]},
+            {"Vulnerabilities": [{"VulnerabilityID": "CVE-2020-1", "PkgName": "p", "Severity": "HIGH"}]},
+        ]}
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            (baseline_dir / "img.json").write_text(json.dumps({
+                "image": "img", "expires_at": "2099-01-01",
+                "accepted_vulnerabilities": [{"id": "CVE-2020-1", "package": "p"}],
+            }), encoding="utf-8")
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", scan)
+        self.assertEqual(problems, [])
+
+    def test_all_nine_real_baselines_exist_and_are_well_formed(self):
+        baseline_dir = Path(__file__).resolve().parent.parent / "docker" / "vuln-baseline"
+        images = [
+            "optarena-tester", "optarena-tester-python", "optarena-tester-node",
+            "optarena-tester-go", "optarena-tester-jvm", "optarena-tester-rust",
+            "optarena-tester-dotnet", "optarena-tester-php", "optarena-tester-ruby",
+        ]
+        for image in images:
+            with self.subTest(image=image):
+                path = baseline_dir / f"{image}.json"
+                self.assertTrue(path.is_file(), f"missing baseline: {path}")
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(data["image"], image)
+                self.assertIn("expires_at", data)
+                self.assertIn("owner", data)
+                self.assertTrue(data["accepted_vulnerabilities"])
+                for entry in data["accepted_vulnerabilities"]:
+                    self.assertIn("id", entry)
+                    self.assertIn("package", entry)
+
+
+class CheckNoInfraErrorsTests(unittest.TestCase):
+    """P2-06: scripts/check_no_infra_errors.py is what lets
+    integration-smoke.yml distinguish "the model got the task wrong" (an
+    ordinary, expected outcome for a small local smoke-test model) from
+    "the integration itself broke" (a container engine failure, a driver
+    crash - the actual thing that workflow exists to catch) - verified
+    directly against a real run record shape, not just plausible-looking
+    fixtures."""
+
+    def setUp(self):
+        self.mod = _load_standalone_script("scripts", "check_no_infra_errors")
+        self.d = Path(tempfile.mkdtemp(prefix="optarena_test_infracheck_"))
+        self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
+
+    def _write(self, summary: dict) -> str:
+        path = self.d / "run.json"
+        path.write_text(json.dumps({"summary": summary}), encoding="utf-8")
+        return str(path)
+
+    def test_model_failure_with_no_infra_errors_passes(self):
+        """The exact scenario confirmed live: aider+gemma3:1b failed the
+        create_fibonacci case (optarena run exits 1) with
+        infrastructure_errors=None - this must exit 0."""
+        path = self._write({"failed": 1, "infrastructure_errors": None})
+        with mock.patch.object(sys, "argv", ["check_no_infra_errors.py", path]):
+            self.assertEqual(self.mod.main(), 0)
+
+    def test_infrastructure_error_fails(self):
+        path = self._write({"failed": 1, "infrastructure_errors": 2})
+        with mock.patch.object(sys, "argv", ["check_no_infra_errors.py", path]):
+            self.assertEqual(self.mod.main(), 1)
+
+    def test_all_passed_no_infra_errors_passes(self):
+        path = self._write({"failed": 0, "infrastructure_errors": None})
+        with mock.patch.object(sys, "argv", ["check_no_infra_errors.py", path]):
+            self.assertEqual(self.mod.main(), 0)
+
+    def test_missing_argv_is_a_clean_usage_error_not_a_crash(self):
+        with mock.patch.object(sys, "argv", ["check_no_infra_errors.py"]):
+            self.assertEqual(self.mod.main(), 2)
+
 
 class NormalizeWorkspaceLineEndingsTests(unittest.TestCase):
     """
@@ -1978,6 +2736,48 @@ class ScenarioTests(unittest.TestCase):
         )
 
 
+class HostNativeExecutionConfirmationTests(unittest.TestCase):
+    """P1-05: a `cli`-kind driver (aider, Claude Code, ...) runs headlessly
+    on the HOST with the user's real filesystem/environment/credentials -
+    only the verifier sandbox is containerized. This gate must not silently
+    let that happen unattended."""
+
+    def _scenario(self, driver):
+        return Scenario(name="x", driver=driver,
+                         backend=Backend(kind="ollama", base_url="http://x", model="m"))
+
+    def test_baseline_driver_needs_no_confirmation(self):
+        from optarena.cli import _confirm_host_native_execution
+        args = argparse.Namespace(yes_i_understand_host_execution=False)
+        self.assertTrue(_confirm_host_native_execution([self._scenario("ollama-chat")], args))
+
+    def test_flag_bypasses_prompt_entirely(self):
+        from optarena.cli import _confirm_host_native_execution
+        args = argparse.Namespace(yes_i_understand_host_execution=True)
+        with mock.patch("sys.stdin.isatty", return_value=False):
+            self.assertTrue(_confirm_host_native_execution([self._scenario("aider")], args))
+
+    def test_non_interactive_without_flag_refused(self):
+        from optarena.cli import _confirm_host_native_execution
+        args = argparse.Namespace(yes_i_understand_host_execution=False)
+        with mock.patch("sys.stdin.isatty", return_value=False):
+            self.assertFalse(_confirm_host_native_execution([self._scenario("aider")], args))
+
+    def test_interactive_yes_confirms(self):
+        from optarena.cli import _confirm_host_native_execution
+        args = argparse.Namespace(yes_i_understand_host_execution=False)
+        with mock.patch("sys.stdin.isatty", return_value=True), \
+             mock.patch("builtins.input", return_value="y"):
+            self.assertTrue(_confirm_host_native_execution([self._scenario("claude-code")], args))
+
+    def test_interactive_no_refuses(self):
+        from optarena.cli import _confirm_host_native_execution
+        args = argparse.Namespace(yes_i_understand_host_execution=False)
+        with mock.patch("sys.stdin.isatty", return_value=True), \
+             mock.patch("builtins.input", return_value="n"):
+            self.assertFalse(_confirm_host_native_execution([self._scenario("codex")], args))
+
+
 class SchemaValidationTests(unittest.TestCase):
     """Phase 2.5: malformed/fuzzed scenario or case files must fail fast,
     with a clear file+key error, before any driver/backend call."""
@@ -2018,6 +2818,39 @@ class SchemaValidationTests(unittest.TestCase):
     def test_expected_files_unknown_key_rejected(self):
         with self.assertRaises(SchemaError):
             validate_case({"name": "x", "expected_files": [{"path_pattren": "a.py"}]})
+
+    def test_git_config_path_rejected_everywhere(self):
+        """P0-01: no case-controlled path field may reach .git - that's what
+        cases.git_init_workspace's host-native `git add -A` would pick up as
+        real repo config/hooks/filters and execute on the host."""
+        for variant in (".git/config", ".GIT/config", "a/.git/hooks/pre-commit",
+                        "a\\.git\\config"):
+            with self.assertRaises(SchemaError):
+                validate_case({"name": "x", "setup_files": {variant: "evil"}})
+            with self.assertRaises(SchemaError):
+                validate_case({"name": "x", "test_setup_files": {variant: "evil"}})
+            with self.assertRaises(SchemaError):
+                validate_case({"name": "x", "reference_solution": {variant: "evil"}})
+            with self.assertRaises(SchemaError):
+                validate_case({"name": "x", "broken_solutions": [
+                    {"name": "v1", "files": {variant: "evil"}}]})
+            with self.assertRaises(SchemaError):
+                validate_case({"name": "x", "disruptions": [
+                    {"after_prompt": 1, "write_files": {variant: "evil"}}]})
+            with self.assertRaises(SchemaError):
+                validate_case({"name": "x", "disruptions": [
+                    {"after_prompt": 1, "delete_files": [variant]}]})
+
+    def test_path_traversal_rejected_everywhere(self):
+        """P0-02: a '..' segment must be rejected in every path-bearing case
+        field, not just setup_files - it has no glob metacharacter, so
+        drivers.openai_chat.concrete_target's basename-only stripping would
+        otherwise pass it straight through to a workspace-escaping write."""
+        for variant in ("../outside.py", "a/../../outside.py", "/etc/passwd", "C:/x.py"):
+            with self.assertRaises(SchemaError):
+                validate_case({"name": "x", "setup_files": {variant: "x"}})
+            with self.assertRaises(SchemaError):
+                validate_case({"name": "x", "expected_files": [{"path_pattern": variant}]})
 
     def test_broken_solutions_shape_enforced(self):
         with self.assertRaises(SchemaError):
@@ -2101,7 +2934,7 @@ class MultiImageSandboxTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         (self.root / "case_py").mkdir()
         (self.root / "case_go").mkdir()
-        import optarena.cases as cases_mod
+        import optarena._cases._sandbox as cases_mod
         self.cases_mod = cases_mod
         self._orig = (cases_mod._docker_checked_at, cases_mod._docker_ok,
                       cases_mod._docker_warned, dict(cases_mod._active_sandboxes))
@@ -2347,8 +3180,13 @@ class PricingTests(unittest.TestCase):
             0.0,
         )
 
-    def test_unknown_model_is_free(self):
-        self.assertEqual(estimate_cost("gemma3:1b", 5000, 5000), 0.0)
+    def test_unknown_remote_model_cost_is_unknown_not_free(self):
+        """P2-05: an unpriced model on a non-local backend must report None
+        (unknown), never 0.0 - 0.0 is reserved for a confirmed-free/local
+        backend, and conflating the two used to make an unpriced remote run
+        silently report as costing nothing."""
+        self.assertIsNone(estimate_cost("gemma3:1b", 5000, 5000))
+        self.assertIsNone(price_for("gemma3:1b"))
 
     def test_local_hostname_substring_not_falsely_matched(self):
         # H-07: a lookalike domain must not be treated as the real localhost
@@ -2379,6 +3217,25 @@ class CostAggregationTests(unittest.TestCase):
     def test_free_run_reports_none_cost(self):
         cases = [{"name": "a", "passed": True, "duration_s": 1.0, "files": ["x"], "extra": {}}]
         self.assertIsNone(aggregate(cases)["total_cost_usd"])
+
+    def test_unpriced_case_flagged_not_silently_zeroed(self):
+        """P2-05: a case that made real (priced-model-shaped) token usage but
+        got cost_usd=None (unknown pricing) must surface as 'unpriced', not
+        just vanish into the sum as if it cost nothing."""
+        cases = [
+            {"name": "a", "passed": True, "duration_s": 1.0, "files": ["x.py"],
+             "extra": {"cost_usd": 0.10, "prompt_tokens": 100, "completion_tokens": 10}},
+            {"name": "b", "passed": True, "duration_s": 1.0, "files": ["y.py"],
+             "extra": {"cost_usd": None, "prompt_tokens": 200, "completion_tokens": 20}},
+        ]
+        s = aggregate(cases)
+        self.assertEqual(s["total_cost_usd"], 0.10)
+        self.assertEqual(s["unpriced_cases"], 1)
+
+    def test_no_unpriced_flag_when_all_cases_priced(self):
+        cases = [{"name": "a", "passed": True, "duration_s": 1.0, "files": ["x"],
+                  "extra": {"cost_usd": 0.10, "prompt_tokens": 100}}]
+        self.assertIsNone(aggregate(cases)["unpriced_cases"])
 
 
 class CheaperVerdictTests(unittest.TestCase):
@@ -2412,8 +3269,8 @@ class ManifestTests(unittest.TestCase):
         sc = Scenario(name=name, driver="aider", cases_dir=str(cases_dir))
         driver = mock.Mock(parallel_safe=False, caches_results=False)
         driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
-        with mock.patch("optarena.runner.get_driver", return_value=driver), \
-             mock.patch("optarena.runner.tempfile.mkdtemp", return_value=str(made)):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=driver), \
+             mock.patch("optarena.runner._execution.tempfile.mkdtemp", return_value=str(made)):
             return run_scenario(sc)
 
     def setUp(self):
@@ -2816,6 +3673,22 @@ class SecurityScanTests(unittest.TestCase):
         from optarena.security import scan_text
         self.assertEqual(scan_text("def add(a, b):\n    return a + b\n", "c.py"), [])
 
+    def test_secret_finding_never_persists_the_canary(self):
+        """P1-02: a secret-rule finding used to store up to 160 raw chars of
+        the matched line - which contains the very secret it just detected.
+        A canary value must never appear anywhere in the finding dict."""
+        from optarena.security import scan_text
+        canary = "sk-THIS_IS_A_CANARY_SECRET_VALUE_0123456789"
+        finds = scan_text(f'API_KEY = "{canary}"\n', "app.py")
+        secret_finds = [f for f in finds if f["rule"] == "provider-api-key"]
+        self.assertTrue(secret_finds)
+        for f in secret_finds:
+            for value in f.values():
+                self.assertNotIn(canary, str(value))
+        self.assertIn("redacted", secret_finds[0]["snippet"])
+        # a non-secret rule's snippet is unaffected - still the real line
+        self.assertIn("os.system", scan_text('os.system("x " + a)\n', "app.py")[0]["snippet"])
+
     def test_scan_workspace_rollup(self):
         from optarena.security import scan_workspace
         with tempfile.TemporaryDirectory() as d:
@@ -2858,6 +3731,34 @@ class PackTests(unittest.TestCase):
             out.write_text(json.dumps(bad))
             with self.assertRaises(ValueError):
                 packs.load_pack(str(out))
+
+    def test_plain_http_rejected_by_default(self):
+        """P1-07: a pack fetched over plain http has no transport integrity
+        against an on-path attacker - refused before any network call is
+        made, not just discouraged."""
+        from optarena import packs
+        with self.assertRaises(ValueError) as ctx:
+            packs.load_pack("http://example.com/x.optpack.json")
+        self.assertIn("http", str(ctx.exception).lower())
+
+    def test_plain_http_allowed_with_explicit_opt_in(self):
+        """allow_insecure=True must get PAST the transport check - no real
+        network call, just proving urlopen is actually reached instead of
+        the ValueError firing first."""
+        from optarena import packs
+        with mock.patch("optarena.packs.urllib.request.urlopen") as m:
+            m.side_effect = OSError("simulated: nothing listening")
+            with self.assertRaises(OSError):
+                packs.load_pack("http://127.0.0.1:1/x.optpack.json", allow_insecure=True)
+            m.assert_called_once()
+
+    def test_https_never_needs_the_opt_in(self):
+        from optarena import packs
+        with mock.patch("optarena.packs.urllib.request.urlopen") as m:
+            m.side_effect = OSError("simulated: nothing listening")
+            with self.assertRaises(OSError):
+                packs.load_pack("https://example.invalid/x.optpack.json")
+            m.assert_called_once()
 
     def test_install_idempotent_and_resolve(self):
         from optarena import packs
@@ -3296,7 +4197,7 @@ class RunScenarioLifecycleEventsTests(unittest.TestCase):
         old = sys.stdout
         sys.stdout = buf
         try:
-            with mock.patch("optarena.runner.get_driver", return_value=driver):
+            with mock.patch("optarena.runner._execution.get_driver", return_value=driver):
                 rec = run_scenario(sc, events=events)
         finally:
             sys.stdout = old
@@ -3337,6 +4238,29 @@ class ManifestTrialsTests(unittest.TestCase):
         self.assertEqual(m["trials"], 3)
         self.assertEqual(m["runner_trials"], 1)
 
+    def test_manifest_records_source_and_platform(self):
+        """P2-04: a manifest used to record oracle_version/case_set_hash/
+        trials but nothing about the exact tool build (git commit, dirty
+        state) or the platform it ran on - two results could be
+        semantically identical by those fields yet not be reproducible from
+        one another. Values may legitimately be None off a non-git install,
+        but the keys must always be present."""
+        from optarena.runner import build_manifest
+        m = build_manifest(
+            Scenario(name="x", driver="aider", backend=Backend(kind="ollama", base_url="http://x", model="m")),
+            [], requested_trials=1)
+        for key in ("git_commit", "git_dirty", "python_version", "platform"):
+            self.assertIn(key, m)
+        self.assertIsInstance(m["python_version"], str)
+        self.assertTrue(m["python_version"])
+
+    def test_manifest_records_driver_version_key(self):
+        from optarena.runner import build_manifest
+        m = build_manifest(
+            Scenario(name="x", driver="aider", backend=Backend(kind="ollama", base_url="http://x", model="m")),
+            [], requested_trials=1)
+        self.assertIn("driver_version", m)
+
     def test_caching_driver_manifest_reflects_requested_trials_not_one(self):
         cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_manifesttrials_"))
         self.addCleanup(shutil.rmtree, cases_dir, ignore_errors=True)
@@ -3346,10 +4270,142 @@ class ManifestTrialsTests(unittest.TestCase):
         driver = mock.Mock(parallel_safe=False, caches_results=True, trials=1)
         driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
         sc = Scenario(name="x", driver="aider", cases_dir=str(cases_dir))
-        with mock.patch("optarena.runner.get_driver", return_value=driver):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=driver):
             rec = run_scenario(sc, trials=5)
         self.assertEqual(rec.manifest["trials"], 5)
         self.assertEqual(rec.manifest["runner_trials"], 1)
+
+
+class GetDriverVersionTests(unittest.TestCase):
+    """P2-04: get_driver_version is manifest metadata, not a live-run
+    dependency - every failure mode returns None rather than raising, and
+    nothing here should ever talk to a model/provider."""
+
+    def test_unknown_driver_returns_none(self):
+        from optarena.drivers import get_driver_version
+        self.assertIsNone(get_driver_version("not-a-real-driver"))
+
+    def test_baseline_driver_returns_none(self):
+        from optarena.drivers import get_driver_version
+        self.assertIsNone(get_driver_version("openai-chat"))
+        self.assertIsNone(get_driver_version("ollama-chat"))
+
+    def test_cli_driver_binary_not_on_path_returns_none(self):
+        from optarena.drivers import get_driver_version
+        with mock.patch("shutil.which", return_value=None), \
+             mock.patch("optarena.drivers.aider_cli.find_aider", return_value=None):
+            self.assertIsNone(get_driver_version("aider"))
+            self.assertIsNone(get_driver_version("codex"))
+
+    def test_cli_driver_version_parsed_from_first_output_line(self):
+        from optarena.drivers import get_driver_version
+        fake = mock.Mock(returncode=0, stdout="aider 0.60.1\nsome other line\n", stderr="")
+        with mock.patch("optarena.drivers.aider_cli.find_aider", return_value="/usr/bin/aider"), \
+             mock.patch("subprocess.run", return_value=fake):
+            self.assertEqual(get_driver_version("aider"), "aider 0.60.1")
+
+    def test_cli_driver_version_probe_never_raises(self):
+        from optarena.drivers import get_driver_version
+
+        def _boom(*_a, **_kw):
+            raise OSError("simulated: binary vanished mid-probe")
+
+        with mock.patch("optarena.drivers.aider_cli.find_aider", return_value="/usr/bin/aider"), \
+             mock.patch("subprocess.run", side_effect=_boom):
+            self.assertIsNone(get_driver_version("aider"))
+
+    def test_sdk_driver_package_not_installed_returns_none(self):
+        from importlib.metadata import PackageNotFoundError
+        from optarena.drivers import get_driver_version
+        with mock.patch("importlib.metadata.version", side_effect=PackageNotFoundError):
+            self.assertIsNone(get_driver_version("crewai"))
+
+    def test_sdk_driver_version_from_installed_package_metadata(self):
+        from optarena.drivers import get_driver_version
+        with mock.patch("importlib.metadata.version", return_value="1.2.3"):
+            self.assertEqual(get_driver_version("crewai"), "1.2.3")
+
+    def test_sdk_driver_uses_pip_distribution_name_not_import_name(self):
+        """Found live while implementing this: `openai-agents`' import name
+        (`import agents`) differs from its PyPI distribution name
+        (`openai-agents`), and `importlib.metadata.version()` needs the
+        distribution name - looking up "agents" silently returned None even
+        though the package IS installed. Confirms the fix queries the
+        correct name, not the import name."""
+        from importlib.metadata import PackageNotFoundError
+        from optarena.drivers import get_driver_version
+
+        def _fake_version(name):
+            if name == "openai-agents":
+                return "0.18.3"
+            raise PackageNotFoundError(name)
+
+        with mock.patch("importlib.metadata.version", side_effect=_fake_version):
+            self.assertEqual(get_driver_version("openai-agents"), "0.18.3")
+
+    def test_every_sdk_driver_has_a_pip_name_entry(self):
+        from optarena.drivers import DRIVERS, _SDK_PIP_NAMES
+        for key, info in DRIVERS.items():
+            if info["kind"] == "sdk":
+                self.assertIn(key, _SDK_PIP_NAMES, f"{key} has no _SDK_PIP_NAMES entry")
+
+
+class EntryPointDriverDiscoveryTests(unittest.TestCase):
+    """P3-02: a third-party package can register a driver via the
+    `optarena.drivers` entry-point group without any code change here."""
+
+    @staticmethod
+    def _fake_entry_point(name, driver_cls):
+        ep = mock.Mock()
+        ep.name = name
+        ep.value = "fake_pkg.driver:FakeDriver"
+        ep.load.return_value = driver_cls
+        return ep
+
+    def test_discovered_entry_point_is_merged_into_drivers_registry(self):
+        from optarena.drivers import _load_entry_point_drivers
+        ep = self._fake_entry_point("my-tool", mock.Mock)
+        with mock.patch("importlib.metadata.entry_points", return_value=[ep]):
+            discovered = _load_entry_point_drivers()
+        self.assertIn("my-tool", discovered)
+        self.assertIs(discovered["my-tool"]["_entry_point"], ep)
+        self.assertEqual(discovered["my-tool"]["kind"], "external")
+
+    def test_get_driver_instantiates_a_discovered_entry_point(self):
+        made = mock.Mock(name="instance")
+        driver_cls = mock.Mock(return_value=made)
+        ep = self._fake_entry_point("my-tool", driver_cls)
+        with mock.patch.dict(DRIVERS, {"my-tool": {
+            "kind": "external", "backend": "scenario", "status": "external",
+            "file_tools": True, "summary": "x", "owner": None, "tested_with": None,
+            "_entry_point": ep,
+        }}):
+            result = get_driver("my-tool")
+        driver_cls.assert_called_once_with()
+        self.assertIs(result, made)
+
+    def test_get_driver_wraps_a_broken_entry_point_in_runtime_error(self):
+        ep = mock.Mock()
+        ep.name = "broken-tool"
+        ep.value = "broken_pkg:Broken"
+        ep.load.side_effect = ImportError("no module named broken_pkg")
+        with mock.patch.dict(DRIVERS, {"broken-tool": {
+            "kind": "external", "backend": "scenario", "status": "external",
+            "file_tools": True, "summary": "x", "owner": None, "tested_with": None,
+            "_entry_point": ep,
+        }}):
+            with self.assertRaises(RuntimeError):
+                get_driver("broken-tool")
+
+    def test_no_entry_points_installed_is_not_an_error(self):
+        from optarena.drivers import _load_entry_point_drivers
+        with mock.patch("importlib.metadata.entry_points", return_value=[]):
+            self.assertEqual(_load_entry_point_drivers(), {})
+
+    def test_entry_points_lookup_failure_is_swallowed(self):
+        from optarena.drivers import _load_entry_point_drivers
+        with mock.patch("importlib.metadata.entry_points", side_effect=RuntimeError("boom")):
+            self.assertEqual(_load_entry_point_drivers(), {})
 
 
 class RunScenarioCleanupResilienceTests(unittest.TestCase):
@@ -3372,7 +4428,7 @@ class RunScenarioCleanupResilienceTests(unittest.TestCase):
         driver.run_case.return_value = CaseResult(name="c1", passed=True, duration_s=0.1)
         driver.teardown.side_effect = RuntimeError("teardown boom")
         sc = Scenario(name="x", driver="aider", cases_dir=str(self.cases_dir))
-        with mock.patch("optarena.runner.get_driver", return_value=driver):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=driver):
             rec = run_scenario(sc)  # must not raise
         self.assertEqual(rec.status, "completed")
         self.assertEqual(rec.summary["passed"], 1)
@@ -3462,13 +4518,106 @@ class InfrastructureErrorAggregateTests(unittest.TestCase):
         self.assertEqual(s["infrastructure_errors"], 1)
 
 
+class CapabilityAwareAggregateTests(unittest.TestCase):
+    """P2-07: a driver with no file-editing tools (every baseline/SDK
+    driver) structurally cannot satisfy some cases regardless of model
+    output - `pass_rate` must stay exactly what it always meant (every
+    case, unadjusted, still comparable to older runs), while
+    `eligible_pass_rate` gives the "of the cases this driver could possibly
+    have won" second lens, same shape as F-10's adjusted_pass_rate for
+    infrastructure errors."""
+
+    def test_excluded_cases_lower_overall_but_not_eligible_rate(self):
+        cases = [
+            {"passed": True, "duration_s": 1, "extra": {}},
+            {"passed": True, "duration_s": 1, "extra": {}},
+            {"passed": False, "duration_s": 1,
+             "extra": {"capability_excluded": "needs 2 separate files - a flat-file writer produces exactly one"}},
+        ]
+        s = aggregate(cases)
+        self.assertEqual(s["pass_rate"], round(2 / 3, 3))   # unchanged - every case still counts
+        self.assertEqual(s["capability_excluded_cases"], 1)
+        self.assertEqual(s["eligible_pass_rate"], 1.0)      # 2/2 of what this driver could win
+        self.assertEqual(
+            s["capability_exclusion_reasons"],
+            ["needs 2 separate files - a flat-file writer produces exactly one"])
+
+    def test_none_when_nothing_excluded(self):
+        cases = [{"passed": True, "duration_s": 1, "extra": {}}]
+        s = aggregate(cases)
+        self.assertIsNone(s["capability_excluded_cases"])
+        self.assertIsNone(s["eligible_pass_rate"])
+        self.assertIsNone(s["capability_exclusion_reasons"])
+
+    def test_multiple_distinct_reasons_deduplicated_and_sorted(self):
+        cases = [
+            {"passed": False, "duration_s": 1, "extra": {"capability_excluded": "reason B"}},
+            {"passed": False, "duration_s": 1, "extra": {"capability_excluded": "reason A"}},
+            {"passed": False, "duration_s": 1, "extra": {"capability_excluded": "reason A"}},
+        ]
+        s = aggregate(cases)
+        self.assertEqual(s["capability_excluded_cases"], 3)
+        self.assertEqual(s["capability_exclusion_reasons"], ["reason A", "reason B"])
+        self.assertIsNone(s["eligible_pass_rate"])  # eligible_total is 0 here
+
+
+class RunnerCapabilityExclusionWiringTests(unittest.TestCase):
+    """P2-07: the actual wiring - runner._run_case must record
+    capability_excluded ONLY for a file_tools=False driver on a case
+    baseline_incompatible() actually flags, and never for a file_tools=True
+    (CLI-agent) driver even on the same case."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_capexclusion_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+
+    @staticmethod
+    def _multi_file_case():
+        # baseline_incompatible() flags this: 2 expected_files, a flat-file
+        # writer can only ever produce one.
+        return {
+            "name": "c", "prompts": ["do it"],
+            "expected_files": [{"path_pattern": "a.py"}, {"path_pattern": "b.py"}],
+        }
+
+    def test_file_tools_false_driver_gets_capability_excluded(self):
+        from optarena.runner import _run_case
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.return_value = CaseResult(name="c", passed=False)
+        sc = Scenario(name="s", driver="openai-chat",
+                      backend=Backend(base_url="http://x", model="m"))
+        result = _run_case(driver, self._multi_file_case(), sc, self.ws, trials=1)
+        self.assertIn("capability_excluded", result.extra)
+        self.assertIn("2 separate files", result.extra["capability_excluded"])
+
+    def test_file_tools_true_driver_never_gets_capability_excluded(self):
+        from optarena.runner import _run_case
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.return_value = CaseResult(name="c", passed=False)
+        sc = Scenario(name="s", driver="aider",
+                      backend=Backend(base_url="http://x", model="m"))
+        result = _run_case(driver, self._multi_file_case(), sc, self.ws, trials=1)
+        self.assertNotIn("capability_excluded", result.extra)
+
+    def test_file_tools_false_driver_on_a_compatible_case_unaffected(self):
+        from optarena.runner import _run_case
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.return_value = CaseResult(name="c", passed=True)
+        sc = Scenario(name="s", driver="openai-chat",
+                      backend=Backend(base_url="http://x", model="m"))
+        case = {"name": "c", "prompts": ["do it"],
+                "expected_files": [{"path_pattern": "a.py"}]}
+        result = _run_case(driver, case, sc, self.ws, trials=1)
+        self.assertNotIn("capability_excluded", result.extra)
+
+
 class ImageOverrideResolutionTests(unittest.TestCase):
     """F-15: a scenario-level image_overrides map lets a run pin a specific
     immutable tag per case image without a single global env var replacing
     every image uniformly."""
 
     def setUp(self):
-        import optarena.cases as cases_mod
+        import optarena._cases._sandbox as cases_mod
         self.cases_mod = cases_mod
         self.addCleanup(cases_mod.set_image_overrides, None)
 
@@ -3494,7 +4643,7 @@ class EngineHealthTTLTests(unittest.TestCase):
     within seconds, not stay "unavailable" until the process exits."""
 
     def setUp(self):
-        import optarena.cases as cases_mod
+        import optarena._cases._sandbox as cases_mod
         self.cases_mod = cases_mod
         self._orig = (cases_mod._docker_checked_at, cases_mod._docker_ok)
         cases_mod._docker_checked_at = -1.0
@@ -3594,7 +4743,7 @@ class EngineStateResetTests(unittest.TestCase):
     every later one."""
 
     def setUp(self):
-        import optarena.cases as cases_mod
+        import optarena._cases._sandbox as cases_mod
         self.cases_mod = cases_mod
         self._orig = (cases_mod._docker_checked_at, cases_mod._docker_warned,
                       dict(cases_mod._pull_attempts))
@@ -3623,9 +4772,9 @@ class EngineStateResetTests(unittest.TestCase):
         self.cases_mod._docker_warned = True
         driver = mock.Mock(parallel_safe=False, caches_results=False)
         driver.run_case.return_value = CaseResult(name="create_factorial", passed=True)
-        with mock.patch("optarena.runner.get_driver", return_value=driver), \
-             mock.patch("optarena.runner.DockerSandbox"), \
-             mock.patch("optarena.runner.store.save_checkpoint"):
+        with mock.patch("optarena.runner._execution.get_driver", return_value=driver), \
+             mock.patch("optarena.runner._execution.DockerSandbox"), \
+             mock.patch("optarena.runner._execution.store.save_checkpoint"):
             run_scenario(Scenario(name="x", driver="aider", cases=["create_factorial"]))
         self.assertFalse(self.cases_mod._docker_warned)
 
@@ -3816,6 +4965,104 @@ class BaselineDriverEndToEndTests(unittest.TestCase):
         self.assertNotIn(b"\r\n", raw)
 
 
+class _RealWorkerFakeDriver(SingleFileSDKDriver):
+    """
+    P0-04: a fake SDK driver for exercising the REAL subprocess worker
+    mechanism end to end (SDKWorkerProcessTests below) - unlike
+    SDKDriverBaseTests._driver's `_Fake`, this is a genuine MODULE-LEVEL
+    class with no closure state, because a real child process needs a
+    target it can actually pickle-by-reference and import; a class defined
+    inside a function cannot cross a process boundary at all. Behavior is
+    driven entirely by `scenario.backend.model` (the one thing that DOES
+    cross the boundary, being a plain dataclass field) rather than by
+    constructor arguments, for the same reason.
+    """
+    name = "fake-real-sdk"
+
+    def open_session(self, scenario):
+        return {"opened": True}
+
+    def close_session(self, session) -> None:
+        pass
+
+    def complete(self, session, prompt: str, scenario, timeout):
+        import time as _time
+        model = scenario.backend.model
+        if model.startswith("slow:"):
+            _time.sleep(float(model.split(":", 1)[1]))
+        return "```\nok\n```", {}
+
+
+class SDKWorkerProcessTests(unittest.TestCase):
+    """P0-04: proves the actual mechanism, not just run_case()'s bookkeeping
+    around it - a call that overruns its deadline gets its OS process
+    killed, not merely abandoned. This is what SDKDriverBaseTests' `_Fake`
+    (a local class, bypassing the real worker for exactly this reason)
+    cannot verify on its own."""
+
+    def _scenario(self, model="fast"):
+        return Scenario(name="s", driver="fake-real-sdk",
+                        backend=Backend(base_url="http://x", model=model))
+
+    def test_worker_runs_in_a_different_os_process(self):
+        driver = _RealWorkerFakeDriver()
+        handle = driver._open_worker(self._scenario())
+        try:
+            proc, _conn = handle
+            self.assertNotEqual(proc.pid, os.getpid())
+            self.assertTrue(proc.is_alive())
+        finally:
+            driver._close_worker(handle)
+
+    def test_normal_completion_round_trips_through_the_worker(self):
+        driver = _RealWorkerFakeDriver()
+        scenario = self._scenario("fast")
+        handle = driver._open_worker(scenario)
+        try:
+            text, usage = driver._complete_with_deadline(handle, "p", scenario, 20)
+            self.assertIn("ok", text)
+            self.assertEqual(usage, {})
+        finally:
+            driver._close_worker(handle)
+
+    def test_overrun_call_actually_kills_the_process(self):
+        """The point of P0-04's fix: not "eventually reported as timed out"
+        (the old thread-based version already did that) but "the process
+        making the call is confirmed dead" - a killed API request cannot
+        keep consuming credits in the background."""
+        from optarena.drivers.sdk_base import SDKTimeout
+        driver = _RealWorkerFakeDriver()
+        scenario = self._scenario("slow:5")
+        handle = driver._open_worker(scenario)
+        proc, _conn = handle
+        with self.assertRaises(SDKTimeout):
+            driver._complete_with_deadline(handle, "p", scenario, 0.3)
+        self.assertFalse(proc.is_alive())
+        self.assertIsNotNone(proc.exitcode)   # actually reaped, not just "not alive yet"
+        driver._close_worker(handle)   # must not raise against an already-dead process
+
+    def test_close_worker_on_a_live_process_is_clean(self):
+        driver = _RealWorkerFakeDriver()
+        handle = driver._open_worker(self._scenario("fast"))
+        proc, _conn = handle
+        driver._close_worker(handle)
+        self.assertFalse(proc.is_alive())
+
+    def test_full_run_case_survives_a_real_timeout(self):
+        """End to end through run_case() itself, not just the worker
+        primitives directly - the actual case loop must report the timeout
+        cleanly and the worker process must not survive it."""
+        driver = _RealWorkerFakeDriver()
+        case = {"name": "c", "prompts": ["p"], "timeout": 0.3,
+                "expected_files": [{"path_pattern": "hi.py"}]}
+        ws = Path(tempfile.mkdtemp(prefix="optarena_test_sdkworker_"))
+        self.addCleanup(shutil.rmtree, ws, ignore_errors=True)
+        result = driver.run_case(case, self._scenario("slow:5"), ws)
+        self.assertIsNotNone(result.error)
+        self.assertIn("budget", result.error)
+        self.assertLess(result.duration_s, 4.0)
+
+
 class SDKDriverBaseTests(unittest.TestCase):
     """
     A-09: the six SDK drivers now share one case loop, so these test that loop
@@ -3833,7 +5080,7 @@ class SDKDriverBaseTests(unittest.TestCase):
 
     @staticmethod
     def _driver(reply="```\nprint('hi')\n```", usage=None, delay_s=0.0, closed=None):
-        from optarena.drivers.sdk_base import SingleFileSDKDriver
+        from optarena.drivers.sdk_base import SDKTimeout, SingleFileSDKDriver
 
         class _Fake(SingleFileSDKDriver):
             name = "fake-sdk"
@@ -3852,6 +5099,43 @@ class SDKDriverBaseTests(unittest.TestCase):
                     import time as _t
                     _t.sleep(delay_s)
                 return reply, dict(usage or {})
+
+            # Test-only: this class is defined here as a closure over
+            # reply/delay_s/usage/closed, so it (like any locally-defined
+            # class) cannot be sent across a real process boundary - pickle
+            # needs a module-level, importable class. These overrides
+            # exercise run_case()'s own orchestration (deadline math, error
+            # reporting, session lifecycle) directly in-process instead, the
+            # same way the base class did before P0-04's process-based
+            # rewrite. The REAL subprocess mechanism - genuine killability,
+            # not just deadline bookkeeping - is covered separately by
+            # SDKWorkerProcessTests below, via a module-level driver.
+            def _open_worker(self, scenario):
+                return self.open_session(scenario)
+
+            def _close_worker(self, session):
+                self.close_session(session)
+
+            def _complete_with_deadline(self, session, prompt, scenario, remaining):
+                import threading as _threading
+                box: dict = {}
+
+                def _run():
+                    try:
+                        box["value"] = self.complete(session, prompt, scenario, remaining)
+                    except BaseException as exc:  # noqa: BLE001
+                        box["error"] = exc
+
+                t = _threading.Thread(target=_run, daemon=True)
+                t.start()
+                t.join(remaining)
+                if t.is_alive():
+                    raise SDKTimeout(
+                        f"{self.name} did not respond within the case's remaining "
+                        f"{remaining:.0f}s budget")
+                if "error" in box:
+                    raise box["error"]
+                return box["value"]
 
         return _Fake()
 
@@ -3933,10 +5217,10 @@ class SDKDriverBaseTests(unittest.TestCase):
         self.assertNotIn("prompt_tokens", result.extra)
         self.assertEqual(result.extra["cost_usd"], 0.0)
 
-    def test_session_is_closed_even_on_timeout(self):
+    def test_session_closed_on_normal_completion(self):
         closed = []
-        driver = self._driver(delay_s=5, closed=closed)
-        driver.run_case(self._case(timeout=1), self._scenario(), self.ws)
+        driver = self._driver(closed=closed)
+        driver.run_case(self._case(), self._scenario(), self.ws)
         self.assertEqual(len(closed), 1)
 
     def test_no_code_block_still_writes_and_marks_step_not_ok(self):

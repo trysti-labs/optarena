@@ -1,0 +1,348 @@
+{
+  "image": "optarena-tester-node",
+  "generated_at": "2026-08-02",
+  "expires_at": "2026-11-02",
+  "owner": "arun@trysti.com",
+  "scan_severity": [
+    "CRITICAL",
+    "HIGH"
+  ],
+  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py.",
+  "accepted_vulnerabilities": [
+    {
+      "id": "CVE-2026-13149",
+      "package": "brace-expansion",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-14257",
+      "package": "brace-expansion",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "bsdutils",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2024-21538",
+      "package": "cross-spawn",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-64756",
+      "package": "glob",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-41992",
+      "package": "gzip",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-54369",
+      "package": "libacl1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "libblkid1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-59375",
+      "package": "libexpat1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-25210",
+      "package": "libexpat1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-45186",
+      "package": "libexpat1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-56408",
+      "package": "libexpat1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "libmount1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "libncursesw6",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69534",
+      "package": "libpython3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-11940",
+      "package": "libpython3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-15308",
+      "package": "libpython3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-3644",
+      "package": "libpython3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-7210",
+      "package": "libpython3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69534",
+      "package": "libpython3.11-stdlib",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-11940",
+      "package": "libpython3.11-stdlib",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-15308",
+      "package": "libpython3.11-stdlib",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-3644",
+      "package": "libpython3.11-stdlib",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-7210",
+      "package": "libpython3.11-stdlib",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "libsmartcols1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-7458",
+      "package": "libsqlite3-0",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "libtinfo6",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "libuuid1",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-26996",
+      "package": "minimatch",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-27903",
+      "package": "minimatch",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-27904",
+      "package": "minimatch",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "mount",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "ncurses-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "ncurses-bin",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-13221",
+      "package": "perl-base",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-42496",
+      "package": "perl-base",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-42497",
+      "package": "perl-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-48962",
+      "package": "perl-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-57432",
+      "package": "perl-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-57433",
+      "package": "perl-base",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-8376",
+      "package": "perl-base",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-9538",
+      "package": "perl-base",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-45623",
+      "package": "postcss",
+      "severity": "HIGH"
+    },
+    {
+      "id": "GHSA-r28c-9q8g-f849",
+      "package": "postcss",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69534",
+      "package": "python3.11",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-11940",
+      "package": "python3.11",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-15308",
+      "package": "python3.11",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-3644",
+      "package": "python3.11",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-7210",
+      "package": "python3.11",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2025-69534",
+      "package": "python3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-11940",
+      "package": "python3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-15308",
+      "package": "python3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-3644",
+      "package": "python3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-7210",
+      "package": "python3.11-minimal",
+      "severity": "HIGH"
+    },
+    {
+      "id": "GHSA-f88m-g3jw-g9cj",
+      "package": "sharp",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-48815",
+      "package": "sigstore",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-23745",
+      "package": "tar",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-23950",
+      "package": "tar",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-24842",
+      "package": "tar",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-26960",
+      "package": "tar",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-29786",
+      "package": "tar",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-31802",
+      "package": "tar",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-59873",
+      "package": "tar",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CVE-2026-59874",
+      "package": "tar",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "util-linux",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2026-53615",
+      "package": "util-linux-extra",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CVE-2023-45853",
+      "package": "zlib1g",
+      "severity": "CRITICAL"
+    }
+  ]
+}

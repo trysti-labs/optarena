@@ -6,8 +6,10 @@ column, regression delta) and not just raw token counts.
 
 Prices are `$ per 1,000,000 tokens` as `(prompt, completion)`, substring-matched
 against the model id. Local inference (Ollama / LM Studio / any localhost
-backend) and unmatched models cost `0.0` - a run is only billed when it hits a
-paid remote endpoint.
+backend) is `0.0` - genuinely free, confirmed by the backend URL. A remote
+model this table has no price for is `None` - unknown, not free (P2-05: an
+unmatched remote model used to also report `0.0`, which read as "this run
+cost nothing" when the honest answer was "we don't know what this cost").
 
 The built-in table is a convenience, not authoritative (providers change
 prices). Override or extend it with a JSON file of the same shape, pointed at
@@ -110,16 +112,21 @@ def estimate_cost(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     base_url: str | None = None,
-) -> float:
+) -> "float | None":
     """
-    Estimate USD cost for one run's token usage. Returns 0.0 for local
-    backends and for models with no known price (so "free" is the honest
-    default, never a fabricated number).
+    Estimate USD cost for one run's token usage.
+
+    P2-05: `0.0` and "unknown" are not the same claim, and returning `0.0`
+    for both let a run against an unpriced remote model silently report as
+    free. Only a confirmed-local backend returns `0.0` here; a remote model
+    this table has no price for returns `None` so callers (metrics.aggregate,
+    the dashboard) can render "N/A" instead of a fabricated "$0.00" and can
+    tell a genuinely free run apart from an incompletely-priced one.
     """
     if base_url is not None and is_local_backend(base_url):
         return 0.0
     price = price_for(model)
     if price is None:
-        return 0.0
+        return None
     p, c = price
     return round((prompt_tokens / 1_000_000) * p + (completion_tokens / 1_000_000) * c, 4)

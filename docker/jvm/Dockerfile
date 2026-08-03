@@ -2,7 +2,7 @@
 #
 # A scratch Spring Boot project is built once here (network available at
 # build time) purely to warm the shared ~/.m2 cache - every dependency and
-# plugin a case's own pom.xml needs (same spring-boot-starter-parent 3.3.4)
+# plugin a case's own pom.xml needs (same spring-boot-starter-parent 3.5.16)
 # is then already local, so `mvn -o package`/`mvn -o test` works with
 # --network none at check_command time.
 # Base pinned by multi-arch manifest-list digest (H-03: a floating tag can be
@@ -11,7 +11,9 @@
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
 FROM maven:3.9-eclipse-temurin-17@sha256:1ed5d1f54416b706707b4f3238f63a20bb06aab27c6d240090a2bb9ad895ed45
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# P1-03: apt-get upgrade picks up any OS-level security patch published for
+# this exact Debian release since the base image was last rebuilt.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         python3 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -321,50 +321,55 @@ jobs:
       # obviously-dangerous character).
       matrix:
         include:
+          # `baseline` = the docker/vuln-baseline/<baseline>.json key (also
+          # `image` minus its ":latest" tag) - kept as its own field rather
+          # than derived in shell, since GitHub Actions expressions have no
+          # string-replace function either (see the `name` comment below).
           - context: docker
             image: optarena-tester:latest
+            baseline: optarena-tester
             name: base
           - context: docker/python
             image: optarena-tester-python:latest
+            baseline: optarena-tester-python
             name: python
           - context: docker/node
             image: optarena-tester-node:latest
+            baseline: optarena-tester-node
             name: node
           - context: docker/go
             image: optarena-tester-go:latest
+            baseline: optarena-tester-go
             name: go
           - context: docker/jvm
             image: optarena-tester-jvm:latest
+            baseline: optarena-tester-jvm
             name: jvm
           - context: docker/rust
             image: optarena-tester-rust:latest
+            baseline: optarena-tester-rust
             name: rust
           - context: docker/dotnet
             image: optarena-tester-dotnet:latest
+            baseline: optarena-tester-dotnet
             name: dotnet
           - context: docker/php
             image: optarena-tester-php:latest
+            baseline: optarena-tester-php
             name: php
           - context: docker/ruby
             image: optarena-tester-ruby:latest
+            baseline: optarena-tester-ruby
             name: ruby
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
       - name: Build the image
         run: docker build -t ${{ matrix.image }} -f ${{ matrix.context }}/Dockerfile ${{ matrix.context }}
-      # Non-blocking for now, deliberately: the first real scan of these 9
-      # images (2026-08-02) turned up a genuine, non-trivial CRITICAL/HIGH
-      # backlog in transitive dependencies baked into the base layers (e.g.
-      # CVE-2026-33186/grpc, CVE-2025-68121/stdlib - real findings, not a
-      # scanner or wiring problem, confirmed by running Trivy directly
-      # against a locally-built image). Shipping this hard-blocking on day
-      # one would stop every PR on a backlog nobody has triaged yet, which
-      # is the exact mistake the tool's own guidance warns against. Report
-      # first (still fails the STEP so it's visible, still uploads SARIF to
-      # the Security tab for tracking) via continue-on-error at the job
-      # level; once the existing backlog is triaged, remove
-      # continue-on-error here so new CRITICAL/HIGH findings block PRs again.
-      - name: Trivy vulnerability scan
+      # SARIF: human-readable artifact for tracking (not the blocking gate).
+      - name: Trivy vulnerability scan (SARIF, informational)
         continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -372,7 +377,38 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: "1"
+      # P1-03: JSON output feeds check_vuln_baseline.py, the ACTUAL gate -
+      # exit-code left at Trivy's default (0) here so this step never fails
+      # on its own; the baseline check step below is what blocks. A flat
+      # `continue-on-error: true` (the previous state, blocking nothing at
+      # all) is gone: docker/vuln-baseline/<image>.json - regenerated during
+      # the 2026-08-02 remediation pass, which fixed 45% of the fleet's
+      # CRITICAL/HIGH backlog (2508 -> 1367, verified by live scan, not
+      # estimated: Go/PHP/.NET base images refreshed, Go additionally off an
+      # EOL minor, apt-get upgrade added everywhere, an unused ImageMagick
+      # suite removed from the Rust image) - records exactly what's already
+      # been triaged and accepted (mostly Linux-kernel-header and
+      # Debian-perl-tooling noise that can't affect a container's real
+      # attack surface, confirmed not removable without breaking
+      # build-essential/adduser respectively; see each baseline file's own
+      # `note`). A genuinely NEW CRITICAL/HIGH finding - or the baseline
+      # simply expiring, forcing periodic re-triage - fails this job.
+      - name: Trivy vulnerability scan (JSON, for baseline check)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: json
+          output: trivy-results.json
+          severity: CRITICAL,HIGH
+      - name: Check against the accepted-vulnerability baseline
+        run: python docker/check_vuln_baseline.py ${{ matrix.baseline }} trivy-results.json
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: cyclonedx
+          output: sbom-cyclonedx.json
       # Not a Security-tab upload (was, until confirmed 2026-08-02: both
       # org's repos have default_workflow_permissions locked to "read" at
       # the org level, greyed out in Settings with no way for a repo admin
@@ -384,7 +420,7 @@ jobs:
       # the ceiling is confirmed permanent rather than a one-off. Findings
       # stay inspectable as a downloadable artifact instead; re-add the
       # Security-tab upload if the org ever flips that setting.
-      - name: Upload SARIF as an artifact
+      - name: Upload SARIF + SBOM as artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -393,7 +429,9 @@ jobs:
           # the "/" case: every context with one failed outright). matrix.name
           # is a plain word, added to the matrix specifically for this.
           name: trivy-${{ matrix.name }}
-          path: trivy-results.sarif
+          path: |
+            trivy-results.sarif
+            sbom-cyclonedx.json
           retention-days: 14
 
   # GitHub's own dependency-review-action, PR-only (it diffs the PR's
