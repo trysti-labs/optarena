@@ -9,7 +9,7 @@
 # silently replaced upstream, changing oracle behavior between identical
 # OptArena commits). The tag stays for readability; the digest is what's
 # actually pulled. Refresh deliberately: docker buildx imagetools inspect <tag>
-FROM maven:3.9-eclipse-temurin-17@sha256:1ed5d1f54416b706707b4f3238f63a20bb06aab27c6d240090a2bb9ad895ed45
+FROM maven:3-eclipse-temurin-26@sha256:d5617b9a6307e1b51dc7c55edf09bacb66f1c91fb861949c34a3a0d4e16bd241
 
 # P1-03: apt-get upgrade picks up any OS-level security patch published for
 # this exact Debian release since the base image was last rebuilt.
