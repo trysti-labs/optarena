@@ -6000,16 +6000,30 @@ class SDKWorkerProcessTests(unittest.TestCase):
     def test_full_run_case_survives_a_real_timeout(self):
         """End to end through run_case() itself, not just the worker
         primitives directly - the actual case loop must report the timeout
-        cleanly and the worker process must not survive it."""
+        cleanly and the worker process must not survive it.
+
+        `timeout` must stay well above realistic `_open_worker()` spawn
+        overhead: `run_case()` computes its deadline BEFORE spawning the
+        real subprocess worker, so on a slow/loaded CI runner a too-tight
+        budget (this was 0.3s) can be entirely consumed by process spawn
+        alone - the loop then reports "case deadline exceeded before prompt
+        1/1" (the preflight check) instead of ever reaching
+        `_complete_with_deadline`'s "...budget" message this test is meant
+        to exercise. Confirmed live as the actual failure on a real CI run,
+        not a hypothetical - 2.0s leaves comfortable headroom over normal
+        multiprocessing spawn time while staying far under the "slow:5"
+        driver's 5s sleep, so the completion-level timeout path reliably
+        wins the race regardless of machine speed.
+        """
         driver = _RealWorkerFakeDriver()
-        case = {"name": "c", "prompts": ["p"], "timeout": 0.3,
+        case = {"name": "c", "prompts": ["p"], "timeout": 2.0,
                 "expected_files": [{"path_pattern": "hi.py"}]}
         ws = Path(tempfile.mkdtemp(prefix="optarena_test_sdkworker_"))
         self.addCleanup(shutil.rmtree, ws, ignore_errors=True)
         result = driver.run_case(case, self._scenario("slow:5"), ws)
         self.assertIsNotNone(result.error)
         self.assertIn("budget", result.error)
-        self.assertLess(result.duration_s, 4.0)
+        self.assertLess(result.duration_s, 5.0)
 
 
 class SDKDriverBaseTests(unittest.TestCase):
@@ -6253,11 +6267,20 @@ class SDKDriverGenerationParamsTests(unittest.TestCase):
         return Scenario(name="s", driver=driver, backend=backend)
 
     def test_crewai_llm_carries_generation_params(self):
+        # Each driver module imports its SDK lazily INSIDE open_session()/
+        # aopen_session(), not at module level (so `optarena drivers list`
+        # works without every extra installed) - so the ImportError this
+        # test needs to catch only happens once that method actually runs,
+        # not at the `from optarena.drivers.X import Y` line above it. The
+        # whole attempt has to be inside one try/except, or an environment
+        # missing the extra fails with an uncaught ModuleNotFoundError
+        # instead of a clean skip (confirmed live: this was happening on
+        # the "no docker" CI job, which doesn't install the optional extras).
         try:
             from optarena.drivers.crewai_sdk import CrewAIDriver
+            llm = CrewAIDriver().open_session(self._scenario("crewai")).llm
         except ImportError:
             self.skipTest("crewai not installed")
-        llm = CrewAIDriver().open_session(self._scenario("crewai")).llm
         self.assertEqual(llm.temperature, 0.4)
         self.assertEqual(llm.top_p, 0.8)
         self.assertEqual(llm.seed, 5)
@@ -6266,16 +6289,16 @@ class SDKDriverGenerationParamsTests(unittest.TestCase):
         try:
             import langchain_openai  # noqa: F401
             from optarena.drivers.langgraph_sdk import LangGraphDriver
+            # create_react_agent compiles the model into an internal graph
+            # with no stable public accessor for it - intercept the exact
+            # `model=` kwarg it's called with instead of reverse-engineering
+            # graph internals that could change between langgraph versions.
+            with mock.patch("langgraph.prebuilt.create_react_agent") as fake_create:
+                fake_create.return_value = "compiled-graph-placeholder"
+                LangGraphDriver().open_session(self._scenario("langgraph"))
+            llm = fake_create.call_args.kwargs["model"]
         except ImportError:
             self.skipTest("langgraph/langchain-openai not installed")
-        # create_react_agent compiles the model into an internal graph with
-        # no stable public accessor for it - intercept the exact `model=`
-        # kwarg it's called with instead of reverse-engineering graph
-        # internals that could change between langgraph versions.
-        with mock.patch("langgraph.prebuilt.create_react_agent") as fake_create:
-            fake_create.return_value = "compiled-graph-placeholder"
-            LangGraphDriver().open_session(self._scenario("langgraph"))
-        llm = fake_create.call_args.kwargs["model"]
         self.assertEqual(llm.temperature, 0.4)
         self.assertEqual(llm.top_p, 0.8)
         self.assertEqual(llm.seed, 5)
@@ -6283,24 +6306,23 @@ class SDKDriverGenerationParamsTests(unittest.TestCase):
     def test_openai_agents_model_settings_carries_generation_params(self):
         try:
             from optarena.drivers.openai_agents_sdk import OpenAIAgentsDriver
+            agent, _run_config, client = OpenAIAgentsDriver().open_session(self._scenario("openai-agents"))
         except ImportError:
             self.skipTest("openai-agents not installed")
-        agent, _run_config, client = OpenAIAgentsDriver().open_session(self._scenario("openai-agents"))
         self.assertEqual(agent.model_settings.temperature, 0.4)
         self.assertEqual(agent.model_settings.top_p, 0.8)
         self.assertEqual(agent.model_settings.extra_body, {"seed": 5})
-        driver_loop = getattr(client, "close", None)
-        if driver_loop is not None:
+        if getattr(client, "close", None) is not None:
             import asyncio
             asyncio.run(client.close())
 
     def test_autogen_client_create_args_carries_generation_params(self):
+        import asyncio
         try:
             from optarena.drivers.autogen_sdk import AutoGenDriver
+            _agent, client = asyncio.run(AutoGenDriver().aopen_session(self._scenario("autogen")))
         except ImportError:
             self.skipTest("autogen not installed")
-        import asyncio
-        _agent, client = asyncio.run(AutoGenDriver().aopen_session(self._scenario("autogen")))
         try:
             create_args = client._create_args
             self.assertEqual(create_args["temperature"], 0.4)
@@ -6310,12 +6332,12 @@ class SDKDriverGenerationParamsTests(unittest.TestCase):
             asyncio.run(AutoGenDriver().aclose_session((_agent, client)))
 
     def test_semantic_kernel_execution_settings_carries_generation_params(self):
+        import asyncio
         try:
             from optarena.drivers.semantic_kernel_sdk import SemanticKernelDriver
+            session = asyncio.run(SemanticKernelDriver().aopen_session(self._scenario("semantic-kernel")))
         except ImportError:
             self.skipTest("semantic-kernel not installed")
-        import asyncio
-        session = asyncio.run(SemanticKernelDriver().aopen_session(self._scenario("semantic-kernel")))
         try:
             settings = session["agent"].arguments.execution_settings["default"]
             self.assertEqual(settings.temperature, 0.4)
@@ -6327,9 +6349,9 @@ class SDKDriverGenerationParamsTests(unittest.TestCase):
     def test_smolagents_model_kwargs_carries_generation_params(self):
         try:
             from optarena.drivers.smolagents_sdk import SmolAgentsDriver
+            model = SmolAgentsDriver().open_session(self._scenario("smolagents"))
         except ImportError:
             self.skipTest("smolagents not installed")
-        model = SmolAgentsDriver().open_session(self._scenario("smolagents"))
         self.assertEqual(model.kwargs["temperature"], 0.4)
         self.assertEqual(model.kwargs["top_p"], 0.8)
         self.assertEqual(model.kwargs["seed"], 5)
