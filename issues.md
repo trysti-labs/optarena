@@ -539,11 +539,9 @@ Requested directly: "ensure that optarena works across windows, linux, mac." A s
 
 ## What's next
 
-Recommended order for the remaining open items, highest-impact first:
+Every P0/P1/P2/P3 finding in this document is fixed and verified - see each finding's own entry above, and the P2/P3 pass summaries below for the two most recent rounds. One item remains open, and it isn't actionable from this repository:
 
-1. **P1-03's one true remainder** - the .NET SDK-internal tool CVEs, blocked on an upstream Microsoft 8.0.4xx rebuild; re-checked live again 2026-08-03 (Microsoft's own `dotnet/core` release notes: 8.0.423, released 2026-07-14, is still the latest) - re-check periodically, nothing to do until Microsoft ships a new build. ~~The publish-workflow signing/attestation steps also deserve a real end-to-end check~~ **Done** - see P1-03's entry above: the GHCR permission blocker is fixed and a real 9/9 push confirmed live; the cosign/attestation steps specifically get their first real run on this commit's push (they were uncommitted at the time of that verification run).
-2. ~~P2-03, P2-04 (driver/SDK version capture), P2-06, P2-07 - product/testing maturity work.~~ **Done** (see below).
-3. ~~P3-01, P3-02.~~ **Done** (see below).
+- **P1-03's one true remainder** - the .NET SDK-internal tool CVEs, blocked on an upstream Microsoft 8.0.4xx rebuild. Re-checked live 2026-08-03 against Microsoft's own `dotnet/core` release notes: `8.0.423` (released 2026-07-14) is still the latest published SDK build - re-check periodically; nothing to do until Microsoft ships a new one.
 
 ## P3 maintainability pass (2026-08-03)
 
