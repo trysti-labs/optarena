@@ -20,6 +20,16 @@ import re
 MAX_CHECK_COMMAND_TIMEOUT = 3600   # seconds; generous ceiling, not a real per-case budget
 MAX_CASE_TIMEOUT = 3600
 
+# P1-05: Windows-reserved device names - illegal as a file/directory name on
+# Windows regardless of extension or casing ("con", "CON.txt", "Con" all
+# collide with the same reserved device). Checked against each path
+# SEGMENT's basename (the part before the first '.'), not the whole path,
+# since a reserved name is illegal at any directory level, not just the leaf.
+_RESERVED_DOS_NAMES = frozenset({
+    "con", "prn", "aux", "nul",
+    *(f"com{n}" for n in range(10)), *(f"lpt{n}" for n in range(10)),
+})
+
 # A-04: `setup_repo` names a directory under repos/ and nothing else - no
 # separators, no "..", no drive letters. See validate_case for why this
 # input is untrusted.
@@ -70,6 +80,35 @@ def reject_unsafe_relpath(rel: str, where: str) -> None:
             raise _err(where, f"path may not contain '..': {rel!r}")
         if seg.lower() == ".git":
             raise _err(where, f"path may not touch .git: {rel!r}")
+        # P1-05: Windows alias hardening - none of these produce a working
+        # command-execution bypass on their own (the traversal/.git/absolute
+        # checks above already close those), but each is a real
+        # inconsistent-validation trap: content that passes THIS check can
+        # still land somewhere different than its own path says once actually
+        # written on Windows, or collide with a reserved OS name.
+        #
+        # A trailing space or dot: Windows silently STRIPS these from a
+        # component when the file/directory is actually created, so
+        # "secret.txt " (validated) and "secret.txt" (what ends up on disk)
+        # are two different strings referring to the same real path - a
+        # case's own path_pattern/expected assertions could then target a
+        # name that never actually exists as written.
+        if seg != seg.rstrip(" ."):
+            raise _err(where, f"path segment has a trailing space or dot, "
+                              f"unsafe/inconsistent on Windows: {seg!r} in {rel!r}")
+        # A reserved DOS device name, with or without an extension
+        # ("con", "CON.txt", "com1.py" are all illegal) - case-insensitive,
+        # matching Windows' own reserved-name comparison.
+        if seg.split(".", 1)[0].lower() in _RESERVED_DOS_NAMES:
+            raise _err(where, f"path segment is a reserved Windows device "
+                              f"name: {seg!r} in {rel!r}")
+        # Alternate Data Stream syntax (NTFS-specific): a ':' anywhere
+        # within a single path SEGMENT (as opposed to the whole-path
+        # drive-prefix ':' already rejected above, e.g. "C:") addresses a
+        # hidden stream attached to that file rather than the file itself.
+        if ":" in seg:
+            raise _err(where, f"path segment contains ':' (Windows "
+                              f"alternate-data-stream syntax): {seg!r} in {rel!r}")
 
 
 def _validate_string_map(value, where: str) -> None:
@@ -91,7 +130,10 @@ def _validate_string_list(value, where: str) -> None:
 # ── Scenario files ─────────────────────────────────────────────────────────
 
 _SCENARIO_KNOWN_KEYS = {"name", "driver", "backend", "cases", "timeout", "cases_dir", "image_overrides"}
-_BACKEND_KNOWN_KEYS = {"kind", "base_url", "model", "api_key", "num_ctx"}
+_BACKEND_KNOWN_KEYS = {
+    "kind", "base_url", "model", "api_key", "num_ctx",
+    "temperature", "top_p", "seed",
+}
 
 
 def validate_scenario(data: dict, source: str = "<scenario>") -> None:
@@ -124,6 +166,17 @@ def validate_scenario(data: dict, source: str = "<scenario>") -> None:
         if "num_ctx" in backend and backend["num_ctx"] is not None:
             if not isinstance(backend["num_ctx"], int) or isinstance(backend["num_ctx"], bool) or backend["num_ctx"] <= 0:
                 raise _err(f"{source}.backend.num_ctx", "must be a positive integer")
+        if "temperature" in backend and backend["temperature"] is not None:
+            t = backend["temperature"]
+            if not _is_number(t) or isinstance(t, bool) or not (0 <= t <= 2):
+                raise _err(f"{source}.backend.temperature", "must be a number in [0, 2]")
+        if "top_p" in backend and backend["top_p"] is not None:
+            p = backend["top_p"]
+            if not _is_number(p) or isinstance(p, bool) or not (0 < p <= 1):
+                raise _err(f"{source}.backend.top_p", "must be a number in (0, 1]")
+        if "seed" in backend and backend["seed"] is not None:
+            if not isinstance(backend["seed"], int) or isinstance(backend["seed"], bool):
+                raise _err(f"{source}.backend.seed", "must be an integer")
 
     cases = data.get("cases")
     if cases is not None and (not isinstance(cases, list) or not all(isinstance(c, str) for c in cases)):
@@ -325,8 +378,17 @@ def validate_case(data: dict, source: str = "<case>") -> None:
                 has_contains = "file_contains" in when
                 if has_exists == has_contains:
                     raise _err(f"{where}.when", "exactly one of 'file_exists' or 'file_contains' is required")
-                if has_exists and (not isinstance(when["file_exists"], str) or not when["file_exists"]):
-                    raise _err(f"{where}.when.file_exists", "must be a non-empty string (relative path)")
+                if has_exists:
+                    if not isinstance(when["file_exists"], str) or not when["file_exists"]:
+                        raise _err(f"{where}.when.file_exists", "must be a non-empty string (relative path)")
+                    # P1-04: `file_exists` is a workspace-relative EXISTENCE
+                    # CHECK, not a write - but without this it was the one
+                    # case-controlled path field with no containment check
+                    # at either the schema or the runtime layer at all (see
+                    # _disruption_ready in _workspace_setup.py, fixed
+                    # alongside this), letting a disruption's trigger probe
+                    # whether an arbitrary HOST path exists.
+                    reject_unsafe_relpath(when["file_exists"], f"{where}.when.file_exists")
                 if has_contains:
                     fc = when["file_contains"]
                     if not isinstance(fc, dict):
@@ -336,6 +398,14 @@ def validate_case(data: dict, source: str = "<case>") -> None:
                         raise _err(f"{where}.when.file_contains", f"unknown key(s): {', '.join(sorted(unknown_fc))}")
                     if not isinstance(fc.get("path"), str) or not fc["path"]:
                         raise _err(f"{where}.when.file_contains.path", "must be a non-empty string")
+                    # P1-04: schema validation previously only checked this
+                    # was a non-empty string - the runtime containment check
+                    # in _disruption_ready already existed and worked, but a
+                    # traversal/absolute path here still passed schema
+                    # validation, only to be silently refused later. Fail
+                    # fast here instead, matching every other case-controlled
+                    # path field.
+                    reject_unsafe_relpath(fc["path"], f"{where}.when.file_contains.path")
                     if not isinstance(fc.get("pattern"), str) or not fc["pattern"]:
                         raise _err(f"{where}.when.file_contains.pattern", "must be a non-empty string")
             if "write_files" in dis and dis["write_files"] is not None:

@@ -41,11 +41,23 @@ class AutoGenDriver(AsyncSingleFileSDKDriver):
         from autogen_ext.models.openai import OpenAIChatCompletionClient
 
         backend = scenario.backend
+        # P2-02: generation parameters - confirmed live in autogen_ext's own
+        # source that any constructor kwarg matching OpenAI's
+        # CompletionCreateParamsBase (temperature/top_p/seed included) is
+        # forwarded into every completion request's create_args.
+        gen_kwargs = {}
+        if backend.temperature is not None:
+            gen_kwargs["temperature"] = backend.temperature
+        if backend.top_p is not None:
+            gen_kwargs["top_p"] = backend.top_p
+        if backend.seed is not None:
+            gen_kwargs["seed"] = backend.seed
         client = OpenAIChatCompletionClient(
             model=backend.model,
             base_url=backend.openai_base,
             api_key=backend.api_key or "optarena",
             model_info=_LOCAL_MODEL_INFO,
+            **gen_kwargs,
         )
         agent = AssistantAgent(
             name="software_engineer",

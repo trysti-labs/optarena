@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -269,6 +270,51 @@ class SetupRepoContainmentTests(unittest.TestCase):
         copy_setup_repo(self.ws, available[0])
         self.assertTrue(any(p.is_file() for p in self.ws.rglob("*")))
         validate_case({"name": "c", "setup_repo": available[0]})   # and it validates
+
+    def test_missing_repos_dir_gives_wheel_install_remediation(self):
+        """P2-01: a wheel install has no repos/ at all - the error should say
+        so and point at the fix, not just "not found" (indistinguishable from
+        a typo'd case name in a real source checkout)."""
+        from optarena.cases import copy_setup_repo
+        missing = self.ws / "no-such-repos-dir"
+        with mock.patch("optarena._cases._workspace_setup.REPOS_DIR", missing):
+            with self.assertRaises(FileNotFoundError) as ctx:
+                copy_setup_repo(self.ws, "some-repo")
+        self.assertIn("source-checkout-only", str(ctx.exception))
+        self.assertIn("wheel", str(ctx.exception))
+
+    def test_existing_repos_dir_wrong_name_gives_plain_not_found(self):
+        """The wheel-install remediation must not fire when repos/ genuinely
+        exists but the named repo simply isn't in it - that's a real typo,
+        not a packaging-boundary problem."""
+        from optarena.cases import copy_setup_repo
+        present = self.ws / "real-repos-dir"
+        present.mkdir()
+        with mock.patch("optarena._cases._workspace_setup.REPOS_DIR", present):
+            with self.assertRaises(FileNotFoundError) as ctx:
+                copy_setup_repo(self.ws, "nonexistent-repo-name")
+        self.assertNotIn("source-checkout-only", str(ctx.exception))
+
+
+class SandboxBuildWheelRemediationTests(unittest.TestCase):
+    """P2-01: `optarena sandbox build` from a wheel install (no docker/
+    checked out) should say so plainly rather than a bare "no Dockerfile"."""
+
+    def test_missing_docker_dir_gives_wheel_install_remediation(self):
+        import io
+        from contextlib import redirect_stderr
+        from optarena.cli._sandbox_cmds import cmd_docker
+        missing = Path(tempfile.mkdtemp(prefix="optarena_test_nodocker_")) / "docker"
+        self.addCleanup(shutil.rmtree, missing.parent, ignore_errors=True)
+        args = argparse.Namespace(action="build", all=False, lang=None)
+        with mock.patch("optarena.cli._sandbox_cmds.DOCKERFILE_DIR", missing):
+            with mock.patch("optarena.cli._sandbox_cmds.dockerfile_for", return_value=missing / "Dockerfile"):
+                buf = io.StringIO()
+                with redirect_stderr(buf):
+                    rc = cmd_docker(args)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("source-checkout-only", buf.getvalue())
+        self.assertIn("wheel", buf.getvalue())
 
 
 class ImageReferenceValidationTests(unittest.TestCase):
@@ -945,6 +991,157 @@ class RunCaptureTests(unittest.TestCase):
         self.assertLess(len(proc.stdout), 2 * _MAX_CAPTURE_BYTES)
 
 
+class WorkspaceQuotaWatchdogTests(unittest.TestCase):
+    """P1-07: a Docker bind mount (how /workspace always reaches the
+    sandbox) cannot be size-quota'd via Docker's own --storage-opt at all -
+    confirmed by reading the actual DockerSandbox.start()/
+    _run_check_command_docker container-run args, which have no such flag
+    for the bind-mounted path. This is the host-side polling fallback:
+    real filesystem growth, real threads - not mocked I/O - the same
+    live-verification discipline the rest of this project's security tests
+    already use."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_quotawatch_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+
+    def test_workspace_usage_counts_real_files(self):
+        from optarena._cases._sandbox import _workspace_usage
+        (self.ws / "a.txt").write_bytes(b"x" * 100)
+        (self.ws / "b.txt").write_bytes(b"y" * 250)
+        sub = self.ws / "sub"
+        sub.mkdir()
+        (sub / "c.txt").write_bytes(b"z" * 50)
+        total, count = _workspace_usage(self.ws)
+        self.assertEqual(total, 400)
+        self.assertEqual(count, 3)
+
+    def test_workspace_usage_skips_symlinks(self):
+        target = Path(tempfile.mkdtemp(prefix="optarena_test_quotawatch_target_"))
+        self.addCleanup(shutil.rmtree, target, ignore_errors=True)
+        (target / "big.bin").write_bytes(b"x" * 10_000)
+        try:
+            (self.ws / "link").symlink_to(target / "big.bin")
+        except OSError:
+            self.skipTest("host does not permit symlink creation "
+                          "(needs elevation/Developer Mode on Windows)")
+        from optarena._cases._sandbox import _workspace_usage
+        total, count = _workspace_usage(self.ws)
+        self.assertEqual((total, count), (0, 0), "a symlink's target must not count against the quota")
+
+    def test_watchdog_triggers_on_byte_quota(self):
+        from optarena._cases._sandbox import _WorkspaceQuotaWatchdog
+        triggered = []
+        watchdog = _WorkspaceQuotaWatchdog(
+            self.ws, on_exceeded=triggered.append, max_bytes=500, max_files=10_000, interval=0.05)
+        watchdog.start()
+        try:
+            (self.ws / "big.bin").write_bytes(b"x" * 1000)
+            for _ in range(100):
+                if triggered:
+                    break
+                time.sleep(0.05)
+        finally:
+            watchdog.stop()
+        self.assertEqual(len(triggered), 1)
+        self.assertIn("byte", triggered[0])
+        self.assertIsNotNone(watchdog.triggered_reason)
+
+    def test_watchdog_triggers_on_file_count_quota(self):
+        from optarena._cases._sandbox import _WorkspaceQuotaWatchdog
+        triggered = []
+        watchdog = _WorkspaceQuotaWatchdog(
+            self.ws, on_exceeded=triggered.append, max_bytes=10**9, max_files=5, interval=0.05)
+        watchdog.start()
+        try:
+            for i in range(10):
+                (self.ws / f"f{i}.txt").write_text("x")
+            for _ in range(100):
+                if triggered:
+                    break
+                time.sleep(0.05)
+        finally:
+            watchdog.stop()
+        self.assertEqual(len(triggered), 1)
+        self.assertIn("file", triggered[0])
+
+    def test_watchdog_never_triggers_when_under_both_quotas(self):
+        from optarena._cases._sandbox import _WorkspaceQuotaWatchdog
+        triggered = []
+        watchdog = _WorkspaceQuotaWatchdog(
+            self.ws, on_exceeded=triggered.append, max_bytes=10**9, max_files=10_000, interval=0.05)
+        watchdog.start()
+        try:
+            (self.ws / "small.txt").write_text("just a little content")
+            time.sleep(0.3)   # several poll intervals, ample time to have fired if it were going to
+        finally:
+            watchdog.stop()
+        self.assertEqual(triggered, [])
+        self.assertIsNone(watchdog.triggered_reason)
+
+    def test_watchdog_fires_at_most_once(self):
+        from optarena._cases._sandbox import _WorkspaceQuotaWatchdog
+        triggered = []
+        watchdog = _WorkspaceQuotaWatchdog(
+            self.ws, on_exceeded=triggered.append, max_bytes=10, max_files=10_000, interval=0.02)
+        (self.ws / "big.bin").write_bytes(b"x" * 1000)
+        watchdog.start()
+        time.sleep(0.3)  # many poll intervals past the first trigger
+        watchdog.stop()
+        self.assertEqual(len(triggered), 1, "must stop polling after the first trigger, not fire repeatedly")
+
+
+class WorkspaceQuotaIntegrationTests(unittest.TestCase):
+    """P1-07: the actual wiring through run_check_command's host-exec path -
+    a real Python subprocess writing real bytes to a real workspace, killed
+    by a real watchdog thread, not a mocked simulation of any of that."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_quotaintegration_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+
+    def test_runaway_check_command_is_aborted_for_quota_not_left_to_time_out(self):
+        import sys
+        from optarena._cases import _sandbox as sandbox_mod
+        # A real script file, not an inline `-c` one-liner: `shell=True`
+        # dispatches through cmd.exe on native Windows, which doesn't
+        # handle an embedded-newline multi-statement -c string the way a
+        # POSIX shell would - writing a real .py file sidesteps shell
+        # quoting entirely and works identically on every platform.
+        script = self.ws / "runaway.py"
+        script.write_text(
+            "import time\n"
+            "f = open('runaway.bin', 'wb')\n"
+            "for _ in range(300):\n"
+            "    f.write(b'x' * 1024); f.flush(); time.sleep(0.02)\n",
+            encoding="utf-8")
+        # A command that would otherwise run for a full ~6s, writing 1KB
+        # chunks as fast as it can - the watchdog must abort it long before
+        # either that artificial runtime or the case's own (generous) timeout.
+        cmd = f'{sys.executable} runaway.py'
+        with mock.patch.object(sandbox_mod, "_WORKSPACE_MAX_BYTES", 5000), \
+             mock.patch.object(sandbox_mod, "_WORKSPACE_QUOTA_POLL_INTERVAL_S", 0.05):
+            failures, info = sandbox_mod._run_check_command_local(cmd, self.ws, 30, sandbox_mod._new_oracle_info(cmd))
+        self.assertTrue(info.get("workspace_quota_exceeded"))
+        self.assertEqual(len(failures), 1)
+        self.assertIn("workspace exceeded", failures[0])
+        # Aborted well before the command's own artificial ~6s runtime
+        # (300 * 0.02s) - proves it was actually killed, not just that the
+        # command happened to finish and looked like a quota match by luck.
+        self.assertLess(info["duration_s"], 4)
+
+    def test_well_behaved_check_command_is_unaffected(self):
+        """No false positives: a normal, small check_command must run to
+        completion exactly as before, with no quota fields set."""
+        import sys
+        from optarena._cases import _sandbox as sandbox_mod
+        cmd = f'{sys.executable} -c "print(\'ok\')"'
+        failures, info = sandbox_mod._run_check_command_local(cmd, self.ws, 30, sandbox_mod._new_oracle_info(cmd))
+        self.assertEqual(failures, [])
+        self.assertNotIn("workspace_quota_exceeded", info)
+        self.assertEqual(info["exit_code"], 0)
+
+
 @unittest.skipUnless(os.name != "posix", "Windows Job Object behavior")
 class WindowsJobObjectTests(unittest.TestCase):
     """P0-03: _WindowsJob directly, not just through run_capture's
@@ -1265,6 +1462,73 @@ class SecretRedactionTests(unittest.TestCase):
         self.assertEqual(out["c"], 42)
         self.assertIsNone(out["d"])
         self.assertEqual(out["a"][1], "clean")
+
+    # ── P1-03: full multiline PEM block redaction, not just the header ────
+    PEM_BODY = (
+        "MIIEowIBAAKCAQEACANARYKEYBODYLINE1abcdefghijklmnopqrstuvwxyz0123\n"
+        "CANARYKEYBODYLINE2abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ\n"
+        "CANARYKEYBODYLINE3abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ"
+    )
+
+    def _pem(self, kind="RSA "):
+        return f"-----BEGIN {kind}PRIVATE KEY-----\n{self.PEM_BODY}\n-----END {kind}PRIVATE KEY-----"
+
+    def test_redact_secret_patterns_removes_the_full_pem_body_not_just_header(self):
+        """The original bug: only the '-----BEGIN...-----' header line was
+        replaced, leaving the base64 key body and footer fully intact and
+        reconstructable by anyone who re-prepended a standard header."""
+        from optarena.security import redact_secret_patterns
+        pem = self._pem()
+        out = redact_secret_patterns(f"dumping config:\n{pem}\nend of dump")
+        self.assertNotIn("BEGIN RSA PRIVATE KEY", out)
+        self.assertNotIn("CANARYKEYBODYLINE1", out)
+        self.assertNotIn("CANARYKEYBODYLINE2", out)
+        self.assertNotIn("CANARYKEYBODYLINE3", out)
+        self.assertNotIn("END RSA PRIVATE KEY", out)
+        self.assertIn("dumping config:", out)
+        self.assertIn("end of dump", out)
+
+    def test_redact_pem_block_covers_every_documented_key_type(self):
+        from optarena.security import redact_secret_patterns
+        for kind in ("RSA ", "EC ", "OPENSSH ", "DSA ", "ENCRYPTED ", ""):
+            with self.subTest(kind=kind or "generic/PKCS8"):
+                out = redact_secret_patterns(self._pem(kind))
+                self.assertNotIn("CANARYKEYBODYLINE1", out)
+                self.assertNotIn(f"BEGIN {kind}PRIVATE KEY", out)
+
+    def test_redact_pem_block_handles_truncated_key_with_no_end_marker(self):
+        """A malformed/truncated block (output cut off mid-capture) must
+        still be redacted from BEGIN onward, not left with a live,
+        unredacted key body just because the footer never arrived."""
+        from optarena.security import redact_secret_patterns
+        truncated = f"-----BEGIN RSA PRIVATE KEY-----\n{self.PEM_BODY}"
+        out = redact_secret_patterns(truncated)
+        self.assertNotIn("CANARYKEYBODYLINE1", out)
+        self.assertNotIn("BEGIN RSA PRIVATE KEY", out)
+
+    def test_redact_pem_block_through_the_full_recursive_pipeline(self):
+        """End to end through the same call path a saved run record goes
+        through - not just the primitive in isolation."""
+        from optarena.security import redact_secrets_recursive
+        data = {"extra": {"stderr": f"leaked config:\n{self._pem()}"}}
+        out = redact_secrets_recursive(data)
+        dumped = json.dumps(out)
+        self.assertNotIn("CANARYKEYBODYLINE1", dumped)
+        self.assertNotIn("CANARYKEYBODYLINE2", dumped)
+
+    def test_scan_text_still_flags_a_private_key_finding_on_the_header_line(self):
+        """P1-03's fix must not regress `optarena scan`'s finding-detection
+        - scan_text processes a file LINE BY LINE, so the header-only rule
+        (not the multiline redaction pattern) is what has to keep matching
+        there; confirms the two mechanisms didn't collide."""
+        from optarena.security import scan_text
+        findings = scan_text(self._pem(), "leaked_key.pem")
+        self.assertTrue(any(f["rule"] == "private-key" for f in findings))
+        # P1-03: the persisted FINDING itself must not carry the key body
+        # either - _redacted_snippet only ever kept the matched line (the
+        # header), never the multiline body, so this was already safe; a
+        # regression test in case that ever changes.
+        self.assertFalse(any("CANARYKEYBODYLINE1" in f["snippet"] for f in findings))
 
     # ── CLI agent driver: non-zero exit (stderr) ────────────────────────
     def test_cli_agent_stderr_canary_redacted(self):
@@ -2146,17 +2410,49 @@ class CheckVulnBaselineTests(unittest.TestCase):
     CI job actually blocking - a genuinely NEW CRITICAL/HIGH finding must
     fail it, while the documented, already-triaged backlog in
     docker/vuln-baseline/*.json must not (that's the whole point of a
-    baseline instead of a blanket continue-on-error)."""
+    baseline instead of a blanket continue-on-error).
+
+    P1-02: the matching identity is now (target, package type, package,
+    installed version, CVE ID) - not just (CVE ID, package) - plus explicit
+    checks for a fix becoming available or severity being reclassified
+    upward for an otherwise-still-matching finding. Fixture shapes below
+    mirror the REAL Trivy JSON schema confirmed live against this session's
+    own images (PkgIdentifier.PURL, InstalledVersion, FixedVersion, a
+    Target string of the "<image-ref> (<os> <version>)" shape for
+    OS-package results)."""
 
     def setUp(self):
         self.mod = _load_docker_script("check_vuln_baseline")
 
-    def _scan(self, findings):
-        """findings: list of (cve_id, package_name)."""
-        return {"Results": [{"Vulnerabilities": [
-            {"VulnerabilityID": cve, "PkgName": pkg, "Severity": "CRITICAL"}
-            for cve, pkg in findings
-        ]}]}
+    def _scan(self, findings, target="ghcr.io/x/img:sha123 (debian 12)"):
+        """findings: list of dicts - cve, pkg, installed="1.0", fixed="",
+        severity="CRITICAL", pkg_type="deb". Builds one Trivy Results[]
+        entry with the real field names/shape (PkgIdentifier.PURL etc)."""
+        vulns = []
+        for f in findings:
+            installed = f.get("installed", "1.0")
+            pkg_type = f.get("pkg_type", "deb")
+            vulns.append({
+                "VulnerabilityID": f["cve"],
+                "PkgName": f["pkg"],
+                "InstalledVersion": installed,
+                "FixedVersion": f.get("fixed", ""),
+                "Severity": f.get("severity", "CRITICAL"),
+                "PkgIdentifier": {"PURL": f"pkg:{pkg_type}/debian/{f['pkg']}@{installed}"},
+            })
+        return {"Results": [{"Target": target, "Vulnerabilities": vulns}]}
+
+    def _accepted(self, cve, pkg, installed="1.0", fixed="", severity="CRITICAL",
+                  pkg_type="deb", target="debian 12"):
+        return {"id": cve, "package": pkg, "package_type": pkg_type,
+                "installed_version": installed, "fixed_version": fixed,
+                "severity": severity, "target": target}
+
+    def _write_baseline(self, baseline_dir, accepted, expires_at="2099-01-01", **extra):
+        (baseline_dir / "img.json").write_text(json.dumps({
+            "image": "img", "expires_at": expires_at,
+            "accepted_vulnerabilities": accepted, **extra,
+        }), encoding="utf-8")
 
     def test_missing_baseline_file_is_a_problem_not_a_crash(self):
         problems = self.mod.check("no-such-image", self._scan([]))
@@ -2168,13 +2464,12 @@ class CheckVulnBaselineTests(unittest.TestCase):
         documented as accepted must fail, not silently pass."""
         with tempfile.TemporaryDirectory() as d:
             baseline_dir = Path(d)
-            (baseline_dir / "img.json").write_text(json.dumps({
-                "image": "img", "expires_at": "2099-01-01",
-                "accepted_vulnerabilities": [{"id": "CVE-2020-1", "package": "old-pkg"}],
-            }), encoding="utf-8")
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "old-pkg")])
             with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
-                problems = self.mod.check("img", self._scan(
-                    [("CVE-2020-1", "old-pkg"), ("CVE-2026-9999", "new-pkg")]))
+                problems = self.mod.check("img", self._scan([
+                    {"cve": "CVE-2020-1", "pkg": "old-pkg"},
+                    {"cve": "CVE-2026-9999", "pkg": "new-pkg"},
+                ]))
         self.assertEqual(len(problems), 1)
         self.assertIn("CVE-2026-9999", problems[0])
         self.assertIn("new-pkg", problems[0])
@@ -2182,12 +2477,9 @@ class CheckVulnBaselineTests(unittest.TestCase):
     def test_baseline_findings_alone_pass_clean(self):
         with tempfile.TemporaryDirectory() as d:
             baseline_dir = Path(d)
-            (baseline_dir / "img.json").write_text(json.dumps({
-                "image": "img", "expires_at": "2099-01-01",
-                "accepted_vulnerabilities": [{"id": "CVE-2020-1", "package": "old-pkg"}],
-            }), encoding="utf-8")
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "old-pkg")])
             with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
-                problems = self.mod.check("img", self._scan([("CVE-2020-1", "old-pkg")]))
+                problems = self.mod.check("img", self._scan([{"cve": "CVE-2020-1", "pkg": "old-pkg"}]))
         self.assertEqual(problems, [])
 
     def test_expired_baseline_fails_even_with_no_new_findings(self):
@@ -2196,35 +2488,148 @@ class CheckVulnBaselineTests(unittest.TestCase):
         import datetime
         with tempfile.TemporaryDirectory() as d:
             baseline_dir = Path(d)
-            (baseline_dir / "img.json").write_text(json.dumps({
-                "image": "img", "expires_at": "2020-01-01", "owner": "someone",
-                "accepted_vulnerabilities": [{"id": "CVE-2020-1", "package": "old-pkg"}],
-            }), encoding="utf-8")
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "old-pkg")],
+                                  expires_at="2020-01-01", owner="someone")
             with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
                 problems = self.mod.check(
-                    "img", self._scan([("CVE-2020-1", "old-pkg")]),
+                    "img", self._scan([{"cve": "CVE-2020-1", "pkg": "old-pkg"}]),
                     today=datetime.date(2026, 1, 1))
         self.assertEqual(len(problems), 1)
         self.assertIn("expired", problems[0])
 
     def test_same_cve_across_multiple_targets_deduplicated(self):
-        """The same CVE+package can legitimately appear in multiple vendored
-        copies (two .deps.json files bundling the same library) - that's a
-        detail of where it was found, not a second vulnerability to demand
-        a second baseline entry for."""
+        """The same CVE+package+version can legitimately appear in multiple
+        vendored copies (two .deps.json files bundling the same library) -
+        that's a detail of where it was found, not a second vulnerability
+        to demand a second baseline entry for."""
         scan = {"Results": [
-            {"Vulnerabilities": [{"VulnerabilityID": "CVE-2020-1", "PkgName": "p", "Severity": "HIGH"}]},
-            {"Vulnerabilities": [{"VulnerabilityID": "CVE-2020-1", "PkgName": "p", "Severity": "HIGH"}]},
+            {"Target": "img:t (debian 12)", "Vulnerabilities": [
+                {"VulnerabilityID": "CVE-2020-1", "PkgName": "p", "InstalledVersion": "1.0",
+                 "FixedVersion": "", "Severity": "HIGH", "PkgIdentifier": {"PURL": "pkg:deb/debian/p@1.0"}}]},
+            {"Target": "img:t (debian 12)", "Vulnerabilities": [
+                {"VulnerabilityID": "CVE-2020-1", "PkgName": "p", "InstalledVersion": "1.0",
+                 "FixedVersion": "", "Severity": "HIGH", "PkgIdentifier": {"PURL": "pkg:deb/debian/p@1.0"}}]},
         ]}
         with tempfile.TemporaryDirectory() as d:
             baseline_dir = Path(d)
-            (baseline_dir / "img.json").write_text(json.dumps({
-                "image": "img", "expires_at": "2099-01-01",
-                "accepted_vulnerabilities": [{"id": "CVE-2020-1", "package": "p"}],
-            }), encoding="utf-8")
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "p", severity="HIGH")])
             with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
                 problems = self.mod.check("img", scan)
         self.assertEqual(problems, [])
+
+    def test_changed_installed_version_invalidates_acceptance(self):
+        """P1-02: accepting a CVE against one installed version must not
+        silently keep covering it after the package moves to a different
+        version - that's a materially different (and unreviewed) state."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "pkg", installed="1.0")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "installed": "1.1"}]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("CVE-2020-1", problems[0])
+        self.assertIn("1.1", problems[0])
+
+    def test_newly_available_fix_invalidates_acceptance(self):
+        """P1-02: a finding accepted as 'no fix available' must re-trigger
+        once Trivy's DB reports one - the environment didn't change, but
+        the finding is no longer the same acceptable risk it was."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "pkg", fixed="")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "fixed": "1.0.1"}]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("gained fixed_version", problems[0])
+        self.assertIn("1.0.1", problems[0])
+
+    def test_severity_increase_invalidates_acceptance(self):
+        """P1-02: Trivy's own severity classification for a CVE can be
+        revised upward independent of anything in this repo - re-triage
+        when that happens rather than trusting a stale severity forever."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "pkg", severity="HIGH")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "severity": "CRITICAL"}]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("severity increased", problems[0])
+        self.assertIn("HIGH -> CRITICAL", problems[0])
+
+    def test_severity_decrease_or_unchanged_does_not_fail(self):
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "pkg", severity="CRITICAL")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg", "severity": "HIGH"}]))
+        self.assertEqual(problems, [])
+
+    def test_target_change_invalidates_acceptance(self):
+        """P1-02: an OS version bump (debian 12 -> 13) changes the actual
+        scanned surface even if the CVE+package+version string still reads
+        the same - treat it as unreviewed rather than assuming it's fine."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "pkg", target="debian 12")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg"}], target="ghcr.io/x/img:sha (debian 13)"))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("NEW finding", problems[0])
+
+    def test_image_ref_prefix_in_target_does_not_break_matching(self):
+        """The same underlying OS target must match across two scans that
+        used different tags/registries to reach it (ci.yml's local-tag PR
+        scan vs publish-images.yml's git-sha-tagged real scan) - only the
+        "(os version)" suffix is the actually-comparable part."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [self._accepted("CVE-2020-1", "pkg", target="debian 12")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "pkg"}],
+                    target="localhost:5000/totally/different/ref:abc123 (debian 12)"))
+        self.assertEqual(problems, [])
+
+    def test_pkg_type_distinguishes_same_named_package_across_ecosystems(self):
+        """A "requests" Debian package and an unrelated "requests" gem (or
+        any other same-named-different-ecosystem pair) must not be treated
+        as the same accepted finding just because the bare name matches."""
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            self._write_baseline(baseline_dir, [
+                self._accepted("CVE-2020-1", "requests", pkg_type="deb")])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan(
+                    [{"cve": "CVE-2020-1", "pkg": "requests", "pkg_type": "gem"}]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("NEW finding", problems[0])
+
+    def test_malformed_entry_missing_required_field_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            bad = self._accepted("CVE-2020-1", "pkg")
+            del bad["package_type"]
+            self._write_baseline(baseline_dir, [bad])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan([]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("malformed baseline entry", problems[0])
+        self.assertIn("package_type", problems[0])
+
+    def test_duplicate_baseline_entries_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            baseline_dir = Path(d)
+            entry = self._accepted("CVE-2020-1", "pkg")
+            self._write_baseline(baseline_dir, [entry, dict(entry)])
+            with mock.patch.object(self.mod, "BASELINE_DIR", baseline_dir):
+                problems = self.mod.check("img", self._scan([]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("duplicate", problems[0])
 
     def test_all_nine_real_baselines_exist_and_are_well_formed(self):
         baseline_dir = Path(__file__).resolve().parent.parent / "docker" / "vuln-baseline"
@@ -2233,6 +2638,7 @@ class CheckVulnBaselineTests(unittest.TestCase):
             "optarena-tester-go", "optarena-tester-jvm", "optarena-tester-rust",
             "optarena-tester-dotnet", "optarena-tester-php", "optarena-tester-ruby",
         ]
+        required = {"id", "package", "package_type", "installed_version", "target", "severity"}
         for image in images:
             with self.subTest(image=image):
                 path = baseline_dir / f"{image}.json"
@@ -2243,8 +2649,13 @@ class CheckVulnBaselineTests(unittest.TestCase):
                 self.assertIn("owner", data)
                 self.assertTrue(data["accepted_vulnerabilities"])
                 for entry in data["accepted_vulnerabilities"]:
-                    self.assertIn("id", entry)
-                    self.assertIn("package", entry)
+                    missing = required - entry.keys()
+                    self.assertFalse(missing, f"{image}: entry {entry} missing {missing}")
+                # P1-02: the real files themselves must be internally consistent
+                # too, not just individually well-formed - reuses the exact
+                # malformed/duplicate detection the check itself applies.
+                _, malformed = self.mod._load_accepted(data, image)
+                self.assertEqual(malformed, [], f"{image}: {malformed}")
 
 
 class CheckNoInfraErrorsTests(unittest.TestCase):
@@ -2852,6 +3263,39 @@ class SchemaValidationTests(unittest.TestCase):
             with self.assertRaises(SchemaError):
                 validate_case({"name": "x", "expected_files": [{"path_pattern": variant}]})
 
+    def test_windows_alias_paths_rejected_everywhere(self):
+        """P1-05: none of these produce a working command-execution bypass
+        on their own - the traversal/.git/absolute checks already close
+        those - but each is a real Windows normalization trap: a trailing
+        space/dot gets silently stripped by the OS on create (so the
+        validated name and the real on-disk name differ), a reserved
+        device name is illegal to create at all, and ':' outside a drive
+        prefix addresses an NTFS alternate data stream rather than the
+        file itself."""
+        variants = (
+            "secret.txt ",              # trailing space
+            "secret.txt.",              # trailing dot
+            "sub /file.py",             # trailing space on a DIRECTORY segment
+            "CON", "con.txt", "Con.PY",  # reserved device name, case-insensitive
+            "COM1.py", "lpt9",
+            "file.txt:hidden",          # ADS syntax
+        )
+        for variant in variants:
+            with self.subTest(variant=variant), self.assertRaises(SchemaError):
+                validate_case({"name": "x", "setup_files": {variant: "x"}})
+            with self.subTest(variant=variant, field="path_pattern"), self.assertRaises(SchemaError):
+                validate_case({"name": "x", "expected_files": [{"path_pattern": variant}]})
+            with self.subTest(variant=variant, field="file_exists"), self.assertRaises(SchemaError):
+                validate_case({"name": "x", "disruptions": [{"when": {"file_exists": variant}}]})
+
+    def test_windows_alias_check_does_not_reject_ordinary_names(self):
+        """Confirms the new checks are narrowly targeted - real filenames
+        that merely CONTAIN a reserved word or a dot are unaffected."""
+        for ok in ("console.py", "constants.py", "nullable.py", "auxiliary.py",
+                   "file.name.with.dots.py", "sub/nested/file.py"):
+            with self.subTest(ok=ok):
+                validate_case({"name": "x", "setup_files": {ok: "x"}})
+
     def test_broken_solutions_shape_enforced(self):
         with self.assertRaises(SchemaError):
             validate_case({"name": "x", "broken_solutions": [{"files": {}}]})  # missing name
@@ -2875,6 +3319,27 @@ class SchemaValidationTests(unittest.TestCase):
         validate_scenario({"name": "x", "driver": "aider", "cases": []})
         with self.assertRaises(SchemaError):
             validate_scenario({"name": "x", "driver": "aider", "cases": "not-a-list"})
+
+    def test_generation_params_accepted_and_range_checked(self):
+        """P2-02: temperature/top_p/seed are validated the same way num_ctx
+        already was - a real range check, not just a type check, since an
+        out-of-range value reaches a real backend request otherwise."""
+        validate_scenario({"name": "x", "driver": "aider",
+                           "backend": {"temperature": 0.7, "top_p": 0.9, "seed": 42}})
+        validate_scenario({"name": "x", "driver": "aider",
+                           "backend": {"temperature": 0, "top_p": 1, "seed": 0}})
+        for bad in ({"temperature": -0.1}, {"temperature": 2.1}, {"temperature": "hot"}, {"temperature": True}):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SchemaError):
+                    validate_scenario({"name": "x", "driver": "aider", "backend": bad})
+        for bad in ({"top_p": 0}, {"top_p": 1.1}, {"top_p": "high"}, {"top_p": False}):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SchemaError):
+                    validate_scenario({"name": "x", "driver": "aider", "backend": bad})
+        for bad in ({"seed": 1.5}, {"seed": "seven"}, {"seed": True}):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SchemaError):
+                    validate_scenario({"name": "x", "driver": "aider", "backend": bad})
 
     def test_duplicate_case_names_rejected(self):
         with self.assertRaises(SchemaError):
@@ -3260,6 +3725,101 @@ class CheaperVerdictTests(unittest.TestCase):
         self.assertEqual(_cheaper("a", "b", {"total_cost_usd": 0.0}, {"total_cost_usd": 0.0}), "a")
 
 
+class EligibleSummaryLinesTests(unittest.TestCase):
+    """P2-04: `optarena run`'s console output previously showed only the raw
+    pass rate - eligible_pass_rate/adjusted_pass_rate existed in the saved
+    JSON but nowhere in what a user actually watches scroll by."""
+
+    def test_no_extra_lines_when_nothing_excluded(self):
+        from optarena.cli._run import _eligible_summary_lines
+        s = {"cases": 5, "capability_excluded_cases": None, "infrastructure_errors": None}
+        self.assertEqual(_eligible_summary_lines(s), [])
+
+    def test_eligible_line_when_capability_excluded(self):
+        from optarena.cli._run import _eligible_summary_lines
+        s = {"cases": 3, "capability_excluded_cases": 1, "eligible_pass_rate": 0.5,
+             "capability_exclusion_reasons": ["no file tools"],
+             "infrastructure_errors": None}
+        lines = _eligible_summary_lines(s)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("eligible: 50%", lines[0])
+        self.assertIn("2/3", lines[0])
+        self.assertIn("no file tools", lines[0])
+
+    def test_adjusted_line_when_infrastructure_errors(self):
+        from optarena.cli._run import _eligible_summary_lines
+        s = {"cases": 4, "capability_excluded_cases": None,
+             "infrastructure_errors": 1, "adjusted_pass_rate": 0.667}
+        lines = _eligible_summary_lines(s)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("adjusted: 67%", lines[0])
+        self.assertIn("3/4", lines[0])
+
+    def test_both_lines_when_both_apply(self):
+        from optarena.cli._run import _eligible_summary_lines
+        s = {"cases": 4, "capability_excluded_cases": 1, "eligible_pass_rate": 1.0,
+             "capability_exclusion_reasons": ["reason"],
+             "infrastructure_errors": 1, "adjusted_pass_rate": 0.5}
+        self.assertEqual(len(_eligible_summary_lines(s)), 2)
+
+
+class DoctorVersionDriftJSONTests(unittest.TestCase):
+    """
+    P2-03: `doctor`'s version-drift note ("last tested with X, not
+    re-verified against Y") existed only as a human-readable print - `_print`
+    is a documented no-op under `--json`, so a scripted/CI caller of
+    `optarena doctor --json` got NO version-drift signal at all, silently,
+    even though the exact same information was computed. Found while wiring
+    a CI job to gate on this signal: the JSON `checks` list had nothing to
+    grep. Fixed by recording the same note as its own advisory row in
+    `report["checks"]`, in both output modes.
+    """
+
+    def test_version_drift_note_appears_in_json_checks(self):
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(base_url="http://unreachable.invalid:1", kind="ollama", json=True)
+        with mock.patch("optarena.drivers.get_driver_version", return_value="9.9.9"):
+            with mock.patch("shutil.which", return_value="/usr/bin/aider"):
+                buf = _capture_stdout(lambda: cmd_doctor(args))
+        report = json.loads(buf)
+        version_checks = [c for c in report["checks"] if c["label"] == "aider version"]
+        self.assertEqual(len(version_checks), 1)
+        self.assertIn("not re-verified", version_checks[0]["detail"])
+        self.assertFalse(version_checks[0]["ok"])
+        self.assertFalse(version_checks[0]["required"])   # advisory - must not affect the exit code
+
+    def test_no_drift_note_when_version_matches_tested_with(self):
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(base_url="http://unreachable.invalid:1", kind="ollama", json=True)
+        with mock.patch("optarena.drivers.get_driver_version", return_value="aider.EXE 0.86.2"):
+            with mock.patch("shutil.which", return_value="/usr/bin/aider"):
+                buf = _capture_stdout(lambda: cmd_doctor(args))
+        report = json.loads(buf)
+        version_checks = [c for c in report["checks"] if c["label"] == "aider version"]
+        self.assertEqual(len(version_checks), 1)
+        self.assertNotIn("not re-verified", version_checks[0]["detail"])
+        self.assertTrue(version_checks[0]["ok"])
+
+    def test_json_mode_still_prints_nothing_but_json(self):
+        """--json must stay script-safe (A-28) - the new recording must not
+        leak an extra human-readable print line onto stdout."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(base_url="http://unreachable.invalid:1", kind="ollama", json=True)
+        with mock.patch("optarena.drivers.get_driver_version", return_value="9.9.9"):
+            with mock.patch("shutil.which", return_value="/usr/bin/aider"):
+                buf = _capture_stdout(lambda: cmd_doctor(args))
+        json.loads(buf)   # raises if anything but one JSON document was printed
+
+
+def _capture_stdout(fn) -> str:
+    import io
+    from contextlib import redirect_stdout
+    out = io.StringIO()
+    with redirect_stdout(out):
+        fn()
+    return out.getvalue()
+
+
 class ManifestTests(unittest.TestCase):
     """M-01: every run records an immutable case-set/oracle/trials identity."""
 
@@ -3600,6 +4160,56 @@ class CompareSignificanceTests(unittest.TestCase):
         self.assertFalse(cmp["verdict"]["accuracy_significant"])
 
 
+class CompareEligibleSetTests(unittest.TestCase):
+    """P2-04: "cross-driver comparisons state the exact common eligible case
+    set" - a case belongs there only if BOTH runs actually attempted it AND
+    neither driver was structurally incapable of it (capability_excluded).
+    Distinct from each run's own eligible_pass_rate: two drivers can each
+    exclude a DIFFERENT case and so share no common eligible set at all even
+    though both individually look fine."""
+
+    def _run(self, name, cases):
+        # cases: list of (name, passed, capability_excluded_reason_or_None)
+        case_dicts = [
+            {"name": n, "passed": p, "duration_s": 1.0, "execution_ok": True,
+             "files": [], "extra": ({"capability_excluded": reason} if reason else {})}
+            for n, p, reason in cases
+        ]
+        return {"run_id": name, "scenario": {"name": name}, "summary": aggregate(case_dicts),
+                "cases": case_dicts, "manifest": None}
+
+    def test_excluded_case_removed_from_common_eligible_set(self):
+        a = self._run("a", [("x", True, None), ("y", False, "no file tools")])
+        b = self._run("b", [("x", True, None), ("y", True, None)])
+        cmp = compare_runs(a, b)
+        self.assertEqual(cmp["verdict"]["eligible_cases"], ["x"])
+        self.assertEqual(cmp["verdict"]["eligible_case_count"], 1)
+
+    def test_all_eligible_when_nothing_excluded(self):
+        a = self._run("a", [("x", True, None), ("y", False, None)])
+        b = self._run("b", [("x", True, None), ("y", True, None)])
+        cmp = compare_runs(a, b)
+        self.assertEqual(cmp["verdict"]["eligible_cases"], ["x", "y"])
+        self.assertEqual(cmp["verdict"]["eligible_case_count"], 2)
+
+    def test_each_side_excluding_a_different_case_leaves_no_overlap(self):
+        a = self._run("a", [("x", True, "reason A"), ("y", True, None)])
+        b = self._run("b", [("x", True, None), ("y", True, "reason B")])
+        cmp = compare_runs(a, b)
+        self.assertEqual(cmp["verdict"]["eligible_cases"], [])
+        self.assertEqual(cmp["verdict"]["eligible_case_count"], 0)
+
+    def test_format_table_shows_eligible_line_only_when_it_differs(self):
+        clean_a = self._run("a", [("x", True, None)])
+        clean_b = self._run("b", [("x", True, None)])
+        self.assertNotIn("eligible set", format_table(compare_runs(clean_a, clean_b)))
+
+        excl_a = self._run("a", [("x", True, None), ("y", False, "no file tools")])
+        excl_b = self._run("b", [("x", True, None), ("y", True, None)])
+        table = format_table(compare_runs(excl_a, excl_b))
+        self.assertIn("eligible set:  1/2", table)
+
+
 class ReportArtifactTests(unittest.TestCase):
     def _run(self):
         return {
@@ -3633,6 +4243,27 @@ class ReportArtifactTests(unittest.TestCase):
         self.assertIn("<!doctype html>", html)
         self.assertIn("95% CI", html)
         self.assertNotIn("http://", html.replace("https://github.com", ""))  # no network assets
+
+    def test_html_omits_eligible_tile_when_nothing_excluded(self):
+        from optarena.report import to_html
+        self.assertNotIn("Eligible pass rate", to_html(self._run()))
+        self.assertNotIn("Adjusted pass rate", to_html(self._run()))
+
+    def test_html_shows_eligible_and_adjusted_tiles(self):
+        """P2-04: the raw "Pass rate" tile is always over every case - when
+        the summary carries capability_excluded_cases/infrastructure_errors,
+        the report must say so explicitly instead of only in the raw JSON."""
+        from optarena.report import to_html
+        run = self._run()
+        run["summary"].update({
+            "capability_excluded_cases": 1, "eligible_pass_rate": 0.5,
+            "infrastructure_errors": 1, "adjusted_pass_rate": 0.5,
+        })
+        html = to_html(run)
+        self.assertIn("Eligible pass rate", html)
+        self.assertIn("50%", html)
+        self.assertIn("2/3", html)   # eligible denominator: 3 cases - 1 excluded
+        self.assertIn("Adjusted pass rate", html)
 
     def test_sarif_valid(self):
         from optarena.report import to_sarif
@@ -3858,6 +4489,24 @@ class DisruptionTests(unittest.TestCase):
         with self.assertRaises(SchemaError):  # unknown key under 'when'
             validate_case({**base, "disruptions": [{"when": {"bogus": 1}}]})
 
+    def test_schema_rejects_unsafe_file_exists_path(self):
+        """P1-04: `file_exists` was previously checked only as a non-empty
+        string - a traversal/absolute value passed schema validation and
+        was only an unprotected runtime existence check on the real host
+        filesystem (see test_reactive_file_exists_cannot_escape_workspace
+        below)."""
+        base = {"name": "x", "prompts": ["a"]}
+        for bad in ("../outside.txt", "/etc/passwd", "C:/Windows/win.ini", "sub/../../out.txt"):
+            with self.subTest(bad=bad), self.assertRaises(SchemaError):
+                validate_case({**base, "disruptions": [{"when": {"file_exists": bad}}]})
+
+    def test_schema_rejects_unsafe_file_contains_path(self):
+        base = {"name": "x", "prompts": ["a"]}
+        for bad in ("../outside.txt", "/etc/passwd", "C:/Windows/win.ini"):
+            with self.subTest(bad=bad), self.assertRaises(SchemaError):
+                validate_case({**base, "disruptions": [
+                    {"when": {"file_contains": {"path": bad, "pattern": "x"}}}]})
+
     def test_reactive_file_exists_fires_once_workspace_satisfies_it(self):
         from optarena.cases import apply_disruptions
         case = {"disruptions": [
@@ -3878,6 +4527,31 @@ class DisruptionTests(unittest.TestCase):
             (root / "flag.txt").unlink()
             self.assertEqual(apply_disruptions(case, root, 3, seen), [])
             self.assertFalse((root / "flag.txt").exists())
+
+    def test_reactive_file_exists_cannot_escape_workspace(self):
+        """P1-04's actual runtime gap, exercised directly (bypassing
+        validate_case, the same way test_delete_containment_refused does
+        for the write side) so this proves the RUNTIME containment check
+        itself works, independent of the schema layer that now also
+        rejects this case earlier. Before the fix, `(root / abs_path)`
+        silently discarded `root` entirely for an absolute right-hand side
+        (pathlib's own documented behaviour) and checked the REAL host
+        path - a case-controlled arbitrary-host-file-existence oracle."""
+        from optarena.cases import apply_disruptions
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_file = Path(outside_dir) / "definitely-exists-on-the-host.txt"
+            outside_file.write_text("secret host content\n")
+            case = {"disruptions": [
+                {"when": {"file_exists": str(outside_file)},
+                 "write_files": {"flag.txt": "leaked\n"}}]}
+            with tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                # The host file genuinely exists - if containment were
+                # broken, this would fire. It must not.
+                self.assertTrue(outside_file.exists())
+                fired = apply_disruptions(case, root, 1)
+                self.assertEqual(fired, [])
+                self.assertFalse((root / "flag.txt").exists())
 
     def test_reactive_file_contains_checks_content(self):
         from optarena.cases import apply_disruptions
@@ -3969,6 +4643,185 @@ class EfficiencyMetricsTests(unittest.TestCase):
         s = aggregate([{"passed": True, "duration_s": 1, "extra": {}}])
         self.assertIsNone(s["tokens_per_pass"])
         self.assertIsNone(s["steps_per_pass"])
+
+
+@unittest.skipUnless(shutil.which("ssh-keygen"), "requires OpenSSH's ssh-keygen (>=8.0, for -Y sign/verify)")
+class PackSigningTests(unittest.TestCase):
+    """P1-06: publisher authenticity for case packs, on top of the existing
+    integrity (content hash) and transport (https-required) checks. Real
+    ssh-keygen keys throughout, not mocked subprocess calls - the whole
+    point is proving actual cryptographic verification works, the same
+    live-tool discipline the rest of this project's security fixes use."""
+
+    def _cases_dir(self, d):
+        p = Path(d) / "cases"
+        p.mkdir()
+        (p / "c1.json").write_text(json.dumps({
+            "name": "c1", "prompts": ["do x"],
+            "expected_files": [{"path_pattern": "x.py", "content_patterns": ["x"]}]}))
+        return p
+
+    def _keypair(self, d, name="key"):
+        import subprocess
+        key_path = Path(d) / name
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", "", "-C", "test"],
+                       capture_output=True, timeout=30, check=True)
+        return key_path, key_path.with_suffix(key_path.suffix + ".pub")
+
+    def test_sign_and_verify_trusted_publisher_round_trip(self):
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            self.assertIn("signature", pack)
+            self.assertEqual(pack["signature"]["signer"], "acme-corp")
+
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub, trusted_publishers_file=signers_file)
+            result = packs.verify_pack_signature(pack, trusted_publishers_file=signers_file)
+            self.assertTrue(result["signed"])
+            self.assertTrue(result["trusted"])
+            self.assertFalse(result["tampered"])
+            self.assertIn("acme-corp", result["detail"])
+
+    def test_verify_unknown_signer_is_untrusted_not_tampered(self):
+        """A signer simply not (yet) in the keyring is a soft 'don't know
+        them' state - distinct from an actively broken signature."""
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, _pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            empty_keyring = Path(d) / "empty_signers"
+            empty_keyring.write_text("someone-else ssh-ed25519 AAAAunrelated\n", encoding="utf-8")
+            result = packs.verify_pack_signature(pack, trusted_publishers_file=empty_keyring)
+            self.assertTrue(result["signed"])
+            self.assertFalse(result["trusted"])
+            self.assertFalse(result["tampered"])
+
+    def test_verify_tampered_content_is_detected(self):
+        """A known signer whose signature does NOT verify - the content
+        changed after signing (or an impersonation attempt) - is a
+        materially different, stronger signal than 'unknown signer'."""
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub, trusted_publishers_file=signers_file)
+            # Tamper AFTER signing: change content, recompute a
+            # self-consistent hash (a sophisticated tamperer would do this
+            # too), but the OLD signature (over the OLD hash) stays.
+            pack["cases"]["c1.json"]["prompts"] = ["EVIL INSTEAD"]
+            pack["hash"] = packs.content_hash(pack["cases"])
+            result = packs.verify_pack_signature(pack, trusted_publishers_file=signers_file)
+            self.assertTrue(result["signed"])
+            self.assertFalse(result["trusted"])
+            self.assertTrue(result["tampered"])
+
+    def test_load_pack_local_file_never_gated_on_trust(self):
+        """A pack already on the local filesystem needed no network trust
+        decision to get there - unsigned/untrusted is fine for a local
+        install, same as before this fix (no regression)."""
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")  # unsigned
+            out = packs.write_pack(pack, Path(d) / "p.optpack.json")
+            loaded = packs.load_pack(str(out))
+            self.assertFalse(loaded["verification"]["signed"])
+
+    def test_load_pack_remote_untrusted_refused_without_allow_unsigned(self):
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, _pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            raw = json.dumps(pack).encode("utf-8")
+            with mock.patch("optarena.packs.urllib.request.urlopen") as m:
+                m.return_value.__enter__.return_value.read.return_value = raw
+                empty_keyring = Path(d) / "empty_signers"
+                with mock.patch.object(packs, "TRUSTED_PUBLISHERS_FILE", empty_keyring):
+                    with self.assertRaises(ValueError) as ctx:
+                        packs.load_pack("https://example.invalid/p.optpack.json")
+                    self.assertIn("unsigned/untrusted", str(ctx.exception))
+
+    def test_load_pack_remote_untrusted_allowed_with_allow_unsigned(self):
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, _pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            raw = json.dumps(pack).encode("utf-8")
+            with mock.patch("optarena.packs.urllib.request.urlopen") as m:
+                m.return_value.__enter__.return_value.read.return_value = raw
+                empty_keyring = Path(d) / "empty_signers"
+                with mock.patch.object(packs, "TRUSTED_PUBLISHERS_FILE", empty_keyring):
+                    loaded = packs.load_pack("https://example.invalid/p.optpack.json",
+                                             allow_unsigned=True)
+            self.assertFalse(loaded["verification"]["trusted"])
+
+    def test_load_pack_tampered_refused_unconditionally_even_local_and_allow_unsigned(self):
+        """The hard-tamper case bypasses NEITHER the local-file exemption
+        NOR --allow-unsigned - it's never a legitimate 'haven't decided to
+        trust this yet' state the way an unknown signer is."""
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "1.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub, trusted_publishers_file=signers_file)
+            pack["cases"]["c1.json"]["prompts"] = ["EVIL INSTEAD"]
+            pack["hash"] = packs.content_hash(pack["cases"])
+            out = packs.write_pack(pack, Path(d) / "tampered.optpack.json")
+            with mock.patch.object(packs, "TRUSTED_PUBLISHERS_FILE", signers_file):
+                with self.assertRaises(ValueError) as ctx:
+                    packs.load_pack(str(out), allow_unsigned=True)  # local AND allow_unsigned
+                self.assertIn("BROKEN signature", str(ctx.exception))
+
+    def test_add_trusted_publisher_replaces_existing_entry_for_same_identity(self):
+        from optarena import packs
+        with tempfile.TemporaryDirectory() as d:
+            _priv1, pub1 = self._keypair(d, "key1")
+            _priv2, pub2 = self._keypair(d, "key2")
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub1, trusted_publishers_file=signers_file)
+            packs.add_trusted_publisher("acme-corp", pub2, trusted_publishers_file=signers_file)
+            lines = signers_file.read_text(encoding="utf-8").splitlines()
+            acme_lines = [ln for ln in lines if ln.startswith("acme-corp ")]
+            self.assertEqual(len(acme_lines), 1, "must replace, not duplicate, the same identity")
+            self.assertIn(pub2.read_text(encoding="utf-8").split()[1], acme_lines[0])
+
+    def test_signature_and_verification_survive_install_and_feed_the_manifest(self):
+        """End to end through install_pack (which writes _pack.json) and
+        runner._manifest._pack_info (which reads it back) - not just the
+        packs.py primitives in isolation."""
+        from optarena import packs
+        from optarena.runner._manifest import _pack_info
+        with tempfile.TemporaryDirectory() as d:
+            src = self._cases_dir(d)
+            priv, pub = self._keypair(d)
+            pack = packs.build_pack(src, "mypack", "3.0.0")
+            pack = packs.sign_pack(pack, priv, signer_id="acme-corp")
+            signers_file = Path(d) / "trusted_publishers"
+            packs.add_trusted_publisher("acme-corp", pub, trusted_publishers_file=signers_file)
+            with mock.patch.object(packs, "TRUSTED_PUBLISHERS_FILE", signers_file):
+                loaded = packs.load_pack(str(packs.write_pack(pack, Path(d) / "p.optpack.json")))
+                reg = Path(d) / "reg"
+                dest = packs.install_pack(loaded, packs_dir=reg)
+            info = _pack_info(str(dest))
+            self.assertEqual(info["name"], "mypack")
+            self.assertEqual(info["version"], "3.0.0")
+            self.assertTrue(info["verification"]["trusted"])
 
 
 class PackVersionSortTests(unittest.TestCase):
@@ -4260,6 +5113,72 @@ class ManifestTrialsTests(unittest.TestCase):
             Scenario(name="x", driver="aider", backend=Backend(kind="ollama", base_url="http://x", model="m")),
             [], requested_trials=1)
         self.assertIn("driver_version", m)
+
+    def test_manifest_records_generation_params_and_provider_version(self):
+        """P2-02: temperature/top_p/seed and a best-effort provider version
+        are part of the manifest's identity now, recorded regardless of
+        whether the run's driver actually honors them."""
+        from optarena.runner import build_manifest
+        backend = Backend(kind="ollama", base_url="http://x", model="m",
+                           temperature=0.4, top_p=0.9, seed=7)
+        m = build_manifest(
+            Scenario(name="x", driver="aider", backend=backend), [], requested_trials=1)
+        self.assertEqual(m["backend_temperature"], 0.4)
+        self.assertEqual(m["backend_top_p"], 0.9)
+        self.assertEqual(m["backend_seed"], 7)
+        self.assertIn("backend_provider_version", m)   # None off an unreachable host - key still present
+
+    def test_provider_version_detected_live_from_ollama(self):
+        """Real /api/version request against a live local Ollama - not
+        mocked - confirming the field carries a real value when the backend
+        actually is Ollama and reachable."""
+        import urllib.error
+        import urllib.request
+        from optarena.runner._manifest import _provider_version
+        backend = Backend(kind="ollama", base_url="http://localhost:11434")
+        try:
+            urllib.request.urlopen("http://localhost:11434/api/version", timeout=2)
+        except (OSError, urllib.error.URLError):
+            self.skipTest("no local Ollama reachable")
+        version = _provider_version(backend)
+        self.assertIsInstance(version, str)
+        self.assertTrue(version)
+
+    def test_provider_version_none_for_non_ollama_and_unreachable(self):
+        from optarena.runner._manifest import _provider_version
+        self.assertIsNone(_provider_version(Backend(kind="openai", base_url="http://localhost:11434")))
+        self.assertIsNone(_provider_version(Backend(kind="ollama", base_url="http://127.0.0.1:1")))
+
+    def test_source_revision_falls_back_to_embedded_build_commit(self):
+        """P2-02: a wheel install has no .git directory - _source_revision
+        must fall back to a build-time-embedded commit file rather than
+        reporting None, and git_dirty must stay None (no working tree to be
+        dirty), not falsely claim "known clean" with False."""
+        from optarena.runner._manifest import _source_revision
+        import optarena.runner._manifest as manifest_mod
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=1, stdout="")
+            fake_file = Path(manifest_mod.__file__).resolve().parent.parent / "_build_commit.txt"
+            real_read_text = Path.read_text
+
+            def fake_read_text(self, *a, **kw):
+                if self == fake_file:
+                    return "deadbeef1234\n"
+                return real_read_text(self, *a, **kw)
+
+            with mock.patch.object(Path, "read_text", fake_read_text):
+                info = _source_revision()
+        self.assertEqual(info["git_commit"], "deadbeef1234")
+        self.assertIsNone(info["git_dirty"])
+
+    def test_source_revision_none_when_no_git_and_no_embedded_commit(self):
+        from optarena.runner._manifest import _source_revision
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=1, stdout="")
+            with mock.patch.object(Path, "read_text", side_effect=OSError("no such file")):
+                info = _source_revision()
+        self.assertIsNone(info["git_commit"])
+        self.assertIsNone(info["git_dirty"])
 
     def test_caching_driver_manifest_reflects_requested_trials_not_one(self):
         cases_dir = Path(tempfile.mkdtemp(prefix="optarena_test_manifesttrials_"))
@@ -4928,6 +5847,36 @@ class BaselineDriverEndToEndTests(unittest.TestCase):
         self.assertTrue(request["path"].endswith("/api/chat"))
         self.assertEqual(request["body"]["options"], {"num_ctx": 4096})
 
+    def test_ollama_chat_sends_generation_params_in_options(self):
+        """P2-02: temperature/top_p/seed must reach the real request body,
+        not just the manifest - this is what "honored" means for a driver."""
+        from optarena.drivers.openai_chat import OllamaChatDriver
+        scenario = Scenario(name="s", driver="ollama-chat",
+                            backend=Backend(kind="ollama", base_url=self.backend.base_url,
+                                            model="m", temperature=0.3, top_p=0.8, seed=99))
+        OllamaChatDriver().run_case(self._case(), scenario, self.ws)
+        options = self.backend.requests[0]["body"]["options"]
+        self.assertEqual(options, {"temperature": 0.3, "top_p": 0.8, "seed": 99})
+
+    def test_ollama_chat_omits_options_key_when_nothing_configured(self):
+        from optarena.drivers.openai_chat import OllamaChatDriver
+        scenario = Scenario(name="s", driver="ollama-chat",
+                            backend=Backend(kind="ollama", base_url=self.backend.base_url, model="m"))
+        OllamaChatDriver().run_case(self._case(), scenario, self.ws)
+        self.assertNotIn("options", self.backend.requests[0]["body"])
+
+    def test_openai_chat_sends_generation_params_in_body(self):
+        from optarena.drivers.openai_chat import OpenAIChatDriver
+        scenario = Scenario(name="s", driver="openai-chat",
+                            backend=Backend(kind="openai", base_url=self.backend.base_url,
+                                            model="test-model", api_key="sk-scenario",
+                                            temperature=0.5, top_p=0.95, seed=123))
+        OpenAIChatDriver().run_case(self._case(), scenario, self.ws)
+        body = self.backend.requests[0]["body"]
+        self.assertEqual(body["temperature"], 0.5)
+        self.assertEqual(body["top_p"], 0.95)
+        self.assertEqual(body["seed"], 123)
+
     def test_whole_case_deadline_is_not_per_prompt(self):
         # F-05: 3 prompts with a 1s case budget against a 0.6s backend must
         # stop early, not spend 3 x 1s.
@@ -5284,6 +6233,106 @@ class OpenAIAgentsSessionCleanupTests(unittest.TestCase):
 
         driver = OpenAIAgentsDriver()
         driver.close_session(("agent-placeholder", "run-config-placeholder", _BrokenClient()))   # must not raise
+
+
+class SDKDriverGenerationParamsTests(unittest.TestCase):
+    """
+    P2-02: each SDK driver's open_session() must actually forward
+    temperature/top_p/seed into whatever object the underlying framework
+    uses to build its completion request - construction alone (no network
+    call happens here for any of these six) proves the wiring is real, not
+    just plausible-looking code. Skipped per-driver, gracefully, when that
+    optional SDK extra isn't installed - matching this project's existing
+    "environment-dependent capability" pattern (PackSigningTests et al.).
+    """
+
+    def _scenario(self, driver: str, **backend_kw) -> Scenario:
+        backend = Backend(kind="openai", base_url="http://localhost:1",
+                          model="m", api_key="k",
+                          temperature=0.4, top_p=0.8, seed=5, **backend_kw)
+        return Scenario(name="s", driver=driver, backend=backend)
+
+    def test_crewai_llm_carries_generation_params(self):
+        try:
+            from optarena.drivers.crewai_sdk import CrewAIDriver
+        except ImportError:
+            self.skipTest("crewai not installed")
+        llm = CrewAIDriver().open_session(self._scenario("crewai")).llm
+        self.assertEqual(llm.temperature, 0.4)
+        self.assertEqual(llm.top_p, 0.8)
+        self.assertEqual(llm.seed, 5)
+
+    def test_langgraph_chatopenai_carries_generation_params(self):
+        try:
+            import langchain_openai  # noqa: F401
+            from optarena.drivers.langgraph_sdk import LangGraphDriver
+        except ImportError:
+            self.skipTest("langgraph/langchain-openai not installed")
+        # create_react_agent compiles the model into an internal graph with
+        # no stable public accessor for it - intercept the exact `model=`
+        # kwarg it's called with instead of reverse-engineering graph
+        # internals that could change between langgraph versions.
+        with mock.patch("langgraph.prebuilt.create_react_agent") as fake_create:
+            fake_create.return_value = "compiled-graph-placeholder"
+            LangGraphDriver().open_session(self._scenario("langgraph"))
+        llm = fake_create.call_args.kwargs["model"]
+        self.assertEqual(llm.temperature, 0.4)
+        self.assertEqual(llm.top_p, 0.8)
+        self.assertEqual(llm.seed, 5)
+
+    def test_openai_agents_model_settings_carries_generation_params(self):
+        try:
+            from optarena.drivers.openai_agents_sdk import OpenAIAgentsDriver
+        except ImportError:
+            self.skipTest("openai-agents not installed")
+        agent, _run_config, client = OpenAIAgentsDriver().open_session(self._scenario("openai-agents"))
+        self.assertEqual(agent.model_settings.temperature, 0.4)
+        self.assertEqual(agent.model_settings.top_p, 0.8)
+        self.assertEqual(agent.model_settings.extra_body, {"seed": 5})
+        driver_loop = getattr(client, "close", None)
+        if driver_loop is not None:
+            import asyncio
+            asyncio.run(client.close())
+
+    def test_autogen_client_create_args_carries_generation_params(self):
+        try:
+            from optarena.drivers.autogen_sdk import AutoGenDriver
+        except ImportError:
+            self.skipTest("autogen not installed")
+        import asyncio
+        _agent, client = asyncio.run(AutoGenDriver().aopen_session(self._scenario("autogen")))
+        try:
+            create_args = client._create_args
+            self.assertEqual(create_args["temperature"], 0.4)
+            self.assertEqual(create_args["top_p"], 0.8)
+            self.assertEqual(create_args["seed"], 5)
+        finally:
+            asyncio.run(AutoGenDriver().aclose_session((_agent, client)))
+
+    def test_semantic_kernel_execution_settings_carries_generation_params(self):
+        try:
+            from optarena.drivers.semantic_kernel_sdk import SemanticKernelDriver
+        except ImportError:
+            self.skipTest("semantic-kernel not installed")
+        import asyncio
+        session = asyncio.run(SemanticKernelDriver().aopen_session(self._scenario("semantic-kernel")))
+        try:
+            settings = session["agent"].arguments.execution_settings["default"]
+            self.assertEqual(settings.temperature, 0.4)
+            self.assertEqual(settings.top_p, 0.8)
+            self.assertEqual(settings.seed, 5)
+        finally:
+            asyncio.run(session["client"].close())
+
+    def test_smolagents_model_kwargs_carries_generation_params(self):
+        try:
+            from optarena.drivers.smolagents_sdk import SmolAgentsDriver
+        except ImportError:
+            self.skipTest("smolagents not installed")
+        model = SmolAgentsDriver().open_session(self._scenario("smolagents"))
+        self.assertEqual(model.kwargs["temperature"], 0.4)
+        self.assertEqual(model.kwargs["top_p"], 0.8)
+        self.assertEqual(model.kwargs["seed"], 5)
 
 
 if __name__ == "__main__":

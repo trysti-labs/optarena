@@ -3,6 +3,12 @@ __pycache__/
 *.egg-info/
 .venv/
 
+# P2-02: written by the wheel-build step (CI or scripts/embed_build_commit.py)
+# right before `python -m build` - a dev checkout must never carry this, or
+# `_source_revision()`'s git fallback would be silently shadowed by a stale
+# embedded commit instead of reading the real live checkout state.
+optarena/_build_commit.txt
+
 # Results (local run data)
 results/
 

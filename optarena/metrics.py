@@ -304,5 +304,11 @@ def case_deltas(run_a: dict, run_b: dict) -> list[dict]:
             # distinctly from a genuine pass<->fail flip.
             "a_infrastructure_error": bool(ca and _case_infrastructure_error(ca)),
             "b_infrastructure_error": bool(cb and _case_infrastructure_error(cb)),
+            # P2-04: per-row capability-exclusion state, same shape as
+            # infrastructure_error above - lets compare_runs compute the
+            # exact COMMON eligible set across both runs, not just each
+            # run's own eligible_pass_rate in isolation.
+            "a_capability_excluded": bool(ca and ca.get("extra", {}).get("capability_excluded")),
+            "b_capability_excluded": bool(cb and cb.get("extra", {}).get("capability_excluded")),
         })
     return rows

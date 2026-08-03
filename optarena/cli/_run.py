@@ -142,6 +142,31 @@ def _confirm_host_native_execution(scenarios: list, args) -> bool:
     return False
 
 
+def _eligible_summary_lines(s: dict) -> list[str]:
+    """
+    P2-04: `pass_rate` is always the RAW denominator (every case) -
+    `eligible_pass_rate`/`adjusted_pass_rate` were computed by
+    `metrics.aggregate` since P2-07/F-10 but never printed anywhere, so a
+    driver's real accuracy on the cases it could actually attempt was
+    invisible without opening the saved run JSON by hand. Returns zero,
+    one, or two extra lines - only for the dimensions that actually
+    excluded something, so an ordinary run's summary doesn't grow lines
+    that always say the same trivial thing. A plain function (not inlined
+    into cmd_run) so this formatting is unit-testable without a full run.
+    """
+    lines = []
+    if s.get("capability_excluded_cases"):
+        reasons = ", ".join(s.get("capability_exclusion_reasons") or [])
+        lines.append(f"     eligible: {s['eligible_pass_rate']:.0%} of "
+                     f"{s['cases'] - s['capability_excluded_cases']}/{s['cases']} case(s) "
+                     f"this driver could attempt ({s['capability_excluded_cases']} excluded: {reasons})")
+    if s.get("infrastructure_errors"):
+        lines.append(f"     adjusted: {s['adjusted_pass_rate']:.0%} of "
+                     f"{s['cases'] - s['infrastructure_errors']}/{s['cases']} case(s) with a real verdict "
+                     f"({s['infrastructure_errors']} infrastructure error(s))")
+    return lines
+
+
 def cmd_run(args) -> int:
     # --pack is shorthand for --cases-dir pointing at an installed pack.
     if getattr(args, "pack", None):
@@ -243,6 +268,8 @@ def cmd_run(args) -> int:
         clean = f", {s['clean_passes']} clean" if s.get("clean_passes") is not None else ""
         events.say(f"  -> {s['passed']}/{s['cases']} passed ({s['pass_rate']:.0%}{ci_str}{clean}, "
                    f"mean {s['mean_duration_s']}s) - saved {path.name}")
+        for line in _eligible_summary_lines(s):
+            events.say(line)
         eff = []
         if s.get("tokens_per_pass"):
             eff.append(f"{s['tokens_per_pass']} tokens/pass")

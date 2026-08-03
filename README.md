@@ -403,6 +403,13 @@ correctly reports 6 regressions with exit code 1. Both runs here were free
 local Ollama backends, so no `cost` line appears; a `cost $X.XX -> $Y.YY`
 line is added automatically whenever both runs priced a paid backend.
 
+## Community
+
+[CONTRIBUTING.md](./CONTRIBUTING.md) for how to send a PR, [SECURITY.md](./SECURITY.md)
+for reporting a vulnerability, [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for
+the ground rules, and [GOVERNANCE.md](./GOVERNANCE.md) for who maintains this,
+how decisions get made, and the project's version/deprecation policies.
+
 ## License
 
 Apache License 2.0 - see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).

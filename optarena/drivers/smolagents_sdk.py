@@ -29,10 +29,21 @@ class SmolAgentsDriver(SingleFileSDKDriver):
         from smolagents import OpenAIServerModel
 
         backend = scenario.backend
+        # P2-02: generation parameters - confirmed live in OpenAIServerModel's
+        # own docstring that **kwargs (e.g. temperature) forward straight
+        # into the underlying OpenAI completion call; seed does too, same path.
+        gen_kwargs = {}
+        if backend.temperature is not None:
+            gen_kwargs["temperature"] = backend.temperature
+        if backend.top_p is not None:
+            gen_kwargs["top_p"] = backend.top_p
+        if backend.seed is not None:
+            gen_kwargs["seed"] = backend.seed
         return OpenAIServerModel(
             model_id=backend.model,
             api_base=backend.openai_base,
             api_key=backend.api_key or "optarena",
+            **gen_kwargs,
         )
 
     def complete(self, session, prompt: str, scenario: Scenario,

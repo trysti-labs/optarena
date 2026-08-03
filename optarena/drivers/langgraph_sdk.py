@@ -50,10 +50,21 @@ class LangGraphDriver(SingleFileSDKDriver):
         from langchain_openai import ChatOpenAI
 
         backend = scenario.backend
+        # P2-02: generation parameters - confirmed live that ChatOpenAI
+        # declares temperature/top_p/seed as direct model fields (not just
+        # passthrough model_kwargs), so these reach the actual request.
+        kwargs = {}
+        if backend.temperature is not None:
+            kwargs["temperature"] = backend.temperature
+        if backend.top_p is not None:
+            kwargs["top_p"] = backend.top_p
+        if backend.seed is not None:
+            kwargs["seed"] = backend.seed
         llm = ChatOpenAI(
             model_name=backend.model,
             openai_api_base=backend.openai_base,
             openai_api_key=backend.api_key or "optarena",
+            **kwargs,
         )
         return create_react_agent(model=llm, tools=[])
 

@@ -72,15 +72,19 @@ def cmd_init(args) -> int:
 
 def cmd_cases_pack(args) -> int:
     """Bundle a cases directory into a single shareable, versioned pack file."""
-    from ..packs import build_pack, write_pack
+    from ..packs import build_pack, sign_pack, write_pack
     try:
         pack = build_pack(args.dir, args.name, args.version)
+        if getattr(args, "sign_key", None):
+            pack = sign_pack(pack, args.sign_key, signer_id=getattr(args, "signer_id", None))
     except (ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     out = write_pack(pack, args.out)
     print(f"  packed {pack['case_count']} case(s) -> {out}")
     print(f"  name={pack['name']} version={pack['version']} hash={pack['hash']}")
+    if "signature" in pack:
+        print(f"  signed as {pack['signature']['signer']!r}")
     return 0
 
 
@@ -88,13 +92,40 @@ def cmd_cases_install(args) -> int:
     """Install a pack (local file or URL) into the local registry (~/.optarena/packs)."""
     from ..packs import install_pack, load_pack
     try:
-        pack = load_pack(args.source, allow_insecure=args.allow_insecure)
+        pack = load_pack(args.source, allow_insecure=args.allow_insecure,
+                         allow_unsigned=getattr(args, "allow_unsigned", False))
         dest = install_pack(pack, force=args.force)
     except (ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+    # P1-06: "display signature state and signer before installation" -
+    # this prints it right after (install already succeeded, since the
+    # trust gate in load_pack runs BEFORE any bytes are written for a
+    # remote pack; a local pack is never gated, but its state is still
+    # worth showing).
+    v = pack.get("verification") or {}
+    if v.get("trusted"):
+        print(f"  signature: trusted ({v['detail']})")
+    elif v.get("signed"):
+        print(f"  signature: PRESENT BUT NOT TRUSTED - {v['detail']}")
+    else:
+        print("  signature: none (unsigned pack)")
     print(f"  installed {pack['name']}@{pack['version']} ({pack['case_count']} case(s)) -> {dest}")
     print(f"  run it: optarena run --pack {pack['name']} --driver ollama-chat --name r1")
+    return 0
+
+
+def cmd_cases_trust_publisher(args) -> int:
+    """Add a publisher's public key to the local trusted-publisher keyring
+    (~/.optarena/trusted_publishers) - the explicit, locally-owned trust
+    decision that makes a signed pack's signer actually count as verified."""
+    from ..packs import TRUSTED_PUBLISHERS_FILE, add_trusted_publisher
+    try:
+        add_trusted_publisher(args.identity, args.public_key)
+    except (ValueError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(f"  trusted {args.identity!r} added to {TRUSTED_PUBLISHERS_FILE}")
     return 0
 
 

@@ -137,6 +137,24 @@ def to_html(run: dict) -> str:
         # P2-05: a total built from only SOME cases' known prices must not
         # read as complete - "$0.42" implies every case is accounted for.
         cost += f" (+{s['unpriced_cases']} case(s) unpriced)"
+    # P2-04: raw "Pass rate" above is always over every case - when the
+    # driver structurally couldn't attempt some of them (no file tools, a
+    # case needing >1 file), an extra tile states the eligible rate and
+    # denominator explicitly rather than leaving that only in the raw JSON.
+    # Only rendered when it applies, same convention as the cost tile above.
+    extra_tiles = ""
+    if s.get("capability_excluded_cases"):
+        eligible_n = s["cases"] - s["capability_excluded_cases"]
+        extra_tiles += tile(
+            "Eligible pass rate",
+            f"{s['eligible_pass_rate']:.0%} ({eligible_n}/{s['cases']} case(s) "
+            f"this driver could attempt)")
+    if s.get("infrastructure_errors"):
+        non_infra_n = s["cases"] - s["infrastructure_errors"]
+        extra_tiles += tile(
+            "Adjusted pass rate",
+            f"{s['adjusted_pass_rate']:.0%} ({non_infra_n}/{s['cases']} case(s) "
+            f"with a real verdict)")
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OptArena report - {escape(scenario.get('name', ''))}</title>
@@ -151,6 +169,7 @@ def to_html(run: dict) -> str:
 {tile("Clean passes", clean)}
 {tile("Mean time", f"{s.get('mean_duration_s', 0):.1f}s")}
 {tile("Cost", cost)}
+{extra_tiles}
 </div>
 <table><thead><tr><th>case</th><th>result</th><th>time</th><th>detail</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table>

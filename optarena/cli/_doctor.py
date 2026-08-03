@@ -87,21 +87,29 @@ def cmd_doctor(args) -> int:
             return f"version: {v}  (last tested with {tested!r} - not re-verified against this version)"
         return f"version: {v}"
 
+    def _print_version_note(key: str) -> None:
+        # P2-03: `_print` alone is a no-op under `--json` (by design, so a
+        # scripted caller gets clean JSON on stdout) - which meant a version
+        # note NEVER reached `--json` output at all, even though it's the
+        # exact signal a CI job would want to gate on. Recorded into
+        # `report["checks"]` here too (as its own advisory row) so both
+        # output modes carry the same information, not just the human one.
+        note = _version_note(key)
+        if note:
+            _print(f"         {note}")
+            _record(f"{key} version", "not re-verified" not in note, note, required=False)
+
     _section("cli drivers")
     aider_found = _shutil.which("aider") is not None
     _check("aider", aider_found, "pip install aider-chat")
     if aider_found:
-        note = _version_note("aider")
-        if note:
-            _print(f"         {note}")
+        _print_version_note("aider")
     for key, spec in CLI_AGENTS.items():
         found = next((b for b in spec["binaries"] if _shutil.which(b)), None)
         _check(key, found is not None,
                found or f"install {spec['label']} ({'/'.join(spec['binaries'])})")
         if found:
-            note = _version_note(key)
-            if note:
-                _print(f"         {note}")
+            _print_version_note(key)
 
     engine = container_engine()
     _section(f"{engine} (sandboxed check_command execution)")
@@ -133,9 +141,7 @@ def cmd_doctor(args) -> int:
         installed = _ilu.find_spec(import_name) is not None
         _check_info(driver_key, installed, f"pip install optarena[{extra}]")
         if installed:
-            note = _version_note(driver_key)
-            if note:
-                _print(f"         {note}")
+            _print_version_note(driver_key)
 
     # A-29: the three directories that are NOT packaged into a wheel
     # (README's source-checkout note). Installed from a wheel they're simply

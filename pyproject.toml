@@ -53,7 +53,11 @@ where = ["."]
 include = ["optarena*"]
 
 [tool.setuptools.package-data]
-optarena = ["cases/*.json"]
+# _build_commit.txt is optional (glob, not a hard requirement) - present in a
+# wheel built by CI (scripts/embed_build_commit.py runs first), absent from
+# a plain source-checkout `pip install -e .` where it would only shadow the
+# live git state _source_revision() already reads directly. See P2-02.
+optarena = ["cases/*.json", "_build_commit.txt"]
 
 # Intentionally NOT bundled: docker/, dashboard/, repos/ - all
 # top-level siblings of optarena/, not part of this package. This is a

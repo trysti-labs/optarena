@@ -47,6 +47,7 @@ from ._cases_cmds import (
     cmd_cases_install,
     cmd_cases_pack,
     cmd_cases_packs,
+    cmd_cases_trust_publisher,
     cmd_init,
     cmd_list,
     cmd_validate,
@@ -75,7 +76,7 @@ __all__ = [
     "_warn_baseline_incompatible", "_confirm_host_native_execution",
     "cmd_run", "cmd_compare", "cmd_regression", "cmd_list",
     "_SAMPLE_CASE", "cmd_init", "cmd_cases_pack", "cmd_cases_install", "cmd_cases_packs",
-    "cmd_case_show", "cmd_validate", "cmd_verify_corpus",
+    "cmd_cases_trust_publisher", "cmd_case_show", "cmd_validate", "cmd_verify_corpus",
     "cmd_run_show", "cmd_runs_rebuild_index", "cmd_runs_prune", "cmd_runs_scrub_secrets",
     "cmd_doctor", "cmd_docker", "cmd_sandbox_status",
     "_ScopedDashboardHandler", "cmd_serve", "cmd_scan", "cmd_report",
@@ -281,14 +282,28 @@ def main(argv: list[str] | None = None) -> int:
     pc_pack.add_argument("--name", required=True, help="pack name (letters/digits/. _ -)")
     pc_pack.add_argument("--version", default="0.1.0", help="pack version (default 0.1.0)")
     pc_pack.add_argument("--out", help="output file (default <name>-<version>.optpack.json)")
+    pc_pack.add_argument("--sign-key", help="sign the pack with this SSH private key "
+                                            "(ssh-keygen -Y sign) - publish it as a trusted "
+                                            "identity, not just an integrity hash")
+    pc_pack.add_argument("--signer-id", help="identity recorded in the signature "
+                                             "(default: the --sign-key file's own name)")
     pc_pack.set_defaults(fn=cmd_cases_pack)
     pc_inst = cases_sub.add_parser("install", help="install a pack (local file or URL) into the registry")
     pc_inst.add_argument("source", help="path or http(s) URL to a .optpack.json")
     pc_inst.add_argument("--force", action="store_true", help="overwrite an installed pack of the same name@version")
     pc_inst.add_argument("--allow-insecure", action="store_true",
                           help="allow installing a pack over plain http:// (default: https:// required for URLs)")
+    pc_inst.add_argument("--allow-unsigned", action="store_true",
+                          help="allow installing a REMOTE (http/https) pack that isn't signed by a "
+                               "publisher in your trusted keyring (default: refused - a local file "
+                               "path is never gated on this)")
     pc_inst.set_defaults(fn=cmd_cases_install)
     cases_sub.add_parser("packs", help="list installed case packs").set_defaults(fn=cmd_cases_packs)
+    pc_trust = cases_sub.add_parser(
+        "trust-publisher", help="add a publisher's SSH public key to the local trusted-publisher keyring")
+    pc_trust.add_argument("identity", help="identity string to trust (must match the pack's --signer-id)")
+    pc_trust.add_argument("public_key", help="path to the publisher's SSH public key (e.g. id_ed25519.pub)")
+    pc_trust.set_defaults(fn=cmd_cases_trust_publisher)
 
     p_runs = sub.add_parser("runs", help="saved runs: list/show/rebuild-index/prune/scrub-secrets")
     runs_sub = p_runs.add_subparsers(dest="runs_command", required=True)

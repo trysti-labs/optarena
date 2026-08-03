@@ -103,16 +103,27 @@ class OpenAIChatDriver(Driver):
 
     def _chat(self, prompt: str, scenario: Scenario, timeout: int) -> tuple[str, dict]:
         backend = scenario.backend
+        payload = {
+            "model": backend.model,
+            "messages": [
+                {"role": "system", "content": _SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+        }
+        # P2-02: generation parameters, honored directly by the
+        # OpenAI-compatible /v1/chat/completions request body - this is the
+        # raw-model baseline, so these are exactly the fields that determine
+        # what "the model's own behavior" means for this run.
+        if backend.temperature is not None:
+            payload["temperature"] = backend.temperature
+        if backend.top_p is not None:
+            payload["top_p"] = backend.top_p
+        if backend.seed is not None:
+            payload["seed"] = backend.seed
         body = _post_json(
             f"{backend.openai_base}/chat/completions",
-            {
-                "model": backend.model,
-                "messages": [
-                    {"role": "system", "content": _SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-                "stream": False,
-            },
+            payload,
             timeout,
             headers={"Authorization": f"Bearer {backend.api_key}"},
         )
@@ -247,11 +258,22 @@ class OllamaChatDriver(OpenAIChatDriver):
             ],
             "stream": False,
         }
+        # P2-02: generation parameters, and num_ctx, all live under Ollama's
+        # native "options" object - same request field for both.
+        options = {}
         if backend.num_ctx:
             # Only the native /api/chat honors this per-request - the
             # OpenAI-compat /v1/chat/completions path (every other driver)
             # silently ignores it on this Ollama version; see Backend.num_ctx.
-            payload["options"] = {"num_ctx": backend.num_ctx}
+            options["num_ctx"] = backend.num_ctx
+        if backend.temperature is not None:
+            options["temperature"] = backend.temperature
+        if backend.top_p is not None:
+            options["top_p"] = backend.top_p
+        if backend.seed is not None:
+            options["seed"] = backend.seed
+        if options:
+            payload["options"] = options
         body = _post_json(
             f"{backend.base_url.rstrip('/')}/api/chat",
             payload,
