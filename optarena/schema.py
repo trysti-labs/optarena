@@ -220,7 +220,13 @@ _CASE_KNOWN_KEYS = {
     # Dynamic evaluation: mid-session environment changes that fire BETWEEN the
     # agent's prompts (the agent must adapt on its next turn). See validation below.
     "disruptions",
+    # Tool-use cases (openai-tools/ollama-tools drivers): a case names a mock
+    # service instead of expected_files/check_command - see
+    # _cases/_mock_service.py and _cases/_tool_evaluate.py.
+    "tool_service", "tools", "max_tool_turns",
+    "expected_calls", "forbidden_calls", "expected_final_state",
 }
+_TOOL_CALL_SPEC_KNOWN_KEYS = {"tool", "arguments_contains"}
 _DISRUPTION_KNOWN_KEYS = {"after_prompt", "when", "description", "write_files", "delete_files"}
 _DISRUPTION_WHEN_KNOWN_KEYS = {"file_exists", "file_contains"}
 _DISRUPTION_FILE_CONTAINS_KEYS = {"path", "pattern"}
@@ -320,6 +326,35 @@ def validate_case(data: dict, source: str = "<case>") -> None:
                     raise _err(where, "'min_lines' must be a non-negative integer")
             if "case_sensitive" in spec and not isinstance(spec["case_sensitive"], bool):
                 raise _err(where, "'case_sensitive' must be a boolean")
+
+    if "tool_service" in data and data["tool_service"] is not None:
+        if not isinstance(data["tool_service"], str) or not data["tool_service"]:
+            raise _err(source, "'tool_service' must be a non-empty string")
+    if "tools" in data and data["tools"] is not None:
+        _validate_string_list(data["tools"], f"{source}.tools")
+    if "max_tool_turns" in data:
+        mt = data["max_tool_turns"]
+        if not isinstance(mt, int) or isinstance(mt, bool) or not (1 <= mt <= 20):
+            raise _err(source, "'max_tool_turns' must be an integer 1-20")
+    for key in ("expected_calls", "forbidden_calls"):
+        if key in data:
+            specs = data[key]
+            if not isinstance(specs, list):
+                raise _err(source, f"'{key}' must be a list")
+            for i, spec in enumerate(specs):
+                where = f"{source}.{key}[{i}]"
+                if not isinstance(spec, dict):
+                    raise _err(where, "must be an object")
+                unknown_t = set(spec) - _TOOL_CALL_SPEC_KNOWN_KEYS
+                if unknown_t:
+                    raise _err(where, f"unknown key(s): {', '.join(sorted(unknown_t))}")
+                if not isinstance(spec.get("tool"), str) or not spec["tool"]:
+                    raise _err(where, "'tool' must be a non-empty string")
+                if "arguments_contains" in spec and not isinstance(spec["arguments_contains"], dict):
+                    raise _err(where, "'arguments_contains' must be an object")
+    if "expected_final_state" in data and data["expected_final_state"] is not None:
+        if not isinstance(data["expected_final_state"], dict):
+            raise _err(source, "'expected_final_state' must be an object")
 
     if "reference_solution" in data and data["reference_solution"] is not None:
         _validate_string_map(data["reference_solution"], f"{source}.reference_solution")

@@ -66,6 +66,13 @@ cheap shape check; test_setup_files + check_command is the real behavioral
 test (compile/run/assert against actual output), which is what should decide
 correctness for anything beyond the most trivial case.
 
+A separate, parallel case domain - tool-use cases, run by the openai-tools/
+ollama-tools drivers - trades expected_files/check_command for a mock API
+oracle instead (tool_service/tools/expected_calls/forbidden_calls/
+expected_final_state); see _cases/_mock_service.py and
+_cases/_tool_evaluate.py for the schema and grading logic. A case is one
+domain or the other, not both.
+
 P3-01: this module is now a thin re-export facade. The actual logic (corpus
 loading, the workspace-diff oracle, sandboxed check_command execution,
 setup_files/setup_repo/disruptions) lives under `optarena/_cases/`, split by
@@ -84,6 +91,8 @@ from ._cases._constants import (
 )
 from ._cases._corpus import dockerfile_for, filter_cases, load_cases
 from ._cases._evaluate import diff_stats, evaluate_case, evaluate_case_isolated, trajectory_stats
+from ._cases._mock_service import MOCK_SERVICES, MockService, get_mock_service, get_tool_schemas
+from ._cases._tool_evaluate import evaluate_tool_case
 from ._cases._sandbox import (
     _HARDENING_ARGS,
     GHCR_PREFIX,
@@ -126,6 +135,7 @@ __all__ = [
     "CASES_DIR", "DOCKER_IMAGE_DEFAULT", "DOCKERFILE_DIR", "DOCKER_IMAGES", "IGNORE_DIRS", "REPOS_DIR",
     "dockerfile_for", "filter_cases", "load_cases",
     "diff_stats", "evaluate_case", "evaluate_case_isolated", "trajectory_stats",
+    "MOCK_SERVICES", "MockService", "get_mock_service", "get_tool_schemas", "evaluate_tool_case",
     "_HARDENING_ARGS", "GHCR_PREFIX", "DockerSandbox", "_WorkspaceQuotaWatchdog", "_worker_sandboxes",
     "classify_failure", "container_engine", "docker_image_available", "docker_image_pull",
     "ensure_image", "reset_engine_health_cache", "reset_pull_backoff", "resolve_image",

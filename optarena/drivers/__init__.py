@@ -66,6 +66,12 @@ DRIVERS: dict[str, dict] = {
     "ollama-chat":  {"kind": "baseline", "backend": "scenario", "status": "stable", "file_tools": False,
                      "summary": "raw model via Ollama-native /api/chat",
                      "owner": _OWNER, "tested_with": None},
+    "openai-tools": {"kind": "baseline", "backend": "scenario", "status": "experimental", "file_tools": False,
+                     "summary": "raw tool-calling loop via /v1/chat/completions (tool-use cases)",
+                     "owner": _OWNER, "tested_with": None},
+    "ollama-tools": {"kind": "baseline", "backend": "scenario", "status": "experimental", "file_tools": False,
+                     "summary": "raw tool-calling loop via Ollama-native /api/chat (tool-use cases)",
+                     "owner": _OWNER, "tested_with": None},
     "aider":        {"kind": "cli",      "backend": "scenario", "status": "stable", "file_tools": True,
                      "summary": "aider CLI, headless",
                      "owner": _OWNER, "tested_with": "aider.EXE 0.86.2"},
@@ -178,6 +184,12 @@ def get_driver(name: str) -> Driver:
     if key in ("ollama-chat", "ollama"):
         from .openai_chat import OllamaChatDriver
         return OllamaChatDriver()
+    if key == "openai-tools":
+        from .tool_chat import ToolChatDriver
+        return ToolChatDriver()
+    if key == "ollama-tools":
+        from .tool_chat import OllamaToolChatDriver
+        return OllamaToolChatDriver()
     if key == "aider":
         from .aider_cli import AiderDriver
         return AiderDriver()

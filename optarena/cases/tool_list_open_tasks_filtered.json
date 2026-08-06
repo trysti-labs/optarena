@@ -1,0 +1,20 @@
+{
+  "name": "tool_list_open_tasks_filtered",
+  "description": "After completing one of two tasks, list only the open ones - tests passing the status filter argument to list_tasks rather than calling it bare and filtering nothing.",
+  "task_type": "tool_use",
+  "domain": "task_tracker",
+  "difficulty": 2,
+  "tags": ["tool-use", "list", "filter-argument"],
+  "tool_service": "task_tracker",
+  "tools": ["create_task", "complete_task", "list_tasks", "delete_task"],
+  "prompts": [
+    "Create two tasks: 'Fix bug' and 'Write docs'. Mark 'Fix bug' as done. Then show me only the tasks that are still open."
+  ],
+  "expected_calls": [
+    {"tool": "create_task", "arguments_contains": {"title": "Fix bug"}},
+    {"tool": "create_task", "arguments_contains": {"title": "Write docs"}},
+    {"tool": "complete_task"},
+    {"tool": "list_tasks", "arguments_contains": {"status": "open"}}
+  ],
+  "expected_final_state": {"task_count": 2, "completed_count": 1, "open_count": 1}
+}

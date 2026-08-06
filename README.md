@@ -155,6 +155,8 @@ Scenario files are small JSON documents:
 | `aider` | cli | scenario | stable | aider CLI, headless |
 | `openai-chat` | baseline | scenario | stable | Raw model via `/v1/chat/completions` - the no-agent baseline |
 | `ollama-chat` | baseline | scenario | stable | Raw model via Ollama-native `/api/chat` |
+| `openai-tools` | baseline | scenario | experimental | Raw tool-calling loop via `/v1/chat/completions` - for [tool-use cases](#tool-use-cases) |
+| `ollama-tools` | baseline | scenario | experimental | Raw tool-calling loop via Ollama-native `/api/chat` - for [tool-use cases](#tool-use-cases) |
 | `claude-code` | cli | fixed | experimental | Claude Code headless (`claude -p`) |
 | `codex` | cli | fixed | experimental | Codex CLI (`codex exec --full-auto`) |
 | `opencode` | cli | scenario | experimental | OpenCode (`opencode run`) |
@@ -239,6 +241,24 @@ filtering in full detail.
 `optarena init` scaffolds a project-local `cases/` directory with a sample
 case (`test_setup_files` + `check_command` included) to start writing your
 own.
+
+## Tool-use cases
+
+A second, parallel case domain: instead of grading file output, a tool-use
+case grades whether the model called the right tools (function/tool-calling)
+against a mock, in-process API, with the right arguments - closer to what
+BFCL/tau-bench evaluate for tool-calling agents, authored just as cheaply as
+a coding case (one JSON file, no live server or container needed).
+
+```bash
+optarena run --driver ollama-tools --model qwen3-coder:30b \
+  --cases tool_create_task,tool_create_and_complete_task
+```
+
+Ships with one mock service (`task_tracker`: create/complete/list/delete)
+and five example cases (`tool_*` in the catalogue). See [ARCH.md](./ARCH.md)
+§3.5 for the schema and oracle mechanics, and what's still deferred (agent-
+driver support beyond the raw baselines, more mock services).
 
 ## Regression testing
 

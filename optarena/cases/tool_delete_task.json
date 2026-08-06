@@ -1,0 +1,18 @@
+{
+  "name": "tool_delete_task",
+  "description": "Create a task then delete it by the id it was given - covers the one tool (delete_task) the other cases don't exercise.",
+  "task_type": "tool_use",
+  "domain": "task_tracker",
+  "difficulty": 1,
+  "tags": ["tool-use", "delete"],
+  "tool_service": "task_tracker",
+  "tools": ["create_task", "complete_task", "list_tasks", "delete_task"],
+  "prompts": [
+    "Create a task titled 'Temp note', then delete it - it was only a placeholder."
+  ],
+  "expected_calls": [
+    {"tool": "create_task", "arguments_contains": {"title": "Temp note"}},
+    {"tool": "delete_task"}
+  ],
+  "expected_final_state": {"task_count": 0}
+}

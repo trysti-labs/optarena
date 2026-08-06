@@ -80,7 +80,9 @@ optarena/                       repo root
 │   │   ├── _sandbox.py            container engine, DockerSandbox, check_command exec,
 │   │   │                          workspace-quota watchdog (§3.1)
 │   │   ├── _workspace_setup.py    setup_files/setup_repo/git_init/disruptions
-│   │   └── _evaluate.py           ties the assertion oracle + check_command together
+│   │   ├── _evaluate.py           ties the assertion oracle + check_command together
+│   │   ├── _mock_service.py       tool-use cases: in-process mock API + tool registry (§3.5)
+│   │   └── _tool_evaluate.py      tool-use cases: the call-log/final-state oracle (§3.5)
 │   ├── runner/                 executes one scenario → RunRecord
 │   │   ├── _manifest.py           manifest-building (case hashes, ORACLE_VERSION, driver/
 │   │   │                          provider versions, generation params, pack identity, build commit)
@@ -101,6 +103,7 @@ optarena/                       repo root
 │       ├── __init__.py         registry (name → Driver, lazy imports)
 │       ├── base.py             Driver interface + CaseResult + subprocess_env()
 │       ├── openai_chat.py      raw-model baselines (OpenAI + Ollama protocol)
+│       ├── tool_chat.py        raw tool-calling baselines (§3.5; OpenAI + Ollama protocol)
 │       ├── aider_cli.py        aider CLI driver
 │       ├── cli_agents.py       generic headless-CLI driver (Claude Code/Codex/OpenCode/Goose/Qwen Code)
 │       ├── sdk_base.py         shared case loop (deadline, disruptions, telemetry) for all 6 SDK drivers
@@ -449,6 +452,90 @@ resolves it as `cases_dir`.
   installation is caught (`tampered: True`) rather than the run's manifest
   replaying a stale "trusted" snapshot from install time.
 
+### 3.5 Tool-use cases (`tool_service`, `openai-tools`/`ollama-tools`)
+
+A second, parallel case domain alongside §3.1's filesystem oracle - same
+`Case`/`Driver`/`CaseResult`/`Comparison` machinery, a different ground
+truth. Where a coding case asks "did the right file end up with the right
+content", a tool-use case asks "did the agent call the right tools, with the
+right arguments, and avoid the wrong ones" - closer to what BFCL/tau-bench
+evaluate for tool-calling agents, but authored as cheaply as a coding case
+(one JSON file) and run through the same comparison/regression pipeline
+everything else here uses. A case is one domain or the other, never both -
+`tool_service` present means the coding oracle's fields
+(`expected_files`/`check_command`) are absent and vice versa.
+
+```json
+{
+  "name":        "tool_create_task",
+  "tool_service": "task_tracker",
+  "tools":        ["create_task", "complete_task", "list_tasks", "delete_task"],
+  "prompts":      ["Create a new task titled 'Buy milk' and assign it to alice."],
+  "expected_calls": [
+    {"tool": "create_task", "arguments_contains": {"title": "Buy milk", "assignee": "alice"}}
+  ],
+  "expected_final_state": {"task_count": 1, "open_count": 1}
+}
+```
+
+- **`tool_service`** names a registered mock service (`_cases/_mock_service.py`
+  → `MOCK_SERVICES`); **`tools`** is which of that service's tools the model
+  sees for this case (defaults to all of them - an explicit subset is how a
+  case tests tool *selection*, e.g. exposing `create_task`/`delete_task`
+  together and checking the model picks the right one). Adding a service is
+  one class + one registry entry, the same shape as adding a driver or a
+  sandbox track elsewhere in this doc.
+- **The oracle** (`_cases/_tool_evaluate.py`, `evaluate_tool_case`) checks
+  three independent things, all evaluated (not short-circuited, same as
+  `check_expected`): every `expected_calls` entry matched at least one
+  logged call (`arguments_contains` is a required *subset*, not an exact
+  match - an extra legitimate argument doesn't fail a case); no
+  `forbidden_calls` entry matched any logged call; every
+  `expected_final_state` key/value matches the mock service's own
+  `summary()`. Returns the same `(failures, oracle_info)` shape
+  `evaluate_case` does, stashed into `CaseResult.extra["oracle"]`
+  identically - the dashboard/CLI output code needed no changes.
+- **A fresh mock-service instance per case run**, never shared across cases
+  or trials - the same isolation a fresh workspace gives the filesystem
+  oracle. `MockService.dispatch()` never raises: an unknown tool name or a
+  tool call with wrong/missing arguments both become a normal
+  `{"error": ...}` result (what a real function-calling loop would hand the
+  model back), logged to `call_log` like any other call - a hallucinated or
+  malformed call is data the oracle can assert against
+  (`forbidden_calls`/`n_unknown_calls`), not a driver crash.
+- **The driver loop** (`drivers/tool_chat.py`, shared by both variants -
+  only the wire protocol differs, same split as `openai_chat.py`'s two
+  baselines): send the conversation with `tools` attached → if the response
+  has `tool_calls`, dispatch each against the mock service and append a
+  `{"role": "tool", ...}` result message, loop → if the response has no
+  tool_calls, the model is done with this prompt. Bounded by `max_tool_turns`
+  (case-level override, default 6) so a model that never stops calling tools
+  can't consume a case's whole timeout budget one turn at a time -
+  `CaseResult.extra["hit_turn_limit"]` records when that ceiling was hit.
+  Full call trajectory is recorded to `CaseResult.extra["tool_calls"]`,
+  matching the "show your work, not just pass/fail" precedent §3.1's
+  `extra["oracle"]` sets. Like the raw-model baselines (§6.2), this is a
+  no-agent, no-file-tools driver (`file_tools: False` in the registry) -
+  it measures the backend's own tool-calling behavior, not a framework's
+  agent loop on top of it.
+- **Why a mock-service oracle, not a live HTTP server in a sandbox**: the
+  entire interaction (request → tool_call → dispatch → result) is
+  driver-side Python, so an in-process object with a call log is a
+  sufficient, dependency-free ground truth - no container, no network, no
+  `check_command` needed for this domain. Matches the project's stdlib-only
+  core the same way the filesystem oracle does.
+- **What's explicitly deferred, not attempted**: only `openai-tools`/
+  `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
+  agent driver has a tool-calling code path yet (they all write files, not
+  call functions - §6's `file_tools` split), so an agent-vs-baseline
+  comparison isn't possible in this domain yet, only backend-vs-backend and
+  model-vs-model. `optarena cases verify --strict` (§10.2) doesn't cover
+  this domain either - there's no `reference_solution`/`broken_solutions`
+  equivalent for a tool-calling trajectory yet, so the discriminating-oracle
+  guarantee is enforced by unit tests (`tests/test_tool_use_cases.py`)
+  today, not by a corpus-wide verify command. Only one mock service
+  (`task_tracker`) ships; adding more is the natural way this domain grows.
+
 ---
 
 ## 4. Execution flow
@@ -592,6 +679,8 @@ each framework's agent-construction API differs.
 |---|---|---|
 | `openai-chat` | stable | `POST /v1/chat/completions`; driver writes extracted code block |
 | `ollama-chat` | stable | `POST /api/chat` (Ollama native); same convention |
+| `openai-tools` | experimental | `POST /v1/chat/completions` with `tools`; real tool-call loop against a mock service (§3.5) |
+| `ollama-tools` | experimental | `POST /api/chat` with `tools` (Ollama native); same loop, native tool_calls format |
 | `aider` | stable | `aider --message … --yes --no-git` per prompt, cwd=workspace |
 | `claude-code` | experimental | `claude -p`, `--output-format json` |
 | `codex` | experimental | `codex exec --full-auto` |
@@ -800,6 +889,12 @@ Near-term:
   default pass/fail signal.
 
 Done (moved out of "near-term" as of the dates noted):
+- **Tool-use cases** (2026-08-06) - a second case domain (§3.5): a mock-
+  service oracle and two new baseline drivers (`openai-tools`/`ollama-tools`)
+  for grading tool-calling correctness instead of file output. One service
+  (`task_tracker`) and five example cases ship; agent-driver support (not
+  just the raw baselines) and a corpus-verification story for this domain
+  are the natural next steps, not yet started.
 - **Richer oracles** (2026-07-04) - `test_setup_files` + `check_command`,
   container-sandboxed, real compile/run/assert instead of content-pattern-only.
 - **Run matrix** (2026-07-04, terminal only) - `--matrix-drivers`/

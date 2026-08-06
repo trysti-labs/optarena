@@ -1,0 +1,17 @@
+{
+  "name": "tool_create_task",
+  "description": "Create a single task via the task_tracker mock service, with the right title and assignee.",
+  "task_type": "tool_use",
+  "domain": "task_tracker",
+  "difficulty": 1,
+  "tags": ["tool-use", "create"],
+  "tool_service": "task_tracker",
+  "tools": ["create_task", "complete_task", "list_tasks", "delete_task"],
+  "prompts": [
+    "Create a new task titled 'Buy milk' and assign it to alice."
+  ],
+  "expected_calls": [
+    {"tool": "create_task", "arguments_contains": {"title": "Buy milk", "assignee": "alice"}}
+  ],
+  "expected_final_state": {"task_count": 1, "open_count": 1}
+}

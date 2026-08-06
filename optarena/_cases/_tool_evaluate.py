@@ -1,0 +1,83 @@
+"""
+optarena/_cases/_tool_evaluate.py
+──────────────────────────────
+The tool-use oracle: same shape as ``_evaluate.evaluate_case`` (returns
+``(failures, oracle_info)``, stashed into ``CaseResult.extra["oracle"]`` by
+the driver) - grading a ``MockService``'s call log and final state instead of
+a workspace diff.
+"""
+
+from __future__ import annotations
+
+from ._mock_service import MockService
+
+
+def _matches(entry_arguments: dict, arguments_contains: dict) -> bool:
+    """``arguments_contains`` is a required subset, not an exact match - a
+    case asserting {"title": "Buy milk"} shouldn't fail because the model
+    also (legitimately) passed an ``assignee``."""
+    return all(
+        k in entry_arguments and entry_arguments[k] == v
+        for k, v in arguments_contains.items()
+    )
+
+
+def _any_call_matches(call_log: list[dict], tool: str, arguments_contains: dict) -> bool:
+    return any(
+        entry["tool"] == tool and _matches(entry["arguments"], arguments_contains)
+        for entry in call_log
+    )
+
+
+def evaluate_tool_case(case: dict, service: MockService) -> tuple[list[str], dict]:
+    """Full oracle for one tool-use case, after the driver's tool-calling
+    loop has finished running against ``service``.
+
+    - ``expected_calls``: each entry must match at least one logged call
+      (by tool name, with ``arguments_contains`` as a required subset).
+    - ``forbidden_calls``: no logged call may match.
+    - ``expected_final_state``: exact key/value match against
+      ``service.summary()``.
+
+    Every check is independent and all are evaluated (not short-circuited),
+    same as the filesystem oracle's ``check_expected`` - a case with three
+    problems reports three failures, not just the first one found.
+    """
+    call_log = service.call_log
+    failures: list[str] = []
+
+    for expected in case.get("expected_calls", []) or []:
+        tool = expected["tool"]
+        arguments_contains = expected.get("arguments_contains", {}) or {}
+        if not _any_call_matches(call_log, tool, arguments_contains):
+            failures.append(
+                f"expected a call to {tool!r} with arguments containing "
+                f"{arguments_contains!r} - none was made"
+            )
+
+    for forbidden in case.get("forbidden_calls", []) or []:
+        tool = forbidden["tool"]
+        arguments_contains = forbidden.get("arguments_contains", {}) or {}
+        if _any_call_matches(call_log, tool, arguments_contains):
+            failures.append(
+                f"forbidden call to {tool!r} with arguments containing "
+                f"{arguments_contains!r} was made"
+            )
+
+    final_state = service.summary()
+    for key, want in (case.get("expected_final_state") or {}).items():
+        got = final_state.get(key)
+        if got != want:
+            failures.append(f"expected final_state[{key!r}] == {want!r}, got {got!r}")
+
+    known_tools = set(service.TOOLS)
+    unknown_calls = [e for e in call_log if e["tool"] not in known_tools]
+
+    info = {
+        "tool_service": case.get("tool_service"),
+        "call_log": call_log,
+        "final_state": final_state,
+        "n_calls": len(call_log),
+        "n_unknown_calls": len(unknown_calls),
+    }
+    return failures, info

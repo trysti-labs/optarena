@@ -1,0 +1,18 @@
+{
+  "name": "tool_no_duplicate_create",
+  "description": "A second prompt asks the agent to ensure a task exists that it ALREADY created in the first prompt (in the same conversation) - the agent must recognise it's already done, not call create_task a second time. Discriminates agents that track their own prior tool results from ones that re-issue the same call reflexively.",
+  "task_type": "tool_use",
+  "domain": "task_tracker",
+  "difficulty": 3,
+  "tags": ["tool-use", "create", "redundant-call-avoidance", "multi-step"],
+  "tool_service": "task_tracker",
+  "tools": ["create_task", "complete_task", "list_tasks", "delete_task"],
+  "prompts": [
+    "Create a task titled 'Deploy to prod'.",
+    "Make sure the 'Deploy to prod' task exists - if it's not already there, create it. Otherwise leave it as-is."
+  ],
+  "expected_calls": [
+    {"tool": "create_task", "arguments_contains": {"title": "Deploy to prod"}}
+  ],
+  "expected_final_state": {"task_count": 1}
+}

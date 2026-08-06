@@ -5,6 +5,21 @@ This starts from the current `v0.1` branch state rather than reconstructing
 full project history - see `git log` for everything before this file
 existed.
 
+## [Unreleased]
+
+### Added
+
+- **Tool-use cases**: a second case domain alongside the original coding-case
+  filesystem oracle - a case names a mock, in-process API service instead of
+  `expected_files`/`check_command`, and is graded on whether the agent called
+  the right tools with the right arguments (and avoided the wrong ones), not
+  on files written. Two new experimental baseline drivers run the real
+  request → tool_call → execute-against-mock-service → feed-result-back loop:
+  `openai-tools` (`/v1/chat/completions` tool_calls) and `ollama-tools`
+  (Ollama-native `/api/chat` tool_calls). Ships with one mock service
+  (`task_tracker`: create/complete/list/delete) and five example cases. See
+  ARCH.md §3.5.
+
 ## [0.1.0] - 2026-08-03
 
 First tagged release. Three external/internal review rounds against the live
