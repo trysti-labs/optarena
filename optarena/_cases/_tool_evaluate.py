@@ -13,13 +13,27 @@ from ._mock_service import MockService
 
 
 def _value_matches(actual, want) -> bool:
-    """A single argument value "contains" ``want``. For a list-valued
-    argument (e.g. git_add's ``paths``), containment means every element of
-    ``want`` appears somewhere in ``actual`` - a case asserting
-    {"paths": ["README.md"]} shouldn't fail because the model reasonably
-    staged ["README.md", "app.py"] in one call. Any other type falls back to
-    exact equality, matching the original single-scalar-argument tools
-    (task_tracker's title/task_id/status) this oracle started with."""
+    """Does ``actual`` "contain" ``want`` - shared by both call-argument
+    matching and expected_final_state matching, since both need the same
+    "required subset, not exact match" semantics:
+
+    - dict: every key in ``want`` must be present in ``actual`` with a
+      matching (recursively-contained) value - extra keys in ``actual`` are
+      fine. This is what makes filesystem's
+      ``expected_final_state: {"files": {"a.py": "..."}}`` check ONLY
+      ``a.py``'s content, ignoring every other file the mock filesystem
+      happens to also have (pre-seeded or otherwise) - the same reasoning
+      as git_repo's ``main_commit_count`` existing so a case never has to
+      pin down the FULL state, only the part it actually cares about.
+    - list: every element of ``want`` must appear somewhere in ``actual``
+      (e.g. git_add's ``paths`` - a case asserting {"paths": ["README.md"]}
+      shouldn't fail because the model reasonably staged
+      ["README.md", "app.py"] in one call).
+    - anything else: exact equality (task_tracker's title/task_id/status,
+      and any scalar final_state field like commit_count).
+    """
+    if isinstance(want, dict) and isinstance(actual, dict):
+        return all(k in actual and _value_matches(actual[k], v) for k, v in want.items())
     if isinstance(want, list) and isinstance(actual, list):
         return all(item in actual for item in want)
     return actual == want
@@ -49,8 +63,10 @@ def evaluate_tool_case(case: dict, service: MockService) -> tuple[list[str], dic
     - ``expected_calls``: each entry must match at least one logged call
       (by tool name, with ``arguments_contains`` as a required subset).
     - ``forbidden_calls``: no logged call may match.
-    - ``expected_final_state``: exact key/value match against
-      ``service.summary()``.
+    - ``expected_final_state``: each key/value must be *contained* in
+      ``service.summary()`` (same subset semantics as ``arguments_contains``
+      - a nested-dict value like ``files`` only needs to contain the
+      sub-keys the case actually names).
 
     Every check is independent and all are evaluated (not short-circuited),
     same as the filesystem oracle's ``check_expected`` - a case with three
@@ -80,8 +96,8 @@ def evaluate_tool_case(case: dict, service: MockService) -> tuple[list[str], dic
     final_state = service.summary()
     for key, want in (case.get("expected_final_state") or {}).items():
         got = final_state.get(key)
-        if got != want:
-            failures.append(f"expected final_state[{key!r}] == {want!r}, got {got!r}")
+        if not _value_matches(got, want):
+            failures.append(f"expected final_state[{key!r}] to contain {want!r}, got {got!r}")
 
     known_tools = set(service.TOOLS)
     unknown_calls = [e for e in call_log if e["tool"] not in known_tools]

@@ -1,0 +1,17 @@
+{
+  "name": "tool_fs_write_new_file",
+  "description": "Create a brand new file at a specific path - graded on the file existing, not on pinning the model's exact prose.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "write"],
+  "tool_service": "filesystem",
+  "tools": ["write_file", "read_text_file"],
+  "prompts": [
+    "Create a new file called .ready containing just the single word: ready"
+  ],
+  "expected_calls": [
+    {"tool": "write_file", "arguments_contains": {"path": ".ready"}}
+  ],
+  "expected_final_state": {"file_count": 1}
+}

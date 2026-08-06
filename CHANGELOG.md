@@ -16,13 +16,19 @@ existed.
   on files written. Two new experimental baseline drivers run the real
   request → tool_call → execute-against-mock-service → feed-result-back loop:
   `openai-tools` (`/v1/chat/completions` tool_calls) and `ollama-tools`
-  (Ollama-native `/api/chat` tool_calls). Ships with two mock services -
-  `task_tracker` (create/complete/list/delete, 5 cases) and `git_repo` (all
+  (Ollama-native `/api/chat` tool_calls). Ships with three mock services -
+  `task_tracker` (create/complete/list/delete, 5 cases), `git_repo` (all
   18 tools from the real MCP git-server ecosystem: status/add/reset/commit/
   diff variants/log/show/branch operations/blame/remotes/tags/push/pull,
-  12 cases) - plus a `tool_service_seed` case field for establishing
-  pre-existing state (e.g. real commit history) before the conversation
-  starts. See ARCH.md §3.5.
+  12 cases), and `filesystem` (all 13 tools from the official MCP filesystem
+  server: read/read-media/read-multiple, write, edit, create-directory,
+  list/list-with-sizes, move, search, directory-tree, get-info,
+  list-allowed-directories, 13 cases) - plus a `tool_service_seed` case
+  field for establishing pre-existing state (e.g. real commit history, or
+  pre-existing files) before the conversation starts, and nested-dict
+  subset matching in `expected_final_state` (e.g. checking one specific
+  file's exact content without pinning every other file the mock also has).
+  See ARCH.md §3.5.
 
 ## [0.1.0] - 2026-08-03
 

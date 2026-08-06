@@ -562,17 +562,47 @@ everything else here uses. A case is one domain or the other, never both -
     reasonably staged `["a.py", "b.py"]` in one call.
   - **Live-verified finding, not a harness bug**: repeated live runs
     against a local model (`qwen3-coder:30b` via Ollama) surfaced a real,
-    reproducible pattern - the model intermittently emits a **zero-argument**
-    tool call (`git_status`, `git_branch`) as literal malformed text
-    (`<function=git_status>\n</function>\n</tool_call>`) instead of using
-    Ollama's structured `tool_calls` field, on both `/api/chat` and
-    `/v1/chat/completions`, while tool calls with real arguments came
-    through reliably. Confirmed non-deterministic (retries flipped some of
-    these to PASS) and confirmed NOT a case-design issue (every case's
-    hand-built ideal trajectory passes, and a realistic wrong trajectory
-    fails, per `tests/test_git_repo_cases.py`'s dry-run coverage) - genuine
-    benchmark signal about this backend's tool-calling reliability, left
-    as-is rather than curve-fit around.
+    reproducible pattern - the model intermittently emits a tool call
+    (`git_status`, `git_branch`, and - confirmed again while building the
+    `filesystem` service below - argument-bearing calls like `write_file`
+    too) as literal malformed text
+    (`<function=git_status>\n</function>\n</tool_call>`, or the named-
+    parameter variant `<function=write_file>\n<parameter=path>...`) instead
+    of using Ollama's structured `tool_calls` field, on both `/api/chat` and
+    `/v1/chat/completions`. Confirmed non-deterministic (retries flipped
+    some of these to PASS) and confirmed NOT a case-design issue (every
+    case's hand-built ideal trajectory passes, and a realistic wrong
+    trajectory fails, per each service's own dry-run test coverage) -
+    genuine benchmark signal about this backend's tool-calling reliability,
+    left as-is rather than curve-fit around.
+- **`filesystem`** (`_cases/_mock_service.py`, `FilesystemService`) - the
+  third mock service, all 13 tools from the official MCP filesystem server
+  (`DEV_NOTES/TOOL_CATALOG_COMPLETE.md` §2: read/read-media/read-multiple,
+  write, edit, create-directory, list/list-with-sizes, move, search,
+  directory-tree, get-info, list-allowed-directories), across 13 example
+  cases. The inverse scope decision from `git_repo`: git tools never author
+  content, so its working tree is fixed at seed time; filesystem tools ARE
+  content authorship (`write_file`/`edit_file`/`move_file`/
+  `create_directory` all actively mutate state mid-conversation), which is
+  the entire point of this domain - does the agent read before answering,
+  edit surgically instead of blind-overwriting, check existence before
+  clobbering.
+  - **`expected_final_state` gained nested-dict subset matching** (shared
+    with `arguments_contains` via the same `_value_matches` helper) so a
+    case can assert `{"files": {"config.py": "..."}}` and have it check
+    only that ONE file's exact content, ignoring every other file the mock
+    filesystem happens to also have - the same "only pin down what you
+    actually care about" reasoning behind `git_repo`'s `main_commit_count`.
+  - **A real case-design bug, caught live and fixed, not worked around**:
+    the first live run failed two cases because the model reasonably wrote
+    a path with a trailing slash (`"src/"`) where a case's
+    `arguments_contains` required exactly `"src"` - semantically identical,
+    failed for a reason that had nothing to do with agent correctness.
+    Fixed by normalizing a trailing slash off `path`/`source`/`destination`
+    arguments in `FilesystemService.dispatch()` itself, before logging -
+    not by loosening the case's assertion, since the normalization is
+    correct for every future case in this service too, not just the two
+    that first exposed it.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not
@@ -582,11 +612,12 @@ everything else here uses. A case is one domain or the other, never both -
   this domain either - there's no `reference_solution`/`broken_solutions`
   equivalent for a tool-calling trajectory yet, so the discriminating-oracle
   guarantee is enforced by unit tests (`tests/test_tool_use_cases.py`,
-  `tests/test_git_repo_cases.py`) today, not by a corpus-wide verify
-  command. A case can only name ONE `tool_service` - a realistic workflow
-  spanning two services (e.g. git + a forge/issue-tracker service) isn't
-  expressible yet; see `DEV_NOTES/TOOL_USE_EXPANSION_PLAN.md` §4 for the
-  design question this raises, deliberately left open rather than decided
+  `tests/test_git_repo_cases.py`, `tests/test_filesystem_cases.py`) today,
+  not by a corpus-wide verify command. A case can only name ONE
+  `tool_service` - a realistic workflow spanning two services (e.g. list a
+  directory, then commit what's found with git) isn't expressible yet; see
+  `DEV_NOTES/TOOL_USE_EXPANSION_PLAN.md` §4 for the design question this
+  raises, deliberately left open rather than decided
   ahead of actually needing it.
 
 ---

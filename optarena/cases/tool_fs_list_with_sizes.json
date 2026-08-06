@@ -1,0 +1,22 @@
+{
+  "name": "tool_fs_list_with_sizes",
+  "description": "Find the largest file in a directory - requires the sizes variant of directory listing, not the plain one.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "list_directory_with_sizes"],
+  "tool_service": "filesystem",
+  "tools": ["list_directory_with_sizes", "list_directory"],
+  "tool_service_seed": {
+    "files": {
+      "data/small.csv": "a,b\n1,2\n",
+      "data/big.csv": "a,b,c,d,e,f,g,h,i,j\n1,2,3,4,5,6,7,8,9,10\n1,2,3,4,5,6,7,8,9,10\n1,2,3,4,5,6,7,8,9,10\n"
+    }
+  },
+  "prompts": [
+    "List the files in the data/ directory along with their sizes, so I can see which one is largest."
+  ],
+  "expected_calls": [
+    {"tool": "list_directory_with_sizes", "arguments_contains": {"path": "data"}}
+  ]
+}

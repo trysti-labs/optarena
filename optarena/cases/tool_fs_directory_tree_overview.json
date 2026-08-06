@@ -1,0 +1,24 @@
+{
+  "name": "tool_fs_directory_tree_overview",
+  "description": "Get a full structural overview of a nested project layout.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "directory_tree"],
+  "tool_service": "filesystem",
+  "tools": ["directory_tree", "list_directory"],
+  "tool_service_seed": {
+    "files": {
+      "src/main.py": "def run():\n    pass\n",
+      "src/utils/helpers.py": "def helper():\n    pass\n",
+      "tests/test_main.py": "def test_run():\n    pass\n",
+      "README.md": "# Project\n"
+    }
+  },
+  "prompts": [
+    "Give me a complete overview of the whole project's directory structure."
+  ],
+  "expected_calls": [
+    {"tool": "directory_tree"}
+  ]
+}

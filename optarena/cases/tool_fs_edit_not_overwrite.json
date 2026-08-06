@@ -1,0 +1,25 @@
+{
+  "name": "tool_fs_edit_not_overwrite",
+  "description": "A single deterministic value substitution - must use a targeted edit, not a blind full-file rewrite, and the resulting content is precise enough to check exactly.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 2,
+  "tags": ["tool-use", "filesystem", "edit"],
+  "tool_service": "filesystem",
+  "tools": ["read_text_file", "edit_file", "write_file"],
+  "tool_service_seed": {
+    "files": {"config.py": "PORT = 8000\nDEBUG = True\n"}
+  },
+  "prompts": [
+    "In config.py, change PORT from 8000 to 9000. Make a targeted edit - don't rewrite the whole file."
+  ],
+  "expected_calls": [
+    {"tool": "edit_file", "arguments_contains": {"path": "config.py"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "write_file", "arguments_contains": {"path": "config.py"}}
+  ],
+  "expected_final_state": {
+    "files": {"config.py": "PORT = 9000\nDEBUG = True\n"}
+  }
+}

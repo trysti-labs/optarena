@@ -1,0 +1,23 @@
+{
+  "name": "tool_fs_move_file",
+  "description": "Rename a file - the content must survive the move unchanged.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "move"],
+  "tool_service": "filesystem",
+  "tools": ["move_file", "read_text_file", "write_file"],
+  "tool_service_seed": {
+    "files": {"old_name.py": "print('hello')\n"}
+  },
+  "prompts": [
+    "Rename old_name.py to new_name.py."
+  ],
+  "expected_calls": [
+    {"tool": "move_file", "arguments_contains": {"source": "old_name.py", "destination": "new_name.py"}}
+  ],
+  "expected_final_state": {
+    "file_count": 1,
+    "files": {"new_name.py": "print('hello')\n"}
+  }
+}

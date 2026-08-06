@@ -1,0 +1,22 @@
+{
+  "name": "tool_fs_read_before_answering",
+  "description": "Answer a question about a file's current content by actually reading it, not guessing.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "read"],
+  "tool_service": "filesystem",
+  "tools": ["read_text_file", "write_file"],
+  "tool_service_seed": {
+    "files": {"config.py": "PORT = 8000\nDEBUG = True\n"}
+  },
+  "prompts": [
+    "Read config.py and tell me what port it's currently configured to use."
+  ],
+  "expected_calls": [
+    {"tool": "read_text_file", "arguments_contains": {"path": "config.py"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "write_file"}
+  ]
+}

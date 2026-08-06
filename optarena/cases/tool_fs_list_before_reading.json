@@ -1,0 +1,23 @@
+{
+  "name": "tool_fs_list_before_reading",
+  "description": "List a directory's contents before reading a specific file from it - tests using list_directory for discovery rather than guessing a path.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "list", "read"],
+  "tool_service": "filesystem",
+  "tools": ["list_directory", "read_text_file"],
+  "tool_service_seed": {
+    "files": {
+      "src/main.py": "def run():\n    pass\n",
+      "src/utils.py": "def helper():\n    pass\n"
+    }
+  },
+  "prompts": [
+    "List what's in the src/ directory, then read main.py from it."
+  ],
+  "expected_calls": [
+    {"tool": "list_directory", "arguments_contains": {"path": "src"}},
+    {"tool": "read_text_file", "arguments_contains": {"path": "src/main.py"}}
+  ]
+}

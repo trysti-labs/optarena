@@ -1,0 +1,16 @@
+{
+  "name": "tool_fs_list_allowed_directories",
+  "description": "Check which directories are actually accessible before assuming access to something out of scope.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "list_allowed_directories"],
+  "tool_service": "filesystem",
+  "tools": ["list_allowed_directories", "list_directory"],
+  "prompts": [
+    "Before doing anything else, tell me which directories you're actually allowed to access."
+  ],
+  "expected_calls": [
+    {"tool": "list_allowed_directories"}
+  ]
+}

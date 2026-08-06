@@ -1,0 +1,22 @@
+{
+  "name": "tool_fs_read_media_file",
+  "description": "Read a binary/media file using the dedicated media-read tool, not the text-file reader.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "read_media_file"],
+  "tool_service": "filesystem",
+  "tools": ["read_media_file", "read_text_file"],
+  "tool_service_seed": {
+    "media_files": {"logo.png": "image/png"}
+  },
+  "prompts": [
+    "Read logo.png so you can tell me what kind of file it is."
+  ],
+  "expected_calls": [
+    {"tool": "read_media_file", "arguments_contains": {"path": "logo.png"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "read_text_file", "arguments_contains": {"path": "logo.png"}}
+  ]
+}

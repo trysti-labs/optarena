@@ -48,6 +48,17 @@ class MockService:
         already aren't shared across services.
         """
 
+    @staticmethod
+    def _as_list(value) -> list:
+        """Real models sometimes pass a single item as a bare scalar
+        instead of a one-element list (git_add's ``paths``,
+        read_multiple_files's ``paths``, ...) - normalize rather than let
+        it silently iterate character-by-character (for a string) or fail
+        outright."""
+        if isinstance(value, str):
+            return [value]
+        return list(value or [])
+
     def dispatch(self, tool_name: str, arguments: dict) -> Any:
         """Call ``tool_name`` with ``arguments``, log it, and return its
         result - never raises. An unknown tool name or a tool that raises
@@ -260,15 +271,6 @@ class GitRepoService(MockService):
             commit_id = self._commits[commit_id]["parent"]
         return out
 
-    @staticmethod
-    def _as_list(paths) -> list[str]:
-        """Real models sometimes pass a single path as a bare string
-        instead of a one-element list - normalize rather than let it
-        silently iterate character-by-character."""
-        if isinstance(paths, str):
-            return [paths]
-        return list(paths or [])
-
     # ── tools ────────────────────────────────────────────────────────────
 
     def git_status(self) -> dict:
@@ -473,6 +475,252 @@ class GitRepoService(MockService):
         }
 
 
+class FilesystemService(MockService):
+    """A mock virtual filesystem - all 13 tools the official MCP filesystem
+    server exposes, catalogued in DEV_NOTES/TOOL_CATALOG_COMPLETE.md §2.
+
+    Inverse of GitRepoService's scope decision: git tools never author
+    content, so its working tree is fixed at seed() time. Filesystem tools
+    ARE content authorship - write_file/edit_file/move_file/create_directory
+    actively mutate state during the conversation, which is the whole point
+    of this domain (does the agent read before overwriting, edit
+    surgically instead of blind-rewriting, check existence before
+    clobbering). ``seed()`` only establishes what exists BEFORE the
+    conversation starts, same role as it plays for git_repo.
+    """
+
+    TOOLS = {name: name for name in (
+        "read_text_file", "read_media_file", "read_multiple_files",
+        "write_file", "edit_file", "create_directory",
+        "list_directory", "list_directory_with_sizes",
+        "move_file", "search_files", "directory_tree",
+        "get_file_info", "list_allowed_directories",
+    )}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._files: dict[str, str] = {}
+        self._media: dict[str, dict] = {}          # path -> {"mime_type": str} (content itself not modeled)
+        self._directories: set[str] = set()         # explicit + auto-registered parents, no trailing slash
+        self._allowed_directories = ["/workspace"]
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``files`` ({path: content}): pre-existing text files.
+        - ``media_files`` ({path: mime_type}): pre-existing "binary" files -
+          content itself isn't modeled, only that the path exists and what
+          kind of file it is, enough to test ``read_media_file`` calls.
+        - ``directories`` ([path, ...]): pre-existing EMPTY directories
+          (a file's own parent directories are always implied automatically
+          - this is only needed for a directory with nothing in it yet).
+        """
+        for path, content in (spec.get("files") or {}).items():
+            self._touch_parents(path)
+            self._files[path] = content
+        for path, mime in (spec.get("media_files") or {}).items():
+            self._touch_parents(path)
+            self._media[path] = {"mime_type": mime}
+        for d in spec.get("directories") or []:
+            self._directories.add(d.strip("/"))
+
+    # ── path normalization ──────────────────────────────────────────────
+
+    _PATH_KEYS = ("path", "source", "destination")
+
+    def dispatch(self, tool_name: str, arguments: dict) -> Any:
+        """A trailing slash on a directory path ("src" vs "src/") is a
+        stylistic choice no real filesystem tool treats as a different
+        path - live-verified: a real model reasonably wrote "src/" where a
+        case asserted "src" and failed for a reason that had nothing to do
+        with whether the agent did the right thing. Normalized here, once,
+        before the base class logs/dispatches, rather than inside every
+        individual tool method (which wouldn't fix what the oracle sees -
+        the call log records what's passed to dispatch, not what a method
+        does internally with it)."""
+        normalized = {
+            k: (v.rstrip("/") if isinstance(v, str) and k in self._PATH_KEYS else v)
+            for k, v in (arguments or {}).items()
+        }
+        return super().dispatch(tool_name, normalized)
+
+    # ── internal helpers ────────────────────────────────────────────────
+
+    def _touch_parents(self, path: str) -> None:
+        """Writing a nested path implicitly creates its ancestor
+        directories - matches how every real write_file-style tool
+        behaves, so a case doesn't need a separate create_directory seed
+        entry just to make a nested write_file's target reachable."""
+        parts = path.strip("/").split("/")[:-1]
+        prefix = ""
+        for part in parts:
+            prefix = f"{prefix}/{part}" if prefix else part
+            self._directories.add(prefix)
+
+    def _dir_exists(self, path: str) -> bool:
+        path = path.strip("/")
+        if path == "":
+            return True
+        if path in self._directories:
+            return True
+        prefix = f"{path}/"
+        return any(p.startswith(prefix) for p in list(self._files) + list(self._media))
+
+    def _children(self, dir_path: str) -> list[tuple[str, str]]:
+        """Immediate children of ``dir_path`` as ``(name, "file"|"directory")``,
+        computed on demand from the flat path sets rather than maintained
+        as a live tree - simple and correct at mock scale, no separate
+        structure to keep in sync on every write/move."""
+        dir_path = dir_path.strip("/")
+        prefix = f"{dir_path}/" if dir_path else ""
+        out: dict[str, str] = {}
+        for p in list(self._files) + list(self._media):
+            if not p.startswith(prefix):
+                continue
+            rest = p[len(prefix):]
+            if not rest:
+                continue
+            if "/" in rest:
+                out[rest.split("/", 1)[0]] = "directory"
+            else:
+                out[rest] = "file"
+        for d in self._directories:
+            if d == dir_path or not d.startswith(prefix):
+                continue
+            top = d[len(prefix):].split("/", 1)[0]
+            if top and top not in out:
+                out[top] = "directory"
+        return sorted(out.items())
+
+    # ── tools ────────────────────────────────────────────────────────────
+
+    def read_text_file(self, path: str, head: int | None = None, tail: int | None = None) -> dict:
+        if path not in self._files:
+            return {"error": f"no such file {path!r}"}
+        lines = self._files[path].split("\n")
+        if head:
+            lines = lines[:int(head)]
+        elif tail:
+            lines = lines[-int(tail):]
+        return {"path": path, "content": "\n".join(lines)}
+
+    def read_media_file(self, path: str) -> dict:
+        if path not in self._media:
+            return {"error": f"no such media file {path!r}"}
+        return {"path": path, "mime_type": self._media[path]["mime_type"], "data": "<mock: base64 content not modeled>"}
+
+    def read_multiple_files(self, paths) -> dict:
+        out = {}
+        for p in self._as_list(paths):
+            out[p] = self._files[p] if p in self._files else {"error": f"no such file {p!r}"}
+        return {"files": out}
+
+    def write_file(self, path: str, content: str) -> dict:
+        self._touch_parents(path)
+        self._files[path] = content
+        return {"path": path, "bytes_written": len(content)}
+
+    def edit_file(self, path: str, edits, dry_run: bool = False) -> dict:
+        if path not in self._files:
+            return {"error": f"no such file {path!r}"}
+        content = self._files[path]
+        applied = []
+        for edit in edits or []:
+            old_text, new_text = edit.get("old_text", ""), edit.get("new_text", "")
+            if old_text not in content:
+                return {"error": f"old_text not found in {path!r}: {old_text!r}", "applied": applied}
+            content = content.replace(old_text, new_text, 1)
+            applied.append({"old_text": old_text, "new_text": new_text})
+        if dry_run:
+            return {"path": path, "dry_run": True, "preview": content}
+        self._files[path] = content
+        return {"path": path, "edits_applied": len(applied)}
+
+    def create_directory(self, path: str) -> dict:
+        self._directories.add(path.strip("/"))
+        return {"path": path, "created": True}
+
+    def list_directory(self, path: str = "") -> dict:
+        if path and not self._dir_exists(path):
+            return {"error": f"no such directory {path!r}"}
+        entries = [{"name": n, "type": t} for n, t in self._children(path)]
+        return {"path": path, "entries": entries}
+
+    def list_directory_with_sizes(self, path: str = "", sort_by: str | None = None) -> dict:
+        if path and not self._dir_exists(path):
+            return {"error": f"no such directory {path!r}"}
+        prefix = f"{path.strip('/')}/" if path.strip("/") else ""
+        entries = []
+        for name, typ in self._children(path):
+            full = f"{prefix}{name}"
+            size = len(self._files.get(full, "")) if typ == "file" else 0
+            entries.append({"name": name, "type": typ, "size": size})
+        entries.sort(key=(lambda e: -e["size"]) if sort_by == "size" else (lambda e: e["name"]))
+        return {"path": path, "entries": entries}
+
+    def move_file(self, source: str, destination: str) -> dict:
+        if source not in self._files and source not in self._media:
+            return {"error": f"no such file {source!r}"}
+        if destination in self._files or destination in self._media:
+            return {"error": f"destination {destination!r} already exists"}
+        self._touch_parents(destination)
+        if source in self._files:
+            self._files[destination] = self._files.pop(source)
+        else:
+            self._media[destination] = self._media.pop(source)
+        return {"source": source, "destination": destination}
+
+    def search_files(self, path: str = "", pattern: str = "", exclude_patterns=None) -> dict:
+        prefix = f"{path.strip('/')}/" if path.strip("/") else ""
+        exclude_patterns = exclude_patterns or []
+        matches = []
+        for p in list(self._files) + list(self._media):
+            if not p.startswith(prefix):
+                continue
+            name = p.rsplit("/", 1)[-1]
+            if pattern and pattern.lower() not in name.lower():
+                continue
+            if any(ex.lower() in p.lower() for ex in exclude_patterns):
+                continue
+            matches.append(p)
+        return {"matches": sorted(matches)}
+
+    def directory_tree(self, path: str = "", exclude_patterns=None) -> dict:
+        exclude_patterns = exclude_patterns or []
+
+        def build(dir_path: str) -> dict:
+            node = {"name": dir_path.rsplit("/", 1)[-1] if dir_path else "/", "type": "directory", "children": []}
+            for name, typ in self._children(dir_path):
+                full = f"{dir_path}/{name}" if dir_path else name
+                if any(ex.lower() in full.lower() for ex in exclude_patterns):
+                    continue
+                node["children"].append(build(full) if typ == "directory" else {"name": name, "type": "file"})
+            return node
+
+        return build(path.strip("/"))
+
+    def get_file_info(self, path: str) -> dict:
+        if path in self._files:
+            return {"path": path, "type": "file", "size": len(self._files[path])}
+        if path in self._media:
+            return {"path": path, "type": "file", "size": 0, "mime_type": self._media[path]["mime_type"]}
+        if self._dir_exists(path):
+            return {"path": path, "type": "directory"}
+        return {"error": f"no such path {path!r}"}
+
+    def list_allowed_directories(self) -> dict:
+        return {"directories": list(self._allowed_directories)}
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "file_count": len(self._files) + len(self._media),
+            "directory_count": len(self._directories),
+            "files": dict(sorted(self._files.items())),
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -622,9 +870,76 @@ _GIT_REPO_SCHEMAS: dict[str, dict] = {
         []),
 }
 
+_FILESYSTEM_SCHEMAS: dict[str, dict] = {
+    "read_text_file": _fn(
+        "read_text_file", "Read the complete contents of a text file, optionally limited to the first/last N lines.",
+        {"path": {"type": "string", "description": "File to read."},
+         "head": {"type": "integer", "description": "Only return the first N lines (optional)."},
+         "tail": {"type": "integer", "description": "Only return the last N lines (optional)."}},
+        ["path"]),
+    "read_media_file": _fn(
+        "read_media_file", "Read a binary/media file (image, etc.) and return its content with MIME type.",
+        {"path": {"type": "string", "description": "Media file to read."}},
+        ["path"]),
+    "read_multiple_files": _fn(
+        "read_multiple_files", "Read several files at once in a single call.",
+        {"paths": {"type": "array", "items": {"type": "string"}, "description": "Files to read."}},
+        ["paths"]),
+    "write_file": _fn(
+        "write_file", "Create a new file or overwrite an existing one with the given content.",
+        {"path": {"type": "string", "description": "File to write."},
+         "content": {"type": "string", "description": "Full content to write."}},
+        ["path", "content"]),
+    "edit_file": _fn(
+        "edit_file", "Make one or more targeted search-and-replace edits to an existing file, without rewriting it wholesale.",
+        {"path": {"type": "string", "description": "File to edit."},
+         "edits": {"type": "array", "description": "List of {old_text, new_text} replacements, applied in order.",
+                   "items": {"type": "object", "properties": {
+                       "old_text": {"type": "string"}, "new_text": {"type": "string"}}}},
+         "dry_run": {"type": "boolean", "description": "Preview the result without actually applying it (optional)."}},
+        ["path", "edits"]),
+    "create_directory": _fn(
+        "create_directory", "Create a directory (and any missing parent directories).",
+        {"path": {"type": "string", "description": "Directory to create."}},
+        ["path"]),
+    "list_directory": _fn(
+        "list_directory", "List the immediate contents of a directory, marking each entry as a file or a directory.",
+        {"path": {"type": "string", "description": "Directory to list (empty/omitted for the root)."}},
+        []),
+    "list_directory_with_sizes": _fn(
+        "list_directory_with_sizes", "Like list_directory, but includes each entry's size.",
+        {"path": {"type": "string", "description": "Directory to list (empty/omitted for the root)."},
+         "sort_by": {"type": "string", "enum": ["name", "size"], "description": "Sort order (optional, defaults to name)."}},
+        []),
+    "move_file": _fn(
+        "move_file", "Move or rename a file to a new path.",
+        {"source": {"type": "string", "description": "Existing path."},
+         "destination": {"type": "string", "description": "New path."}},
+        ["source", "destination"]),
+    "search_files": _fn(
+        "search_files", "Recursively search for files whose name matches a pattern, under a given directory.",
+        {"path": {"type": "string", "description": "Directory to search under (empty/omitted for the root)."},
+         "pattern": {"type": "string", "description": "Substring/pattern to match against each file's name."},
+         "exclude_patterns": {"type": "array", "items": {"type": "string"}, "description": "Paths containing any of these are skipped (optional)."}},
+        ["pattern"]),
+    "directory_tree": _fn(
+        "directory_tree", "Return the full recursive directory structure as a nested tree, starting at the given path.",
+        {"path": {"type": "string", "description": "Root to build the tree from (empty/omitted for the whole tree)."},
+         "exclude_patterns": {"type": "array", "items": {"type": "string"}, "description": "Paths containing any of these are skipped (optional)."}},
+        []),
+    "get_file_info": _fn(
+        "get_file_info", "Get metadata (type, size) for a file or directory.",
+        {"path": {"type": "string", "description": "Path to inspect."}},
+        ["path"]),
+    "list_allowed_directories": _fn(
+        "list_allowed_directories", "List the directories this tool is allowed to access.",
+        {}, []),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
+    "filesystem": (FilesystemService, _FILESYSTEM_SCHEMAS),
 }
 
 

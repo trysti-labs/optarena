@@ -1,0 +1,18 @@
+{
+  "name": "tool_fs_create_directory_then_write",
+  "description": "Set up a new directory before writing a file into it.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "create_directory", "write"],
+  "tool_service": "filesystem",
+  "tools": ["create_directory", "write_file", "list_directory"],
+  "prompts": [
+    "Create a directory called output, then write a file at output/result.txt containing just the word: done"
+  ],
+  "expected_calls": [
+    {"tool": "create_directory", "arguments_contains": {"path": "output"}},
+    {"tool": "write_file", "arguments_contains": {"path": "output/result.txt"}}
+  ],
+  "expected_final_state": {"file_count": 1}
+}

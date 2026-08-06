@@ -1,0 +1,22 @@
+{
+  "name": "tool_fs_read_multiple_together",
+  "description": "Compare two files' contents - tests using the batch read tool instead of two separate single-file reads.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 1,
+  "tags": ["tool-use", "filesystem", "read", "batch"],
+  "tool_service": "filesystem",
+  "tools": ["read_multiple_files", "read_text_file"],
+  "tool_service_seed": {
+    "files": {
+      "config.py": "PORT = 8000\n",
+      "settings.py": "PORT = 9000\n"
+    }
+  },
+  "prompts": [
+    "Read both config.py and settings.py at once and tell me whether their PORT values differ."
+  ],
+  "expected_calls": [
+    {"tool": "read_multiple_files", "arguments_contains": {"paths": ["config.py", "settings.py"]}}
+  ]
+}

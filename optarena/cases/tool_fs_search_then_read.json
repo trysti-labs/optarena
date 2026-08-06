@@ -1,0 +1,24 @@
+{
+  "name": "tool_fs_search_then_read",
+  "description": "Find a file by searching rather than being told its exact path, then read what was found.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 2,
+  "tags": ["tool-use", "filesystem", "search"],
+  "tool_service": "filesystem",
+  "tools": ["search_files", "read_text_file", "list_directory"],
+  "tool_service_seed": {
+    "files": {
+      "src/main.py": "def run():\n    pass\n",
+      "src/utils.py": "# TODO: add caching\ndef helper():\n    pass\n",
+      "README.md": "# Project\n"
+    }
+  },
+  "prompts": [
+    "Find whichever file has 'utils' in its name, then read that file."
+  ],
+  "expected_calls": [
+    {"tool": "search_files"},
+    {"tool": "read_text_file", "arguments_contains": {"path": "src/utils.py"}}
+  ]
+}

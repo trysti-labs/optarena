@@ -1,0 +1,25 @@
+{
+  "name": "tool_fs_check_before_overwrite",
+  "description": "Check whether a file already exists before creating it - must not clobber existing important content.",
+  "task_type": "tool_use",
+  "domain": "filesystem",
+  "difficulty": 2,
+  "tags": ["tool-use", "filesystem", "get_file_info", "precondition"],
+  "tool_service": "filesystem",
+  "tools": ["get_file_info", "list_directory", "write_file"],
+  "tool_service_seed": {
+    "files": {"output.txt": "important existing results, do not lose this\n"}
+  },
+  "prompts": [
+    "Before creating output.txt, check whether it already exists. If it does, don't overwrite it - just tell me it's already there."
+  ],
+  "expected_calls": [
+    {"tool": "get_file_info", "arguments_contains": {"path": "output.txt"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "write_file", "arguments_contains": {"path": "output.txt"}}
+  ],
+  "expected_final_state": {
+    "files": {"output.txt": "important existing results, do not lose this\n"}
+  }
+}
