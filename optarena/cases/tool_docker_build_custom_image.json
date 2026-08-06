@@ -1,0 +1,20 @@
+{
+  "name": "tool_docker_build_custom_image",
+  "description": "Build a custom image from a Dockerfile rather than pulling a stock one.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 1,
+  "tags": ["tool-use", "docker", "build"],
+  "tool_service": "docker",
+  "tools": ["build_image", "pull_image", "create_container"],
+  "prompts": [
+    "Build a custom image tagged myapp:latest from this project's Dockerfile, then run a container called app from it."
+  ],
+  "expected_calls": [
+    {"tool": "build_image", "arguments_contains": {"tag": "myapp:latest"}},
+    {"tool": "create_container", "arguments_contains": {"name": "app", "image": "myapp:latest"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "pull_image", "arguments_contains": {"tag": "myapp:latest"}}
+  ]
+}

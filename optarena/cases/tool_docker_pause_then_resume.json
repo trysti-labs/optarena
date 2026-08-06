@@ -1,0 +1,22 @@
+{
+  "name": "tool_docker_pause_then_resume",
+  "description": "Temporarily pause a container, then resume it - covers pause_container and start_container's dual role as resume.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 1,
+  "tags": ["tool-use", "docker", "pause"],
+  "tool_service": "docker",
+  "tools": ["pause_container", "start_container"],
+  "tool_service_seed": {
+    "images": ["nginx:latest"],
+    "containers": {"web": {"image": "nginx:latest", "status": "running"}}
+  },
+  "prompts": [
+    "Pause the web container temporarily, then resume it a moment later."
+  ],
+  "expected_calls": [
+    {"tool": "pause_container", "arguments_contains": {"name": "web"}},
+    {"tool": "start_container", "arguments_contains": {"name": "web"}}
+  ],
+  "expected_final_state": {"running_container_count": 1}
+}

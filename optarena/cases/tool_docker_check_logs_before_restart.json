@@ -1,0 +1,28 @@
+{
+  "name": "tool_docker_check_logs_before_restart",
+  "description": "A crashed container should be diagnosed via its logs before blindly restarting it.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 2,
+  "tags": ["tool-use", "docker", "logs", "restart", "diagnose"],
+  "tool_service": "docker",
+  "tools": ["get_container_logs", "restart_container", "inspect_container"],
+  "tool_service_seed": {
+    "images": ["myapi:v1"],
+    "containers": {
+      "api": {
+        "image": "myapi:v1",
+        "status": "stopped",
+        "logs": ["Booting up...", "Fatal: unhandled exception in request handler", "process exited with code 1"]
+      }
+    }
+  },
+  "prompts": [
+    "The api container isn't running. Find out what happened, then restart it."
+  ],
+  "expected_calls": [
+    {"tool": "get_container_logs", "arguments_contains": {"name": "api"}},
+    {"tool": "restart_container", "arguments_contains": {"name": "api"}}
+  ],
+  "expected_final_state": {"running_container_count": 1}
+}

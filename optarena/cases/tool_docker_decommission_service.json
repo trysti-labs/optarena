@@ -1,0 +1,25 @@
+{
+  "name": "tool_docker_decommission_service",
+  "description": "Decommissioning workflow: disconnect from its network, survey what exists, then remove an orphaned volume that's no longer needed.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 2,
+  "tags": ["tool-use", "docker", "network", "volume", "multi-step"],
+  "tool_service": "docker",
+  "tools": ["disconnect_network", "list_images", "list_volumes", "remove_volume"],
+  "tool_service_seed": {
+    "images": ["myapp:v1"],
+    "volumes": ["old-backup"],
+    "containers": {"app": {"image": "myapp:v1", "status": "running"}}
+  },
+  "prompts": [
+    "We're decommissioning this service. Disconnect the app container from its network, check what images and volumes currently exist, then remove the old-backup volume since it's an orphaned leftover nobody uses anymore."
+  ],
+  "expected_calls": [
+    {"tool": "disconnect_network", "arguments_contains": {"container": "app"}},
+    {"tool": "list_images"},
+    {"tool": "list_volumes"},
+    {"tool": "remove_volume", "arguments_contains": {"name": "old-backup"}}
+  ],
+  "expected_final_state": {"volume_count": 0}
+}

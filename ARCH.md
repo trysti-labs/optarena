@@ -603,6 +603,46 @@ everything else here uses. A case is one domain or the other, never both -
     not by loosening the case's assertion, since the normalization is
     correct for every future case in this service too, not just the two
     that first exposed it.
+- **`docker`** (`_cases/_mock_service.py`, `DockerService`) - the fourth
+  mock service, 25 tools across containers/images/networks/volumes/system
+  from the "comprehensive" tier catalogued in
+  `DEV_NOTES/TOOL_CATALOG_COMPLETE.md` §4, across 15 example cases. Unlike
+  `git_repo`/`filesystem`, several tools enforce real Docker-like
+  PRECONDITIONS rather than always succeeding: `remove_container` refuses
+  a running container (must `stop_container` first, or pass `force`),
+  `remove_image`/`remove_volume` refuse while any container still
+  references them, `create_container` refuses an image/volume that hasn't
+  been pulled/built/created yet - "does the agent respect these
+  preconditions instead of forcing past them" is the workflow-discipline
+  skill this service is built to test, the same role `git_repo`'s "no
+  commit without staging" plays there.
+  - **A design gap caught during manual verification, not live testing**:
+    the first implementation had no way for a container to actually mount
+    a volume (`create_container` had no `volumes` parameter), which made
+    `remove_volume`'s in-use refusal and `prune_volumes`'s discrimination
+    permanently untestable dead code - a volume could never actually
+    become "in use" through any real tool call. Fixed by adding a
+    `volumes` parameter to `create_container` and wiring it into the same
+    attachment tracking `connect_network`/`disconnect_network` already use
+    for networks, before any case was written against it.
+  - **Three distinct real findings from live verification against
+    `qwen3-coder:30b`**, each root-caused individually rather than assumed
+    to be the same issue: (1) the already-known malformed-tool-call-as-text
+    quirk, reproduced again here; (2) a case that got valid, correctly-
+    sequenced structured tool calls but with **hallucinated argument
+    values** (`disconnect_network(network="app-network",
+    container="app-container")` instead of the actual seeded `"bridge"`/
+    `"app"`) - the model never called a discovery tool to check the real
+    names first, it guessed plausible-sounding ones; (3) a case where the
+    model talked itself out of using a tool that was right there
+    (`tag_image`) with a confused explanation that the available tools
+    "do not support the actual tagging operation" - a real, if surprising,
+    capability gap (incorrectly concluding a needed tool doesn't exist),
+    not a schema clarity problem (the tool's description directly says
+    "give an existing image an additional tag"). All three are genuine
+    benchmark signal, none are case-design bugs (every case's dry-run
+    ideal/wrong-trajectory pair in `tests/test_docker_cases.py` behaves
+    correctly).
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not
@@ -612,8 +652,9 @@ everything else here uses. A case is one domain or the other, never both -
   this domain either - there's no `reference_solution`/`broken_solutions`
   equivalent for a tool-calling trajectory yet, so the discriminating-oracle
   guarantee is enforced by unit tests (`tests/test_tool_use_cases.py`,
-  `tests/test_git_repo_cases.py`, `tests/test_filesystem_cases.py`) today,
-  not by a corpus-wide verify command. A case can only name ONE
+  `tests/test_git_repo_cases.py`, `tests/test_filesystem_cases.py`,
+  `tests/test_docker_cases.py`) today, not by a corpus-wide verify command.
+  A case can only name ONE
   `tool_service` - a realistic workflow spanning two services (e.g. list a
   directory, then commit what's found with git) isn't expressible yet; see
   `DEV_NOTES/TOOL_USE_EXPANSION_PLAN.md` §4 for the design question this

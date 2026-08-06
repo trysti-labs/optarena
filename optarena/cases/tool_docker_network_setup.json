@@ -1,0 +1,22 @@
+{
+  "name": "tool_docker_network_setup",
+  "description": "Check existing networks, then create a new one and attach an existing container to it.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 2,
+  "tags": ["tool-use", "docker", "network"],
+  "tool_service": "docker",
+  "tools": ["list_networks", "create_network", "connect_network"],
+  "tool_service_seed": {
+    "images": ["myapp:v1"],
+    "containers": {"app": {"image": "myapp:v1", "status": "running"}}
+  },
+  "prompts": [
+    "Check what networks already exist, then create a network called appnet and connect the app container to it."
+  ],
+  "expected_calls": [
+    {"tool": "list_networks"},
+    {"tool": "create_network", "arguments_contains": {"name": "appnet"}},
+    {"tool": "connect_network", "arguments_contains": {"network": "appnet", "container": "app"}}
+  ]
+}

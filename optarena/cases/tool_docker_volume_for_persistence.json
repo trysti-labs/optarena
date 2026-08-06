@@ -1,0 +1,21 @@
+{
+  "name": "tool_docker_volume_for_persistence",
+  "description": "Create a named volume and mount it into a new container for persistent storage - not just an ephemeral container.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 2,
+  "tags": ["tool-use", "docker", "volume"],
+  "tool_service": "docker",
+  "tools": ["create_volume", "create_container"],
+  "tool_service_seed": {
+    "images": ["postgres:latest"]
+  },
+  "prompts": [
+    "Create a named volume called dbdata, then start a container called db from postgres:latest with that volume mounted, so the data survives a restart."
+  ],
+  "expected_calls": [
+    {"tool": "create_volume", "arguments_contains": {"name": "dbdata"}},
+    {"tool": "create_container", "arguments_contains": {"name": "db", "image": "postgres:latest", "volumes": ["dbdata"]}}
+  ],
+  "expected_final_state": {"volume_count": 1, "container_count": 1}
+}

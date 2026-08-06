@@ -721,6 +721,279 @@ class FilesystemService(MockService):
         }
 
 
+class DockerService(MockService):
+    """A mock Docker daemon - 25 tools spanning containers, images,
+    networks, volumes, and system info, catalogued in
+    DEV_NOTES/TOOL_CATALOG_COMPLETE.md §4 ("comprehensive" tier).
+
+    Unlike git_repo/filesystem, several of these tools enforce real
+    Docker-like PRECONDITIONS rather than always succeeding - removing a
+    running container, or an image a container still uses, are refused
+    (matching real `docker rm`/`docker rmi` behaviour) - because "does the
+    agent respect these preconditions instead of forcing past them" is
+    exactly the workflow-discipline skill this domain exists to test, the
+    same role git_repo's "no commit without staging" plays there.
+    """
+
+    TOOLS = {name: name for name in (
+        "list_containers", "create_container", "start_container", "stop_container",
+        "restart_container", "pause_container", "remove_container",
+        "inspect_container", "get_container_logs", "get_container_stats",
+        "list_images", "pull_image", "build_image", "tag_image",
+        "remove_image", "prune_images",
+        "list_networks", "create_network", "connect_network", "disconnect_network",
+        "list_volumes", "create_volume", "remove_volume", "prune_volumes",
+        "docker_info",
+    )}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._containers: dict[str, dict] = {}   # name -> {image, status, ports, env, logs, networks}
+        self._images: dict[str, dict] = {}        # tag -> {source: "pulled"|"built"}
+        self._networks: dict[str, dict] = {"bridge": {"driver": "bridge", "containers": set()}}
+        self._volumes: dict[str, dict] = {}        # name -> {containers: set}
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``images`` ([tag, ...]): pre-existing images, as if already pulled.
+        - ``volumes`` ([name, ...]): pre-existing volumes.
+        - ``containers`` ({name: {image, status, logs, volumes}}):
+          pre-existing containers - ``status`` one of "running"/"stopped"
+          (default "running"); ``logs`` a list of pre-existing log lines;
+          ``volumes`` a list of volume names to mount (must already be
+          listed in this spec's own ``volumes`` key - processed first).
+        - ``networks`` ([name, ...]): pre-existing custom networks.
+        """
+        for tag in spec.get("images") or []:
+            self._images[tag] = {"source": "pulled"}
+        for name in spec.get("volumes") or []:
+            self._volumes.setdefault(name, {"containers": set()})
+        for name, cfg in (spec.get("containers") or {}).items():
+            self._images.setdefault(cfg.get("image", "unknown"), {"source": "pulled"})
+            vols = list(cfg.get("volumes", []))
+            self._containers[name] = {
+                "image": cfg.get("image"), "status": cfg.get("status", "running"),
+                "ports": cfg.get("ports", {}), "env": cfg.get("env", {}),
+                "logs": list(cfg.get("logs", [])), "networks": {"bridge"}, "volumes": vols,
+            }
+            self._networks["bridge"]["containers"].add(name)
+            for vol in vols:
+                self._volumes.setdefault(vol, {"containers": set()})
+                self._volumes[vol]["containers"].add(name)
+        for name in spec.get("networks") or []:
+            self._networks.setdefault(name, {"driver": "bridge", "containers": set()})
+
+    # ── containers ───────────────────────────────────────────────────────
+
+    def list_containers(self, all: bool = True) -> dict:
+        items = self._containers.items() if all else (
+            (n, c) for n, c in self._containers.items() if c["status"] == "running")
+        return {"containers": [{"name": n, "image": c["image"], "status": c["status"]} for n, c in sorted(items)]}
+
+    def create_container(self, name: str, image: str, ports: dict | None = None,
+                          env: dict | None = None, volumes: list | None = None) -> dict:
+        if name in self._containers:
+            return {"error": f"container {name!r} already exists"}
+        if image not in self._images:
+            return {"error": f"no such image {image!r} - pull or build it first"}
+        volumes = self._as_list(volumes)
+        missing = [v for v in volumes if v not in self._volumes]
+        if missing:
+            return {"error": f"no such volume(s) {missing} - create them first"}
+        self._containers[name] = {"image": image, "status": "running", "ports": ports or {},
+                                  "env": env or {}, "logs": [], "networks": {"bridge"}, "volumes": volumes}
+        self._networks["bridge"]["containers"].add(name)
+        for vol in volumes:
+            self._volumes[vol]["containers"].add(name)
+        return {"name": name, "image": image, "status": "running", "volumes": volumes}
+
+    def _require_container(self, name: str) -> dict | None:
+        if name not in self._containers:
+            return {"error": f"no such container {name!r}"}
+        return None
+
+    def start_container(self, name: str) -> dict:
+        err = self._require_container(name)
+        if err:
+            return err
+        self._containers[name]["status"] = "running"
+        return {"name": name, "status": "running"}
+
+    def stop_container(self, name: str) -> dict:
+        err = self._require_container(name)
+        if err:
+            return err
+        self._containers[name]["status"] = "stopped"
+        return {"name": name, "status": "stopped"}
+
+    def restart_container(self, name: str) -> dict:
+        err = self._require_container(name)
+        if err:
+            return err
+        self._containers[name]["status"] = "running"
+        return {"name": name, "status": "running", "restarted": True}
+
+    def pause_container(self, name: str) -> dict:
+        err = self._require_container(name)
+        if err:
+            return err
+        if self._containers[name]["status"] != "running":
+            return {"error": f"container {name!r} is not running"}
+        self._containers[name]["status"] = "paused"
+        return {"name": name, "status": "paused"}
+
+    def remove_container(self, name: str, force: bool = False) -> dict:
+        err = self._require_container(name)
+        if err:
+            return err
+        if self._containers[name]["status"] == "running" and not force:
+            return {"error": f"container {name!r} is running - stop it first, or pass force=true"}
+        for net in self._containers[name]["networks"]:
+            self._networks[net]["containers"].discard(name)
+        for vol in self._containers[name].get("volumes", []):
+            if vol in self._volumes:
+                self._volumes[vol]["containers"].discard(name)
+        del self._containers[name]
+        return {"name": name, "removed": True}
+
+    def inspect_container(self, name: str) -> dict:
+        err = self._require_container(name)
+        if err:
+            return err
+        return {"name": name, **self._containers[name], "networks": sorted(self._containers[name]["networks"])}
+
+    def get_container_logs(self, name: str, tail: int | None = None) -> dict:
+        err = self._require_container(name)
+        if err:
+            return err
+        logs = self._containers[name]["logs"]
+        if tail:
+            logs = logs[-int(tail):]
+        return {"name": name, "logs": logs}
+
+    def get_container_stats(self, name: str) -> dict:
+        err = self._require_container(name)
+        if err:
+            return err
+        # Fixed, deterministic mock figures - real stats aren't modeled,
+        # only that the tool was called and returns something plausible.
+        return {"name": name, "cpu_percent": 5.0, "memory_mb": 128}
+
+    # ── images ───────────────────────────────────────────────────────────
+
+    def list_images(self) -> dict:
+        return {"images": [{"tag": t, "source": v["source"]} for t, v in sorted(self._images.items())]}
+
+    def pull_image(self, tag: str) -> dict:
+        self._images[tag] = {"source": "pulled"}
+        return {"tag": tag, "source": "pulled"}
+
+    def build_image(self, tag: str, dockerfile_path: str | None = None) -> dict:
+        self._images[tag] = {"source": "built"}
+        return {"tag": tag, "source": "built"}
+
+    def tag_image(self, source: str, target: str) -> dict:
+        if source not in self._images:
+            return {"error": f"no such image {source!r}"}
+        self._images[target] = dict(self._images[source])
+        return {"source": source, "target": target}
+
+    def remove_image(self, tag: str) -> dict:
+        if tag not in self._images:
+            return {"error": f"no such image {tag!r}"}
+        in_use = [n for n, c in self._containers.items() if c["image"] == tag]
+        if in_use:
+            return {"error": f"image {tag!r} is in use by container(s) {in_use} - remove them first"}
+        del self._images[tag]
+        return {"tag": tag, "removed": True}
+
+    def prune_images(self) -> dict:
+        used = {c["image"] for c in self._containers.values()}
+        unused = [t for t in self._images if t not in used]
+        for t in unused:
+            del self._images[t]
+        return {"removed": sorted(unused)}
+
+    # ── networks ─────────────────────────────────────────────────────────
+
+    def list_networks(self) -> dict:
+        return {"networks": [{"name": n, "driver": v["driver"]} for n, v in sorted(self._networks.items())]}
+
+    def create_network(self, name: str, driver: str = "bridge") -> dict:
+        if name in self._networks:
+            return {"error": f"network {name!r} already exists"}
+        self._networks[name] = {"driver": driver, "containers": set()}
+        return {"name": name, "driver": driver}
+
+    def connect_network(self, network: str, container: str) -> dict:
+        if network not in self._networks:
+            return {"error": f"no such network {network!r}"}
+        err = self._require_container(container)
+        if err:
+            return err
+        self._networks[network]["containers"].add(container)
+        self._containers[container]["networks"].add(network)
+        return {"network": network, "container": container, "connected": True}
+
+    def disconnect_network(self, network: str, container: str) -> dict:
+        if network not in self._networks:
+            return {"error": f"no such network {network!r}"}
+        self._networks[network]["containers"].discard(container)
+        if container in self._containers:
+            self._containers[container]["networks"].discard(network)
+        return {"network": network, "container": container, "disconnected": True}
+
+    # ── volumes ──────────────────────────────────────────────────────────
+
+    def list_volumes(self) -> dict:
+        return {"volumes": sorted(self._volumes)}
+
+    def create_volume(self, name: str) -> dict:
+        if name in self._volumes:
+            return {"error": f"volume {name!r} already exists"}
+        self._volumes[name] = {"containers": set()}
+        return {"name": name}
+
+    def remove_volume(self, name: str) -> dict:
+        if name not in self._volumes:
+            return {"error": f"no such volume {name!r}"}
+        if self._volumes[name]["containers"]:
+            return {"error": f"volume {name!r} is in use - remove the container(s) using it first"}
+        del self._volumes[name]
+        return {"name": name, "removed": True}
+
+    def prune_volumes(self) -> dict:
+        unused = [n for n, v in self._volumes.items() if not v["containers"]]
+        for n in unused:
+            del self._volumes[n]
+        return {"removed": sorted(unused)}
+
+    # ── system ───────────────────────────────────────────────────────────
+
+    def docker_info(self) -> dict:
+        return {
+            "containers": len(self._containers),
+            "containers_running": sum(1 for c in self._containers.values() if c["status"] == "running"),
+            "images": len(self._images),
+            "networks": len(self._networks),
+            "volumes": len(self._volumes),
+        }
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "container_count": len(self._containers),
+            "running_container_count": sum(1 for c in self._containers.values() if c["status"] == "running"),
+            "stopped_container_count": sum(1 for c in self._containers.values() if c["status"] == "stopped"),
+            "image_count": len(self._images),
+            "network_count": len(self._networks),
+            "volume_count": len(self._volumes),
+            "containers": {n: c["status"] for n, c in sorted(self._containers.items())},
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -936,10 +1209,119 @@ _FILESYSTEM_SCHEMAS: dict[str, dict] = {
         {}, []),
 }
 
+_DOCKER_SCHEMAS: dict[str, dict] = {
+    "list_containers": _fn(
+        "list_containers", "List containers.",
+        {"all": {"type": "boolean", "description": "Include stopped containers too (default true)."}},
+        []),
+    "create_container": _fn(
+        "create_container", "Create and start a new container from an image (the image must already be pulled or built; any listed volumes must already exist).",
+        {"name": {"type": "string", "description": "Name for the new container."},
+         "image": {"type": "string", "description": "Image to run it from."},
+         "ports": {"type": "object", "description": "Port mappings (optional)."},
+         "env": {"type": "object", "description": "Environment variables (optional)."},
+         "volumes": {"type": "array", "items": {"type": "string"}, "description": "Volume names to mount (optional)."}},
+        ["name", "image"]),
+    "start_container": _fn(
+        "start_container", "Start a stopped or paused container.",
+        {"name": {"type": "string", "description": "Container to start."}},
+        ["name"]),
+    "stop_container": _fn(
+        "stop_container", "Stop a running container.",
+        {"name": {"type": "string", "description": "Container to stop."}},
+        ["name"]),
+    "restart_container": _fn(
+        "restart_container", "Restart a container.",
+        {"name": {"type": "string", "description": "Container to restart."}},
+        ["name"]),
+    "pause_container": _fn(
+        "pause_container", "Pause a running container's processes.",
+        {"name": {"type": "string", "description": "Container to pause."}},
+        ["name"]),
+    "remove_container": _fn(
+        "remove_container", "Remove a container. Refuses if it's currently running, unless force is set.",
+        {"name": {"type": "string", "description": "Container to remove."},
+         "force": {"type": "boolean", "description": "Remove even if running (optional, default false)."}},
+        ["name"]),
+    "inspect_container": _fn(
+        "inspect_container", "Get full details for a container (image, status, ports, env, networks).",
+        {"name": {"type": "string", "description": "Container to inspect."}},
+        ["name"]),
+    "get_container_logs": _fn(
+        "get_container_logs", "Get a container's log output.",
+        {"name": {"type": "string", "description": "Container to get logs from."},
+         "tail": {"type": "integer", "description": "Only return the last N lines (optional)."}},
+        ["name"]),
+    "get_container_stats": _fn(
+        "get_container_stats", "Get live resource usage (CPU, memory) for a container.",
+        {"name": {"type": "string", "description": "Container to get stats for."}},
+        ["name"]),
+    "list_images": _fn(
+        "list_images", "List locally available images.",
+        {}, []),
+    "pull_image": _fn(
+        "pull_image", "Pull an image from a registry.",
+        {"tag": {"type": "string", "description": "Image tag to pull, e.g. 'nginx:latest'."}},
+        ["tag"]),
+    "build_image": _fn(
+        "build_image", "Build an image from a Dockerfile.",
+        {"tag": {"type": "string", "description": "Tag to give the built image."},
+         "dockerfile_path": {"type": "string", "description": "Path to the Dockerfile (optional)."}},
+        ["tag"]),
+    "tag_image": _fn(
+        "tag_image", "Give an existing image an additional tag.",
+        {"source": {"type": "string", "description": "Existing image tag."},
+         "target": {"type": "string", "description": "New tag to add."}},
+        ["source", "target"]),
+    "remove_image": _fn(
+        "remove_image", "Remove an image. Refuses if any container still uses it.",
+        {"tag": {"type": "string", "description": "Image tag to remove."}},
+        ["tag"]),
+    "prune_images": _fn(
+        "prune_images", "Remove every image not used by any existing container.",
+        {}, []),
+    "list_networks": _fn(
+        "list_networks", "List networks.",
+        {}, []),
+    "create_network": _fn(
+        "create_network", "Create a new network.",
+        {"name": {"type": "string", "description": "Name for the new network."},
+         "driver": {"type": "string", "description": "Network driver (optional, defaults to 'bridge')."}},
+        ["name"]),
+    "connect_network": _fn(
+        "connect_network", "Attach a container to a network.",
+        {"network": {"type": "string", "description": "Network to connect to."},
+         "container": {"type": "string", "description": "Container to attach."}},
+        ["network", "container"]),
+    "disconnect_network": _fn(
+        "disconnect_network", "Detach a container from a network.",
+        {"network": {"type": "string", "description": "Network to disconnect from."},
+         "container": {"type": "string", "description": "Container to detach."}},
+        ["network", "container"]),
+    "list_volumes": _fn(
+        "list_volumes", "List volumes.",
+        {}, []),
+    "create_volume": _fn(
+        "create_volume", "Create a new named volume.",
+        {"name": {"type": "string", "description": "Name for the new volume."}},
+        ["name"]),
+    "remove_volume": _fn(
+        "remove_volume", "Remove a volume. Refuses if any container still uses it.",
+        {"name": {"type": "string", "description": "Volume to remove."}},
+        ["name"]),
+    "prune_volumes": _fn(
+        "prune_volumes", "Remove every volume not used by any existing container.",
+        {}, []),
+    "docker_info": _fn(
+        "docker_info", "Get a system-wide summary (container/image/network/volume counts).",
+        {}, []),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
     "filesystem": (FilesystemService, _FILESYSTEM_SCHEMAS),
+    "docker": (DockerService, _DOCKER_SCHEMAS),
 }
 
 

@@ -1,0 +1,23 @@
+{
+  "name": "tool_docker_list_before_assuming",
+  "description": "Check what's actually running before reporting on it, rather than guessing.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 1,
+  "tags": ["tool-use", "docker", "list"],
+  "tool_service": "docker",
+  "tools": ["list_containers", "inspect_container"],
+  "tool_service_seed": {
+    "images": ["nginx:latest", "redis:latest"],
+    "containers": {
+      "web": {"image": "nginx:latest", "status": "running"},
+      "cache": {"image": "redis:latest", "status": "stopped"}
+    }
+  },
+  "prompts": [
+    "Before doing anything else, show me what containers currently exist and their status."
+  ],
+  "expected_calls": [
+    {"tool": "list_containers"}
+  ]
+}

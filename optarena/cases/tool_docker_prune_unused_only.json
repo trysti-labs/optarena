@@ -1,0 +1,23 @@
+{
+  "name": "tool_docker_prune_unused_only",
+  "description": "Prune images and volumes that aren't in use - the volume attached to a running container must survive, the unattached one and the unused image must not.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 2,
+  "tags": ["tool-use", "docker", "prune"],
+  "tool_service": "docker",
+  "tools": ["prune_images", "prune_volumes", "list_images", "list_volumes"],
+  "tool_service_seed": {
+    "images": ["myapp:v1", "old-build:v0"],
+    "volumes": ["dbdata", "scratch"],
+    "containers": {"app": {"image": "myapp:v1", "status": "running", "volumes": ["dbdata"]}}
+  },
+  "prompts": [
+    "Clean up any Docker images and volumes that aren't currently being used by a container."
+  ],
+  "expected_calls": [
+    {"tool": "prune_images"},
+    {"tool": "prune_volumes"}
+  ],
+  "expected_final_state": {"image_count": 1, "volume_count": 1}
+}

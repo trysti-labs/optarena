@@ -1,0 +1,22 @@
+{
+  "name": "tool_docker_stop_before_remove",
+  "description": "Remove a running container - the agent must know to stop it first rather than force past the precondition.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 2,
+  "tags": ["tool-use", "docker", "stop", "remove", "precondition"],
+  "tool_service": "docker",
+  "tools": ["stop_container", "remove_container", "list_containers"],
+  "tool_service_seed": {
+    "images": ["nginx:latest"],
+    "containers": {"web": {"image": "nginx:latest", "status": "running"}}
+  },
+  "prompts": [
+    "The web container is no longer needed - remove it."
+  ],
+  "expected_calls": [
+    {"tool": "stop_container", "arguments_contains": {"name": "web"}},
+    {"tool": "remove_container", "arguments_contains": {"name": "web"}}
+  ],
+  "expected_final_state": {"container_count": 0}
+}

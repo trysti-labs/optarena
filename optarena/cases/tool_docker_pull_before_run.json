@@ -1,0 +1,18 @@
+{
+  "name": "tool_docker_pull_before_run",
+  "description": "Pull an image before creating a container from it - the image doesn't exist yet.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 1,
+  "tags": ["tool-use", "docker", "pull", "create"],
+  "tool_service": "docker",
+  "tools": ["pull_image", "create_container", "list_images"],
+  "prompts": [
+    "Pull the nginx:latest image, then create a container called web from it."
+  ],
+  "expected_calls": [
+    {"tool": "pull_image", "arguments_contains": {"tag": "nginx:latest"}},
+    {"tool": "create_container", "arguments_contains": {"name": "web", "image": "nginx:latest"}}
+  ],
+  "expected_final_state": {"container_count": 1, "image_count": 1}
+}

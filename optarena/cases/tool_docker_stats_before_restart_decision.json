@@ -1,0 +1,20 @@
+{
+  "name": "tool_docker_stats_before_restart_decision",
+  "description": "Check resource usage before deciding whether a healthy-looking container actually needs a restart.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 1,
+  "tags": ["tool-use", "docker", "stats"],
+  "tool_service": "docker",
+  "tools": ["get_container_stats", "restart_container"],
+  "tool_service_seed": {
+    "images": ["myapi:v1"],
+    "containers": {"api": {"image": "myapi:v1", "status": "running"}}
+  },
+  "prompts": [
+    "Check the api container's current resource usage before deciding whether it needs a restart."
+  ],
+  "expected_calls": [
+    {"tool": "get_container_stats", "arguments_contains": {"name": "api"}}
+  ]
+}

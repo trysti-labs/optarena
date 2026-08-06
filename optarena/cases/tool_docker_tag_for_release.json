@@ -1,0 +1,20 @@
+{
+  "name": "tool_docker_tag_for_release",
+  "description": "Tag an existing image with an additional release tag.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 1,
+  "tags": ["tool-use", "docker", "tag"],
+  "tool_service": "docker",
+  "tools": ["tag_image", "list_images"],
+  "tool_service_seed": {
+    "images": ["myapp:v1"]
+  },
+  "prompts": [
+    "Tag the myapp:v1 image as myapp:stable for the release."
+  ],
+  "expected_calls": [
+    {"tool": "tag_image", "arguments_contains": {"source": "myapp:v1", "target": "myapp:stable"}}
+  ],
+  "expected_final_state": {"image_count": 2}
+}

@@ -1,0 +1,22 @@
+{
+  "name": "tool_docker_full_teardown_order",
+  "description": "Fully clean up a container and its image - must remove the container (and disconnect it) before the image, since the image can't be removed while in use.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 3,
+  "tags": ["tool-use", "docker", "remove", "ordering", "multi-step"],
+  "tool_service": "docker",
+  "tools": ["disconnect_network", "stop_container", "remove_container", "remove_image", "inspect_container"],
+  "tool_service_seed": {
+    "images": ["myapp:v1"],
+    "containers": {"app": {"image": "myapp:v1", "status": "running"}}
+  },
+  "prompts": [
+    "Fully clean up: remove both the app container and the myapp:v1 image."
+  ],
+  "expected_calls": [
+    {"tool": "remove_container", "arguments_contains": {"name": "app"}},
+    {"tool": "remove_image", "arguments_contains": {"tag": "myapp:v1"}}
+  ],
+  "expected_final_state": {"container_count": 0, "image_count": 0}
+}

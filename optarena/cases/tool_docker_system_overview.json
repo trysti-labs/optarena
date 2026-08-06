@@ -1,0 +1,20 @@
+{
+  "name": "tool_docker_system_overview",
+  "description": "Get a quick system-wide summary rather than listing every resource type individually.",
+  "task_type": "tool_use",
+  "domain": "docker",
+  "difficulty": 1,
+  "tags": ["tool-use", "docker", "info"],
+  "tool_service": "docker",
+  "tools": ["docker_info", "list_containers", "list_images"],
+  "tool_service_seed": {
+    "images": ["nginx:latest"],
+    "containers": {"web": {"image": "nginx:latest", "status": "running"}}
+  },
+  "prompts": [
+    "Give me a quick summary of the overall Docker system state - how many containers, images, and so on."
+  ],
+  "expected_calls": [
+    {"tool": "docker_info"}
+  ]
+}
