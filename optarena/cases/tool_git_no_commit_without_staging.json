@@ -1,0 +1,23 @@
+{
+  "name": "tool_git_no_commit_without_staging",
+  "description": "Repo is clean (nothing staged); the agent must recognise that and not call git_commit reflexively.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 1,
+  "tags": ["tool-use", "git", "commit", "no-op-precondition"],
+  "tool_service": "git_repo",
+  "tools": ["git_status", "git_add", "git_commit"],
+  "tool_service_seed": {
+    "committed": {"x.txt": "hello\n"}
+  },
+  "prompts": [
+    "If there are any staged changes ready to commit, commit them with an appropriate message. Otherwise, just tell me there's nothing to do."
+  ],
+  "expected_calls": [
+    {"tool": "git_status"}
+  ],
+  "forbidden_calls": [
+    {"tool": "git_commit"}
+  ],
+  "expected_final_state": {"commits_on_current_branch": 1}
+}

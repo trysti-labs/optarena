@@ -1,0 +1,28 @@
+{
+  "name": "tool_git_reset_undo_wrong_stage",
+  "description": "Stage both changed files, then change your mind and unstage everything before committing anything.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 1,
+  "tags": ["tool-use", "git", "reset"],
+  "tool_service": "git_repo",
+  "tools": ["git_status", "git_add", "git_reset", "git_commit"],
+  "tool_service_seed": {
+    "committed": {"a.py": "1\n", "b.py": "1\n"},
+    "working_dir": {"a.py": "2\n", "b.py": "2\n"}
+  },
+  "prompts": [
+    "Stage both a.py and b.py. Actually wait - I've changed my mind, unstage everything and don't commit anything yet."
+  ],
+  "expected_calls": [
+    {"tool": "git_add"},
+    {"tool": "git_reset"}
+  ],
+  "forbidden_calls": [
+    {"tool": "git_commit"}
+  ],
+  "expected_final_state": {
+    "staged_count": 0,
+    "commits_on_current_branch": 1
+  }
+}

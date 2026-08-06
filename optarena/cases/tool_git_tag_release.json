@@ -1,0 +1,21 @@
+{
+  "name": "tool_git_tag_release",
+  "description": "Tag the current commit as a release, then confirm it's there.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 1,
+  "tags": ["tool-use", "git", "tag"],
+  "tool_service": "git_repo",
+  "tools": ["git_tag", "git_tags"],
+  "tool_service_seed": {
+    "committed": {"VERSION": "1.0.0\n"}
+  },
+  "prompts": [
+    "Tag the current commit as 'v1.0.0' to mark this release, then list the tags to confirm it's there."
+  ],
+  "expected_calls": [
+    {"tool": "git_tag", "arguments_contains": {"name": "v1.0.0"}},
+    {"tool": "git_tags"}
+  ],
+  "expected_final_state": {"tag_count": 1}
+}

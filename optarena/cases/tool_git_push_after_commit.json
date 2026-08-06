@@ -1,0 +1,23 @@
+{
+  "name": "tool_git_push_after_commit",
+  "description": "Check the remote, commit an existing local change, then push it.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 1,
+  "tags": ["tool-use", "git", "push", "remotes"],
+  "tool_service": "git_repo",
+  "tools": ["git_remotes", "git_add", "git_commit", "git_push"],
+  "tool_service_seed": {
+    "committed": {"app.py": "VERSION = 1\n"},
+    "working_dir": {"app.py": "VERSION = 2\n"}
+  },
+  "prompts": [
+    "First check which remote we'd be pushing to. Then commit the change to app.py with a suitable message, and push it."
+  ],
+  "expected_calls": [
+    {"tool": "git_remotes"},
+    {"tool": "git_commit"},
+    {"tool": "git_push"}
+  ],
+  "expected_final_state": {"pushed_matches_local": true}
+}

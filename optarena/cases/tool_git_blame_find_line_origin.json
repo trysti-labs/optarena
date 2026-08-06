@@ -1,0 +1,22 @@
+{
+  "name": "tool_git_blame_find_line_origin",
+  "description": "Find which commit introduced a specific function, using real multi-commit history where the function was added in the second commit, not the first.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 2,
+  "tags": ["tool-use", "git", "blame"],
+  "tool_service": "git_repo",
+  "tools": ["git_log", "git_blame"],
+  "tool_service_seed": {
+    "initial_commits": [
+      {"message": "Add greet function", "files": {"greet.py": "def greet(name):\n    return f'Hello {name}'\n"}},
+      {"message": "Add farewell function", "files": {"greet.py": "def greet(name):\n    return f'Hello {name}'\n\ndef farewell(name):\n    return f'Bye {name}'\n"}}
+    ]
+  },
+  "prompts": [
+    "Find out which commit introduced the farewell function in greet.py."
+  ],
+  "expected_calls": [
+    {"tool": "git_blame", "arguments_contains": {"path": "greet.py"}}
+  ]
+}

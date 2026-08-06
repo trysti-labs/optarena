@@ -1,0 +1,24 @@
+{
+  "name": "tool_git_status_before_acting",
+  "description": "Check status and see the actual diff before touching anything - must not commit yet.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 1,
+  "tags": ["tool-use", "git", "status", "diff"],
+  "tool_service": "git_repo",
+  "tools": ["git_status", "git_diff_unstaged", "git_diff_staged", "git_add", "git_commit"],
+  "tool_service_seed": {
+    "committed": {"app.py": "print('v1')\n"},
+    "working_dir": {"app.py": "print('v2')\n", "notes.txt": "todo: refactor later\n"}
+  },
+  "prompts": [
+    "Before we change anything, tell me exactly what's currently modified or new in this repo - both a summary and the actual content differences."
+  ],
+  "expected_calls": [
+    {"tool": "git_status"},
+    {"tool": "git_diff_unstaged"}
+  ],
+  "forbidden_calls": [
+    {"tool": "git_commit"}
+  ]
+}

@@ -100,6 +100,7 @@ class ToolChatDriver(Driver):
             result.error = str(exc)
             return result
         service = service_cls()
+        service.seed(case.get("tool_service_seed") or {})
 
         messages: list[dict] = [{"role": "system", "content": _SYSTEM}]
         t0 = time.monotonic()

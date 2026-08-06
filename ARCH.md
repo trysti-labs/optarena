@@ -503,6 +503,17 @@ everything else here uses. A case is one domain or the other, never both -
   model back), logged to `call_log` like any other call - a hallucinated or
   malformed call is data the oracle can assert against
   (`forbidden_calls`/`n_unknown_calls`), not a driver crash.
+- **`tool_service_seed`** establishes state BEFORE the conversation starts -
+  a git repo case needs real pre-existing history (a prior commit to diff
+  against, a multi-commit log to search) that no tool in a git-only case
+  can create (git has no "write file content" tool - see the `git_repo`
+  bullet below), the same way a coding case's `setup_files` exist before
+  the model's first turn. The driver calls `service.seed(case.get
+  ("tool_service_seed", {}))` once, right after construction; each
+  service defines its own spec shape (no shared schema across services,
+  matching how tool arguments already aren't shared) and the calls it
+  makes to build that state are never logged to `call_log` - the oracle
+  only ever grades what the AGENT did, not test-fixture setup.
 - **The driver loop** (`drivers/tool_chat.py`, shared by both variants -
   only the wire protocol differs, same split as `openai_chat.py`'s two
   baselines): send the conversation with `tools` attached → if the response
@@ -524,6 +535,44 @@ everything else here uses. A case is one domain or the other, never both -
   sufficient, dependency-free ground truth - no container, no network, no
   `check_command` needed for this domain. Matches the project's stdlib-only
   core the same way the filesystem oracle does.
+- **`git_repo`** (`_cases/_mock_service.py`, `GitRepoService`) - the second
+  mock service, covering all 18 tools catalogued from the real MCP git-
+  server ecosystem in `DEV_NOTES/TOOL_CATALOG_COMPLETE.md` §1 (status, add,
+  reset, commit, the three diff variants, log, show, branch listing/create/
+  checkout, blame, remotes, tags list/create, push, pull), across 12 example
+  cases. Deliberately scoped to coding/dev-specific tools rather than more
+  generic CRUD services like `task_tracker` - see
+  `DEV_NOTES/TOOL_USE_EXPANSION_PLAN.md` for why (BFCL/tau-bench already own
+  generic tool-calling; git workflow judgment doesn't compete with anything
+  else in the landscape). Two design points specific to this service:
+  - **The working tree is fixed at `seed()` time and never changes during a
+    case** - no git tool authors file content (that's a filesystem
+    service's job, not built yet), so every one of these 18 tools is
+    purely testing git WORKFLOW judgment (stage the right things, commit at
+    the right granularity, branch before editing, pull before push,
+    tag/blame correctly) - never content authorship.
+  - **Assertions favor final repository state over exact call arguments**
+    where the agent has a free choice the case can't predict (e.g. a
+    feature-branch name) - `summary()` exposes `main_commit_count`
+    specifically so a case can prove "the commit landed off main" without
+    needing to know what the model named the branch it used to get there.
+    `_tool_evaluate.py`'s matcher also does list-subset containment for
+    list-valued arguments (`git_add`'s `paths`), not exact-list equality -
+    a case asserting `{"paths": ["a.py"]}` shouldn't fail because the model
+    reasonably staged `["a.py", "b.py"]` in one call.
+  - **Live-verified finding, not a harness bug**: repeated live runs
+    against a local model (`qwen3-coder:30b` via Ollama) surfaced a real,
+    reproducible pattern - the model intermittently emits a **zero-argument**
+    tool call (`git_status`, `git_branch`) as literal malformed text
+    (`<function=git_status>\n</function>\n</tool_call>`) instead of using
+    Ollama's structured `tool_calls` field, on both `/api/chat` and
+    `/v1/chat/completions`, while tool calls with real arguments came
+    through reliably. Confirmed non-deterministic (retries flipped some of
+    these to PASS) and confirmed NOT a case-design issue (every case's
+    hand-built ideal trajectory passes, and a realistic wrong trajectory
+    fails, per `tests/test_git_repo_cases.py`'s dry-run coverage) - genuine
+    benchmark signal about this backend's tool-calling reliability, left
+    as-is rather than curve-fit around.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not
@@ -532,9 +581,13 @@ everything else here uses. A case is one domain or the other, never both -
   model-vs-model. `optarena cases verify --strict` (§10.2) doesn't cover
   this domain either - there's no `reference_solution`/`broken_solutions`
   equivalent for a tool-calling trajectory yet, so the discriminating-oracle
-  guarantee is enforced by unit tests (`tests/test_tool_use_cases.py`)
-  today, not by a corpus-wide verify command. Only one mock service
-  (`task_tracker`) ships; adding more is the natural way this domain grows.
+  guarantee is enforced by unit tests (`tests/test_tool_use_cases.py`,
+  `tests/test_git_repo_cases.py`) today, not by a corpus-wide verify
+  command. A case can only name ONE `tool_service` - a realistic workflow
+  spanning two services (e.g. git + a forge/issue-tracker service) isn't
+  expressible yet; see `DEV_NOTES/TOOL_USE_EXPANSION_PLAN.md` §4 for the
+  design question this raises, deliberately left open rather than decided
+  ahead of actually needing it.
 
 ---
 

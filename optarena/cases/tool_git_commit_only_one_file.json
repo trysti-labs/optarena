@@ -1,0 +1,25 @@
+{
+  "name": "tool_git_commit_only_one_file",
+  "description": "Two files changed; only one should be committed now, the other left for later - tests commit granularity judgment, graded on the actual resulting commit rather than exact tool arguments.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 2,
+  "tags": ["tool-use", "git", "add", "commit", "granularity"],
+  "tool_service": "git_repo",
+  "tools": ["git_status", "git_add", "git_commit"],
+  "tool_service_seed": {
+    "committed": {"a.py": "value = 1\n", "b.py": "value = 1\n"},
+    "working_dir": {"a.py": "value = 2\n", "b.py": "value = 2\n"}
+  },
+  "prompts": [
+    "Both a.py and b.py have changed. Only commit the change to a.py right now - b.py isn't ready, leave it for a separate commit later."
+  ],
+  "expected_calls": [
+    {"tool": "git_commit"}
+  ],
+  "expected_final_state": {
+    "commits_on_current_branch": 2,
+    "unstaged_modified_count": 1,
+    "staged_count": 0
+  }
+}

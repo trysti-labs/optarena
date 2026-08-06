@@ -1,0 +1,24 @@
+{
+  "name": "tool_git_log_and_show_commit",
+  "description": "Inspect commit history, then show full details of a specific commit - real multi-commit history to look through, not a single-commit repo.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 1,
+  "tags": ["tool-use", "git", "log", "show"],
+  "tool_service": "git_repo",
+  "tools": ["git_log", "git_show"],
+  "tool_service_seed": {
+    "initial_commits": [
+      {"message": "Initial scaffold", "files": {"app.py": "# app\n"}},
+      {"message": "Add config loader", "files": {"app.py": "# app\n", "config.py": "def load():\n    pass\n"}},
+      {"message": "Add logging setup", "files": {"app.py": "# app\n", "config.py": "def load():\n    pass\n", "log.py": "def setup():\n    pass\n"}}
+    ]
+  },
+  "prompts": [
+    "Look at the commit history, then show me the full details of the most recent commit."
+  ],
+  "expected_calls": [
+    {"tool": "git_log"},
+    {"tool": "git_show"}
+  ]
+}

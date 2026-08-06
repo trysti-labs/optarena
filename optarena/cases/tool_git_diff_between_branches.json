@@ -1,0 +1,28 @@
+{
+  "name": "tool_git_diff_between_branches",
+  "description": "Multi-turn: branch off, commit a change on the branch, then diff main against it - exercises the full create/checkout/add/commit/diff sequence together, not one tool in isolation.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 3,
+  "tags": ["tool-use", "git", "branch", "diff", "multi-step"],
+  "tool_service": "git_repo",
+  "tools": ["git_branch", "git_create_branch", "git_checkout", "git_add", "git_commit", "git_diff"],
+  "tool_service_seed": {
+    "committed": {"config.py": "PORT = 8000\n"},
+    "working_dir": {"config.py": "PORT = 9000\n"}
+  },
+  "prompts": [
+    "config.py has already been locally edited to use PORT 9000. Create a branch called 'staging' and commit that change on it (not on main).",
+    "Now show me the diff between the main branch and the staging branch."
+  ],
+  "expected_calls": [
+    {"tool": "git_create_branch"},
+    {"tool": "git_checkout"},
+    {"tool": "git_commit"},
+    {"tool": "git_diff"}
+  ],
+  "expected_final_state": {
+    "main_commit_count": 1,
+    "branch_count": 2
+  }
+}

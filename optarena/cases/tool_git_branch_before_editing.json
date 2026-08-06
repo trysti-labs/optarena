@@ -1,0 +1,27 @@
+{
+  "name": "tool_git_branch_before_editing",
+  "description": "A change should land on a feature branch, not committed straight to main - graded on where the commit actually lands (main_commit_count), not on guessing the branch name the model picks.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 2,
+  "tags": ["tool-use", "git", "branch", "checkout", "workflow"],
+  "tool_service": "git_repo",
+  "tools": ["git_branch", "git_create_branch", "git_checkout", "git_add", "git_commit"],
+  "tool_service_seed": {
+    "committed": {"app.py": "VERSION = 1\n"},
+    "working_dir": {"app.py": "VERSION = 2  # new feature\n"}
+  },
+  "prompts": [
+    "We're about to add a new feature to app.py. First list the branches to confirm where we are, then set up a feature branch for this work before committing - don't commit straight to main."
+  ],
+  "expected_calls": [
+    {"tool": "git_branch"},
+    {"tool": "git_create_branch"},
+    {"tool": "git_checkout"},
+    {"tool": "git_commit"}
+  ],
+  "expected_final_state": {
+    "main_commit_count": 1,
+    "branch_count": 2
+  }
+}

@@ -225,6 +225,12 @@ _CASE_KNOWN_KEYS = {
     # _cases/_mock_service.py and _cases/_tool_evaluate.py.
     "tool_service", "tools", "max_tool_turns",
     "expected_calls", "forbidden_calls", "expected_final_state",
+    # Initial mock-service state (e.g. an existing git history) established
+    # BEFORE the conversation starts, via MockService.seed() - never logged/
+    # graded. Shape is entirely service-defined (no shared schema across
+    # services, same as tool arguments aren't shared), so this is only
+    # type-checked as "an object" here.
+    "tool_service_seed",
 }
 _TOOL_CALL_SPEC_KNOWN_KEYS = {"tool", "arguments_contains"}
 _DISRUPTION_KNOWN_KEYS = {"after_prompt", "when", "description", "write_files", "delete_files"}
@@ -355,6 +361,9 @@ def validate_case(data: dict, source: str = "<case>") -> None:
     if "expected_final_state" in data and data["expected_final_state"] is not None:
         if not isinstance(data["expected_final_state"], dict):
             raise _err(source, "'expected_final_state' must be an object")
+    if "tool_service_seed" in data and data["tool_service_seed"] is not None:
+        if not isinstance(data["tool_service_seed"], dict):
+            raise _err(source, "'tool_service_seed' must be an object")
 
     if "reference_solution" in data and data["reference_solution"] is not None:
         _validate_string_map(data["reference_solution"], f"{source}.reference_solution")

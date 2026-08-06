@@ -12,12 +12,25 @@ from __future__ import annotations
 from ._mock_service import MockService
 
 
+def _value_matches(actual, want) -> bool:
+    """A single argument value "contains" ``want``. For a list-valued
+    argument (e.g. git_add's ``paths``), containment means every element of
+    ``want`` appears somewhere in ``actual`` - a case asserting
+    {"paths": ["README.md"]} shouldn't fail because the model reasonably
+    staged ["README.md", "app.py"] in one call. Any other type falls back to
+    exact equality, matching the original single-scalar-argument tools
+    (task_tracker's title/task_id/status) this oracle started with."""
+    if isinstance(want, list) and isinstance(actual, list):
+        return all(item in actual for item in want)
+    return actual == want
+
+
 def _matches(entry_arguments: dict, arguments_contains: dict) -> bool:
     """``arguments_contains`` is a required subset, not an exact match - a
     case asserting {"title": "Buy milk"} shouldn't fail because the model
     also (legitimately) passed an ``assignee``."""
     return all(
-        k in entry_arguments and entry_arguments[k] == v
+        k in entry_arguments and _value_matches(entry_arguments[k], v)
         for k, v in arguments_contains.items()
     )
 

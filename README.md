@@ -252,13 +252,16 @@ a coding case (one JSON file, no live server or container needed).
 
 ```bash
 optarena run --driver ollama-tools --model qwen3-coder:30b \
-  --cases tool_create_task,tool_create_and_complete_task
+  --cases tool_create_task,tool_git_stage_review_and_commit
 ```
 
-Ships with one mock service (`task_tracker`: create/complete/list/delete)
-and five example cases (`tool_*` in the catalogue). See [ARCH.md](./ARCH.md)
-§3.5 for the schema and oracle mechanics, and what's still deferred (agent-
-driver support beyond the raw baselines, more mock services).
+Ships with two mock services - `task_tracker` (generic create/complete/
+list/delete, 5 cases) and `git_repo` (all 18 tools a real coding agent's
+git workflow touches - status/add/commit/diff/log/branch/checkout/blame/
+tags/push/pull, 12 cases) - deliberately scoped toward coding/dev tools
+rather than more generic ones; see [ARCH.md](./ARCH.md) §3.5 for the schema
+and oracle mechanics, and what's still deferred (agent-driver support
+beyond the raw baselines, more mock services).
 
 ## Regression testing
 

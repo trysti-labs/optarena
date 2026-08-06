@@ -1,0 +1,30 @@
+{
+  "name": "tool_git_pull_before_push",
+  "description": "A teammate's commit already exists on the remote; the agent must pull it before adding and pushing its own new work, not push blind and risk clobbering it.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 3,
+  "tags": ["tool-use", "git", "pull", "push", "multi-step"],
+  "tool_service": "git_repo",
+  "tools": ["git_status", "git_pull", "git_add", "git_commit", "git_push"],
+  "tool_service_seed": {
+    "committed": {"shared.py": "A = 1\n"},
+    "working_dir": {"shared.py": "A = 1\n", "new_feature.py": "def feature():\n    pass\n"},
+    "remote_ahead_commits": [
+      {"message": "Teammate's fix", "files": {"shared.py": "A = 2  # fixed\n"}}
+    ]
+  },
+  "prompts": [
+    "Before pushing any new work, make sure you have the latest changes from the remote. Then stage and commit new_feature.py, and push everything."
+  ],
+  "expected_calls": [
+    {"tool": "git_pull"},
+    {"tool": "git_add", "arguments_contains": {"paths": ["new_feature.py"]}},
+    {"tool": "git_commit"},
+    {"tool": "git_push"}
+  ],
+  "expected_final_state": {
+    "commits_on_current_branch": 3,
+    "pushed_matches_local": true
+  }
+}

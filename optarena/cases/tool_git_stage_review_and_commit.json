@@ -1,0 +1,23 @@
+{
+  "name": "tool_git_stage_review_and_commit",
+  "description": "Stage a change, review exactly what's staged, then commit it with a real message.",
+  "task_type": "tool_use",
+  "domain": "git_repo",
+  "difficulty": 1,
+  "tags": ["tool-use", "git", "add", "commit"],
+  "tool_service": "git_repo",
+  "tools": ["git_status", "git_add", "git_diff_staged", "git_commit"],
+  "tool_service_seed": {
+    "committed": {"README.md": "# Project\n"},
+    "working_dir": {"README.md": "# Project\n\nA short description of what this does.\n"}
+  },
+  "prompts": [
+    "Stage the change to README.md, double check exactly what's staged, then commit it with a clear, descriptive message."
+  ],
+  "expected_calls": [
+    {"tool": "git_add", "arguments_contains": {"paths": ["README.md"]}},
+    {"tool": "git_diff_staged"},
+    {"tool": "git_commit"}
+  ],
+  "expected_final_state": {"commits_on_current_branch": 2, "staged_count": 0}
+}
