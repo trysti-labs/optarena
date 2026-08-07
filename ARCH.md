@@ -203,6 +203,49 @@ Comparison  two runs, aligned by case  per-case deltas + verdict
   Shell, YAML, Terraform, Dockerfile, Makefile) at the per-track allocation the spec's own
   Phase 1 table asks for - see §10.1 for the full breakdown and what's
   explicitly deferred beyond it.
+- **`--tool-service`/`--tags`/`--like` (v0.2, CLI redesign)**: `language`/
+  `framework` only ever covered the filesystem-oracle domain - the §3.5
+  tool-use domain's 14 mock services (266 cases) had no selector at all
+  beyond exact `--cases name,name` (you had to already know case names).
+  Researched prior art before designing this (lm-evaluation-harness's
+  `--tasks` group-expansion, BFCL's `--test-category`, pytest's `-k`
+  substring vs. `-m` marker-expression split, Inspect AI's task-bundles-
+  dataset+solver+scorer shape) and landed on the same "one small selection
+  vocabulary reused everywhere" principle every one of them uses, instead
+  of inventing flags ad hoc per subcommand the way `--language`/
+  `--framework` had drifted into being duplicated three times (`run`,
+  `cases list`, `cases verify`) with slightly different wiring each time.
+  `cases.filter_cases()` gained three new keyword-only params, all
+  optional and AND'd against the existing ones: `tool_service` (comma-
+  separated, OR'd within itself - `--tool-service build_tools,
+  observability`), `tags` (a pytest `-m`-style boolean expression -
+  `--tags "tool-use and observability"` - over the case's free-form
+  `tags` array, parsed by the new `_cases/_tag_expr.py` mini-language:
+  `and`/`or`/`not`/parens, standard precedence, case-insensitive tag
+  matching, a small hand-written recursive-descent parser rather than a
+  dependency), and `like` (`-k`/`--like`, a case-insensitive substring
+  match on the case name, pytest's `-k` by another name). All three are
+  wired identically into `run`, `cases list`, and `cases verify` - the
+  same three places `--language`/`--framework` already were - plus a new
+  `optarena cases groups` command (mirroring `--tasks list`'s group
+  discovery) that prints case counts per `tool_service`/`language`/`tags`
+  value, so a filter can be aimed at something real without guessing.
+  `TagExpressionError` (a `ValueError` subclass) is caught explicitly
+  wherever `filter_cases` is now called directly outside `run`'s existing
+  `_EXPECTED_RUN_ERRORS` catch (`cmd_list`, and `cmd_verify_corpus`'s
+  previously-unguarded call to it, fixed in the same pass) so a malformed
+  `--tags` expression reads as a clean one-line error (F-04), never a raw
+  traceback. Deliberately NOT built in this pass, despite motivating the
+  research: an `--environment`/`--matrix-environments` axis for a future
+  live-MCP-server-A/B-testing capability (see
+  `DEV_NOTES/LIVE_MCP_AB_TESTING_EXPLORATION.md`, not committed) - not
+  decided, not scheduled, and adding an inert placeholder flag for an
+  unbuilt feature would violate this project's own "don't design for
+  hypothetical future requirements" rule. The naming was chosen so it
+  won't collide with that if/when it lands: `--tool-service`/`--tags`/
+  `--like` all narrow *which cases run*, orthogonal to *what a tool-use
+  case's tools actually talk to*, which is what `--environment` would
+  need to mean.
 - `setup_files` are written into the workspace before the run ("modify" cases).
 - `expected_files` is the **oracle**: the case passes iff every spec matches a
   file that is *new or modified* since the pre-run snapshot, containing every

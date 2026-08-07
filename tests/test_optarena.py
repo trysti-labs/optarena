@@ -3283,6 +3283,79 @@ class ScenarioTests(unittest.TestCase):
             ["a", "b"],
         )
 
+    def test_tool_service_filter_matches_any_of_a_comma_list(self):
+        cases = [
+            {"name": "a", "tool_service": "build_tools"},
+            {"name": "b", "tool_service": "observability"},
+            {"name": "c", "tool_service": "database"},
+        ]
+        self.assertEqual(
+            [c["name"] for c in filter_cases(cases, tool_service="build_tools,observability")],
+            ["a", "b"],
+        )
+        self.assertEqual([c["name"] for c in filter_cases(cases, tool_service="database")], ["c"])
+
+    def test_tags_filter_evaluates_the_boolean_expression_per_case(self):
+        cases = [
+            {"name": "a", "tags": ["tool-use", "observability"]},
+            {"name": "b", "tags": ["tool-use", "database"]},
+            {"name": "c", "tags": []},
+        ]
+        self.assertEqual(
+            [c["name"] for c in filter_cases(cases, tags="tool-use and observability")],
+            ["a"],
+        )
+        self.assertEqual(
+            [c["name"] for c in filter_cases(cases, tags="tool-use")],
+            ["a", "b"],
+        )
+
+    def test_tags_filter_raises_tag_expression_error_on_malformed_expression(self):
+        from optarena.cases import TagExpressionError
+        with self.assertRaises(TagExpressionError):
+            filter_cases([{"name": "a", "tags": []}], tags="a and")
+
+    def test_like_filter_matches_a_case_insensitive_substring_of_the_name(self):
+        cases = [{"name": "tool_bt_check_docs"}, {"name": "tool_obs_check_alert_rule"}]
+        self.assertEqual([c["name"] for c in filter_cases(cases, like="tool_bt")], ["tool_bt_check_docs"])
+        self.assertEqual([c["name"] for c in filter_cases(cases, like="CHECK")], [c["name"] for c in cases])
+
+    def test_tool_service_filter_resolves_to_matching_case_names_via_scenario_from_args(self):
+        from optarena.cli import _scenario_from_args
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        (d / "bt_case.json").write_text(json.dumps(
+            {"name": "bt_case", "tool_service": "build_tools", "tools": [],
+             "expected_calls": [{"tool": "x"}]}), encoding="utf-8")
+        (d / "obs_case.json").write_text(json.dumps(
+            {"name": "obs_case", "tool_service": "observability", "tools": [],
+             "expected_calls": [{"tool": "y"}]}), encoding="utf-8")
+        args = argparse.Namespace(
+            driver="ollama-tools", model="llama3.2", kind="ollama",
+            base_url="http://localhost:11434", api_key="optarena", name=None,
+            cases=None, cases_dir=str(d), timeout=None, language=None, framework=None,
+            tool_service="build_tools", tags=None, like=None,
+        )
+        sc = _scenario_from_args(args)
+        self.assertEqual(sc.cases, ["bt_case"])
+
+    def test_like_filter_resolves_to_matching_case_names_via_scenario_from_args(self):
+        from optarena.cli import _scenario_from_args
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        (d / "tool_bt_check.json").write_text(json.dumps(
+            {"name": "tool_bt_check", "prompts": ["p"], "expected_files": []}), encoding="utf-8")
+        (d / "tool_obs_check.json").write_text(json.dumps(
+            {"name": "tool_obs_check", "prompts": ["p"], "expected_files": []}), encoding="utf-8")
+        args = argparse.Namespace(
+            driver="ollama-chat", model="llama3.2", kind="ollama",
+            base_url="http://localhost:11434", api_key="optarena", name=None,
+            cases=None, cases_dir=str(d), timeout=None, language=None, framework=None,
+            tool_service=None, tags=None, like="tool_bt",
+        )
+        sc = _scenario_from_args(args)
+        self.assertEqual(sc.cases, ["tool_bt_check"])
+
 
 class HostNativeExecutionConfirmationTests(unittest.TestCase):
     """P1-05: a `cli`-kind driver (aider, Claude Code, ...) runs headlessly

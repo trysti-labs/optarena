@@ -50,9 +50,14 @@ def _scenario_from_args(args, driver: str | None = None, model: str | None = Non
     cases = args.cases.split(",") if args.cases else None
     language = getattr(args, "language", None)
     framework = getattr(args, "framework", None)
-    if language or framework:
+    tool_service = getattr(args, "tool_service", None)
+    tags = getattr(args, "tags", None)
+    like = getattr(args, "like", None)
+    if language or framework or tool_service or tags or like:
         loaded = load_cases(cases, cases_dir=args.cases_dir)
-        cases = [c["name"] for c in filter_cases(loaded, language=language, framework=framework)]
+        cases = [c["name"] for c in filter_cases(
+            loaded, language=language, framework=framework,
+            tool_service=tool_service, tags=tags, like=like)]
     return Scenario(
         name=name, driver=driver, backend=backend,
         cases=cases,
@@ -183,14 +188,17 @@ def cmd_run(args) -> int:
         if args.cases_dir:
             for sc in scenarios:
                 sc.cases_dir = sc.cases_dir or args.cases_dir
-        # --language/--framework must narrow file scenarios too, not just
-        # inline ones (previously they were silently ignored alongside
-        # --scenario).
-        if getattr(args, "language", None) or getattr(args, "framework", None):
+        # --language/--framework/--tool-service/--tags/--like must narrow file
+        # scenarios too, not just inline ones (previously they were silently
+        # ignored alongside --scenario).
+        if any(getattr(args, name, None) for name in
+               ("language", "framework", "tool_service", "tags", "like")):
             for sc in scenarios:
                 loaded = load_cases(sc.cases, cases_dir=sc.cases_dir)
                 sc.cases = [c["name"] for c in filter_cases(
-                    loaded, language=args.language, framework=args.framework)]
+                    loaded, language=args.language, framework=args.framework,
+                    tool_service=getattr(args, "tool_service", None),
+                    tags=getattr(args, "tags", None), like=getattr(args, "like", None))]
         matrix_drivers = (args.matrix_drivers or "").split(",") if args.matrix_drivers else []
         matrix_models = (args.matrix_models or "").split(",") if args.matrix_models else []
         if matrix_drivers or matrix_models:

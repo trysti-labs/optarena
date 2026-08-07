@@ -109,9 +109,16 @@ doctor` reports exactly what's present and where results are going.
 ```bash
 optarena drivers list                 # what tools can be driven
 optarena cases list                   # task catalogue (also: cases show <name>)
+optarena cases groups                 # discover tool_service/language/tags values and case counts
 
 # One scenario, inline (raw-model baseline against local Ollama)
 optarena run --driver ollama-chat --name baseline --model llama3.2
+
+# Select cases by tool_service, a boolean tag expression, or a name substring
+# instead of listing exact names (see `optarena cases groups` for real values)
+optarena run --driver ollama-tools --model qwen3-coder:30b --tool-service build_tools
+optarena run --driver ollama-chat --model llama3.2 --tags "python and not slow"
+optarena run --driver ollama-chat --model llama3.2 -k tool_bt_check
 
 # A/B: two scenarios in one command → auto-compares and saves the comparison
 optarena run --scenario scenarios/aider-proxy.json \

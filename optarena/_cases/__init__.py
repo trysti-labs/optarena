@@ -9,6 +9,7 @@ imports from and keeps doing so unchanged.
 
 Layout, in dependency order (each only imports from ones above it):
   _constants.py        shared paths/registries with no other dependencies
+  _tag_expr.py          the `--tags` boolean-expression mini-language
   _corpus.py            case-file loading/filtering/validation
   _snapshot.py           workspace content hashing + the assertion oracle
   _sandbox.py            container engine, DockerSandbox, check_command exec

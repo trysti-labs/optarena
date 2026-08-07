@@ -9,6 +9,26 @@ existed.
 
 ### Added
 
+- **`--tool-service`/`--tags`/`-k`/`--like` case selectors, and `optarena
+  cases groups`**: `--language`/`--framework` only ever covered the
+  filesystem-oracle case domain, leaving the tool-use domain's 14 mock
+  services (266 cases) selectable only by exact `--cases name,name` -
+  you had to already know case names. `cases.filter_cases()` gained three
+  new keyword-only params, wired identically into `run`, `cases list`,
+  and `cases verify` (the same three places `--language`/`--framework`
+  already were): `--tool-service` (comma-separated, OR'd within itself -
+  e.g. `--tool-service build_tools,observability`), `--tags` (a pytest
+  `-m`-style boolean expression over a case's free-form `tags` array -
+  `and`/`or`/`not`/parens, e.g. `--tags "tool-use and observability"`,
+  parsed by a new small hand-written expression language,
+  `_cases/_tag_expr.py`), and `-k`/`--like` (pytest's `-k`, a
+  case-insensitive substring match on the case name). `optarena cases
+  groups` is new: prints case counts per `tool_service`/`language`/`tags`
+  value so a filter can be aimed at something real without guessing. A
+  malformed `--tags` expression now reads as a clean one-line CLI error
+  (F-04), not a traceback, everywhere `filter_cases` is called - including
+  `cmd_verify_corpus`'s call to it, which had no error handling at all
+  before this pass.
 - **Tool-use cases**: a second case domain alongside the original coding-case
   filesystem oracle - a case names a mock, in-process API service instead of
   `expected_files`/`check_command`, and is graded on whether the agent called

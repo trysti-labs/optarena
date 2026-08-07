@@ -90,6 +90,7 @@ from ._cases._constants import (
     CASES_DIR, DOCKER_IMAGE_DEFAULT, DOCKERFILE_DIR, DOCKER_IMAGES, IGNORE_DIRS, REPOS_DIR,
 )
 from ._cases._corpus import dockerfile_for, filter_cases, load_cases
+from ._cases._tag_expr import TagExpressionError, compile_tag_expression
 from ._cases._evaluate import diff_stats, evaluate_case, evaluate_case_isolated, trajectory_stats
 from ._cases._mock_service import MOCK_SERVICES, MockService, get_mock_service, get_tool_schemas
 from ._cases._tool_evaluate import evaluate_tool_case
@@ -133,7 +134,7 @@ from ._cases._workspace_setup import (
 
 __all__ = [
     "CASES_DIR", "DOCKER_IMAGE_DEFAULT", "DOCKERFILE_DIR", "DOCKER_IMAGES", "IGNORE_DIRS", "REPOS_DIR",
-    "dockerfile_for", "filter_cases", "load_cases",
+    "dockerfile_for", "filter_cases", "load_cases", "TagExpressionError", "compile_tag_expression",
     "diff_stats", "evaluate_case", "evaluate_case_isolated", "trajectory_stats",
     "MOCK_SERVICES", "MockService", "get_mock_service", "get_tool_schemas", "evaluate_tool_case",
     "_HARDENING_ARGS", "GHCR_PREFIX", "DockerSandbox", "_WorkspaceQuotaWatchdog", "_worker_sandboxes",

@@ -8,18 +8,29 @@ import json
 import sys
 from pathlib import Path
 
-from ..cases import filter_cases, load_cases
+from ..cases import TagExpressionError, filter_cases, load_cases
 from ..store import list_runs
 
 
 def cmd_list(args) -> int:
     what = args.what
     if what == "cases":
-        language = getattr(args, "language", None)
-        framework = getattr(args, "framework", None)
-        for c in filter_cases(load_cases(), language=language, framework=framework):
+        try:
+            cases = filter_cases(
+                load_cases(),
+                language=getattr(args, "language", None),
+                framework=getattr(args, "framework", None),
+                tool_service=getattr(args, "tool_service", None),
+                tags=getattr(args, "tags", None),
+                like=getattr(args, "like", None),
+            )
+        except TagExpressionError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        for c in cases:
             print(f"  {c['name']:28} {c.get('language', '-'):10} "
-                  f"{c.get('framework', '-'):12} {c.get('description', '')}")
+                  f"{c.get('framework', '-'):12} {c.get('tool_service', '-'):16} "
+                  f"{c.get('description', '')}")
     elif what == "drivers":
         from ..drivers import DRIVERS
         print(f"  {'driver':14} {'kind':10} {'backend':10} {'status':13} summary")
@@ -34,6 +45,32 @@ def cmd_list(args) -> int:
             print(f"  {r['run_id']:44} {r.get('driver', ''):12} "
                   f"{b.get('model', ''):14} {s.get('passed', '?')}/{s.get('cases', '?')} "
                   f"({s.get('mean_duration_s', '?')}s avg)")
+    return 0
+
+
+def cmd_case_groups(args) -> int:
+    """Discovery: how many cases exist per `tool_service`/`domain`/
+    `language`, so `--tool-service`/`--tags`/`--language` can be aimed at
+    something real instead of guessing exact case names first."""
+    from collections import Counter
+
+    cases = load_cases(cases_dir=getattr(args, "cases_dir", None))
+    tool_services = Counter(c["tool_service"] for c in cases if c.get("tool_service"))
+    languages = Counter(c["language"] for c in cases if c.get("language"))
+    domains = Counter(c["domain"] for c in cases if c.get("domain"))
+    all_tags = Counter(t for c in cases for t in (c.get("tags") or []))
+
+    def _table(title: str, flag: str, counts: "Counter[str]") -> None:
+        if not counts:
+            return
+        print(f"\n  {title} (use with {flag}):")
+        for name, count in sorted(counts.items()):
+            print(f"    {name:24} {count:>4}")
+
+    _table("tool_service - tool-use domain", "--tool-service", tool_services)
+    _table("language - filesystem domain", "--language", languages)
+    _table("domain", "(informational only, no --domain flag today)", domains)
+    _table("tags", "--tags", all_tags)
     return 0
 
 
@@ -154,7 +191,8 @@ def cmd_case_show(args) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     c = cases[0]
-    print(f"\n  {c['name']}  ({c.get('language', '-')}/{c.get('framework', '-')}, "
+    tag = f"tool_service={c['tool_service']}" if c.get("tool_service") else f"{c.get('language', '-')}/{c.get('framework', '-')}"
+    print(f"\n  {c['name']}  ({tag}, "
           f"task_type={c.get('task_type', '-')}, difficulty={c.get('difficulty', '-')})")
     print(f"  {c.get('description', '')}\n")
     for i, prompt in enumerate(c.get("prompts", []), 1):
@@ -204,6 +242,14 @@ def cmd_verify_corpus(args) -> int:
     names = args.cases.split(",") if args.cases else None
     try:
         cases = load_cases(names, cases_dir=args.cases_dir)
+        # TagExpressionError (a ValueError) from a malformed --tags belongs in
+        # the same catch as load_cases' own errors below, so it stays inside
+        # the try.
+        cases = filter_cases(cases, language=getattr(args, "language", None),
+                             framework=getattr(args, "framework", None),
+                             tool_service=getattr(args, "tool_service", None),
+                             tags=getattr(args, "tags", None),
+                             like=getattr(args, "like", None))
     except (ValueError, OSError) as e:
         # A-34: OSError as well as ValueError. ValueError covers SchemaError (a
         # malformed/duplicate case file); a typo in `--cases` raises
@@ -214,8 +260,6 @@ def cmd_verify_corpus(args) -> int:
             raise
         print(f"error: {e}", file=sys.stderr)
         return 2
-    cases = filter_cases(cases, language=getattr(args, "language", None),
-                         framework=getattr(args, "framework", None))
     violations, checked, skipped = verify_cases(cases)
     print(f"\n  verify-corpus: {checked} variant(s) checked across "
           f"{len(cases) - skipped} case(s); {skipped} case(s) declare no variants")

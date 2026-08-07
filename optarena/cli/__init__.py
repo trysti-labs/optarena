@@ -43,6 +43,7 @@ from ..drivers import DRIVER_NAMES
 from ..events import LOG_LEVELS
 from ._cases_cmds import (
     _SAMPLE_CASE,
+    cmd_case_groups,
     cmd_case_show,
     cmd_cases_install,
     cmd_cases_pack,
@@ -76,7 +77,7 @@ __all__ = [
     "_warn_baseline_incompatible", "_confirm_host_native_execution",
     "cmd_run", "cmd_compare", "cmd_regression", "cmd_list",
     "_SAMPLE_CASE", "cmd_init", "cmd_cases_pack", "cmd_cases_install", "cmd_cases_packs",
-    "cmd_cases_trust_publisher", "cmd_case_show", "cmd_validate", "cmd_verify_corpus",
+    "cmd_cases_trust_publisher", "cmd_case_show", "cmd_case_groups", "cmd_validate", "cmd_verify_corpus",
     "cmd_run_show", "cmd_runs_rebuild_index", "cmd_runs_prune", "cmd_runs_scrub_secrets",
     "cmd_doctor", "cmd_docker", "cmd_sandbox_status",
     "_ScopedDashboardHandler", "cmd_serve", "cmd_scan", "cmd_report",
@@ -194,6 +195,14 @@ def main(argv: list[str] | None = None) -> int:
                                       "(see `optarena cases packs`); shorthand for --cases-dir")
     p_run.add_argument("--language", help="only run cases tagged with this language (see `optarena list cases`)")
     p_run.add_argument("--framework", help="only run cases tagged with this framework (see `optarena list cases`)")
+    p_run.add_argument("--tool-service", help="only run tool-use cases for these tool_service(s), "
+                                              "comma-separated (e.g. build_tools,observability - "
+                                              "see `optarena cases groups`)")
+    p_run.add_argument("--tags", help="only run cases matching this boolean tag expression, e.g. "
+                                      "\"tool-use and observability\" or \"not slow\" "
+                                      "(see `optarena cases groups`)")
+    p_run.add_argument("-k", "--like", help="only run cases whose name contains this substring "
+                                            "(case-insensitive)")
     p_run.add_argument("--timeout", type=int, help="per-case timeout override (s)")
     p_run.add_argument("--trials", type=int, default=1,
                        help="run each case N times; majority verdict + per-trial detail (default 1)")
@@ -255,7 +264,17 @@ def main(argv: list[str] | None = None) -> int:
     pc_list = cases_sub.add_parser("list", help="list cases (optionally filtered)")
     pc_list.add_argument("--language", help="only cases tagged with this language")
     pc_list.add_argument("--framework", help="only cases tagged with this framework")
+    pc_list.add_argument("--tool-service", help="only tool-use cases for these tool_service(s), "
+                                                "comma-separated (see `optarena cases groups`)")
+    pc_list.add_argument("--tags", help="only cases matching this boolean tag expression, e.g. "
+                                        "\"tool-use and observability\" (see `optarena cases groups`)")
+    pc_list.add_argument("-k", "--like", help="only cases whose name contains this substring")
     pc_list.set_defaults(fn=cmd_list, what="cases")
+    pc_groups = cases_sub.add_parser(
+        "groups", help="discover tool_service/domain/language values and case counts, "
+                       "to aim --tool-service/--tags/--language at something real")
+    pc_groups.add_argument("--cases-dir", help="load from this directory instead of the built-in catalogue")
+    pc_groups.set_defaults(fn=cmd_case_groups)
     pc_show = cases_sub.add_parser("show", help="print one case in full (prompts, oracle, metadata)")
     pc_show.add_argument("name")
     pc_show.add_argument("--cases-dir", help="load from this directory instead of the built-in catalogue")
@@ -272,6 +291,10 @@ def main(argv: list[str] | None = None) -> int:
     pc_ver.add_argument("--cases-dir", help="load cases from this directory")
     pc_ver.add_argument("--language", help="only verify cases tagged with this language")
     pc_ver.add_argument("--framework", help="only verify cases tagged with this framework")
+    pc_ver.add_argument("--tool-service", help="only verify tool-use cases for these tool_service(s), "
+                                               "comma-separated")
+    pc_ver.add_argument("--tags", help="only verify cases matching this boolean tag expression")
+    pc_ver.add_argument("-k", "--like", help="only verify cases whose name contains this substring")
     pc_ver.add_argument("--strict", action="store_true",
                         help="also fail when a case declares nothing that must FAIL "
                              "(no broken_solutions and no implicit 'unmodified' check) - "
