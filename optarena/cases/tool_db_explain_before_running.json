@@ -1,0 +1,20 @@
+{
+  "name": "tool_db_explain_before_running",
+  "description": "Check the execution plan before actually running a query.",
+  "task_type": "tool_use",
+  "domain": "database",
+  "difficulty": 1,
+  "tags": ["tool-use", "database", "explain"],
+  "tool_service": "database",
+  "tools": ["explain_query", "execute_sql"],
+  "tool_service_seed": {
+    "tables": [{"schema": "public", "name": "orders"}]
+  },
+  "prompts": [
+    "Check the execution plan for 'SELECT * FROM orders WHERE user_id = 42', then actually run it."
+  ],
+  "expected_calls": [
+    {"tool": "explain_query"},
+    {"tool": "execute_sql"}
+  ]
+}

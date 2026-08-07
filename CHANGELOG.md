@@ -51,7 +51,7 @@ existed.
   search/bugs/repo/docs/diff/init/pkg/ci/link - several enforcing real
   npm-like preconditions (`install` refuses a package never published to
   the registry, `ci` refuses without a lockfile, `publish` refuses
-  overwriting an already-published version), 35 cases), and `terraform`
+  overwriting an already-published version), 35 cases), `terraform`
   (all 55 tools the official `hashicorp/terraform-mcp-server` registers
   across orgs/projects/teams/workspaces/variables/variable sets/policy
   sets/runs/plans/applies/state versions/stacks/no-code workspaces/
@@ -60,7 +60,14 @@ existed.
   workspace and locks it on success, `action_run("apply")` refuses a run
   not in a plannable-to-apply state and records a new state version,
   `delete_workspace_safely`/`force_unlock_workspace`/`delete_project`
-  each enforce their own real precondition), 31 cases) - plus a
+  each enforce their own real precondition), 31 cases), and `database`
+  (all 9 tools the real `crystaldba/postgres-mcp` ("Postgres MCP Pro")
+  reference implementation registers - schema/object introspection,
+  `explain_query` (with optional hypothetical indexes), `execute_sql`,
+  workload- and query-level index tuning, health checks, top-query
+  reporting - `execute_sql` refuses write statements in restricted-
+  access-mode sessions, `explain_query` refuses combining `analyze` with
+  `hypothetical_indexes`, 8 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

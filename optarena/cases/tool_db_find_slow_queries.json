@@ -1,0 +1,22 @@
+{
+  "name": "tool_db_find_slow_queries",
+  "description": "Find the slowest queries currently running against the database.",
+  "task_type": "tool_use",
+  "domain": "database",
+  "difficulty": 1,
+  "tags": ["tool-use", "database", "performance"],
+  "tool_service": "database",
+  "tools": ["get_top_queries"],
+  "tool_service_seed": {
+    "top_queries": [
+      {"query": "SELECT * FROM orders WHERE user_id = $1", "total_time": 4200.0, "mean_time": 42.0, "calls": 100},
+      {"query": "SELECT * FROM sessions WHERE token = $1", "total_time": 9800.0, "mean_time": 9.8, "calls": 1000}
+    ]
+  },
+  "prompts": [
+    "Which queries are taking the most total time on this database?"
+  ],
+  "expected_calls": [
+    {"tool": "get_top_queries"}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "tool_db_inspect_table",
+  "description": "Get detailed information about a specific table.",
+  "task_type": "tool_use",
+  "domain": "database",
+  "difficulty": 1,
+  "tags": ["tool-use", "database", "schema"],
+  "tool_service": "database",
+  "tools": ["get_object_details"],
+  "tool_service_seed": {
+    "tables": [{"schema": "public", "name": "orders", "columns": [{"name": "id", "type": "bigint"}, {"name": "user_id", "type": "bigint"}], "row_count": 50000}]
+  },
+  "prompts": [
+    "Show detailed information about the orders table in the public schema."
+  ],
+  "expected_calls": [
+    {"tool": "get_object_details", "arguments_contains": {"schema_name": "public", "object_name": "orders"}}
+  ]
+}

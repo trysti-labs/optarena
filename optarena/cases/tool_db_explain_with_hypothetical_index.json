@@ -1,0 +1,19 @@
+{
+  "name": "tool_db_explain_with_hypothetical_index",
+  "description": "Check how a query's plan would change with a hypothetical index, without actually creating one.",
+  "task_type": "tool_use",
+  "domain": "database",
+  "difficulty": 2,
+  "tags": ["tool-use", "database", "explain", "index"],
+  "tool_service": "database",
+  "tools": ["explain_query"],
+  "tool_service_seed": {
+    "tables": [{"schema": "public", "name": "orders"}]
+  },
+  "prompts": [
+    "Without actually creating anything, show me how the plan for 'SELECT * FROM orders WHERE user_id = 42' would change if there were an index on orders(user_id)."
+  ],
+  "expected_calls": [
+    {"tool": "explain_query", "arguments_contains": {"sql": "SELECT * FROM orders WHERE user_id = 42"}}
+  ]
+}

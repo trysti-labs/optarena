@@ -255,7 +255,7 @@ optarena run --driver ollama-tools --model qwen3-coder:30b \
   --cases tool_create_task,tool_git_stage_review_and_commit
 ```
 
-Ships with eight mock services - `task_tracker` (generic create/complete/
+Ships with nine mock services - `task_tracker` (generic create/complete/
 list/delete, 5 cases), `git_repo` (all 18 tools a real coding agent's git
 workflow touches - status/add/commit/diff/log/branch/checkout/blame/tags/
 push/pull, 12 cases), `filesystem` (all 13 tools the official MCP
@@ -275,15 +275,18 @@ without an open pending review", 47 cases), and `package_registry` (all
 uninstall/update/audit/publish/unpublish/deprecate/dist-tag/owner and
 more - install refuses a package never published to the registry, ci
 refuses without a lockfile, publish refuses overwriting an already-
-published version, 35 cases), and `terraform` (all 55 tools the official
+published version, 35 cases), `terraform` (all 55 tools the official
 HashiCorp Terraform MCP server exposes across orgs/projects/teams/
 workspaces/variables/policy sets/runs/plans/applies/state/stacks/registry
 search - several enforcing real preconditions like "can't start a run
 against a locked workspace", "can't force-unlock a workspace that isn't
-locked", 31 cases) - deliberately scoped toward coding/dev tools rather
-than more generic ones; see [ARCH.md](./ARCH.md) §3.5 for the schema and
-oracle mechanics, and what's still deferred (agent-driver support beyond
-the raw baselines, more mock services).
+locked", 31 cases), and `database` (all 9 tools the real Postgres MCP Pro
+reference implementation registers - schema introspection, EXPLAIN with
+optional hypothetical indexes, SQL execution, workload/query index
+tuning, health checks, top queries, 8 cases) - deliberately scoped toward
+coding/dev tools rather than more generic ones; see [ARCH.md](./ARCH.md)
+§3.5 for the schema and oracle mechanics, and what's still deferred
+(agent-driver support beyond the raw baselines, more mock services).
 
 ## Regression testing
 

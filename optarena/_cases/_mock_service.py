@@ -3717,6 +3717,193 @@ class TerraformService(MockService):
             "team_count": len(self._teams),
         }
 
+
+class DatabaseService(MockService):
+    """A mock PostgreSQL instance - the 9 tools the real `crystaldba/
+    postgres-mcp` ("Postgres MCP Pro", 3000+ stars) registers, extracted
+    directly from its source this session (`TOOL_CATALOG_COMPLETE.md`
+    §11's "~5-8 core tools" estimate undercounted by one, the same
+    pattern hit for every other category surveyed).
+
+    The real server's most interesting design decision, and the one
+    this mock exists to test: `execute_sql` is gated by an `access_mode`
+    ("unrestricted" or "restricted") set for the whole session, not
+    discoverable through any other tool - in restricted mode only
+    read-only statements are allowed (matches the real server's
+    SafeSqlDriver). Unlike `git_repo`/`docker`/`terraform`'s precondition
+    tests, an agent has no way to learn the session's access mode in
+    advance, so this isn't modeled as an agent-facing case (there's
+    nothing to discover first) - it's a correctness property of the
+    service itself, covered by direct unit tests instead.
+    """
+
+    TOOLS = {name: name for name in (
+        "list_schemas", "list_objects", "get_object_details", "explain_query",
+        "execute_sql", "analyze_workload_indexes", "analyze_query_indexes",
+        "analyze_db_health", "get_top_queries",
+    )}
+
+    _WRITE_KEYWORDS = ("insert", "update", "delete", "drop", "alter", "create", "truncate", "grant", "revoke")
+    _HEALTH_TYPES = {"index", "connection", "vacuum", "sequence", "replication", "buffer", "constraint", "all"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._access_mode = "unrestricted"
+        self._schemas: dict[str, dict] = {}
+        self._tables: dict[tuple[str, str], dict] = {}
+        self._views: dict[tuple[str, str], dict] = {}
+        self._sequences: dict[tuple[str, str], dict] = {}
+        self._extensions: dict[str, dict] = {}
+        self._top_queries: list[dict] = []
+        self._health_findings: dict[str, list[str]] = {}
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``access_mode`` ("unrestricted" or "restricted", default
+          "unrestricted") - restricted refuses write statements in
+          `execute_sql`.
+        - ``schemas`` ({name: {owner, schema_type}}).
+        - ``tables``/``views`` ([{schema, name, columns, row_count,
+          indexes} or {schema, name, definition}, ...]) - referencing a
+          schema not in ``schemas`` auto-registers a bare one.
+        - ``sequences`` ([{schema, name, data_type}, ...]).
+        - ``extensions`` ({name: {version, relocatable}}).
+        - ``top_queries`` ([{query, total_time, mean_time, calls}, ...]).
+        - ``health_findings`` ({health_type: [finding, ...]}).
+        """
+        for name, cfg in (spec.get("schemas") or {}).items():
+            self._schemas[name] = {"owner": cfg.get("owner", "postgres"),
+                                    "schema_type": cfg.get("schema_type", "User Schema")}
+        for entry in spec.get("tables") or []:
+            self._schemas.setdefault(entry["schema"], {"owner": "postgres", "schema_type": "User Schema"})
+            self._tables[(entry["schema"], entry["name"])] = {
+                "columns": list(entry.get("columns", [])), "row_count": entry.get("row_count", 0),
+                "indexes": list(entry.get("indexes", [])),
+            }
+        for entry in spec.get("views") or []:
+            self._schemas.setdefault(entry["schema"], {"owner": "postgres", "schema_type": "User Schema"})
+            self._views[(entry["schema"], entry["name"])] = {"definition": entry.get("definition", "")}
+        for entry in spec.get("sequences") or []:
+            self._schemas.setdefault(entry["schema"], {"owner": "postgres", "schema_type": "User Schema"})
+            self._sequences[(entry["schema"], entry["name"])] = {"data_type": entry.get("data_type", "bigint")}
+        for name, cfg in (spec.get("extensions") or {}).items():
+            self._extensions[name] = {"version": cfg.get("version", "1.0"), "relocatable": cfg.get("relocatable", False)}
+        if "access_mode" in spec:
+            self._access_mode = spec["access_mode"]
+        for entry in spec.get("top_queries") or []:
+            self._top_queries.append(dict(entry))
+        for health_type, findings in (spec.get("health_findings") or {}).items():
+            self._health_findings[health_type] = list(findings)
+
+    # ── schema introspection ─────────────────────────────────────────────
+
+    def list_schemas(self) -> dict:
+        return {"schemas": [{"name": n, **s} for n, s in sorted(self._schemas.items())]}
+
+    def list_objects(self, schema_name: str, object_type: str = "table") -> dict:
+        if object_type != "extension" and schema_name not in self._schemas:
+            return {"error": f"no such schema {schema_name!r}"}
+        if object_type in ("table", "view"):
+            store = self._tables if object_type == "table" else self._views
+            return {"objects": [{"schema": s, "name": n, "type": object_type}
+                                 for (s, n) in sorted(store) if s == schema_name]}
+        if object_type == "sequence":
+            return {"objects": [{"schema": s, "name": n, "data_type": self._sequences[(s, n)]["data_type"]}
+                                 for (s, n) in sorted(self._sequences) if s == schema_name]}
+        if object_type == "extension":
+            return {"objects": [{"name": n, **e} for n, e in sorted(self._extensions.items())]}
+        return {"error": f"unsupported object type {object_type!r} (expected table, view, sequence, or extension)"}
+
+    def get_object_details(self, schema_name: str, object_name: str, object_type: str = "table") -> dict:
+        if object_type in ("table", "view"):
+            store = self._tables if object_type == "table" else self._views
+            obj = store.get((schema_name, object_name))
+            if obj is None:
+                return {"error": f"no such {object_type} {schema_name}.{object_name}"}
+            return {"schema": schema_name, "name": object_name, "type": object_type, **obj}
+        if object_type == "sequence":
+            seq = self._sequences.get((schema_name, object_name))
+            if seq is None:
+                return {"error": f"no such sequence {schema_name}.{object_name}"}
+            return {"schema": schema_name, "name": object_name, **seq}
+        if object_type == "extension":
+            ext = self._extensions.get(object_name)
+            if ext is None:
+                return {"error": f"no such extension {object_name!r}"}
+            return {"name": object_name, **ext}
+        return {"error": f"unsupported object type {object_type!r} (expected table, view, sequence, or extension)"}
+
+    # ── query execution ──────────────────────────────────────────────────
+
+    def explain_query(self, sql: str, analyze: bool = False, hypothetical_indexes: list | None = None) -> dict:
+        hypothetical_indexes = hypothetical_indexes or []
+        if hypothetical_indexes and analyze:
+            return {"error": "cannot use analyze and hypothetical_indexes together"}
+        plan = {"sql": sql, "estimated_cost": 100.0, "analyze": analyze}
+        if hypothetical_indexes:
+            plan["hypothetical_indexes_considered"] = hypothetical_indexes
+            plan["estimated_cost"] = 20.0
+        return plan
+
+    def execute_sql(self, sql: str) -> dict:
+        first_word = sql.strip().split(None, 1)[0].lower() if sql and sql.strip() else ""
+        if self._access_mode == "restricted" and first_word in self._WRITE_KEYWORDS:
+            return {"error": f"write statement refused - session is in restricted (read-only) mode: {sql!r}"}
+        return {"sql": sql, "rows": [], "row_count": 0}
+
+    # ── index tuning ─────────────────────────────────────────────────────
+
+    def analyze_workload_indexes(self, max_index_size_mb: int = 10000, method: str = "dta") -> dict:
+        if method not in ("dta", "llm"):
+            return {"error": f"unknown method {method!r} (expected dta or llm)"}
+        return {"method": method, "max_index_size_mb": max_index_size_mb,
+                "recommendations": [{"table": "orders", "columns": ["user_id"], "estimated_improvement": "40%"}]}
+
+    def analyze_query_indexes(self, queries, max_index_size_mb: int = 10000, method: str = "dta") -> dict:
+        queries = self._as_list(queries)
+        if not queries:
+            return {"error": "provide a non-empty list of queries to analyze"}
+        if len(queries) > 10:
+            return {"error": "provide at most 10 queries to analyze"}
+        if method not in ("dta", "llm"):
+            return {"error": f"unknown method {method!r} (expected dta or llm)"}
+        return {"method": method, "queries_analyzed": len(queries),
+                "recommendations": [{"table": "orders", "columns": ["created_at"], "estimated_improvement": "25%"}]}
+
+    # ── health / performance ─────────────────────────────────────────────
+
+    def analyze_db_health(self, health_type: str = "all") -> dict:
+        types_ = [t.strip() for t in health_type.split(",")]
+        unknown = [t for t in types_ if t not in self._HEALTH_TYPES]
+        if unknown:
+            return {"error": f"unknown health check type(s) {unknown} (expected one of {sorted(self._HEALTH_TYPES)})"}
+        if "all" in types_:
+            types_ = sorted(self._HEALTH_TYPES - {"all"})
+        return {"checked": types_, "findings": {t: self._health_findings.get(t, []) for t in types_}}
+
+    def get_top_queries(self, sort_by: str = "resources", limit: int = 10) -> dict:
+        if sort_by not in ("total_time", "mean_time", "resources"):
+            return {"error": f"unknown sort_by {sort_by!r} (expected total_time, mean_time, or resources)"}
+        key = "total_time" if sort_by == "resources" else sort_by
+        queries = sorted(self._top_queries, key=lambda q: q.get(key, 0), reverse=True)
+        return {"sort_by": sort_by, "queries": queries[:limit]}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "access_mode": self._access_mode,
+            "schema_count": len(self._schemas),
+            "table_count": len(self._tables),
+            "view_count": len(self._views),
+            "sequence_count": len(self._sequences),
+            "extension_count": len(self._extensions),
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -4863,6 +5050,50 @@ _TERRAFORM_SCHEMAS: dict[str, dict] = {
         ["org", "namespace", "name"]),
 }
 
+_DATABASE_SCHEMAS: dict[str, dict] = {
+    "list_schemas": _fn("list_schemas", "List all schemas in the database.", {}, []),
+    "list_objects": _fn(
+        "list_objects", "List objects of a given type in a schema.",
+        {"schema_name": {"type": "string"},
+         "object_type": {"type": "string", "enum": ["table", "view", "sequence", "extension"], "description": "Optional, defaults to 'table'."}},
+        ["schema_name"]),
+    "get_object_details": _fn(
+        "get_object_details", "Show detailed information about a database object.",
+        {"schema_name": {"type": "string"}, "object_name": {"type": "string"},
+         "object_type": {"type": "string", "enum": ["table", "view", "sequence", "extension"], "description": "Optional, defaults to 'table'."}},
+        ["schema_name", "object_name"]),
+    "explain_query": _fn(
+        "explain_query", "Explain a SQL query's execution plan, optionally with real execution stats or hypothetical indexes.",
+        {"sql": {"type": "string"},
+         "analyze": {"type": "boolean", "description": "Run the query for real statistics instead of estimates (optional, default false)."},
+         "hypothetical_indexes": {"type": "array", "description": "Indexes to simulate, e.g. [{\"table\":\"users\",\"columns\":[\"email\"]}] (optional).",
+                                   "items": {"type": "object"}}},
+        ["sql"]),
+    "execute_sql": _fn(
+        "execute_sql", "Execute a SQL statement. Refuses write statements while the session is in restricted (read-only) mode.",
+        {"sql": {"type": "string"}}, ["sql"]),
+    "analyze_workload_indexes": _fn(
+        "analyze_workload_indexes", "Analyze frequently executed queries in the database and recommend optimal indexes.",
+        {"max_index_size_mb": {"type": "integer", "description": "Optional, defaults to 10000."},
+         "method": {"type": "string", "enum": ["dta", "llm"], "description": "Optional, defaults to 'dta'."}},
+        []),
+    "analyze_query_indexes": _fn(
+        "analyze_query_indexes", "Analyze a list of (up to 10) SQL queries and recommend optimal indexes.",
+        {"queries": {"type": "array", "items": {"type": "string"}},
+         "max_index_size_mb": {"type": "integer", "description": "Optional, defaults to 10000."},
+         "method": {"type": "string", "enum": ["dta", "llm"], "description": "Optional, defaults to 'dta'."}},
+        ["queries"]),
+    "analyze_db_health": _fn(
+        "analyze_db_health", "Analyze database health (index, connection, vacuum, sequence, replication, buffer, constraint, or 'all').",
+        {"health_type": {"type": "string", "description": "Comma-separated list of checks, or 'all' (optional, default 'all')."}},
+        []),
+    "get_top_queries": _fn(
+        "get_top_queries", "Report the slowest or most resource-intensive queries.",
+        {"sort_by": {"type": "string", "enum": ["total_time", "mean_time", "resources"], "description": "Optional, defaults to 'resources'."},
+         "limit": {"type": "integer", "description": "Optional, defaults to 10."}},
+        []),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
@@ -4872,6 +5103,7 @@ MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "forge": (ForgeService, _FORGE_SCHEMAS),
     "package_registry": (PackageRegistryService, _PACKAGE_REGISTRY_SCHEMAS),
     "terraform": (TerraformService, _TERRAFORM_SCHEMAS),
+    "database": (DatabaseService, _DATABASE_SCHEMAS),
 }
 
 

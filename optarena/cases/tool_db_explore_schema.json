@@ -1,0 +1,20 @@
+{
+  "name": "tool_db_explore_schema",
+  "description": "List schemas, then list the tables in one of them.",
+  "task_type": "tool_use",
+  "domain": "database",
+  "difficulty": 1,
+  "tags": ["tool-use", "database", "schema"],
+  "tool_service": "database",
+  "tools": ["list_schemas", "list_objects"],
+  "tool_service_seed": {
+    "tables": [{"schema": "public", "name": "orders"}, {"schema": "public", "name": "users"}]
+  },
+  "prompts": [
+    "List the schemas in this database, then list the tables in the public schema."
+  ],
+  "expected_calls": [
+    {"tool": "list_schemas"},
+    {"tool": "list_objects", "arguments_contains": {"schema_name": "public"}}
+  ]
+}

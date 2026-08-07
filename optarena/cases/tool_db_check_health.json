@@ -1,0 +1,22 @@
+{
+  "name": "tool_db_check_health",
+  "description": "Run a general health check on the database.",
+  "task_type": "tool_use",
+  "domain": "database",
+  "difficulty": 1,
+  "tags": ["tool-use", "database", "health"],
+  "tool_service": "database",
+  "tools": ["analyze_db_health"],
+  "tool_service_seed": {
+    "health_findings": {
+      "index": ["table orders has 3 unused indexes"],
+      "vacuum": ["table orders has not been vacuumed in 14 days"]
+    }
+  },
+  "prompts": [
+    "Run a general health check on this database and tell me if there are any problems."
+  ],
+  "expected_calls": [
+    {"tool": "analyze_db_health"}
+  ]
+}

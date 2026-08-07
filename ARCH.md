@@ -889,6 +889,34 @@ everything else here uses. A case is one domain or the other, never both -
     remaining failures individually root-caused: one an over-tight query
     assertion (loosened), the other the `inspect_stack` finding described
     above (kept as genuine signal).
+- **`database`** (`_cases/_mock_service.py`, `DatabaseService`) - the
+  ninth mock service, all 9 tools the real `crystaldba/postgres-mcp`
+  ("Postgres MCP Pro") registers, extracted directly from its source this
+  session (`DEV_NOTES/TOOL_CATALOG_COMPLETE.md`'s "~5-8 core tools"
+  estimate undercounted by one, the same pattern hit for every other
+  category surveyed). Models a single mock PostgreSQL instance: schema/
+  object introspection, `EXPLAIN` (with optional hypothetical indexes),
+  raw SQL execution, workload- and query-level index recommendations,
+  general health checks, and top-query reporting, across 8 example cases.
+  - **The one interesting design decision this mock exists to test**:
+    `execute_sql` is gated by a whole-session `access_mode`
+    ("unrestricted" or "restricted", matching the real server's
+    `SafeSqlDriver`) that no other tool exposes a way to discover in
+    advance - in restricted mode, write statements (`insert`, `update`,
+    `delete`, `drop`, `alter`, `create`, `truncate`, `grant`, `revoke`)
+    are refused. Unlike every other precondition in this domain, there's
+    nothing for an agent to discover first, so this isn't modeled as a
+    `tool_db_*` case; it's a correctness property of the service itself,
+    covered by direct unit tests instead (`tests/test_database_cases.py`).
+  - `explain_query` refuses combining `analyze` with `hypothetical_indexes`
+    (a real `EXPLAIN ANALYZE` actually executes the query, which makes no
+    sense against indexes that don't exist); `analyze_query_indexes`
+    refuses an empty or >10-item query list.
+  - Live-verified against `qwen3-coder:30b`: 7/8 passed; the one failure
+    (`tool_db_inspect_table`) is the already-known malformed-tool-call-
+    as-text quirk (confirmed via direct replay, reproduced 4/5 times on
+    this single-tool case) - no case-design bugs surfaced, the smallest,
+    most self-contained service built this session.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not

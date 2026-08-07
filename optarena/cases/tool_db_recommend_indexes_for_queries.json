@@ -1,0 +1,16 @@
+{
+  "name": "tool_db_recommend_indexes_for_queries",
+  "description": "Analyze a specific set of queries and recommend indexes for them.",
+  "task_type": "tool_use",
+  "domain": "database",
+  "difficulty": 1,
+  "tags": ["tool-use", "database", "index-tuning"],
+  "tool_service": "database",
+  "tools": ["analyze_query_indexes"],
+  "prompts": [
+    "Analyze this query and recommend an index for it: SELECT * FROM orders WHERE created_at > now() - interval '7 days'."
+  ],
+  "expected_calls": [
+    {"tool": "analyze_query_indexes"}
+  ]
+}
