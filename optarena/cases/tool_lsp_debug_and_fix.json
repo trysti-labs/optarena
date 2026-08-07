@@ -1,0 +1,21 @@
+{
+  "name": "tool_lsp_debug_and_fix",
+  "description": "Check diagnostics for a file, then fix the reported issue.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 2,
+  "tags": ["tool-use", "code_intel", "diagnostics", "edit"],
+  "tool_service": "code_intel",
+  "tools": ["diagnostics", "edit_file"],
+  "tool_service_seed": {
+    "files": {"src/auth.py": "import os\n\ndef login(user):\n    return check(user)\n"},
+    "diagnostics": {"src/auth.py": [{"line": 1, "severity": "warning", "message": "unused import 'os'"}]}
+  },
+  "prompts": [
+    "Check src/auth.py for any warnings, and fix whatever it finds by removing the offending line."
+  ],
+  "expected_calls": [
+    {"tool": "diagnostics", "arguments_contains": {"filePath": "src/auth.py"}},
+    {"tool": "edit_file", "arguments_contains": {"filePath": "src/auth.py"}}
+  ]
+}

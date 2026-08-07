@@ -1,0 +1,20 @@
+{
+  "name": "tool_lsp_check_diagnostics",
+  "description": "Check for errors or warnings in a specific file.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 1,
+  "tags": ["tool-use", "code_intel", "diagnostics"],
+  "tool_service": "code_intel",
+  "tools": ["diagnostics"],
+  "tool_service_seed": {
+    "files": {"src/auth.py": "import os\n\ndef login(user):\n    return check(user)\n"},
+    "diagnostics": {"src/auth.py": [{"line": 1, "severity": "warning", "message": "unused import 'os'"}]}
+  },
+  "prompts": [
+    "Are there any errors or warnings in src/auth.py?"
+  ],
+  "expected_calls": [
+    {"tool": "diagnostics", "arguments_contains": {"filePath": "src/auth.py"}}
+  ]
+}

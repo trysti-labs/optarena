@@ -86,7 +86,12 @@ existed.
   enforcing real preconditions (`nx_visualize_graph`'s type-dependent
   required parameters straight from the source, `update_self_healing_fix`
   resolving a fix via ID/short-link/branch and refusing if none resolve),
-  13 cases) - plus a
+  13 cases), and `code_intel` (all 6 tools the real `isaacphi/
+  mcp-language-server` registers - definition/reference lookup,
+  diagnostics, hover, rename_symbol, edit_file - several enforcing real
+  preconditions (definition/references refuse an unknown symbol,
+  hover/rename_symbol refuse a position with no known symbol, edit_file
+  refuses an out-of-range line edit), 9 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

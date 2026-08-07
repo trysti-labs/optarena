@@ -1,0 +1,19 @@
+{
+  "name": "tool_lsp_lookup_definition",
+  "description": "Look up the source definition of a symbol.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 1,
+  "tags": ["tool-use", "code_intel", "definition"],
+  "tool_service": "code_intel",
+  "tools": ["definition"],
+  "tool_service_seed": {
+    "definitions": {"login": {"filePath": "src/auth.py", "code": "def login(user):\n    return check(user)"}}
+  },
+  "prompts": [
+    "Show me the source definition of the login function."
+  ],
+  "expected_calls": [
+    {"tool": "definition"}
+  ]
+}

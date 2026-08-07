@@ -1,0 +1,22 @@
+{
+  "name": "tool_lsp_investigate_before_rename",
+  "description": "Check what's actually at a position before renaming it.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 2,
+  "tags": ["tool-use", "code_intel", "hover", "rename"],
+  "tool_service": "code_intel",
+  "tools": ["hover", "rename_symbol"],
+  "tool_service_seed": {
+    "files": {"src/auth.py": "def login(user):\n    return check(user)\n"},
+    "references": {"login": [{"filePath": "src/main.py", "line": 10}]},
+    "hover": [{"filePath": "src/auth.py", "line": 1, "text": "def login(user)", "symbol": "login"}]
+  },
+  "prompts": [
+    "Before renaming anything, check what symbol is actually at line 1 of src/auth.py. Then rename it to authenticate_user."
+  ],
+  "expected_calls": [
+    {"tool": "hover", "arguments_contains": {"filePath": "src/auth.py", "line": 1}},
+    {"tool": "rename_symbol", "arguments_contains": {"filePath": "src/auth.py", "line": 1, "newName": "authenticate_user"}}
+  ]
+}

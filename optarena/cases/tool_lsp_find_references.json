@@ -1,0 +1,19 @@
+{
+  "name": "tool_lsp_find_references",
+  "description": "Find all usages of a symbol across the codebase.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 1,
+  "tags": ["tool-use", "code_intel", "references"],
+  "tool_service": "code_intel",
+  "tools": ["references"],
+  "tool_service_seed": {
+    "references": {"login": [{"filePath": "src/main.py", "line": 10}, {"filePath": "src/tests.py", "line": 5}]}
+  },
+  "prompts": [
+    "Find every place in the codebase that calls the login function."
+  ],
+  "expected_calls": [
+    {"tool": "references"}
+  ]
+}

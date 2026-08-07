@@ -1,0 +1,20 @@
+{
+  "name": "tool_lsp_hover_info",
+  "description": "Get type/documentation info for a symbol at a specific file position.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 1,
+  "tags": ["tool-use", "code_intel", "hover"],
+  "tool_service": "code_intel",
+  "tools": ["hover"],
+  "tool_service_seed": {
+    "files": {"src/auth.py": "def login(user):\n    return check(user)\n"},
+    "hover": [{"filePath": "src/auth.py", "line": 1, "text": "def login(user: str) -> bool", "symbol": "login"}]
+  },
+  "prompts": [
+    "What's the type signature of the function defined at line 1 of src/auth.py?"
+  ],
+  "expected_calls": [
+    {"tool": "hover", "arguments_contains": {"filePath": "src/auth.py", "line": 1}}
+  ]
+}

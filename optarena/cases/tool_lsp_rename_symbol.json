@@ -1,0 +1,21 @@
+{
+  "name": "tool_lsp_rename_symbol",
+  "description": "Rename a symbol at a known position, updating all references.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 1,
+  "tags": ["tool-use", "code_intel", "rename"],
+  "tool_service": "code_intel",
+  "tools": ["rename_symbol"],
+  "tool_service_seed": {
+    "files": {"src/auth.py": "def login(user):\n    return check(user)\n"},
+    "references": {"login": [{"filePath": "src/main.py", "line": 10}]},
+    "hover": [{"filePath": "src/auth.py", "line": 1, "text": "def login(user)", "symbol": "login"}]
+  },
+  "prompts": [
+    "The function at line 1 of src/auth.py is called login. Rename it to authenticate_user everywhere it's used."
+  ],
+  "expected_calls": [
+    {"tool": "rename_symbol", "arguments_contains": {"filePath": "src/auth.py", "line": 1, "newName": "authenticate_user"}}
+  ]
+}

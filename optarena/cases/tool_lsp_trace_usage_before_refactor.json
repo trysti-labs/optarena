@@ -1,0 +1,22 @@
+{
+  "name": "tool_lsp_trace_usage_before_refactor",
+  "description": "Check all usages of a symbol before renaming it, to understand the blast radius.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 2,
+  "tags": ["tool-use", "code_intel", "references", "rename"],
+  "tool_service": "code_intel",
+  "tools": ["references", "rename_symbol"],
+  "tool_service_seed": {
+    "files": {"src/auth.py": "def login(user):\n    return check(user)\n"},
+    "references": {"login": [{"filePath": "src/main.py", "line": 10}, {"filePath": "src/tests.py", "line": 5}]},
+    "hover": [{"filePath": "src/auth.py", "line": 1, "text": "def login(user)", "symbol": "login"}]
+  },
+  "prompts": [
+    "Before renaming login (defined at line 1 of src/auth.py) to authenticate_user, check how many places actually call it."
+  ],
+  "expected_calls": [
+    {"tool": "references"},
+    {"tool": "rename_symbol", "arguments_contains": {"filePath": "src/auth.py", "line": 1, "newName": "authenticate_user"}}
+  ]
+}

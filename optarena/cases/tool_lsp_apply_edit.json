@@ -1,0 +1,19 @@
+{
+  "name": "tool_lsp_apply_edit",
+  "description": "Apply a text edit to a specific line range in a file.",
+  "task_type": "tool_use",
+  "domain": "code_intel",
+  "difficulty": 1,
+  "tags": ["tool-use", "code_intel", "edit"],
+  "tool_service": "code_intel",
+  "tools": ["edit_file"],
+  "tool_service_seed": {
+    "files": {"src/auth.py": "def login(user):\n    return check(user)\n"}
+  },
+  "prompts": [
+    "In src/auth.py, replace line 2 with '    return check_user(user)'."
+  ],
+  "expected_calls": [
+    {"tool": "edit_file", "arguments_contains": {"filePath": "src/auth.py"}}
+  ]
+}

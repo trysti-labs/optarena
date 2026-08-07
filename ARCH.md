@@ -1019,6 +1019,41 @@ everything else here uses. A case is one domain or the other, never both -
     second run and was independently confirmed via direct replay (4/5
     total across both runs and retries) as the already-known
     malformed-tool-call-as-text quirk, not a new finding.
+- **`code_intel`** (`_cases/_mock_service.py`, `CodeIntelService`) - the
+  twelfth mock service, all 6 tools the real `isaacphi/mcp-language-server`
+  (1,572 stars, by far the dominant real implementation surveyed this
+  session - next best found was 192) actually registers in its
+  `tools.go`, not the earlier catalog survey's "~4 core tools" estimate
+  (undercounted by 2, the same pattern hit for every category surveyed).
+  Two more tools (`get_codelens`, `execute_codelens`) exist in the source
+  but are commented out and never registered - correctly excluded here.
+  Models a mock language server: symbol definition/reference lookup,
+  file diagnostics, position-based hover info, symbol rename (with
+  cross-file reference updates), and line-range text edits, across 9
+  example cases.
+  - **A structural difference from every other service in this domain**:
+    the real server has no file-reading tool of its own at all -
+    `hover`/`rename_symbol`/`edit_file` all take a `line`/`column` the
+    calling agent is expected to already know from separate file-reading
+    (normally the client's own file tools, out of scope for this
+    single-service-per-case domain - see
+    `DEV_NOTES/TOOL_USE_EXPANSION_PLAN.md` §4's still-open cross-service
+    question). Cases therefore state the relevant file/line directly in
+    the prompt, the same "already told directly" pattern used elsewhere
+    when discovery isn't the case's own teaching point.
+  - Real preconditions enforced: `definition`/`references` refuse an
+    unknown symbol; `diagnostics`/`edit_file` refuse an unknown file;
+    `hover`/`rename_symbol` refuse a position with no known symbol;
+    `edit_file` refuses an out-of-range line edit.
+  - Live-verified against `qwen3-coder:30b`: 5/9 passed, all four
+    failures independently confirmed via direct replay (3/3) as the
+    already-known malformed-tool-call-as-text quirk - no case-design
+    bugs found. Notably higher failure rate than every other service
+    built this session; the failures cluster on the tools with the
+    shortest, simplest single-string-argument schemas (`definition`,
+    `hover`), suggesting (not confirmed) the quirk may correlate with
+    schema simplicity rather than being uniformly random across tools -
+    left as an open observation, not chased further.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not

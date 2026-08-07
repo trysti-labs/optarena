@@ -4404,6 +4404,126 @@ class BuildToolsService(MockService):
         }
 
 
+class CodeIntelService(MockService):
+    """A mock language server - all 6 tools the real `isaacphi/
+    mcp-language-server` (1,572 stars, by far the dominant real
+    implementation surveyed - next best found was 192 stars) actually
+    registers in `tools.go`, not the earlier catalog survey's "~4 core
+    tools" estimate (undercounted by 2, the same pattern hit for every
+    category surveyed this session). Two more tools (`get_codelens`,
+    `execute_codelens`) exist in the source but are commented out and
+    never registered - correctly excluded here, matching the "extract
+    actual registrations, not aspirational code" discipline used
+    throughout this domain.
+
+    The real server has no file-reading tool of its own at all - `hover`/
+    `rename_symbol`/`edit_file` all take a `line`/`column` the calling
+    agent is expected to already know from separate file-reading
+    (normally the client's own file tools, out of scope for this single-
+    service-per-case domain - see `DEV_NOTES/TOOL_USE_EXPANSION_PLAN.md`
+    §4's still-open cross-service question). Cases here therefore state
+    the relevant file/line directly in the prompt, the same "already told
+    directly" pattern used elsewhere in this domain when discovery isn't
+    the case's own teaching point.
+    """
+
+    TOOLS = {name: name for name in (
+        "edit_file", "definition", "references", "diagnostics", "hover", "rename_symbol",
+    )}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._files: dict[str, list[str]] = {}
+        self._definitions: dict[str, dict] = {}
+        self._references: dict[str, list[dict]] = {}
+        self._diagnostics: dict[str, list[dict]] = {}
+        self._hover: dict[tuple[str, int], str] = {}
+        self._symbols_at: dict[tuple[str, int], str] = {}
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``files`` ({path: "line1\\nline2\\n..." or [line, ...]}).
+        - ``definitions`` ({symbolName: {filePath, code}}).
+        - ``references`` ({symbolName: [{filePath, line}, ...]}).
+        - ``diagnostics`` ({filePath: [{line, severity, message}, ...]}) -
+          referencing a file not in ``files`` auto-registers an empty one.
+        - ``hover`` ([{filePath, line, text, symbol}, ...]) - ``symbol``
+          (optional) also registers this position for ``rename_symbol``.
+        """
+        for path, content in (spec.get("files") or {}).items():
+            self._files[path] = content.split("\n") if isinstance(content, str) else list(content)
+        for name, cfg in (spec.get("definitions") or {}).items():
+            self._definitions[name] = {"filePath": cfg["filePath"], "code": cfg.get("code", "")}
+        for name, refs in (spec.get("references") or {}).items():
+            self._references[name] = [dict(r) for r in refs]
+        for path, entries in (spec.get("diagnostics") or {}).items():
+            self._files.setdefault(path, [])
+            self._diagnostics[path] = [dict(e) for e in entries]
+        for entry in spec.get("hover") or []:
+            key = (entry["filePath"], entry["line"])
+            self._hover[key] = entry.get("text", "")
+            if entry.get("symbol"):
+                self._symbols_at[key] = entry["symbol"]
+
+    # ── tools ────────────────────────────────────────────────────────────
+
+    def definition(self, symbolName: str) -> dict:
+        d = self._definitions.get(symbolName)
+        if d is None:
+            return {"error": f"no definition found for symbol {symbolName!r}"}
+        return {"symbolName": symbolName, **d}
+
+    def references(self, symbolName: str) -> dict:
+        refs = self._references.get(symbolName)
+        if not refs:
+            return {"error": f"no references found for symbol {symbolName!r}"}
+        return {"symbolName": symbolName, "references": refs}
+
+    def diagnostics(self, filePath: str, contextLines: int = 5, showLineNumbers: bool = True) -> dict:
+        if filePath not in self._files:
+            return {"error": f"file not found: {filePath!r}"}
+        return {"filePath": filePath, "diagnostics": self._diagnostics.get(filePath, [])}
+
+    def hover(self, filePath: str, line: int, column: int) -> dict:
+        text = self._hover.get((filePath, line))
+        if text is None:
+            return {"error": f"no hover information available at {filePath}:{line}"}
+        return {"filePath": filePath, "line": line, "column": column, "info": text}
+
+    def rename_symbol(self, filePath: str, line: int, column: int, newName: str) -> dict:
+        symbol = self._symbols_at.get((filePath, line))
+        if symbol is None:
+            return {"error": f"no symbol found at {filePath}:{line} to rename"}
+        refs = self._references.get(symbol, [])
+        files_changed = sorted({r["filePath"] for r in refs} | {filePath})
+        return {"symbol": symbol, "newName": newName, "filesChanged": files_changed, "referenceCount": len(refs)}
+
+    def edit_file(self, filePath: str, edits: list) -> dict:
+        if filePath not in self._files:
+            return {"error": f"file not found: {filePath!r}"}
+        lines = self._files[filePath]
+        for e in edits:
+            start, end = e.get("startLine"), e.get("endLine")
+            if start is None or end is None or start < 1 or end < start or end > len(lines):
+                return {"error": f"invalid edit range startLine={start}, endLine={end} for a {len(lines)}-line file"}
+        for e in sorted(edits, key=lambda e: e["startLine"], reverse=True):
+            new_lines = e.get("newText", "").split("\n") if e.get("newText") else []
+            lines[e["startLine"] - 1:e["endLine"]] = new_lines
+        return {"filePath": filePath, "editsApplied": len(edits)}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "file_count": len(self._files),
+            "definition_count": len(self._definitions),
+            "files": {path: "\n".join(lines) for path, lines in sorted(self._files.items())},
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -5753,6 +5873,41 @@ _BUILD_TOOLS_SCHEMAS: dict[str, dict] = {
         ["action"]),
 }
 
+_CODE_INTEL_SCHEMAS: dict[str, dict] = {
+    "definition": _fn(
+        "definition", "Read the source code definition of a symbol (function, type, constant, etc.) from the "
+        "codebase. Returns the complete implementation code where the symbol is defined.",
+        {"symbolName": {"type": "string", "description": "e.g. 'mypackage.MyFunction', 'MyType.MyMethod'."}},
+        ["symbolName"]),
+    "references": _fn(
+        "references", "Find all usages and references of a symbol throughout the codebase.",
+        {"symbolName": {"type": "string", "description": "e.g. 'mypackage.MyFunction', 'MyType'."}},
+        ["symbolName"]),
+    "diagnostics": _fn(
+        "diagnostics", "Get diagnostic information (errors, warnings) for a specific file from the language server.",
+        {"filePath": {"type": "string"},
+         "contextLines": {"type": "integer", "description": "Optional lines of context around each diagnostic, default 5."},
+         "showLineNumbers": {"type": "boolean", "description": "Optional, default true."}},
+        ["filePath"]),
+    "hover": _fn(
+        "hover", "Get hover information (type, documentation) for a symbol at a specific file position.",
+        {"filePath": {"type": "string"}, "line": {"type": "integer", "description": "1-indexed."},
+         "column": {"type": "integer", "description": "1-indexed."}},
+        ["filePath", "line", "column"]),
+    "rename_symbol": _fn(
+        "rename_symbol", "Rename a symbol (variable, function, class, etc.) at a specific position and update all "
+        "references throughout the codebase.",
+        {"filePath": {"type": "string"}, "line": {"type": "integer", "description": "1-indexed."},
+         "column": {"type": "integer", "description": "1-indexed."}, "newName": {"type": "string"}},
+        ["filePath", "line", "column", "newName"]),
+    "edit_file": _fn(
+        "edit_file", "Apply multiple line-range text edits to a file.",
+        {"filePath": {"type": "string"},
+         "edits": {"type": "array", "description": "List of {startLine, endLine, newText} edits (1-indexed, inclusive).",
+                    "items": {"type": "object"}}},
+        ["filePath", "edits"]),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
@@ -5765,6 +5920,7 @@ MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "database": (DatabaseService, _DATABASE_SCHEMAS),
     "ci_pipeline": (CIPipelineService, _CI_PIPELINE_SCHEMAS),
     "build_tools": (BuildToolsService, _BUILD_TOOLS_SCHEMAS),
+    "code_intel": (CodeIntelService, _CODE_INTEL_SCHEMAS),
 }
 
 
