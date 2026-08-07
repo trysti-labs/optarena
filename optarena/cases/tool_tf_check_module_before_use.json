@@ -1,0 +1,21 @@
+{
+  "name": "tool_tf_check_module_before_use",
+  "description": "Search for a module, check its docs and latest version before using it.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "registry"],
+  "tool_service": "terraform",
+  "tools": ["search_modules", "get_module_details", "get_latest_module_version"],
+  "tool_service_seed": {
+    "modules": {"terraform-aws-modules/vpc/aws": {"latest_version": "5.8.1", "docs": "VPC module"}}
+  },
+  "prompts": [
+    "Find a VPC module for AWS in the registry, check its docs, and confirm the latest version."
+  ],
+  "expected_calls": [
+    {"tool": "search_modules"},
+    {"tool": "get_module_details", "arguments_contains": {"namespace": "terraform-aws-modules", "name": "vpc", "provider": "aws"}},
+    {"tool": "get_latest_module_version", "arguments_contains": {"namespace": "terraform-aws-modules", "name": "vpc", "provider": "aws"}}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "tool_tf_orientation",
+  "description": "Basic orientation: what organizations and projects exist.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "orgs"],
+  "tool_service": "terraform",
+  "tools": ["list_terraform_orgs", "list_terraform_projects"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "projects": [{"org": "acme", "id": "prj-1", "name": "platform"}]
+  },
+  "prompts": [
+    "What Terraform organizations do I have access to, and what projects exist in the acme org?"
+  ],
+  "expected_calls": [
+    {"tool": "list_terraform_orgs"},
+    {"tool": "list_terraform_projects", "arguments_contains": {"org": "acme"}}
+  ]
+}

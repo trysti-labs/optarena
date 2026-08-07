@@ -1,0 +1,19 @@
+{
+  "name": "tool_tf_check_provider_capabilities",
+  "description": "Check what capabilities a provider declares.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "registry"],
+  "tool_service": "terraform",
+  "tools": ["get_provider_capabilities"],
+  "tool_service_seed": {
+    "providers": {"hashicorp/aws": {"capabilities": ["moved-block", "import-block"]}}
+  },
+  "prompts": [
+    "Check what capabilities the hashicorp/aws provider declares."
+  ],
+  "expected_calls": [
+    {"tool": "get_provider_capabilities", "arguments_contains": {"namespace": "hashicorp", "name": "aws"}}
+  ]
+}

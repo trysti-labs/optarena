@@ -828,6 +828,67 @@ everything else here uses. A case is one domain or the other, never both -
     log matching the already-known malformed-tool-call-as-text quirk
     (confirmed via direct replay at 2/3 retries - a sixth reproduction of
     the same finding first surfaced by `git_repo`) - no new findings.
+- **`terraform`** (`_cases/_mock_service.py`, `TerraformService`) - the
+  eighth mock service, all 55 tools the official `hashicorp/terraform-mcp-
+  server` registers, extracted directly from its source this session
+  rather than trusted from `DEV_NOTES/TOOL_CATALOG_COMPLETE.md`'s earlier
+  "~10 tools" estimate - the same "the real count runs higher than the
+  survey estimate" pattern hit for every category surveyed so far. Models
+  a mock Terraform Cloud/Enterprise plus the public registry: orgs,
+  projects, teams, workspaces, workspace/variable-set variables, policy
+  sets, runs/plans/applies, state versions, stacks, no-code workspaces,
+  Sentinel mocks, and both public and private registry search across
+  providers/modules/policies, across 31 example cases.
+  - Real workflow-discipline preconditions enforced: `create_run` refuses
+    a locked workspace and locks it on success; `action_run("apply")`
+    refuses a run not in a plannable-to-apply state, records a new state
+    version, and unlocks the workspace (discard/cancel also unlock);
+    `delete_workspace_safely` refuses a locked workspace;
+    `force_unlock_workspace` refuses one that isn't locked; `delete_project`
+    refuses while workspaces still reference it - the same "must satisfy
+    the real precondition, not just exist" discipline every other service
+    in this domain enforces.
+  - **A new class of case-design bug, first seen in this service**: unlike
+    prior services where the human-facing identifier IS the API identifier
+    (a docker image tag, a k8s object name), Terraform Cloud workspaces/
+    variable-sets/policy-sets have opaque IDs distinct from their
+    human-readable names. ~17 of the first 31 cases seeded these with IDs
+    that differed from the prompted name with no reliable discovery path,
+    so a model reasonably used the name where an ID was required - not a
+    discipline lapse, a fair case-design bug. Fixed by a consistent rule
+    applied across every affected case: seeded `id` equals `name`
+    wherever ID-discovery isn't the case's own teaching point; only kept
+    distinct IDs (requiring a `list_*` call first) when that discovery
+    genuinely is the lesson.
+  - **A search-realism bug, same live run**: `search_providers`/
+    `search_modules`/`search_policies`/`search_private_modules`/
+    `search_private_providers` used naive whole-string substring matching
+    (`query in target`), which fails for a natural multi-word model query
+    ("tag enforcement", "internal platform") against a single hyphenated
+    registry key (`hashicorp/require-tags`). Fixed via a shared
+    `_matches_query()` helper that tokenizes the query and matches if any
+    word is a substring of the target, both lowercased - a single reusable
+    fix rather than five one-off patches.
+  - **A redundant-confirmation-call bug, same fix pattern as forge's
+    alert-lookup finding**: `create_and_tag_workspace` required a
+    follow-up `read_workspace_tags` after `create_workspace_tags`, whose
+    own response already shows the current tag set. Fixed by dropping the
+    redundant requirement.
+  - **A genuine model-behavior finding, left as signal, not a bug**:
+    `tool_tf_inspect_stack` has the model call `list_stacks` (which
+    reveals the correct id `stack-1` in its result) and then call
+    `get_stack_details` with the human NAME (`platform-stack`) anyway,
+    ignoring the id it was just shown - reproduced identically across two
+    live runs. Left as-is: a real instance of a model conflating a
+    human-readable field with an opaque-ID field even when the correct id
+    is visible in a prior tool result in the same trajectory.
+  - Live-verified against `qwen3-coder:30b` across two runs. The first
+    (14/31, before the id/search fixes above) surfaced the systemic
+    id-vs-name bug; after fixing it plus the search-tokenization and
+    redundant-confirmation bugs, a second run reached 29/31, with the two
+    remaining failures individually root-caused: one an over-tight query
+    assertion (loosened), the other the `inspect_stack` finding described
+    above (kept as genuine signal).
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not

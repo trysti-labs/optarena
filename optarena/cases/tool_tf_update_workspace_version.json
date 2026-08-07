@@ -1,0 +1,20 @@
+{
+  "name": "tool_tf_update_workspace_version",
+  "description": "Update a workspace's pinned Terraform version.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "workspaces"],
+  "tool_service": "terraform",
+  "tools": ["update_workspace"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod", "terraform_version": "1.5.0"}]
+  },
+  "prompts": [
+    "Update the prod workspace in acme to use Terraform version 1.9.0."
+  ],
+  "expected_calls": [
+    {"tool": "update_workspace", "arguments_contains": {"org": "acme", "workspace_id": "prod", "terraform_version": "1.9.0"}}
+  ]
+}

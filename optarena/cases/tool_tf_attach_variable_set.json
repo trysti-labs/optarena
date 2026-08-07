@@ -1,0 +1,22 @@
+{
+  "name": "tool_tf_attach_variable_set",
+  "description": "Find the right variable set before attaching it to a workspace.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "variable-sets"],
+  "tool_service": "terraform",
+  "tools": ["list_variable_sets", "attach_variable_set_to_workspaces"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod"}],
+    "variable_sets": [{"org": "acme", "id": "varset-1", "name": "shared-networking"}]
+  },
+  "prompts": [
+    "Find the shared-networking variable set in acme, and attach it to the prod workspace."
+  ],
+  "expected_calls": [
+    {"tool": "list_variable_sets", "arguments_contains": {"org": "acme"}},
+    {"tool": "attach_variable_set_to_workspaces", "arguments_contains": {"org": "acme", "varset_id": "varset-1", "workspace_ids": ["prod"]}}
+  ]
+}

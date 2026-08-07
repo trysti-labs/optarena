@@ -1,0 +1,22 @@
+{
+  "name": "tool_tf_attach_policy_set",
+  "description": "Attach a policy set to a workspace, then confirm it's attached.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "policy-sets"],
+  "tool_service": "terraform",
+  "tools": ["attach_policy_set_to_workspaces", "list_workspace_policy_sets"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod"}],
+    "policy_sets": [{"org": "acme", "id": "required-tags", "name": "required-tags"}]
+  },
+  "prompts": [
+    "Attach the required-tags policy set to the prod workspace in acme, then confirm it's attached."
+  ],
+  "expected_calls": [
+    {"tool": "attach_policy_set_to_workspaces", "arguments_contains": {"org": "acme", "policyset_id": "required-tags", "workspace_ids": ["prod"]}},
+    {"tool": "list_workspace_policy_sets", "arguments_contains": {"org": "acme", "workspace_id": "prod"}}
+  ]
+}

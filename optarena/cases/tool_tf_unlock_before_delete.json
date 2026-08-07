@@ -1,0 +1,24 @@
+{
+  "name": "tool_tf_unlock_before_delete",
+  "description": "The workspace is locked by a pending run - unlock it before deleting, not force past the precondition.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 2,
+  "tags": ["tool-use", "terraform", "workspaces", "precondition"],
+  "tool_service": "terraform",
+  "tools": ["force_unlock_workspace", "delete_workspace_safely"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "stuck-workspace", "name": "stuck-workspace", "locked": true}]
+  },
+  "prompts": [
+    "The stuck-workspace in acme is stuck locked and needs to be deleted entirely. Unlock it first, then delete it."
+  ],
+  "expected_calls": [
+    {"tool": "force_unlock_workspace", "arguments_contains": {"org": "acme", "workspace_id": "stuck-workspace"}},
+    {"tool": "delete_workspace_safely", "arguments_contains": {"org": "acme", "workspace_id": "stuck-workspace"}}
+  ],
+  "expected_final_state": {
+    "workspace_count": 0
+  }
+}

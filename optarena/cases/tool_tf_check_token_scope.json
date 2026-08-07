@@ -1,0 +1,19 @@
+{
+  "name": "tool_tf_check_token_scope",
+  "description": "Check what an API token is actually permitted to do.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "tokens"],
+  "tool_service": "terraform",
+  "tools": ["get_token_permissions"],
+  "tool_service_seed": {
+    "tokens": [{"token": "tok-abc", "permissions": {"admin": false, "write": true}}]
+  },
+  "prompts": [
+    "Check what permissions the API token 'tok-abc' actually has before I use it."
+  ],
+  "expected_calls": [
+    {"tool": "get_token_permissions", "arguments_contains": {"token": "tok-abc"}}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "tool_tf_update_workspace_variable",
+  "description": "Find the right variable before updating its value.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "variables"],
+  "tool_service": "terraform",
+  "tools": ["list_workspace_variables", "update_workspace_variable"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod",
+                     "variables": [{"id": "var-1", "key": "region", "value": "us-east-1"}]}]
+  },
+  "prompts": [
+    "Find the 'region' variable on the prod workspace in acme and update its value to 'us-west-2'."
+  ],
+  "expected_calls": [
+    {"tool": "list_workspace_variables", "arguments_contains": {"org": "acme", "workspace_id": "prod"}},
+    {"tool": "update_workspace_variable", "arguments_contains": {"org": "acme", "workspace_id": "prod", "variable_id": "var-1", "value": "us-west-2"}}
+  ]
+}

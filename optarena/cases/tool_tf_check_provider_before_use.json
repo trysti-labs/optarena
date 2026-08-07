@@ -1,0 +1,21 @@
+{
+  "name": "tool_tf_check_provider_before_use",
+  "description": "Search for a provider, check its docs and latest version before pinning it in configuration.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "registry"],
+  "tool_service": "terraform",
+  "tools": ["search_providers", "get_provider_details", "get_latest_provider_version"],
+  "tool_service_seed": {
+    "providers": {"hashicorp/aws": {"latest_version": "5.60.0", "docs": "AWS provider"}}
+  },
+  "prompts": [
+    "Find the AWS provider in the registry, look at its docs, and confirm the latest version before I pin it."
+  ],
+  "expected_calls": [
+    {"tool": "search_providers", "arguments_contains": {"query": "aws"}},
+    {"tool": "get_provider_details", "arguments_contains": {"namespace": "hashicorp", "name": "aws"}},
+    {"tool": "get_latest_provider_version", "arguments_contains": {"namespace": "hashicorp", "name": "aws"}}
+  ]
+}

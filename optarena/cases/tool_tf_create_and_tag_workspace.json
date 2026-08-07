@@ -1,0 +1,20 @@
+{
+  "name": "tool_tf_create_and_tag_workspace",
+  "description": "Create a new workspace and tag it.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "workspaces"],
+  "tool_service": "terraform",
+  "tools": ["create_workspace", "create_workspace_tags", "read_workspace_tags"],
+  "tool_service_seed": {
+    "orgs": ["acme"]
+  },
+  "prompts": [
+    "Create a workspace called 'prod-api' in acme, and tag it with 'env:prod' and 'team:api'."
+  ],
+  "expected_calls": [
+    {"tool": "create_workspace", "arguments_contains": {"org": "acme", "name": "prod-api"}},
+    {"tool": "create_workspace_tags", "arguments_contains": {"org": "acme"}}
+  ]
+}

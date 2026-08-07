@@ -1,0 +1,20 @@
+{
+  "name": "tool_tf_check_policy_docs",
+  "description": "Search for a Sentinel policy and check its documentation.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "registry", "sentinel"],
+  "tool_service": "terraform",
+  "tools": ["search_policies", "get_policy_details"],
+  "tool_service_seed": {
+    "policies": {"hashicorp/require-tags": {"docs": "Requires specific tags on all resources"}}
+  },
+  "prompts": [
+    "Find a Sentinel policy for enforcing required tags, and check its documentation."
+  ],
+  "expected_calls": [
+    {"tool": "search_policies"},
+    {"tool": "get_policy_details", "arguments_contains": {"namespace": "hashicorp", "name": "require-tags"}}
+  ]
+}

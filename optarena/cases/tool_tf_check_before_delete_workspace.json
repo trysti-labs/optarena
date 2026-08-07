@@ -1,0 +1,25 @@
+{
+  "name": "tool_tf_check_before_delete_workspace",
+  "description": "List workspaces and check details before deleting the right one.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "workspaces"],
+  "tool_service": "terraform",
+  "tools": ["list_workspaces", "get_workspace_details", "delete_workspace_safely"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "ws-1", "name": "old-experiment"}]
+  },
+  "prompts": [
+    "Find the 'old-experiment' workspace in acme, confirm its details, then delete it."
+  ],
+  "expected_calls": [
+    {"tool": "list_workspaces", "arguments_contains": {"org": "acme"}},
+    {"tool": "get_workspace_details", "arguments_contains": {"org": "acme", "workspace_id": "ws-1"}},
+    {"tool": "delete_workspace_safely", "arguments_contains": {"org": "acme", "workspace_id": "ws-1"}}
+  ],
+  "expected_final_state": {
+    "workspace_count": 0
+  }
+}

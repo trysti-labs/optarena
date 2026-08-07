@@ -1,0 +1,23 @@
+{
+  "name": "tool_tf_manage_teams",
+  "description": "Check existing teams before creating a new one.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "teams"],
+  "tool_service": "terraform",
+  "tools": ["list_teams", "create_team"],
+  "tool_service_seed": {
+    "orgs": ["acme"]
+  },
+  "prompts": [
+    "Check what teams already exist in acme, then create a new team called 'platform-eng'."
+  ],
+  "expected_calls": [
+    {"tool": "list_teams", "arguments_contains": {"org": "acme"}},
+    {"tool": "create_team", "arguments_contains": {"org": "acme", "name": "platform-eng"}}
+  ],
+  "expected_final_state": {
+    "team_count": 1
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "tool_tf_create_shared_variable_set",
+  "description": "Create a variable set and add a shared variable to it.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "variable-sets"],
+  "tool_service": "terraform",
+  "tools": ["create_variable_set", "create_variable_in_variable_set"],
+  "tool_service_seed": {
+    "orgs": ["acme"]
+  },
+  "prompts": [
+    "Create a variable set called 'shared-networking' in acme, and add a variable 'vpc_cidr' with value '10.0.0.0/16' to it."
+  ],
+  "expected_calls": [
+    {"tool": "create_variable_set", "arguments_contains": {"org": "acme", "name": "shared-networking"}},
+    {"tool": "create_variable_in_variable_set", "arguments_contains": {"org": "acme", "key": "vpc_cidr", "value": "10.0.0.0/16"}}
+  ]
+}

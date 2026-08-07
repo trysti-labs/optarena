@@ -1,0 +1,22 @@
+{
+  "name": "tool_tf_check_state_after_apply",
+  "description": "List state versions for a workspace, then get the details of the latest one.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "state"],
+  "tool_service": "terraform",
+  "tools": ["list_state_versions", "get_state_version"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod"}],
+    "state_versions": [{"org": "acme", "workspace_id": "prod", "serial": 1, "resources": ["aws_vpc.main"]}]
+  },
+  "prompts": [
+    "List the state versions for the prod workspace in acme, then get the details of the latest one."
+  ],
+  "expected_calls": [
+    {"tool": "list_state_versions", "arguments_contains": {"org": "acme", "workspace_id": "prod"}},
+    {"tool": "get_state_version", "arguments_contains": {"org": "acme", "workspace_id": "prod"}}
+  ]
+}

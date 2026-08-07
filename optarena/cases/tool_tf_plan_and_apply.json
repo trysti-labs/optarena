@@ -1,0 +1,26 @@
+{
+  "name": "tool_tf_plan_and_apply",
+  "description": "Start a run, check the plan, then apply it.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 2,
+  "tags": ["tool-use", "terraform", "runs"],
+  "tool_service": "terraform",
+  "tools": ["create_run", "get_plan_logs", "action_run", "get_apply_logs"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod"}]
+  },
+  "prompts": [
+    "Start a new run on the prod workspace in acme to add a VPC, check the plan output, then apply it and check the apply logs."
+  ],
+  "expected_calls": [
+    {"tool": "create_run", "arguments_contains": {"org": "acme", "workspace_id": "prod"}},
+    {"tool": "get_plan_logs"},
+    {"tool": "action_run", "arguments_contains": {"action": "apply"}},
+    {"tool": "get_apply_logs"}
+  ],
+  "expected_final_state": {
+    "applied_run_count": 1
+  }
+}

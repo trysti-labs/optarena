@@ -1,0 +1,19 @@
+{
+  "name": "tool_tf_test_sentinel_policy",
+  "description": "Get mock input data for testing a Sentinel policy.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "sentinel"],
+  "tool_service": "terraform",
+  "tools": ["get_sentinel_mock"],
+  "tool_service_seed": {
+    "sentinel_mocks": [{"id": "policy-1", "data": {"tfplan": {}}}]
+  },
+  "prompts": [
+    "Get the mock test data for Sentinel policy policy-1 so I can write a unit test for it."
+  ],
+  "expected_calls": [
+    {"tool": "get_sentinel_mock", "arguments_contains": {"policy_id": "policy-1"}}
+  ]
+}

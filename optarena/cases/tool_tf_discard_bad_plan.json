@@ -1,0 +1,22 @@
+{
+  "name": "tool_tf_discard_bad_plan",
+  "description": "Find the pending run, then discard it instead of applying.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "runs"],
+  "tool_service": "terraform",
+  "tools": ["list_runs", "action_run"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod"}],
+    "runs": [{"org": "acme", "id": "run-1", "workspace_id": "prod", "status": "planned"}]
+  },
+  "prompts": [
+    "Find the pending run on the prod workspace in acme and discard it - we changed our mind."
+  ],
+  "expected_calls": [
+    {"tool": "list_runs", "arguments_contains": {"org": "acme", "workspace_id": "prod"}},
+    {"tool": "action_run", "arguments_contains": {"run_id": "run-1", "action": "discard"}}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "tool_tf_create_project",
+  "description": "Create a new project in an organization.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "projects"],
+  "tool_service": "terraform",
+  "tools": ["create_project"],
+  "tool_service_seed": {
+    "orgs": ["acme"]
+  },
+  "prompts": [
+    "Create a new project called 'data-platform' in the acme organization."
+  ],
+  "expected_calls": [
+    {"tool": "create_project", "arguments_contains": {"org": "acme", "name": "data-platform"}}
+  ],
+  "expected_final_state": {
+    "project_count": 1
+  }
+}

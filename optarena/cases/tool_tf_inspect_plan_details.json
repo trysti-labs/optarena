@@ -1,0 +1,20 @@
+{
+  "name": "tool_tf_inspect_plan_details",
+  "description": "Check both a plan's status and its structured JSON output.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "plans"],
+  "tool_service": "terraform",
+  "tools": ["get_plan_details", "get_plan_json_output"],
+  "tool_service_seed": {
+    "plans": [{"id": "plan-1", "run_id": "run-1", "json_output": {"resource_changes": [{"action": "create"}]}}]
+  },
+  "prompts": [
+    "Check the status of plan plan-1, and get its structured JSON output to see exactly what would change."
+  ],
+  "expected_calls": [
+    {"tool": "get_plan_details", "arguments_contains": {"plan_id": "plan-1"}},
+    {"tool": "get_plan_json_output", "arguments_contains": {"plan_id": "plan-1"}}
+  ]
+}

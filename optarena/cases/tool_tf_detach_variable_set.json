@@ -1,0 +1,21 @@
+{
+  "name": "tool_tf_detach_variable_set",
+  "description": "Detach a variable set from a workspace that no longer needs it.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "variable-sets"],
+  "tool_service": "terraform",
+  "tools": ["detach_variable_set_from_workspaces"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod"}],
+    "variable_sets": [{"org": "acme", "id": "shared-networking", "name": "shared-networking", "workspaces": ["prod"]}]
+  },
+  "prompts": [
+    "Detach the shared-networking variable set from the prod workspace in acme."
+  ],
+  "expected_calls": [
+    {"tool": "detach_variable_set_from_workspaces", "arguments_contains": {"org": "acme", "varset_id": "shared-networking", "workspace_ids": ["prod"]}}
+  ]
+}

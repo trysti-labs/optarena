@@ -1,0 +1,21 @@
+{
+  "name": "tool_tf_inspect_stack",
+  "description": "List stacks in an organization, then check one's details.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "stacks"],
+  "tool_service": "terraform",
+  "tools": ["list_stacks", "get_stack_details"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "stacks": [{"org": "acme", "id": "stack-1", "name": "platform-stack"}]
+  },
+  "prompts": [
+    "List the stacks in acme, then get the details of platform-stack."
+  ],
+  "expected_calls": [
+    {"tool": "list_stacks", "arguments_contains": {"org": "acme"}},
+    {"tool": "get_stack_details", "arguments_contains": {"org": "acme", "stack_id": "stack-1"}}
+  ]
+}

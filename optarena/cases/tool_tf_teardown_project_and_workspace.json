@@ -1,0 +1,26 @@
+{
+  "name": "tool_tf_teardown_project_and_workspace",
+  "description": "Fully tear down a project - must remove its workspace before the project itself, since the project can't be deleted while workspaces still reference it.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 2,
+  "tags": ["tool-use", "terraform", "projects", "workspaces", "ordering"],
+  "tool_service": "terraform",
+  "tools": ["delete_workspace_safely", "delete_project"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "projects": [{"org": "acme", "id": "sandbox", "name": "sandbox"}],
+    "workspaces": [{"org": "acme", "id": "sandbox-dev", "name": "sandbox-dev", "project_id": "sandbox"}]
+  },
+  "prompts": [
+    "Fully tear down the sandbox project in acme, including its sandbox-dev workspace."
+  ],
+  "expected_calls": [
+    {"tool": "delete_workspace_safely", "arguments_contains": {"org": "acme", "workspace_id": "sandbox-dev"}},
+    {"tool": "delete_project", "arguments_contains": {"org": "acme", "project_id": "sandbox"}}
+  ],
+  "expected_final_state": {
+    "project_count": 0,
+    "workspace_count": 0
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "tool_tf_find_internal_provider",
+  "description": "Search the private provider registry, then check details of the match.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "private-registry"],
+  "tool_service": "terraform",
+  "tools": ["search_private_providers", "get_private_provider_details"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "private_providers": [{"org": "acme", "key": "acme/internal-platform", "docs": "Internal platform provider"}]
+  },
+  "prompts": [
+    "Search acme's private provider registry for the internal platform provider, and check its documentation."
+  ],
+  "expected_calls": [
+    {"tool": "search_private_providers", "arguments_contains": {"org": "acme"}},
+    {"tool": "get_private_provider_details", "arguments_contains": {"org": "acme", "namespace": "acme", "name": "internal-platform"}}
+  ]
+}

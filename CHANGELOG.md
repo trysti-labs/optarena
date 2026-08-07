@@ -16,7 +16,7 @@ existed.
   on files written. Two new experimental baseline drivers run the real
   request → tool_call → execute-against-mock-service → feed-result-back loop:
   `openai-tools` (`/v1/chat/completions` tool_calls) and `ollama-tools`
-  (Ollama-native `/api/chat` tool_calls). Ships with seven mock services -
+  (Ollama-native `/api/chat` tool_calls). Ships with nine mock services -
   `task_tracker` (create/complete/list/delete, 5 cases), `git_repo` (all
   18 tools from the real MCP git-server ecosystem: status/add/reset/commit/
   diff variants/log/show/branch operations/blame/remotes/tags/push/pull,
@@ -51,7 +51,16 @@ existed.
   search/bugs/repo/docs/diff/init/pkg/ci/link - several enforcing real
   npm-like preconditions (`install` refuses a package never published to
   the registry, `ci` refuses without a lockfile, `publish` refuses
-  overwriting an already-published version), 35 cases) - plus a
+  overwriting an already-published version), 35 cases), and `terraform`
+  (all 55 tools the official `hashicorp/terraform-mcp-server` registers
+  across orgs/projects/teams/workspaces/variables/variable sets/policy
+  sets/runs/plans/applies/state versions/stacks/no-code workspaces/
+  Sentinel mocks and public+private registry search - several enforcing
+  real Terraform Cloud-like preconditions (`create_run` refuses a locked
+  workspace and locks it on success, `action_run("apply")` refuses a run
+  not in a plannable-to-apply state and records a new state version,
+  `delete_workspace_safely`/`force_unlock_workspace`/`delete_project`
+  each enforce their own real precondition), 31 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

@@ -1,0 +1,20 @@
+{
+  "name": "tool_tf_remove_variable_from_set",
+  "description": "Remove a stale variable from a shared variable set.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "variable-sets"],
+  "tool_service": "terraform",
+  "tools": ["delete_variable_in_variable_set"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "variable_sets": [{"org": "acme", "id": "shared-networking", "name": "shared-networking", "variables": {"old_key": "stale"}}]
+  },
+  "prompts": [
+    "Remove the 'old_key' variable from the shared-networking variable set in acme."
+  ],
+  "expected_calls": [
+    {"tool": "delete_variable_in_variable_set", "arguments_contains": {"org": "acme", "varset_id": "shared-networking", "key": "old_key"}}
+  ]
+}

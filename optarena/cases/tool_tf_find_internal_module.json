@@ -1,0 +1,21 @@
+{
+  "name": "tool_tf_find_internal_module",
+  "description": "Search the private module registry, then check details of the match.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "private-registry"],
+  "tool_service": "terraform",
+  "tools": ["search_private_modules", "get_private_module_details"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "private_modules": [{"org": "acme", "key": "acme/eks-cluster/aws", "docs": "Internal EKS module"}]
+  },
+  "prompts": [
+    "Search acme's private module registry for an EKS module, and check its documentation."
+  ],
+  "expected_calls": [
+    {"tool": "search_private_modules", "arguments_contains": {"org": "acme"}},
+    {"tool": "get_private_module_details", "arguments_contains": {"org": "acme", "namespace": "acme", "name": "eks-cluster", "provider": "aws"}}
+  ]
+}

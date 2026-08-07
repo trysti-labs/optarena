@@ -1,0 +1,19 @@
+{
+  "name": "tool_tf_check_apply_status",
+  "description": "Check the status of a specific apply.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "applies"],
+  "tool_service": "terraform",
+  "tools": ["get_apply_details"],
+  "tool_service_seed": {
+    "applies": [{"id": "apply-1", "run_id": "run-1", "status": "finished"}]
+  },
+  "prompts": [
+    "Check the status of apply apply-1."
+  ],
+  "expected_calls": [
+    {"tool": "get_apply_details", "arguments_contains": {"apply_id": "apply-1"}}
+  ]
+}

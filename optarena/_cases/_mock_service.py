@@ -3020,6 +3020,703 @@ class PackageRegistryService(MockService):
         }
 
 
+class TerraformService(MockService):
+    """A mock Terraform Cloud/Enterprise plus public registry - all 55
+    tools the official `hashicorp/terraform-mcp-server` registers,
+    extracted directly from its source this session (`server.tool()`/
+    `AddTool()` registrations, not the README) - `TOOL_CATALOG_COMPLETE.md`
+    §6 cited an archived third-party server's "~10 tools" for this
+    category; the real official server is over 5x that, the same "the
+    real count runs higher than the survey estimate" pattern already hit
+    for the whole catalog, kubernetes, forge, and package_registry.
+
+    Two toolsets, matching the real server's own split: 9 read-only
+    **registry** tools (search/get-details for public providers, modules,
+    and Sentinel policies - no auth, no state) and 46 **TFE** tools
+    (Terraform Cloud/Enterprise's own API surface - organizations,
+    projects, workspaces, runs/plans/applies, state versions, teams,
+    variable sets, policy sets, stacks, private registry). The TFE half
+    is where the real workflow discipline lives: `create_run` refuses a
+    locked workspace; `action_run("apply")` refuses a run that isn't in a
+    plannable-to-apply state (can't apply a run twice, can't apply one
+    that was discarded); `delete_workspace_safely` refuses a locked
+    workspace; `force_unlock_workspace` refuses one that isn't locked -
+    the same "respect the precondition, don't force past it" skill
+    `git_repo`/`docker`/`forge` already test, here specifically over
+    infrastructure-changing operations where forcing past a lock is a
+    real, high-consequence mistake.
+    """
+
+    TOOLS = {name: name for name in (
+        "search_providers", "get_provider_details", "get_latest_provider_version",
+        "get_provider_capabilities", "search_modules", "get_module_details",
+        "get_latest_module_version", "search_policies", "get_policy_details",
+        "list_terraform_orgs", "list_terraform_projects", "create_project", "delete_project",
+        "list_teams", "create_team", "get_token_permissions",
+        "list_workspaces", "get_workspace_details", "create_workspace", "update_workspace",
+        "delete_workspace_safely", "force_unlock_workspace", "create_workspace_tags", "read_workspace_tags",
+        "list_workspace_variables", "create_workspace_variable", "update_workspace_variable",
+        "list_variable_sets", "create_variable_set", "create_variable_in_variable_set",
+        "delete_variable_in_variable_set", "attach_variable_set_to_workspaces", "detach_variable_set_from_workspaces",
+        "list_workspace_policy_sets", "attach_policy_set_to_workspaces",
+        "create_run", "list_runs", "get_run_details", "get_run_comments", "action_run",
+        "get_plan_details", "get_plan_json_output", "get_plan_logs",
+        "get_apply_details", "get_apply_logs",
+        "list_state_versions", "get_state_version",
+        "list_stacks", "get_stack_details",
+        "create_no_code_workspace", "get_sentinel_mock",
+        "search_private_modules", "get_private_module_details",
+        "search_private_providers", "get_private_provider_details",
+    )}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._orgs: set[str] = set()
+        self._projects: dict[tuple[str, str], dict] = {}
+        self._teams: dict[tuple[str, str], dict] = {}
+        self._workspaces: dict[tuple[str, str], dict] = {}
+        self._workspace_variables: dict[tuple[str, str], dict[str, dict]] = {}
+        self._variable_sets: dict[tuple[str, str], dict] = {}
+        self._policy_sets: dict[tuple[str, str], dict] = {}
+        self._runs: dict[str, dict] = {}
+        self._plans: dict[str, dict] = {}
+        self._applies: dict[str, dict] = {}
+        self._state_versions: dict[tuple[str, str], list[dict]] = {}
+        self._stacks: dict[tuple[str, str], dict] = {}
+        self._sentinel_mocks: dict[str, dict] = {}
+        self._tokens: dict[str, dict] = {}
+        self._providers: dict[str, dict] = {}
+        self._modules: dict[str, dict] = {}
+        self._policies: dict[str, dict] = {}
+        self._private_modules: dict[tuple[str, str], dict] = {}
+        self._private_providers: dict[tuple[str, str], dict] = {}
+        self._next_id = 1
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``orgs`` ([name, ...]).
+        - ``projects``/``teams`` ([{org, id, name}, ...]).
+        - ``workspaces`` ([{org, id, name, project_id, locked, tags,
+          terraform_version, variables: [{id, key, value, category,
+          sensitive}, ...]}, ...]).
+        - ``variable_sets`` ([{org, id, name, variables: {key: value},
+          workspaces: [workspace_id, ...]}, ...]).
+        - ``policy_sets`` ([{org, id, name, workspaces: [workspace_id,
+          ...]}, ...]).
+        - ``runs`` ([{org, id, workspace_id, status, message, plan_id,
+          apply_id, comments}, ...]) / ``plans`` ([{id, run_id, status,
+          log, json_output}, ...]) / ``applies`` ([{id, run_id, status,
+          log}, ...]).
+        - ``state_versions`` ([{org, workspace_id, serial, resources},
+          ...]).
+        - ``stacks`` ([{org, id, name}, ...]).
+        - ``sentinel_mocks`` ([{id, data}, ...]).
+        - ``tokens`` ([{token, permissions}, ...]).
+        - ``providers`` ({"namespace/name": {latest_version, capabilities,
+          docs}}) / ``modules`` ({"namespace/name/provider":
+          {latest_version, docs}}) / ``policies`` ({"namespace/name":
+          {docs}}) - the public registry.
+        - ``private_modules``/``private_providers`` ([{org, key, docs},
+          ...]) - the org-scoped private registry.
+        """
+        for org in spec.get("orgs") or []:
+            self._orgs.add(org)
+        for entry in spec.get("projects") or []:
+            self._orgs.add(entry["org"])
+            self._projects[(entry["org"], entry["id"])] = {"name": entry["name"]}
+        for entry in spec.get("teams") or []:
+            self._orgs.add(entry["org"])
+            self._teams[(entry["org"], entry["id"])] = {"name": entry["name"]}
+        for entry in spec.get("workspaces") or []:
+            self._orgs.add(entry["org"])
+            key = (entry["org"], entry["id"])
+            self._workspaces[key] = {
+                "name": entry["name"], "project_id": entry.get("project_id"),
+                "locked": entry.get("locked", False), "tags": set(entry.get("tags", [])),
+                "terraform_version": entry.get("terraform_version", "1.9.0"),
+            }
+            for var in entry.get("variables", []):
+                var_id = var.get("id") or self._new_id("var")
+                self._workspace_variables.setdefault(key, {})[var_id] = {
+                    "key": var["key"], "value": var["value"],
+                    "category": var.get("category", "terraform"), "sensitive": var.get("sensitive", False),
+                }
+        for entry in spec.get("variable_sets") or []:
+            self._orgs.add(entry["org"])
+            self._variable_sets[(entry["org"], entry["id"])] = {
+                "name": entry["name"], "variables": dict(entry.get("variables", {})),
+                "workspaces": set(entry.get("workspaces", [])),
+            }
+        for entry in spec.get("policy_sets") or []:
+            self._orgs.add(entry["org"])
+            self._policy_sets[(entry["org"], entry["id"])] = {
+                "name": entry["name"], "workspaces": set(entry.get("workspaces", [])),
+            }
+        for entry in spec.get("runs") or []:
+            self._orgs.add(entry["org"])
+            self._runs[entry["id"]] = {
+                "org": entry["org"], "workspace_id": entry["workspace_id"],
+                "status": entry.get("status", "planned"), "message": entry.get("message", ""),
+                "plan_id": entry.get("plan_id"), "apply_id": entry.get("apply_id"),
+                "comments": list(entry.get("comments", [])),
+            }
+        for entry in spec.get("plans") or []:
+            self._plans[entry["id"]] = {
+                "run_id": entry.get("run_id"), "status": entry.get("status", "finished"),
+                "log": list(entry.get("log", [])), "json_output": entry.get("json_output", {}),
+            }
+        for entry in spec.get("applies") or []:
+            self._applies[entry["id"]] = {
+                "run_id": entry.get("run_id"), "status": entry.get("status", "finished"),
+                "log": list(entry.get("log", [])),
+            }
+        for entry in spec.get("state_versions") or []:
+            self._orgs.add(entry["org"])
+            key = (entry["org"], entry["workspace_id"])
+            self._state_versions.setdefault(key, []).append(
+                {"serial": entry.get("serial", len(self._state_versions.get(key, [])) + 1),
+                 "resources": list(entry.get("resources", []))})
+        for entry in spec.get("stacks") or []:
+            self._orgs.add(entry["org"])
+            self._stacks[(entry["org"], entry["id"])] = {"name": entry["name"]}
+        for entry in spec.get("sentinel_mocks") or []:
+            self._sentinel_mocks[entry["id"]] = {"data": entry.get("data", {})}
+        for entry in spec.get("tokens") or []:
+            self._tokens[entry["token"]] = {"permissions": entry.get("permissions", {})}
+        for key, cfg in (spec.get("providers") or {}).items():
+            self._providers[key] = {"latest_version": cfg.get("latest_version", "1.0.0"),
+                                     "capabilities": list(cfg.get("capabilities", [])),
+                                     "docs": cfg.get("docs", "")}
+        for key, cfg in (spec.get("modules") or {}).items():
+            self._modules[key] = {"latest_version": cfg.get("latest_version", "1.0.0"), "docs": cfg.get("docs", "")}
+        for key, cfg in (spec.get("policies") or {}).items():
+            self._policies[key] = {"docs": cfg.get("docs", "")}
+        for entry in spec.get("private_modules") or []:
+            self._orgs.add(entry["org"])
+            self._private_modules[(entry["org"], entry["key"])] = {"docs": entry.get("docs", "")}
+        for entry in spec.get("private_providers") or []:
+            self._orgs.add(entry["org"])
+            self._private_providers[(entry["org"], entry["key"])] = {"docs": entry.get("docs", "")}
+
+    # ── internal helpers ────────────────────────────────────────────────
+
+    def _new_id(self, prefix: str) -> str:
+        result = f"{prefix}-{self._next_id}"
+        self._next_id += 1
+        return result
+
+    def _require_org(self, org: str) -> dict | None:
+        if org not in self._orgs:
+            return {"error": f"no such organization {org!r}"}
+        return None
+
+    def _require_workspace(self, org: str, workspace_id: str) -> dict | None:
+        if (org, workspace_id) not in self._workspaces:
+            return {"error": f"no such workspace {workspace_id!r} in org {org!r}"}
+        return None
+
+    @staticmethod
+    def _matches_query(query: str, target: str) -> bool:
+        """Real registry search is tokenized full-text search, not a single
+        whole-string substring check - live-verified: a model reasonably
+        searched with a natural multi-word phrase ("tag enforcement",
+        "internal platform") that was never going to substring-match a
+        hyphenated key like "hashicorp/require-tags" as one literal string.
+        Matching if ANY word of the query appears in the target is closer
+        to how a real search box behaves, and turns a search that silently
+        (and unfairly) returned nothing into one that finds the obvious
+        result."""
+        words = (query or "").lower().split()
+        if not words:
+            return True
+        target = target.lower()
+        return any(w in target for w in words)
+
+    def search_providers(self, query: str) -> dict:
+        return {"providers": sorted(k for k in self._providers if self._matches_query(query, k))}
+
+    def get_provider_details(self, namespace: str, name: str, version: str | None = None) -> dict:
+        p = self._providers.get(f"{namespace}/{name}")
+        if p is None:
+            return {"error": f"no such provider {namespace}/{name}"}
+        return {"namespace": namespace, "name": name, "version": version or p["latest_version"], "docs": p["docs"]}
+
+    def get_latest_provider_version(self, namespace: str, name: str) -> dict:
+        p = self._providers.get(f"{namespace}/{name}")
+        if p is None:
+            return {"error": f"no such provider {namespace}/{name}"}
+        return {"namespace": namespace, "name": name, "version": p["latest_version"]}
+
+    def get_provider_capabilities(self, namespace: str, name: str) -> dict:
+        p = self._providers.get(f"{namespace}/{name}")
+        if p is None:
+            return {"error": f"no such provider {namespace}/{name}"}
+        return {"namespace": namespace, "name": name, "capabilities": p["capabilities"]}
+
+    def search_modules(self, query: str) -> dict:
+        return {"modules": sorted(k for k in self._modules if self._matches_query(query, k))}
+
+    def get_module_details(self, namespace: str, name: str, provider: str) -> dict:
+        m = self._modules.get(f"{namespace}/{name}/{provider}")
+        if m is None:
+            return {"error": f"no such module {namespace}/{name}/{provider}"}
+        return {"namespace": namespace, "name": name, "provider": provider, "version": m["latest_version"], "docs": m["docs"]}
+
+    def get_latest_module_version(self, namespace: str, name: str, provider: str) -> dict:
+        m = self._modules.get(f"{namespace}/{name}/{provider}")
+        if m is None:
+            return {"error": f"no such module {namespace}/{name}/{provider}"}
+        return {"namespace": namespace, "name": name, "provider": provider, "version": m["latest_version"]}
+
+    def search_policies(self, query: str) -> dict:
+        return {"policies": sorted(k for k in self._policies if self._matches_query(query, k))}
+
+    def get_policy_details(self, namespace: str, name: str) -> dict:
+        p = self._policies.get(f"{namespace}/{name}")
+        if p is None:
+            return {"error": f"no such policy {namespace}/{name}"}
+        return {"namespace": namespace, "name": name, "docs": p["docs"]}
+
+    # ── orgs / projects / teams / tokens ────────────────────────────────
+
+    def list_terraform_orgs(self) -> dict:
+        return {"organizations": sorted(self._orgs)}
+
+    def list_terraform_projects(self, org: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        return {"projects": [{"id": pid, **p} for (o, pid), p in sorted(self._projects.items()) if o == org]}
+
+    def create_project(self, org: str, name: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        if any(o == org and p["name"] == name for (o, _), p in self._projects.items()):
+            return {"error": f"project {name!r} already exists in org {org!r}"}
+        project_id = self._new_id("prj")
+        self._projects[(org, project_id)] = {"name": name}
+        return {"id": project_id, "name": name}
+
+    def delete_project(self, org: str, project_id: str) -> dict:
+        key = (org, project_id)
+        if key not in self._projects:
+            return {"error": f"no such project {project_id!r} in org {org!r}"}
+        in_use = [wid for (o, wid), w in self._workspaces.items() if o == org and w.get("project_id") == project_id]
+        if in_use:
+            return {"error": f"project {project_id!r} still has workspace(s) {in_use} - remove them first"}
+        del self._projects[key]
+        return {"id": project_id, "deleted": True}
+
+    def list_teams(self, org: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        return {"teams": [{"id": tid, **t} for (o, tid), t in sorted(self._teams.items()) if o == org]}
+
+    def create_team(self, org: str, name: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        if any(o == org and t["name"] == name for (o, _), t in self._teams.items()):
+            return {"error": f"team {name!r} already exists in org {org!r}"}
+        team_id = self._new_id("team")
+        self._teams[(org, team_id)] = {"name": name}
+        return {"id": team_id, "name": name}
+
+    def get_token_permissions(self, token: str) -> dict:
+        t = self._tokens.get(token)
+        if t is None:
+            return {"error": f"no such token {token!r}"}
+        return {"token": token, "permissions": t["permissions"]}
+
+    # ── workspaces ───────────────────────────────────────────────────────
+
+    def list_workspaces(self, org: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        return {"workspaces": [{"id": wid, "name": w["name"], "locked": w["locked"]}
+                                for (o, wid), w in sorted(self._workspaces.items()) if o == org]}
+
+    def get_workspace_details(self, org: str, workspace_id: str) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        w = self._workspaces[(org, workspace_id)]
+        return {"id": workspace_id, "name": w["name"], "project_id": w["project_id"], "locked": w["locked"],
+                "tags": sorted(w["tags"]), "terraform_version": w["terraform_version"]}
+
+    def create_workspace(self, org: str, name: str, project_id: str | None = None,
+                          terraform_version: str | None = None) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        if project_id is not None and (org, project_id) not in self._projects:
+            return {"error": f"no such project {project_id!r} in org {org!r}"}
+        if any(o == org and w["name"] == name for (o, _), w in self._workspaces.items()):
+            return {"error": f"workspace {name!r} already exists in org {org!r}"}
+        workspace_id = self._new_id("ws")
+        self._workspaces[(org, workspace_id)] = {"name": name, "project_id": project_id, "locked": False,
+                                                   "tags": set(), "terraform_version": terraform_version or "1.9.0"}
+        return {"id": workspace_id, "name": name}
+
+    def update_workspace(self, org: str, workspace_id: str, name: str | None = None,
+                          terraform_version: str | None = None) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        w = self._workspaces[(org, workspace_id)]
+        if name is not None:
+            w["name"] = name
+        if terraform_version is not None:
+            w["terraform_version"] = terraform_version
+        return {"id": workspace_id, "name": w["name"], "terraform_version": w["terraform_version"]}
+
+    def delete_workspace_safely(self, org: str, workspace_id: str) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        if self._workspaces[(org, workspace_id)]["locked"]:
+            return {"error": f"workspace {workspace_id!r} is locked - unlock it first"}
+        del self._workspaces[(org, workspace_id)]
+        self._workspace_variables.pop((org, workspace_id), None)
+        return {"id": workspace_id, "deleted": True}
+
+    def force_unlock_workspace(self, org: str, workspace_id: str) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        if not self._workspaces[(org, workspace_id)]["locked"]:
+            return {"error": f"workspace {workspace_id!r} is not locked"}
+        self._workspaces[(org, workspace_id)]["locked"] = False
+        return {"id": workspace_id, "locked": False}
+
+    def create_workspace_tags(self, org: str, workspace_id: str, tags) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        self._workspaces[(org, workspace_id)]["tags"].update(self._as_list(tags))
+        return {"id": workspace_id, "tags": sorted(self._workspaces[(org, workspace_id)]["tags"])}
+
+    def read_workspace_tags(self, org: str, workspace_id: str) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        return {"id": workspace_id, "tags": sorted(self._workspaces[(org, workspace_id)]["tags"])}
+
+    # ── workspace variables ──────────────────────────────────────────────
+
+    def list_workspace_variables(self, org: str, workspace_id: str) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        variables = self._workspace_variables.get((org, workspace_id), {})
+        return {"variables": [{"id": vid, **v} for vid, v in sorted(variables.items())]}
+
+    def create_workspace_variable(self, org: str, workspace_id: str, key: str, value: str,
+                                   category: str = "terraform", sensitive: bool = False) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        variables = self._workspace_variables.setdefault((org, workspace_id), {})
+        if any(v["key"] == key for v in variables.values()):
+            return {"error": f"variable {key!r} already exists on workspace {workspace_id!r}"}
+        var_id = self._new_id("var")
+        variables[var_id] = {"key": key, "value": value, "category": category, "sensitive": sensitive}
+        return {"id": var_id, "key": key}
+
+    def update_workspace_variable(self, org: str, workspace_id: str, variable_id: str,
+                                   value: str | None = None, key: str | None = None) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        variables = self._workspace_variables.get((org, workspace_id), {})
+        if variable_id not in variables:
+            return {"error": f"no such variable {variable_id!r} on workspace {workspace_id!r}"}
+        if value is not None:
+            variables[variable_id]["value"] = value
+        if key is not None:
+            variables[variable_id]["key"] = key
+        return {"id": variable_id, **variables[variable_id]}
+
+    # ── variable sets ────────────────────────────────────────────────────
+
+    def list_variable_sets(self, org: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        return {"variable_sets": [{"id": vsid, "name": vs["name"]}
+                                   for (o, vsid), vs in sorted(self._variable_sets.items()) if o == org]}
+
+    def create_variable_set(self, org: str, name: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        if any(o == org and vs["name"] == name for (o, _), vs in self._variable_sets.items()):
+            return {"error": f"variable set {name!r} already exists in org {org!r}"}
+        varset_id = self._new_id("varset")
+        self._variable_sets[(org, varset_id)] = {"name": name, "variables": {}, "workspaces": set()}
+        return {"id": varset_id, "name": name}
+
+    def create_variable_in_variable_set(self, org: str, varset_id: str, key: str, value: str) -> dict:
+        vs = self._variable_sets.get((org, varset_id))
+        if vs is None:
+            return {"error": f"no such variable set {varset_id!r} in org {org!r}"}
+        if key in vs["variables"]:
+            return {"error": f"variable {key!r} already exists in variable set {varset_id!r}"}
+        vs["variables"][key] = value
+        return {"id": varset_id, "key": key}
+
+    def delete_variable_in_variable_set(self, org: str, varset_id: str, key: str) -> dict:
+        vs = self._variable_sets.get((org, varset_id))
+        if vs is None:
+            return {"error": f"no such variable set {varset_id!r} in org {org!r}"}
+        if key not in vs["variables"]:
+            return {"error": f"no such variable {key!r} in variable set {varset_id!r}"}
+        del vs["variables"][key]
+        return {"id": varset_id, "key": key, "deleted": True}
+
+    def attach_variable_set_to_workspaces(self, org: str, varset_id: str, workspace_ids) -> dict:
+        vs = self._variable_sets.get((org, varset_id))
+        if vs is None:
+            return {"error": f"no such variable set {varset_id!r} in org {org!r}"}
+        workspace_ids = self._as_list(workspace_ids)
+        missing = [wid for wid in workspace_ids if (org, wid) not in self._workspaces]
+        if missing:
+            return {"error": f"no such workspace(s) {missing} in org {org!r}"}
+        vs["workspaces"].update(workspace_ids)
+        return {"id": varset_id, "workspaces": sorted(vs["workspaces"])}
+
+    def detach_variable_set_from_workspaces(self, org: str, varset_id: str, workspace_ids) -> dict:
+        vs = self._variable_sets.get((org, varset_id))
+        if vs is None:
+            return {"error": f"no such variable set {varset_id!r} in org {org!r}"}
+        vs["workspaces"].difference_update(self._as_list(workspace_ids))
+        return {"id": varset_id, "workspaces": sorted(vs["workspaces"])}
+
+    # ── policy sets ──────────────────────────────────────────────────────
+
+    def list_workspace_policy_sets(self, org: str, workspace_id: str) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        attached = [{"id": psid, "name": ps["name"]} for (o, psid), ps in self._policy_sets.items()
+                    if o == org and workspace_id in ps["workspaces"]]
+        return {"policy_sets": attached}
+
+    def attach_policy_set_to_workspaces(self, org: str, policyset_id: str, workspace_ids) -> dict:
+        ps = self._policy_sets.get((org, policyset_id))
+        if ps is None:
+            return {"error": f"no such policy set {policyset_id!r} in org {org!r}"}
+        workspace_ids = self._as_list(workspace_ids)
+        missing = [wid for wid in workspace_ids if (org, wid) not in self._workspaces]
+        if missing:
+            return {"error": f"no such workspace(s) {missing} in org {org!r}"}
+        ps["workspaces"].update(workspace_ids)
+        return {"id": policyset_id, "workspaces": sorted(ps["workspaces"])}
+
+    # ── runs / plans / applies ───────────────────────────────────────────
+
+    def create_run(self, org: str, workspace_id: str, message: str | None = None) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        if self._workspaces[(org, workspace_id)]["locked"]:
+            return {"error": f"workspace {workspace_id!r} is locked - unlock it or wait for the pending run first"}
+        run_id = self._new_id("run")
+        plan_id = self._new_id("plan")
+        self._runs[run_id] = {"org": org, "workspace_id": workspace_id, "status": "planned",
+                               "message": message or "", "plan_id": plan_id, "apply_id": None, "comments": []}
+        self._plans[plan_id] = {"run_id": run_id, "status": "finished",
+                                 "log": ["Refreshing state...", "Plan: 1 to add, 0 to change, 0 to destroy."],
+                                 "json_output": {"resource_changes": [{"action": "create"}]}}
+        self._workspaces[(org, workspace_id)]["locked"] = True
+        return {"id": run_id, "plan_id": plan_id, "status": "planned"}
+
+    def list_runs(self, org: str, workspace_id: str) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        return {"runs": [{"id": rid, "status": r["status"]} for rid, r in sorted(self._runs.items())
+                          if r["org"] == org and r["workspace_id"] == workspace_id]}
+
+    def get_run_details(self, run_id: str) -> dict:
+        run = self._runs.get(run_id)
+        if run is None:
+            return {"error": f"no such run {run_id!r}"}
+        return {"id": run_id, **run}
+
+    def get_run_comments(self, run_id: str) -> dict:
+        run = self._runs.get(run_id)
+        if run is None:
+            return {"error": f"no such run {run_id!r}"}
+        return {"id": run_id, "comments": run["comments"]}
+
+    def action_run(self, run_id: str, action: str) -> dict:
+        run = self._runs.get(run_id)
+        if run is None:
+            return {"error": f"no such run {run_id!r}"}
+        if action == "apply":
+            if run["status"] != "planned":
+                return {"error": f"run {run_id!r} is not in a plannable-to-apply state (status={run['status']!r})"}
+            apply_id = self._new_id("apply")
+            self._applies[apply_id] = {"run_id": run_id, "status": "finished",
+                                        "log": ["Apply complete! Resources: 1 added, 0 changed, 0 destroyed."]}
+            run["apply_id"] = apply_id
+            run["status"] = "applied"
+            ws = self._workspaces.get((run["org"], run["workspace_id"]))
+            if ws:
+                ws["locked"] = False
+            key = (run["org"], run["workspace_id"])
+            versions = self._state_versions.setdefault(key, [])
+            versions.append({"serial": len(versions) + 1, "resources": ["mock_resource.this"]})
+            return {"id": run_id, "apply_id": apply_id, "status": "applied"}
+        if action in ("discard", "cancel"):
+            if run["status"] != "planned":
+                return {"error": f"run {run_id!r} cannot be {action}ed from status {run['status']!r}"}
+            run["status"] = "discarded" if action == "discard" else "canceled"
+            ws = self._workspaces.get((run["org"], run["workspace_id"]))
+            if ws:
+                ws["locked"] = False
+            return {"id": run_id, "status": run["status"]}
+        return {"error": f"unknown action {action!r} (expected apply, discard, or cancel)"}
+
+    def get_plan_details(self, plan_id: str) -> dict:
+        plan = self._plans.get(plan_id)
+        if plan is None:
+            return {"error": f"no such plan {plan_id!r}"}
+        return {"id": plan_id, "run_id": plan["run_id"], "status": plan["status"]}
+
+    def get_plan_json_output(self, plan_id: str) -> dict:
+        plan = self._plans.get(plan_id)
+        if plan is None:
+            return {"error": f"no such plan {plan_id!r}"}
+        return {"id": plan_id, "json_output": plan["json_output"]}
+
+    def get_plan_logs(self, plan_id: str) -> dict:
+        plan = self._plans.get(plan_id)
+        if plan is None:
+            return {"error": f"no such plan {plan_id!r}"}
+        return {"id": plan_id, "log": plan["log"]}
+
+    def get_apply_details(self, apply_id: str) -> dict:
+        apply = self._applies.get(apply_id)
+        if apply is None:
+            return {"error": f"no such apply {apply_id!r}"}
+        return {"id": apply_id, "run_id": apply["run_id"], "status": apply["status"]}
+
+    def get_apply_logs(self, apply_id: str) -> dict:
+        apply = self._applies.get(apply_id)
+        if apply is None:
+            return {"error": f"no such apply {apply_id!r}"}
+        return {"id": apply_id, "log": apply["log"]}
+
+    # ── state ────────────────────────────────────────────────────────────
+
+    def list_state_versions(self, org: str, workspace_id: str) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        return {"state_versions": self._state_versions.get((org, workspace_id), [])}
+
+    def get_state_version(self, org: str, workspace_id: str, serial: int | None = None) -> dict:
+        err = self._require_workspace(org, workspace_id)
+        if err:
+            return err
+        versions = self._state_versions.get((org, workspace_id), [])
+        if not versions:
+            return {"error": f"no state versions for workspace {workspace_id!r}"}
+        if serial is None:
+            return versions[-1]
+        for v in versions:
+            if v["serial"] == serial:
+                return v
+        return {"error": f"no such state version serial {serial!r} for workspace {workspace_id!r}"}
+
+    # ── stacks ───────────────────────────────────────────────────────────
+
+    def list_stacks(self, org: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        return {"stacks": [{"id": sid, "name": s["name"]} for (o, sid), s in sorted(self._stacks.items()) if o == org]}
+
+    def get_stack_details(self, org: str, stack_id: str) -> dict:
+        s = self._stacks.get((org, stack_id))
+        if s is None:
+            return {"error": f"no such stack {stack_id!r} in org {org!r}"}
+        return {"id": stack_id, "name": s["name"]}
+
+    # ── no-code workspaces / sentinel ────────────────────────────────────
+
+    def create_no_code_workspace(self, org: str, name: str, module_source: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        if any(o == org and w["name"] == name for (o, _), w in self._workspaces.items()):
+            return {"error": f"workspace {name!r} already exists in org {org!r}"}
+        workspace_id = self._new_id("ws")
+        self._workspaces[(org, workspace_id)] = {"name": name, "project_id": None, "locked": False,
+                                                   "tags": set(), "terraform_version": "1.9.0",
+                                                   "module_source": module_source}
+        return {"id": workspace_id, "name": name, "module_source": module_source}
+
+    def get_sentinel_mock(self, policy_id: str) -> dict:
+        m = self._sentinel_mocks.get(policy_id)
+        if m is None:
+            return {"error": f"no such sentinel mock {policy_id!r}"}
+        return {"id": policy_id, "data": m["data"]}
+
+    # ── private registry ─────────────────────────────────────────────────
+
+    def search_private_modules(self, org: str, query: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        return {"modules": sorted(k for (o, k) in self._private_modules if o == org and self._matches_query(query, k))}
+
+    def get_private_module_details(self, org: str, namespace: str, name: str, provider: str) -> dict:
+        key = f"{namespace}/{name}/{provider}"
+        m = self._private_modules.get((org, key))
+        if m is None:
+            return {"error": f"no such private module {key!r} in org {org!r}"}
+        return {"namespace": namespace, "name": name, "provider": provider, "docs": m["docs"]}
+
+    def search_private_providers(self, org: str, query: str) -> dict:
+        err = self._require_org(org)
+        if err:
+            return err
+        return {"providers": sorted(k for (o, k) in self._private_providers if o == org and self._matches_query(query, k))}
+
+    def get_private_provider_details(self, org: str, namespace: str, name: str) -> dict:
+        key = f"{namespace}/{name}"
+        p = self._private_providers.get((org, key))
+        if p is None:
+            return {"error": f"no such private provider {key!r} in org {org!r}"}
+        return {"namespace": namespace, "name": name, "docs": p["docs"]}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "org_count": len(self._orgs),
+            "project_count": len(self._projects),
+            "workspace_count": len(self._workspaces),
+            "workspaces": {f"{o}/{wid}": {"name": w["name"], "locked": w["locked"]}
+                            for (o, wid), w in sorted(self._workspaces.items())},
+            "run_count": len(self._runs),
+            "applied_run_count": sum(1 for r in self._runs.values() if r["status"] == "applied"),
+            "runs": {rid: {"status": r["status"]} for rid, r in sorted(self._runs.items())},
+            "state_version_counts": {f"{o}/{wid}": len(v) for (o, wid), v in sorted(self._state_versions.items())},
+            "variable_set_count": len(self._variable_sets),
+            "policy_set_count": len(self._policy_sets),
+            "team_count": len(self._teams),
+        }
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -3969,6 +4666,203 @@ _PACKAGE_REGISTRY_SCHEMAS: dict[str, dict] = {
         ["package", "from_version", "to_version"]),
 }
 
+_TERRAFORM_SCHEMAS: dict[str, dict] = {
+    "search_providers": _fn(
+        "search_providers", "Search the public Terraform Registry for providers.",
+        {"query": {"type": "string"}}, ["query"]),
+    "get_provider_details": _fn(
+        "get_provider_details", "Get documentation for a public provider.",
+        {"namespace": {"type": "string"}, "name": {"type": "string"},
+         "version": {"type": "string", "description": "Optional, defaults to latest."}},
+        ["namespace", "name"]),
+    "get_latest_provider_version": _fn(
+        "get_latest_provider_version", "Get the latest published version of a public provider.",
+        {"namespace": {"type": "string"}, "name": {"type": "string"}}, ["namespace", "name"]),
+    "get_provider_capabilities": _fn(
+        "get_provider_capabilities", "Get the capabilities a public provider declares.",
+        {"namespace": {"type": "string"}, "name": {"type": "string"}}, ["namespace", "name"]),
+    "search_modules": _fn(
+        "search_modules", "Search the public Terraform Registry for modules.",
+        {"query": {"type": "string"}}, ["query"]),
+    "get_module_details": _fn(
+        "get_module_details", "Get documentation for a public module.",
+        {"namespace": {"type": "string"}, "name": {"type": "string"}, "provider": {"type": "string"}},
+        ["namespace", "name", "provider"]),
+    "get_latest_module_version": _fn(
+        "get_latest_module_version", "Get the latest published version of a public module.",
+        {"namespace": {"type": "string"}, "name": {"type": "string"}, "provider": {"type": "string"}},
+        ["namespace", "name", "provider"]),
+    "search_policies": _fn(
+        "search_policies", "Search the public Terraform Registry for Sentinel policies.",
+        {"query": {"type": "string"}}, ["query"]),
+    "get_policy_details": _fn(
+        "get_policy_details", "Get documentation for a public Sentinel policy.",
+        {"namespace": {"type": "string"}, "name": {"type": "string"}}, ["namespace", "name"]),
+    "list_terraform_orgs": _fn("list_terraform_orgs", "List Terraform Cloud/Enterprise organizations.", {}, []),
+    "list_terraform_projects": _fn(
+        "list_terraform_projects", "List projects in an organization.",
+        {"org": {"type": "string"}}, ["org"]),
+    "create_project": _fn(
+        "create_project", "Create a new project in an organization.",
+        {"org": {"type": "string"}, "name": {"type": "string"}}, ["org", "name"]),
+    "delete_project": _fn(
+        "delete_project", "Delete a project. Refuses while it still has workspaces.",
+        {"org": {"type": "string"}, "project_id": {"type": "string"}}, ["org", "project_id"]),
+    "list_teams": _fn(
+        "list_teams", "List teams in an organization.",
+        {"org": {"type": "string"}}, ["org"]),
+    "create_team": _fn(
+        "create_team", "Create a new team in an organization.",
+        {"org": {"type": "string"}, "name": {"type": "string"}}, ["org", "name"]),
+    "get_token_permissions": _fn(
+        "get_token_permissions", "Get the permissions granted by an API token.",
+        {"token": {"type": "string"}}, ["token"]),
+    "list_workspaces": _fn(
+        "list_workspaces", "List workspaces in an organization.",
+        {"org": {"type": "string"}}, ["org"]),
+    "get_workspace_details": _fn(
+        "get_workspace_details", "Get a workspace's details.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}}, ["org", "workspace_id"]),
+    "create_workspace": _fn(
+        "create_workspace", "Create a new workspace.",
+        {"org": {"type": "string"}, "name": {"type": "string"},
+         "project_id": {"type": "string", "description": "Optional."},
+         "terraform_version": {"type": "string", "description": "Optional, defaults to a recent version."}},
+        ["org", "name"]),
+    "update_workspace": _fn(
+        "update_workspace", "Update a workspace's name or Terraform version.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"},
+         "name": {"type": "string"}, "terraform_version": {"type": "string"}},
+        ["org", "workspace_id"]),
+    "delete_workspace_safely": _fn(
+        "delete_workspace_safely", "Delete a workspace. Refuses while it's locked.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}}, ["org", "workspace_id"]),
+    "force_unlock_workspace": _fn(
+        "force_unlock_workspace", "Forcibly unlock a workspace. Refuses if it isn't locked.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}}, ["org", "workspace_id"]),
+    "create_workspace_tags": _fn(
+        "create_workspace_tags", "Add tags to a workspace.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"},
+         "tags": {"type": "array", "items": {"type": "string"}}},
+        ["org", "workspace_id", "tags"]),
+    "read_workspace_tags": _fn(
+        "read_workspace_tags", "List a workspace's tags.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}}, ["org", "workspace_id"]),
+    "list_workspace_variables": _fn(
+        "list_workspace_variables", "List a workspace's variables.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}}, ["org", "workspace_id"]),
+    "create_workspace_variable": _fn(
+        "create_workspace_variable", "Add a variable to a workspace. Refuses a duplicate key.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}, "key": {"type": "string"},
+         "value": {"type": "string"}, "category": {"type": "string", "enum": ["terraform", "env"], "description": "Optional, defaults to 'terraform'."},
+         "sensitive": {"type": "boolean", "description": "Optional, default false."}},
+        ["org", "workspace_id", "key", "value"]),
+    "update_workspace_variable": _fn(
+        "update_workspace_variable", "Update an existing workspace variable's key or value.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}, "variable_id": {"type": "string"},
+         "value": {"type": "string"}, "key": {"type": "string"}},
+        ["org", "workspace_id", "variable_id"]),
+    "list_variable_sets": _fn(
+        "list_variable_sets", "List variable sets in an organization.",
+        {"org": {"type": "string"}}, ["org"]),
+    "create_variable_set": _fn(
+        "create_variable_set", "Create a new variable set.",
+        {"org": {"type": "string"}, "name": {"type": "string"}}, ["org", "name"]),
+    "create_variable_in_variable_set": _fn(
+        "create_variable_in_variable_set", "Add a variable to a variable set.",
+        {"org": {"type": "string"}, "varset_id": {"type": "string"}, "key": {"type": "string"}, "value": {"type": "string"}},
+        ["org", "varset_id", "key", "value"]),
+    "delete_variable_in_variable_set": _fn(
+        "delete_variable_in_variable_set", "Remove a variable from a variable set.",
+        {"org": {"type": "string"}, "varset_id": {"type": "string"}, "key": {"type": "string"}},
+        ["org", "varset_id", "key"]),
+    "attach_variable_set_to_workspaces": _fn(
+        "attach_variable_set_to_workspaces", "Attach a variable set to one or more workspaces.",
+        {"org": {"type": "string"}, "varset_id": {"type": "string"},
+         "workspace_ids": {"type": "array", "items": {"type": "string"}}},
+        ["org", "varset_id", "workspace_ids"]),
+    "detach_variable_set_from_workspaces": _fn(
+        "detach_variable_set_from_workspaces", "Detach a variable set from one or more workspaces.",
+        {"org": {"type": "string"}, "varset_id": {"type": "string"},
+         "workspace_ids": {"type": "array", "items": {"type": "string"}}},
+        ["org", "varset_id", "workspace_ids"]),
+    "list_workspace_policy_sets": _fn(
+        "list_workspace_policy_sets", "List policy sets attached to a workspace.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}}, ["org", "workspace_id"]),
+    "attach_policy_set_to_workspaces": _fn(
+        "attach_policy_set_to_workspaces", "Attach a policy set to one or more workspaces.",
+        {"org": {"type": "string"}, "policyset_id": {"type": "string"},
+         "workspace_ids": {"type": "array", "items": {"type": "string"}}},
+        ["org", "policyset_id", "workspace_ids"]),
+    "create_run": _fn(
+        "create_run", "Start a new plan run on a workspace. Refuses if the workspace is already locked by a pending run.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}, "message": {"type": "string"}},
+        ["org", "workspace_id"]),
+    "list_runs": _fn(
+        "list_runs", "List runs on a workspace.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}}, ["org", "workspace_id"]),
+    "get_run_details": _fn(
+        "get_run_details", "Get a run's details.",
+        {"run_id": {"type": "string"}}, ["run_id"]),
+    "get_run_comments": _fn(
+        "get_run_comments", "List comments on a run.",
+        {"run_id": {"type": "string"}}, ["run_id"]),
+    "action_run": _fn(
+        "action_run", "Apply, discard, or cancel a run. Applying refuses unless the run is in a plannable-to-apply state.",
+        {"run_id": {"type": "string"}, "action": {"type": "string", "enum": ["apply", "discard", "cancel"]}},
+        ["run_id", "action"]),
+    "get_plan_details": _fn(
+        "get_plan_details", "Get a plan's status.",
+        {"plan_id": {"type": "string"}}, ["plan_id"]),
+    "get_plan_json_output": _fn(
+        "get_plan_json_output", "Get a plan's structured JSON output.",
+        {"plan_id": {"type": "string"}}, ["plan_id"]),
+    "get_plan_logs": _fn(
+        "get_plan_logs", "Get a plan's log output.",
+        {"plan_id": {"type": "string"}}, ["plan_id"]),
+    "get_apply_details": _fn(
+        "get_apply_details", "Get an apply's status.",
+        {"apply_id": {"type": "string"}}, ["apply_id"]),
+    "get_apply_logs": _fn(
+        "get_apply_logs", "Get an apply's log output.",
+        {"apply_id": {"type": "string"}}, ["apply_id"]),
+    "list_state_versions": _fn(
+        "list_state_versions", "List state versions for a workspace.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"}}, ["org", "workspace_id"]),
+    "get_state_version": _fn(
+        "get_state_version", "Get a specific (or the latest) state version for a workspace.",
+        {"org": {"type": "string"}, "workspace_id": {"type": "string"},
+         "serial": {"type": "integer", "description": "Optional, defaults to the latest."}},
+        ["org", "workspace_id"]),
+    "list_stacks": _fn(
+        "list_stacks", "List stacks in an organization.",
+        {"org": {"type": "string"}}, ["org"]),
+    "get_stack_details": _fn(
+        "get_stack_details", "Get a stack's details.",
+        {"org": {"type": "string"}, "stack_id": {"type": "string"}}, ["org", "stack_id"]),
+    "create_no_code_workspace": _fn(
+        "create_no_code_workspace", "Create a new workspace from a no-code-ready module.",
+        {"org": {"type": "string"}, "name": {"type": "string"}, "module_source": {"type": "string"}},
+        ["org", "name", "module_source"]),
+    "get_sentinel_mock": _fn(
+        "get_sentinel_mock", "Get mock input data for testing a Sentinel policy.",
+        {"policy_id": {"type": "string"}}, ["policy_id"]),
+    "search_private_modules": _fn(
+        "search_private_modules", "Search an organization's private module registry.",
+        {"org": {"type": "string"}, "query": {"type": "string"}}, ["org", "query"]),
+    "get_private_module_details": _fn(
+        "get_private_module_details", "Get documentation for a private module.",
+        {"org": {"type": "string"}, "namespace": {"type": "string"}, "name": {"type": "string"}, "provider": {"type": "string"}},
+        ["org", "namespace", "name", "provider"]),
+    "search_private_providers": _fn(
+        "search_private_providers", "Search an organization's private provider registry.",
+        {"org": {"type": "string"}, "query": {"type": "string"}}, ["org", "query"]),
+    "get_private_provider_details": _fn(
+        "get_private_provider_details", "Get documentation for a private provider.",
+        {"org": {"type": "string"}, "namespace": {"type": "string"}, "name": {"type": "string"}},
+        ["org", "namespace", "name"]),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
@@ -3977,6 +4871,7 @@ MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "kubernetes": (KubernetesService, _KUBERNETES_SCHEMAS),
     "forge": (ForgeService, _FORGE_SCHEMAS),
     "package_registry": (PackageRegistryService, _PACKAGE_REGISTRY_SCHEMAS),
+    "terraform": (TerraformService, _TERRAFORM_SCHEMAS),
 }
 
 

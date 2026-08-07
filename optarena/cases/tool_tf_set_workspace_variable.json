@@ -1,0 +1,21 @@
+{
+  "name": "tool_tf_set_workspace_variable",
+  "description": "Check existing variables before adding a new one.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "variables"],
+  "tool_service": "terraform",
+  "tools": ["list_workspace_variables", "create_workspace_variable"],
+  "tool_service_seed": {
+    "orgs": ["acme"],
+    "workspaces": [{"org": "acme", "id": "prod", "name": "prod"}]
+  },
+  "prompts": [
+    "Check what variables are already set on the prod workspace in acme, then add a new one called 'region' with value 'us-east-1'."
+  ],
+  "expected_calls": [
+    {"tool": "list_workspace_variables", "arguments_contains": {"org": "acme", "workspace_id": "prod"}},
+    {"tool": "create_workspace_variable", "arguments_contains": {"org": "acme", "workspace_id": "prod", "key": "region", "value": "us-east-1"}}
+  ]
+}

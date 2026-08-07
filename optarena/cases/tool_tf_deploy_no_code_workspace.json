@@ -1,0 +1,22 @@
+{
+  "name": "tool_tf_deploy_no_code_workspace",
+  "description": "Deploy a workspace from a no-code-ready module.",
+  "task_type": "tool_use",
+  "domain": "terraform",
+  "difficulty": 1,
+  "tags": ["tool-use", "terraform", "no-code"],
+  "tool_service": "terraform",
+  "tools": ["create_no_code_workspace"],
+  "tool_service_seed": {
+    "orgs": ["acme"]
+  },
+  "prompts": [
+    "Deploy a new no-code workspace called 'quick-vpc' in acme, from the module terraform-aws-modules/vpc/aws."
+  ],
+  "expected_calls": [
+    {"tool": "create_no_code_workspace", "arguments_contains": {"org": "acme", "name": "quick-vpc", "module_source": "terraform-aws-modules/vpc/aws"}}
+  ],
+  "expected_final_state": {
+    "workspace_count": 1
+  }
+}
