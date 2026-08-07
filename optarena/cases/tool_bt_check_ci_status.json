@@ -1,0 +1,20 @@
+{
+  "name": "tool_bt_check_ci_status",
+  "description": "Check the Nx Cloud CI pipeline status for the current branch.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "ci"],
+  "tool_service": "build_tools",
+  "tools": ["ci_information"],
+  "tool_service_seed": {
+    "current_branch": "feature-login",
+    "cipes": {"feature-login": {"status": "success", "failed_tasks": []}}
+  },
+  "prompts": [
+    "What's the CI status for my current branch?"
+  ],
+  "expected_calls": [
+    {"tool": "ci_information"}
+  ]
+}

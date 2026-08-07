@@ -1,0 +1,21 @@
+{
+  "name": "tool_bt_apply_self_healing_fix",
+  "description": "Apply an Nx Cloud self-healing CI fix for the current branch.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "ci", "self-healing"],
+  "tool_service": "build_tools",
+  "tools": ["update_self_healing_fix"],
+  "tool_service_seed": {
+    "current_branch": "feature-login",
+    "cipes": {"feature-login": {"status": "failed", "failed_tasks": ["web-app:test"],
+                                 "fixes": [{"ai_fix_id": "fix-1", "short_link": "abc-def", "status": "pending"}]}}
+  },
+  "prompts": [
+    "Nx Cloud suggested a self-healing fix for the failing CI run on this branch. Apply it."
+  ],
+  "expected_calls": [
+    {"tool": "update_self_healing_fix", "arguments_contains": {"action": "APPLY"}}
+  ]
+}

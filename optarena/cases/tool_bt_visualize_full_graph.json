@@ -1,0 +1,16 @@
+{
+  "name": "tool_bt_visualize_full_graph",
+  "description": "Visualize the full repository-wide project graph.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "graph"],
+  "tool_service": "build_tools",
+  "tools": ["nx_visualize_graph"],
+  "prompts": [
+    "Show me the full project graph for this whole repository."
+  ],
+  "expected_calls": [
+    {"tool": "nx_visualize_graph", "arguments_contains": {"visualizationType": "full-project-graph"}}
+  ]
+}

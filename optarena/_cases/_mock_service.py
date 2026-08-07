@@ -4203,6 +4203,207 @@ class CIPipelineService(MockService):
         }
 
 
+class BuildToolsService(MockService):
+    """A mock Nx workspace plus Nx Cloud - all 13 tools the official
+    `nrwl/nx-console`'s bundled `nx-mcp` server registers (the real
+    constants in its `tool-names.ts`), extracted directly from its
+    source. No build-tool ecosystem surveyed this session (Gradle,
+    Maven, Bazel, Cargo, CMake, Python packaging, ...) had an official
+    or genuinely dominant real implementation - Nx is the one outlier,
+    official (Nrwl is the company behind Nx) and two orders of magnitude
+    more adopted than anything else found
+    (`DEV_NOTES/MCP_IMPLEMENTATION_GAPS.md` has the full survey). Its
+    real tool surface skews toward monorepo workspace *introspection*
+    (project graph, generators, task-run monitoring, Nx Cloud
+    self-healing CI) rather than directly triggering builds/tests - a
+    genuinely different shape of "build tool" server than Gradle's or
+    npm's, and this mock mirrors that shape faithfully rather than
+    inventing a `run_build` tool the real server doesn't have.
+    """
+
+    TOOLS = {name: name for name in (
+        "nx_docs", "nx_available_plugins", "nx_workspace", "nx_workspace_path",
+        "nx_project_details", "nx_generators", "nx_generator_schema", "nx_visualize_graph",
+        "nx_current_running_tasks_details", "nx_current_running_task_output",
+        "ci_information", "ci_task_output", "update_self_healing_fix",
+    )}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._workspace_path = ""
+        self._plugins: list[dict] = []
+        self._docs: dict[str, str] = {}
+        self._projects: dict[str, dict] = {}
+        self._dependencies: dict[str, list[str]] = {}
+        self._nx_json: dict = {}
+        self._generators: dict[str, dict] = {}
+        self._running_tasks: dict[str, dict] = {}
+        self._cipes: dict[str, dict] = {}
+        self._ci_task_outputs: dict[str, str] = {}
+        self._self_healing_fixes: dict[str, dict] = {}
+        self._short_link_index: dict[str, str] = {}
+        self._current_branch = "main"
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``workspace_path`` (str).
+        - ``current_branch`` (str, default "main") - used when a CI tool's
+          ``branch`` argument is omitted.
+        - ``plugins`` ([{name, description}, ...]).
+        - ``docs`` ({keyword: doc section text}) - matched via tokenized
+          substring search against ``nx_docs``'s ``userQuery``.
+        - ``projects`` ({name: {targets: {...}, tags: [...], root: ...}}).
+        - ``dependencies`` ({name: [dep project name, ...]}) - a dep not
+          present in ``projects`` counts as an external dependency.
+        - ``nx_json`` (dict, the workspace-level config).
+        - ``generators`` ({name: {description, schema}}).
+        - ``running_tasks`` ({taskId: {status, output, continuous}}).
+        - ``cipes`` ({branch: {cipe_url, status, failed_tasks: [...],
+          self_healing_status, fixes: [{ai_fix_id, short_link, status}]}}).
+        - ``ci_task_outputs`` ({taskId: output text}).
+        """
+        self._workspace_path = spec.get("workspace_path", self._workspace_path)
+        self._current_branch = spec.get("current_branch", self._current_branch)
+        for entry in spec.get("plugins") or []:
+            self._plugins.append(dict(entry))
+        for keyword, text in (spec.get("docs") or {}).items():
+            self._docs[keyword] = text
+        for name, cfg in (spec.get("projects") or {}).items():
+            self._projects[name] = {"targets": dict(cfg.get("targets", {})),
+                                     "tags": list(cfg.get("tags", [])),
+                                     "root": cfg.get("root", name)}
+        for name, deps in (spec.get("dependencies") or {}).items():
+            self._dependencies[name] = list(deps)
+        if "nx_json" in spec:
+            self._nx_json = dict(spec["nx_json"])
+        for name, cfg in (spec.get("generators") or {}).items():
+            self._generators[name] = {"description": cfg.get("description", ""),
+                                       "schema": cfg.get("schema", {})}
+        for tid, cfg in (spec.get("running_tasks") or {}).items():
+            self._running_tasks[tid] = {"status": cfg.get("status", "running"),
+                                         "output": cfg.get("output", ""),
+                                         "continuous": cfg.get("continuous", False)}
+        for branch, cfg in (spec.get("cipes") or {}).items():
+            fixes = {}
+            for fix in cfg.get("fixes") or []:
+                fid = fix["ai_fix_id"]
+                fixes[fid] = {"short_link": fix.get("short_link", ""), "status": fix.get("status", "pending")}
+                if fix.get("short_link"):
+                    self._short_link_index[fix["short_link"]] = fid
+                self._self_healing_fixes[fid] = {**fixes[fid], "branch": branch}
+            self._cipes[branch] = {"cipe_url": cfg.get("cipe_url", f"https://cloud.nx.app/cipes/{branch}"),
+                                    "status": cfg.get("status", "success"),
+                                    "failed_tasks": list(cfg.get("failed_tasks", [])),
+                                    "self_healing_status": cfg.get("self_healing_status", "none")}
+        for tid, text in (spec.get("ci_task_outputs") or {}).items():
+            self._ci_task_outputs[tid] = text
+
+    # ── tools ────────────────────────────────────────────────────────────
+
+    def nx_docs(self, userQuery: str) -> dict:
+        words = (userQuery or "").lower().split()
+        sections = [text for kw, text in self._docs.items() if any(w in kw.lower() for w in words)]
+        return {"sections": sections}
+
+    def nx_available_plugins(self) -> dict:
+        return {"plugins": list(self._plugins)}
+
+    def nx_workspace(self, filter=None, select=None, pageToken=None) -> dict:
+        names = sorted(self._projects)
+        if filter:
+            patterns = [p.strip().lower() for p in filter.split(",")]
+            names = [n for n in names if any(
+                p in n.lower() or p in [t.lower() for t in self._projects[n]["tags"]] for p in patterns)]
+        return {"projects": [{"name": n, **self._projects[n]} for n in names], "nxJson": self._nx_json}
+
+    def nx_workspace_path(self) -> dict:
+        return {"path": self._workspace_path or "No workspace path set"}
+
+    def nx_project_details(self, projectName: str, select=None, pageToken=None) -> dict:
+        if projectName not in self._projects:
+            return {"error": f"Project {projectName} not found"}
+        deps = self._dependencies.get(projectName, [])
+        project_deps = [d for d in deps if d in self._projects]
+        external_deps = [d for d in deps if d not in self._projects]
+        return {"name": projectName, **self._projects[projectName],
+                "projectDependencies": project_deps, "externalDependencies": external_deps}
+
+    def nx_generators(self) -> dict:
+        return {"generators": [{"name": n, "description": g["description"]} for n, g in sorted(self._generators.items())]}
+
+    def nx_generator_schema(self, generatorName: str) -> dict:
+        gen = self._generators.get(generatorName)
+        if gen is None:
+            return {"error": f"Generator {generatorName!r} not found"}
+        return {"name": generatorName, "schema": gen["schema"]}
+
+    def nx_visualize_graph(self, visualizationType: str, projectName=None, taskName=None) -> dict:
+        if visualizationType == "project":
+            if not projectName:
+                return {"error": "Project name is required"}
+            return {"visualizationType": visualizationType, "projectName": projectName}
+        if visualizationType == "project-task":
+            if not taskName:
+                return {"error": "Task name is required for task graph visualization"}
+            if not projectName:
+                return {"error": "Project name is required"}
+            return {"visualizationType": visualizationType, "projectName": projectName, "taskName": taskName}
+        if visualizationType == "full-project-graph":
+            return {"visualizationType": visualizationType}
+        return {"error": f"unknown visualizationType {visualizationType!r} "
+                          f"(expected project, project-task, or full-project-graph)"}
+
+    def nx_current_running_tasks_details(self) -> dict:
+        return {"tasks": [{"taskId": tid, **t} for tid, t in sorted(self._running_tasks.items())]}
+
+    def nx_current_running_task_output(self, taskId: str, pageToken=None) -> dict:
+        task = self._running_tasks.get(taskId)
+        if task is None:
+            task = next((t for tid, t in self._running_tasks.items() if taskId in tid), None)
+        if task is None:
+            return {"error": f"No task found with ID {taskId}"}
+        return {"taskId": taskId, **task}
+
+    def ci_information(self, url=None, branch=None, select=None, pageToken=None) -> dict:
+        key = branch or self._current_branch
+        cipe = self._cipes.get(key)
+        if cipe is None:
+            return {"error": f"no CI pipeline execution found for branch {key!r}"}
+        return {"branch": key, **cipe}
+
+    def ci_task_output(self, taskId: str, runId=None, url=None, branch=None, pageToken=None) -> dict:
+        output = self._ci_task_outputs.get(taskId)
+        if output is None:
+            return {"error": f"no CI task output found for task {taskId!r}"}
+        return {"taskId": taskId, "output": output}
+
+    def update_self_healing_fix(self, action: str, aiFixId=None, shortLink=None, branch=None) -> dict:
+        if action not in ("APPLY", "REJECT", "RERUN_ENVIRONMENT_STATE"):
+            return {"error": f"unknown action {action!r} (expected APPLY, REJECT, or RERUN_ENVIRONMENT_STATE)"}
+        fix_id = aiFixId
+        if not fix_id and shortLink:
+            fix_id = self._short_link_index.get(shortLink)
+        if not fix_id:
+            key = branch or self._current_branch
+            fix_id = next((fid for fid, f in self._self_healing_fixes.items() if f["branch"] == key), None)
+        if not fix_id or fix_id not in self._self_healing_fixes:
+            return {"error": "could not identify a self-healing fix from aiFixId, shortLink, or branch"}
+        self._self_healing_fixes[fix_id]["status"] = action
+        return {"aiFixId": fix_id, "action": action, "status": action}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "project_count": len(self._projects),
+            "generator_count": len(self._generators),
+            "fix_statuses": {fid: f["status"] for fid, f in sorted(self._self_healing_fixes.items())},
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -5488,6 +5689,70 @@ _CI_PIPELINE_SCHEMAS: dict[str, dict] = {
         ["csvFilePath"]),
 }
 
+_BUILD_TOOLS_SCHEMAS: dict[str, dict] = {
+    "nx_docs": _fn(
+        "nx_docs", "Returns documentation sections relevant to a query. Always use this before answering "
+        "questions about Nx rather than assuming knowledge about it.",
+        {"userQuery": {"type": "string"}}, ["userQuery"]),
+    "nx_available_plugins": _fn(
+        "nx_available_plugins", "List available Nx plugins from the core team and the local workspace.", {}, []),
+    "nx_workspace": _fn(
+        "nx_workspace", "Return the Nx project graph and nx.json workspace configuration.",
+        {"filter": {"type": "string", "description": "Optional. Filter which projects to include, e.g. project names, glob patterns, or tag:X."},
+         "select": {"type": "string", "description": "Optional dot-notation path to select specific properties."},
+         "pageToken": {"type": "integer", "description": "Optional pagination token."}},
+        []),
+    "nx_workspace_path": _fn(
+        "nx_workspace_path", "Return the path to the Nx workspace root.", {}, []),
+    "nx_project_details": _fn(
+        "nx_project_details", "Return the project configuration (targets, tags, dependencies) for a specific Nx project.",
+        {"projectName": {"type": "string"},
+         "select": {"type": "string", "description": "Optional dot-notation path, e.g. 'targets.build'."},
+         "pageToken": {"type": "integer", "description": "Optional pagination token."}},
+        ["projectName"]),
+    "nx_generators": _fn(
+        "nx_generators", "List all available Nx generators, both plugin-provided and local workspace generators.", {}, []),
+    "nx_generator_schema": _fn(
+        "nx_generator_schema", "Return the full JSON schema (options, types, defaults) for a specific Nx generator.",
+        {"generatorName": {"type": "string", "description": "Use the name from nx_generators."}}, ["generatorName"]),
+    "nx_visualize_graph": _fn(
+        "nx_visualize_graph", "Visualize the Nx project graph or task graph. 'project' requires projectName; "
+        "'project-task' requires both projectName and taskName; 'full-project-graph' requires neither.",
+        {"visualizationType": {"type": "string", "enum": ["project", "project-task", "full-project-graph"]},
+         "projectName": {"type": "string", "description": "Required for 'project' and 'project-task'."},
+         "taskName": {"type": "string", "description": "Required for 'project-task'."}},
+        ["visualizationType"]),
+    "nx_current_running_tasks_details": _fn(
+        "nx_current_running_tasks_details", "List currently running (or recently stopped) Nx CLI tasks.", {}, []),
+    "nx_current_running_task_output": _fn(
+        "nx_current_running_task_output", "Return the terminal output for a specific currently-running (or recently run) task.",
+        {"taskId": {"type": "string"}, "pageToken": {"type": "integer", "description": "Optional pagination token."}},
+        ["taskId"]),
+    "ci_information": _fn(
+        "ci_information", "Retrieve CI pipeline execution information from Nx Cloud for a branch (defaults to the current branch).",
+        {"url": {"type": "string", "description": "Optional Nx Cloud URL to resolve instead of branch."},
+         "branch": {"type": "string", "description": "Optional, defaults to the current git branch."},
+         "select": {"type": "string", "description": "Optional comma-separated field names to select."},
+         "pageToken": {"type": "integer", "description": "Optional pagination token."}},
+        []),
+    "ci_task_output": _fn(
+        "ci_task_output", "Retrieve the terminal output (logs) for a CI task.",
+        {"taskId": {"type": "string", "description": "e.g. 'myapp:build'."},
+         "runId": {"type": "string", "description": "Optional, fetches logs directly from this run if given."},
+         "url": {"type": "string", "description": "Optional Nx Cloud URL to resolve the run from."},
+         "branch": {"type": "string", "description": "Optional, defaults to the current git branch."},
+         "pageToken": {"type": "integer", "description": "Optional pagination token."}},
+        ["taskId"]),
+    "update_self_healing_fix": _fn(
+        "update_self_healing_fix", "Apply or reject a self-healing CI fix suggested by Nx Cloud. Identify the fix "
+        "via aiFixId, shortLink, or branch (defaults to the current branch).",
+        {"aiFixId": {"type": "string", "description": "Direct AI fix ID to apply or reject."},
+         "shortLink": {"type": "string", "description": "Human-readable short link for the fix."},
+         "branch": {"type": "string", "description": "Optional, defaults to the current git branch."},
+         "action": {"type": "string", "enum": ["APPLY", "REJECT", "RERUN_ENVIRONMENT_STATE"]}},
+        ["action"]),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
@@ -5499,6 +5764,7 @@ MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "terraform": (TerraformService, _TERRAFORM_SCHEMAS),
     "database": (DatabaseService, _DATABASE_SCHEMAS),
     "ci_pipeline": (CIPipelineService, _CI_PIPELINE_SCHEMAS),
+    "build_tools": (BuildToolsService, _BUILD_TOOLS_SCHEMAS),
 }
 
 

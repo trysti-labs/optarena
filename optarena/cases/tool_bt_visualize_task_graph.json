@@ -1,0 +1,19 @@
+{
+  "name": "tool_bt_visualize_task_graph",
+  "description": "Visualize the task graph for a specific project and task - requires both projectName and taskName.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 2,
+  "tags": ["tool-use", "build_tools", "graph", "precondition"],
+  "tool_service": "build_tools",
+  "tools": ["nx_visualize_graph"],
+  "tool_service_seed": {
+    "projects": {"web-app": {"targets": {"build": {"executor": "@nx/webpack:webpack"}}, "tags": []}}
+  },
+  "prompts": [
+    "Show me the task graph for the build task of web-app."
+  ],
+  "expected_calls": [
+    {"tool": "nx_visualize_graph", "arguments_contains": {"visualizationType": "project-task", "projectName": "web-app", "taskName": "build"}}
+  ]
+}

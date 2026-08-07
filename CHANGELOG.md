@@ -77,7 +77,16 @@ existed.
   project without naming which one, `run_rollback_pipeline` refuses a
   project with no rollback pipeline configured,
   `find_underused_resource_classes` refuses a CSV path never produced by
-  `download_usage_api_data`), 13 cases) - plus a
+  `download_usage_api_data`), 13 cases), and `build_tools` (all 13 tools
+  the official `nrwl/nx-console`'s bundled `nx-mcp` server registers -
+  docs search, plugin listing, project-graph/nx.json introspection,
+  per-project configuration and dependencies, generator discovery and
+  schemas, project/task-graph visualization, running-task monitoring, and
+  Nx Cloud CI pipeline status/logs/self-healing-fix management - several
+  enforcing real preconditions (`nx_visualize_graph`'s type-dependent
+  required parameters straight from the source, `update_self_healing_fix`
+  resolving a fix via ID/short-link/branch and refusing if none resolve),
+  13 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

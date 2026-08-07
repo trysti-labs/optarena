@@ -966,6 +966,59 @@ everything else here uses. A case is one domain or the other, never both -
     shown; here, it never asks for the ID at all).
   - Live-verified against `qwen3-coder:30b`: 12/13 passed, the one
     failure being the `explore_component_versions` finding above.
+- **`build_tools`** (`_cases/_mock_service.py`, `BuildToolsService`) - the
+  eleventh mock service, all 13 tools the official `nrwl/nx-console`'s
+  bundled `nx-mcp` server registers (the real constants in its
+  `tool-names.ts`), extracted directly from its source. No build-tool
+  ecosystem surveyed this session (Gradle, Maven, Bazel, Cargo, CMake,
+  Python packaging, Composer, NuGet, Go modules, sbt) had an official or
+  genuinely dominant real implementation - the closest was an unofficial
+  56-star Gradle server. Nx was the one outlier: official (Nrwl is the
+  company behind Nx), 1,409 stars on the server's parent repo (29,200 on
+  Nx itself) - two orders of magnitude more adopted than anything else
+  found (`DEV_NOTES/MCP_IMPLEMENTATION_GAPS.md` has the full survey).
+  Models a mock Nx workspace plus Nx Cloud: docs search, plugin listing,
+  project-graph/nx.json introspection, per-project configuration and
+  dependencies, generator discovery and schemas, project/task-graph
+  visualization, running-task monitoring, and Nx Cloud CI pipeline
+  status/logs/self-healing-fix management, across 13 example cases.
+  - **A genuinely different shape of "build tool" than every other real
+    implementation surveyed**: Nx's real tool surface skews toward
+    monorepo workspace *introspection* (what exists, how it's
+    configured, what's currently running) and Nx Cloud's CI
+    self-healing, not toward directly triggering a build/test/publish
+    the way Gradle's or npm's tools do - there is no `run_build`-style
+    tool in the real server at all, and the mock deliberately doesn't
+    invent one.
+  - Real preconditions enforced: `nx_project_details`/`nx_generator_schema`
+    refuse an unknown project/generator; `nx_visualize_graph` enforces
+    real type-dependent required parameters straight from the source
+    (`project` needs `projectName`; `project-task` needs both
+    `projectName` and `taskName`; `full-project-graph` needs neither);
+    `update_self_healing_fix` resolves a fix via `aiFixId`, `shortLink`,
+    or `branch` (defaulting to the current branch) and refuses if none
+    resolve - the same "identify via any of several channels" precondition
+    shape `ci_pipeline`'s project identification uses, applied to a
+    single tool instead of many.
+  - **A live-verified case-design bug, fixed at the source**: the real
+    `ci_information`'s `branch` parameter is designed to be *omitted* -
+    the real server auto-detects the current git branch locally when
+    it's not given. A case's prompt said "my CI run on this branch
+    failed" without naming the branch, and a model has no way to know
+    what "current branch" means without being told (unlike the real
+    server, which can inspect the actual local checkout) - so in 5/5 runs
+    it guessed the common default `"main"` instead of omitting the
+    parameter, a real precondition miss traced to the case never giving
+    the model what it needed to succeed. Fixed by naming the branch
+    explicitly in the prompt, the same "already told directly" pattern
+    used for forge's and package_registry's similar naming bugs.
+  - Live-verified against `qwen3-coder:30b` across two runs. First
+    (11/13, before the fix) surfaced the finding above plus one
+    empty-call-log failure; after the fix, a second confirmatory run
+    reached 13/13 - the empty-call-log failure did not reproduce on the
+    second run and was independently confirmed via direct replay (4/5
+    total across both runs and retries) as the already-known
+    malformed-tool-call-as-text quirk, not a new finding.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not

@@ -1,0 +1,20 @@
+{
+  "name": "tool_bt_check_running_task",
+  "description": "Check what tasks are currently running, then get the output for one of them.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "tasks"],
+  "tool_service": "build_tools",
+  "tools": ["nx_current_running_tasks_details", "nx_current_running_task_output"],
+  "tool_service_seed": {
+    "running_tasks": {"web-app:build": {"status": "running", "output": "Compiling modules..."}}
+  },
+  "prompts": [
+    "What Nx tasks are currently running? Show me the output of the build task once you find it."
+  ],
+  "expected_calls": [
+    {"tool": "nx_current_running_tasks_details"},
+    {"tool": "nx_current_running_task_output", "arguments_contains": {"taskId": "web-app:build"}}
+  ]
+}

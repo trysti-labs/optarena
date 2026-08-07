@@ -1,0 +1,23 @@
+{
+  "name": "tool_bt_inspect_project",
+  "description": "Get the configuration and dependencies of a specific project.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "project"],
+  "tool_service": "build_tools",
+  "tools": ["nx_project_details"],
+  "tool_service_seed": {
+    "projects": {
+      "web-app": {"targets": {"build": {"executor": "@nx/webpack:webpack"}}, "tags": ["type:app"]},
+      "ui-lib": {"targets": {"build": {"executor": "@nx/rollup:rollup"}}, "tags": ["type:lib"]}
+    },
+    "dependencies": {"web-app": ["ui-lib", "lodash"]}
+  },
+  "prompts": [
+    "Show me the configuration and dependencies for the web-app project."
+  ],
+  "expected_calls": [
+    {"tool": "nx_project_details", "arguments_contains": {"projectName": "web-app"}}
+  ]
+}

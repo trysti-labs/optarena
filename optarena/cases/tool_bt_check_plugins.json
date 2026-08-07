@@ -1,0 +1,19 @@
+{
+  "name": "tool_bt_check_plugins",
+  "description": "List the available Nx plugins in this workspace.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "plugins"],
+  "tool_service": "build_tools",
+  "tools": ["nx_available_plugins"],
+  "tool_service_seed": {
+    "plugins": [{"name": "@nx/react", "description": "React support for Nx"}, {"name": "@nx/webpack", "description": "Webpack support for Nx"}]
+  },
+  "prompts": [
+    "What Nx plugins are available in this workspace?"
+  ],
+  "expected_calls": [
+    {"tool": "nx_available_plugins"}
+  ]
+}

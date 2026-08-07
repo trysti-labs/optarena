@@ -1,0 +1,22 @@
+{
+  "name": "tool_bt_debug_ci_failure",
+  "description": "Check the CI status for the current branch, then get the logs for the failed task.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 2,
+  "tags": ["tool-use", "build_tools", "ci", "debugging"],
+  "tool_service": "build_tools",
+  "tools": ["ci_information", "ci_task_output"],
+  "tool_service_seed": {
+    "current_branch": "feature-login",
+    "cipes": {"feature-login": {"status": "failed", "failed_tasks": ["web-app:test"]}},
+    "ci_task_outputs": {"web-app:test": "FAIL: test_login - assertion error at auth_test.py:42"}
+  },
+  "prompts": [
+    "My CI run on the feature-login branch failed. Find out which task failed and show me its logs."
+  ],
+  "expected_calls": [
+    {"tool": "ci_information"},
+    {"tool": "ci_task_output", "arguments_contains": {"taskId": "web-app:test"}}
+  ]
+}

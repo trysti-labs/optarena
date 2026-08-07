@@ -1,0 +1,22 @@
+{
+  "name": "tool_bt_find_generator",
+  "description": "Find a generator for scaffolding a React component, then check its schema before using it.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "generators"],
+  "tool_service": "build_tools",
+  "tools": ["nx_generators", "nx_generator_schema"],
+  "tool_service_seed": {
+    "generators": {
+      "@nx/react:component": {"description": "Generate a React component", "schema": {"name": {"type": "string"}, "export": {"type": "boolean"}}}
+    }
+  },
+  "prompts": [
+    "I want to generate a new React component. Find the right generator and check what options it takes before I use it."
+  ],
+  "expected_calls": [
+    {"tool": "nx_generators"},
+    {"tool": "nx_generator_schema", "arguments_contains": {"generatorName": "@nx/react:component"}}
+  ]
+}

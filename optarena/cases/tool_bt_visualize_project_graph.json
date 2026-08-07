@@ -1,0 +1,19 @@
+{
+  "name": "tool_bt_visualize_project_graph",
+  "description": "Visualize the project graph focused on a single project.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "graph"],
+  "tool_service": "build_tools",
+  "tools": ["nx_visualize_graph"],
+  "tool_service_seed": {
+    "projects": {"web-app": {"targets": {}, "tags": []}}
+  },
+  "prompts": [
+    "Show me the project graph focused on web-app so I can understand its dependencies."
+  ],
+  "expected_calls": [
+    {"tool": "nx_visualize_graph", "arguments_contains": {"visualizationType": "project", "projectName": "web-app"}}
+  ]
+}

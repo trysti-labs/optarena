@@ -1,0 +1,20 @@
+{
+  "name": "tool_bt_reject_self_healing_fix_via_link",
+  "description": "Reject a self-healing CI fix identified by its short link.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "ci", "self-healing"],
+  "tool_service": "build_tools",
+  "tools": ["update_self_healing_fix"],
+  "tool_service_seed": {
+    "cipes": {"main": {"status": "failed", "failed_tasks": ["web-app:test"],
+                        "fixes": [{"ai_fix_id": "fix-1", "short_link": "xyz-789", "status": "pending"}]}}
+  },
+  "prompts": [
+    "Reject the self-healing fix at short link xyz-789 - it's not the right fix."
+  ],
+  "expected_calls": [
+    {"tool": "update_self_healing_fix", "arguments_contains": {"shortLink": "xyz-789", "action": "REJECT"}}
+  ]
+}

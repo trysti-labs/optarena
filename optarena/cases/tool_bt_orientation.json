@@ -1,0 +1,24 @@
+{
+  "name": "tool_bt_orientation",
+  "description": "Find the workspace root, then list the projects in it.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "orientation"],
+  "tool_service": "build_tools",
+  "tools": ["nx_workspace_path", "nx_workspace"],
+  "tool_service_seed": {
+    "workspace_path": "/home/user/monorepo",
+    "projects": {
+      "web-app": {"targets": {"build": {"executor": "@nx/webpack:webpack"}}, "tags": ["type:app"]},
+      "ui-lib": {"targets": {"build": {"executor": "@nx/rollup:rollup"}}, "tags": ["type:lib"]}
+    }
+  },
+  "prompts": [
+    "Where is the Nx workspace root, and what projects does it contain?"
+  ],
+  "expected_calls": [
+    {"tool": "nx_workspace_path"},
+    {"tool": "nx_workspace"}
+  ]
+}

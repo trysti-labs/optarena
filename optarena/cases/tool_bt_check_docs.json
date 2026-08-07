@@ -1,0 +1,19 @@
+{
+  "name": "tool_bt_check_docs",
+  "description": "Look up Nx documentation before answering a question about how targets work.",
+  "task_type": "tool_use",
+  "domain": "build_tools",
+  "difficulty": 1,
+  "tags": ["tool-use", "build_tools", "docs"],
+  "tool_service": "build_tools",
+  "tools": ["nx_docs"],
+  "tool_service_seed": {
+    "docs": {"targets": "Targets define runnable tasks like build, test, and lint for a project."}
+  },
+  "prompts": [
+    "How do targets work in Nx? Check the docs rather than guessing."
+  ],
+  "expected_calls": [
+    {"tool": "nx_docs"}
+  ]
+}
