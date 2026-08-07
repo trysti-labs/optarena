@@ -1,0 +1,20 @@
+{
+  "name": "tool_kube_helm_install_new_release",
+  "description": "Install a brand-new Helm release into a namespace that doesn't exist yet.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 1,
+  "tags": ["tool-use", "kubernetes", "helm", "install_helm_chart"],
+  "tool_service": "kubernetes",
+  "tools": ["install_helm_chart"],
+  "prompts": [
+    "Install the bitnami/postgresql chart as a release named db-release into the data namespace."
+  ],
+  "expected_calls": [
+    {"tool": "install_helm_chart", "arguments_contains": {"name": "db-release", "chart": "bitnami/postgresql", "namespace": "data"}}
+  ],
+  "expected_final_state": {
+    "helm_release_count": 1,
+    "namespaces": ["data", "default"]
+  }
+}

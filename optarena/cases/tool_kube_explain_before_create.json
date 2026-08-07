@@ -1,0 +1,20 @@
+{
+  "name": "tool_kube_explain_before_create",
+  "description": "Unsure what a CronJob even is - look up the resource type before creating one, rather than guessing at its shape blind.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 1,
+  "tags": ["tool-use", "kubernetes", "explain_resource", "kubectl_create"],
+  "tool_service": "kubernetes",
+  "tools": ["explain_resource", "kubectl_create"],
+  "prompts": [
+    "I'm not sure what fields a CronJob needs - look it up first, then create one called nightly-backup using image backup:latest."
+  ],
+  "expected_calls": [
+    {"tool": "explain_resource", "arguments_contains": {"resource": "cronjob"}},
+    {"tool": "kubectl_create", "arguments_contains": {"kind": "cronjob", "name": "nightly-backup", "image": "backup:latest"}}
+  ],
+  "expected_final_state": {
+    "resources": {"default/cronjob/nightly-backup": {"image": "backup:latest"}}
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "tool_kube_rollout_check_then_undo",
+  "description": "The last update to the web deployment broke something - check its rollout history before rolling it back, rather than guessing which revision to revert to.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 3,
+  "tags": ["tool-use", "kubernetes", "kubectl_rollout", "history", "undo"],
+  "tool_service": "kubernetes",
+  "tools": ["kubectl_rollout", "kubectl_get"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "deployment", "name": "web", "namespace": "default", "replicas": 3, "image": "app:v2",
+       "history": [{"revision": 1, "image": "app:v1"}, {"revision": 2, "image": "app:v2"}]}
+    ]
+  },
+  "prompts": [
+    "The last update to the web deployment broke something. Check its rollout history, then roll it back to the previous version."
+  ],
+  "expected_calls": [
+    {"tool": "kubectl_rollout", "arguments_contains": {"subcommand": "history", "name": "web"}},
+    {"tool": "kubectl_rollout", "arguments_contains": {"subcommand": "undo", "name": "web"}}
+  ],
+  "expected_final_state": {
+    "resources": {"default/deployment/web": {"image": "app:v1"}}
+  }
+}

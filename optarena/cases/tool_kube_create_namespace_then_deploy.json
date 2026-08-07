@@ -1,0 +1,21 @@
+{
+  "name": "tool_kube_create_namespace_then_deploy",
+  "description": "Deploy into a namespace that doesn't exist yet - the agent must create the namespace before the deployment, since kubectl_create refuses when the target namespace is missing.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "kubectl_create", "namespace", "ordering"],
+  "tool_service": "kubernetes",
+  "tools": ["kubectl_create", "kubectl_get"],
+  "prompts": [
+    "Set up a new namespace called staging, then create a deployment called web in it running image nginx:latest with 2 replicas."
+  ],
+  "expected_calls": [
+    {"tool": "kubectl_create", "arguments_contains": {"kind": "namespace", "name": "staging"}},
+    {"tool": "kubectl_create", "arguments_contains": {"kind": "deployment", "name": "web", "namespace": "staging", "image": "nginx:latest"}}
+  ],
+  "expected_final_state": {
+    "namespaces": ["default", "staging"],
+    "resources": {"staging/deployment/web": {"image": "nginx:latest", "replicas": 2}}
+  }
+}

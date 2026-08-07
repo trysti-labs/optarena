@@ -1,0 +1,27 @@
+{
+  "name": "tool_kube_apply_not_recreate",
+  "description": "The web deployment already exists - updating its image must use kubectl_apply (upsert), not kubectl_create, which would simply refuse the duplicate.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "kubectl_apply", "idempotent", "precondition"],
+  "tool_service": "kubernetes",
+  "tools": ["kubectl_apply", "kubectl_create", "kubectl_get"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "deployment", "name": "web", "namespace": "default", "replicas": 2, "image": "app:v1"}
+    ]
+  },
+  "prompts": [
+    "Update the web deployment to use image app:v2."
+  ],
+  "expected_calls": [
+    {"tool": "kubectl_apply", "arguments_contains": {"kind": "deployment", "name": "web", "image": "app:v2"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "kubectl_create", "arguments_contains": {"kind": "deployment", "name": "web"}}
+  ],
+  "expected_final_state": {
+    "resources": {"default/deployment/web": {"image": "app:v2"}}
+  }
+}

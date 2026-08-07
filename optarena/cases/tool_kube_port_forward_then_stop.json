@@ -1,0 +1,25 @@
+{
+  "name": "tool_kube_port_forward_then_stop",
+  "description": "Set up a port-forward for local testing, then tear it down once no longer needed instead of leaving it running.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "port_forward", "stop_port_forward"],
+  "tool_service": "kubernetes",
+  "tools": ["port_forward", "stop_port_forward"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "pod", "name": "web-1", "namespace": "default", "status": "Running"}
+    ]
+  },
+  "prompts": [
+    "Forward local port 9090 to port 80 on the web-1 pod so I can test it. I've confirmed it works now, so close that connection."
+  ],
+  "expected_calls": [
+    {"tool": "port_forward", "arguments_contains": {"name": "web-1", "local_port": 9090, "remote_port": 80}},
+    {"tool": "stop_port_forward"}
+  ],
+  "expected_final_state": {
+    "port_forward_count": 0
+  }
+}

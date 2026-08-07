@@ -1,0 +1,21 @@
+{
+  "name": "tool_kube_exec_healthcheck",
+  "description": "Run a health-check command inside a running pod.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 1,
+  "tags": ["tool-use", "kubernetes", "exec_in_pod"],
+  "tool_service": "kubernetes",
+  "tools": ["exec_in_pod"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "pod", "name": "web-1", "namespace": "default", "status": "Running"}
+    ]
+  },
+  "prompts": [
+    "Run 'curl -sf localhost:8080/health' inside the web-1 pod to check if it's healthy."
+  ],
+  "expected_calls": [
+    {"tool": "exec_in_pod", "arguments_contains": {"name": "web-1", "command": ["curl"]}}
+  ]
+}

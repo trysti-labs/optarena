@@ -1,0 +1,20 @@
+{
+  "name": "tool_kube_helm_template_deploy_and_teardown",
+  "description": "Deploy a chart via template rendering for a short-lived debugging session, then remove it the same way once done.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "helm", "helm_template_apply", "helm_template_uninstall"],
+  "tool_service": "kubernetes",
+  "tools": ["helm_template_apply", "helm_template_uninstall"],
+  "prompts": [
+    "Deploy the internal-tools chart via template rendering as a release called debug-tools in the ops namespace so I can test something. I've confirmed testing is done, so remove it the same way now."
+  ],
+  "expected_calls": [
+    {"tool": "helm_template_apply", "arguments_contains": {"name": "debug-tools", "chart": "internal-tools", "namespace": "ops"}},
+    {"tool": "helm_template_uninstall", "arguments_contains": {"name": "debug-tools", "namespace": "ops"}}
+  ],
+  "expected_final_state": {
+    "helm_release_count": 0
+  }
+}

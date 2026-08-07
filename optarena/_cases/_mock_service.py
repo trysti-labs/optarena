@@ -994,6 +994,502 @@ class DockerService(MockService):
         }
 
 
+class KubernetesService(MockService):
+    """A mock Kubernetes cluster plus Helm - 23 of the 24 tools the
+    reference `Flux159/mcp-server-kubernetes` implementation exposes,
+    catalogued (at an "~16+" estimate later confirmed low by reading the
+    actual source tree this session) in DEV_NOTES/TOOL_CATALOG_COMPLETE.md
+    §5. The one omission is deliberate: `kubectl_generic` takes an
+    arbitrary kubectl command string with no fixed shape - mocking it
+    honestly would mean either parsing arbitrary CLI syntax (turning this
+    into a shell simulator) or silently no-op'ing it, neither of which
+    tests anything - the same reasoning that keeps a raw-shell-exec tool
+    out of filesystem/docker.
+
+    Shares git_repo/docker's core skill under test - workflow discipline
+    over a stateful system with real preconditions - but adds two
+    dimensions neither prior service had: (1) a `namespace` scopes nearly
+    every call, so "did the agent operate on the right namespace" is
+    itself gradable; and (2) `kubectl_apply`/`helm_template_apply` UPSERT
+    while `kubectl_create`/`install_helm_chart` REFUSE a duplicate - a
+    real, sharp distinction (matching real kubectl/helm) an agent can get
+    wrong by reaching for the non-idempotent tool a second time, or by
+    never reaching for the namespace-scoped `kubectl_create(kind="namespace")`
+    at all before deploying into a namespace that doesn't exist yet.
+
+    Scope decision: manifests/patches are modeled as explicit keyword
+    fields (kind, name, namespace, replicas, image, labels) rather than a
+    raw YAML/JSON manifest blob - the same "explicit named params over an
+    opaque blob" choice DockerService made for `create_container`, and for
+    the same reason: an opaque blob isn't something `expected_calls` can
+    usefully assert against.
+
+    `kubectl_delete` on a namespace refuses while it still contains
+    resources or Helm releases - the same in-use precondition docker's
+    `remove_image`/`remove_volume` enforce - rather than a silent real-k8s-
+    style cascade, so "clean up what's inside first" has a real consequence
+    to test instead of being trivially bypassable.
+    """
+
+    TOOLS = {name: name for name in (
+        "kubectl_get", "kubectl_describe", "kubectl_create", "kubectl_apply",
+        "kubectl_delete", "kubectl_logs", "kubectl_context", "kubectl_scale",
+        "kubectl_patch", "kubectl_rollout",
+        "explain_resource", "list_api_resources",
+        "port_forward", "stop_port_forward", "exec_in_pod",
+        "install_helm_chart", "upgrade_helm_chart", "uninstall_helm_chart",
+        "helm_template_apply", "helm_template_uninstall",
+        "cleanup_pods", "node_management", "ping",
+    )}
+
+    _EXPLAIN_DOCS = {
+        "pod": "Pod: the smallest deployable unit - one or more containers sharing storage/network.",
+        "deployment": "Deployment: manages a replicated, self-healing set of Pods via a ReplicaSet.",
+        "statefulset": "StatefulSet: manages Pods with stable identities and persistent storage.",
+        "daemonset": "DaemonSet: ensures one Pod copy runs on every (or a subset of) node.",
+        "service": "Service: a stable network endpoint load-balancing across a set of Pods.",
+        "configmap": "ConfigMap: non-secret key/value configuration data for Pods to consume.",
+        "secret": "Secret: sensitive key/value data (credentials, tokens, keys) for Pods to consume.",
+        "job": "Job: runs Pods to completion for a finite task.",
+        "cronjob": "CronJob: runs a Job on a repeating schedule.",
+        "ingress": "Ingress: HTTP(S) routing rules exposing Services outside the cluster.",
+        "namespace": "Namespace: a virtual cluster partitioning names and resource scope.",
+    }
+
+    _SCALABLE_KINDS = {"deployment", "statefulset", "replicaset"}
+    _TERMINAL_POD_STATUSES = {"Error", "CrashLoopBackOff", "Completed", "Evicted"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._namespaces: set[str] = {"default"}
+        self._contexts: set[str] = {"default"}
+        self._current_context = "default"
+        self._nodes: dict[str, dict] = {"node-1": {"schedulable": True}}
+        self._resources: dict[tuple[str, str, str], dict] = {}   # (namespace, kind, name) -> resource
+        self._history: dict[tuple[str, str, str], list[dict]] = {}  # same key -> [{revision, image}, ...]
+        self._helm_releases: dict[tuple[str, str], dict] = {}     # (namespace, name) -> release
+        self._port_forwards: dict[str, dict] = {}
+        self._next_forward_id = 1
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``namespaces`` ([name, ...]): extra namespaces beyond "default".
+        - ``nodes`` ({name: {"schedulable": bool}}): extra/overridden nodes
+          beyond the always-present "node-1".
+        - ``resources`` ([{kind, name, namespace, replicas, image, status,
+          labels, node, logs, history}, ...]): pre-existing resources, as
+          if already applied - ``namespace`` defaults to "default",
+          ``status`` defaults to "Running" for pods. ``history`` ([{revision,
+          image}, ...]) pre-populates multi-revision rollout history
+          directly, for cases that need a real prior revision to roll back
+          to (``kubectl_rollout`` undo/history) - without it, a single
+          revision is synthesized from ``image`` alone, same as
+          git_repo's ``committed`` vs ``initial_commits`` distinction.
+        - ``helm_releases`` ([{name, namespace, chart, revision, values},
+          ...]): pre-existing releases, as if already installed.
+        - ``contexts`` ([name, ...]): extra kube contexts beyond "default"
+          (which is always the initially-current one).
+        """
+        for ns in spec.get("namespaces") or []:
+            self._namespaces.add(ns)
+        for name, cfg in (spec.get("nodes") or {}).items():
+            self._nodes[name] = {"schedulable": cfg.get("schedulable", True)}
+        for ctx in spec.get("contexts") or []:
+            self._contexts.add(ctx)
+        for entry in spec.get("resources") or []:
+            kind, name = entry["kind"], entry["name"]
+            namespace = entry.get("namespace", "default")
+            self._namespaces.add(namespace)
+            key = (namespace, kind, name)
+            self._resources[key] = {
+                "kind": kind, "name": name, "namespace": namespace,
+                "replicas": entry.get("replicas"), "image": entry.get("image"),
+                "status": entry.get("status", "Running" if kind == "pod" else None),
+                "labels": entry.get("labels", {}), "node": entry.get("node"),
+                "logs": list(entry.get("logs", [])),
+            }
+            history = entry.get("history")
+            if history:
+                self._history[key] = [dict(h) for h in history]
+            elif entry.get("image"):
+                self._history[key] = [{"revision": 1, "image": entry["image"]}]
+        for entry in spec.get("helm_releases") or []:
+            namespace = entry.get("namespace", "default")
+            self._namespaces.add(namespace)
+            self._helm_releases[(namespace, entry["name"])] = {
+                "chart": entry["chart"], "namespace": namespace,
+                "revision": entry.get("revision", 1), "values": entry.get("values", {}),
+            }
+
+    # ── internal helpers ────────────────────────────────────────────────
+
+    def _require_namespace(self, namespace: str) -> dict | None:
+        if namespace not in self._namespaces:
+            return {"error": f"no such namespace {namespace!r}"}
+        return None
+
+    def _require_resource(self, namespace: str, kind: str, name: str) -> dict | None:
+        if (namespace, kind, name) not in self._resources:
+            return {"error": f"no such {kind} {name!r} in namespace {namespace!r}"}
+        return None
+
+    def _bump_history(self, key: tuple[str, str, str], image: str | None) -> None:
+        if image is None:
+            return
+        history = self._history.setdefault(key, [])
+        if not history or history[-1]["image"] != image:
+            history.append({"revision": len(history) + 1, "image": image})
+
+    # ── core kubectl ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _without_logs(resource: dict) -> dict:
+        """Neither ``kubectl get`` nor ``kubectl describe`` ever surface a
+        container's actual log output in real Kubernetes - logs are streamed
+        live from the kubelet, not part of the resource object at all - only
+        ``kubectl_logs`` does. Live-verified this matters: with logs left in
+        (an earlier version of this method), a model investigating a failing
+        pod called only ``kubectl_describe`` and correctly found everything
+        it needed (including the log line proving the OOM), never calling
+        ``kubectl_logs`` at all - not a discipline failure, just this mock
+        handing over information no real ``describe`` call would give it."""
+        return {k: v for k, v in resource.items() if k != "logs"}
+
+    def kubectl_get(self, kind: str, name: str | None = None, namespace: str = "default",
+                     all_namespaces: bool = False, selector: dict | None = None) -> dict:
+        if kind == "namespace":
+            if name is not None:
+                if name not in self._namespaces:
+                    return {"error": f"no such namespace {name!r}"}
+                return {"kind": "namespace", "name": name}
+            return {"items": [{"kind": "namespace", "name": n} for n in sorted(self._namespaces)]}
+        if not all_namespaces:
+            err = self._require_namespace(namespace)
+            if err:
+                return err
+        if name is not None:
+            key = (namespace, kind, name)
+            if key not in self._resources:
+                return {"error": f"no such {kind} {name!r} in namespace {namespace!r}"}
+            return self._without_logs(self._resources[key])
+        items = [
+            self._without_logs(r) for (ns, k, _), r in self._resources.items()
+            if k == kind and (all_namespaces or ns == namespace)
+            and (not selector or all(r.get("labels", {}).get(sk) == sv for sk, sv in selector.items()))
+        ]
+        return {"items": items}
+
+    def kubectl_describe(self, kind: str, name: str, namespace: str = "default") -> dict:
+        if kind == "namespace":
+            if name not in self._namespaces:
+                return {"error": f"no such namespace {name!r}"}
+            resource_count = sum(1 for (ns, _, _) in self._resources if ns == name)
+            return {"kind": "namespace", "name": name, "resource_count": resource_count}
+        err = self._require_resource(namespace, kind, name)
+        if err:
+            return err
+        return self._without_logs(self._resources[(namespace, kind, name)])
+
+    def kubectl_create(self, kind: str, name: str, namespace: str = "default",
+                        replicas: int | None = None, image: str | None = None,
+                        labels: dict | None = None) -> dict:
+        if kind == "namespace":
+            if name in self._namespaces:
+                return {"error": f"namespace {name!r} already exists"}
+            self._namespaces.add(name)
+            return {"kind": "namespace", "name": name}
+        err = self._require_namespace(namespace)
+        if err:
+            return err
+        key = (namespace, kind, name)
+        if key in self._resources:
+            return {"error": f"{kind} {name!r} already exists in namespace {namespace!r} - use kubectl_apply to update it"}
+        self._resources[key] = {
+            "kind": kind, "name": name, "namespace": namespace, "replicas": replicas,
+            "image": image, "status": "Running" if kind == "pod" else None,
+            "labels": labels or {}, "node": None, "logs": [],
+        }
+        self._bump_history(key, image)
+        return dict(self._resources[key])
+
+    def kubectl_apply(self, kind: str, name: str, namespace: str = "default",
+                       replicas: int | None = None, image: str | None = None,
+                       labels: dict | None = None) -> dict:
+        if kind == "namespace":
+            self._namespaces.add(name)
+            return {"kind": "namespace", "name": name}
+        err = self._require_namespace(namespace)
+        if err:
+            return err
+        key = (namespace, kind, name)
+        existing = self._resources.get(key)
+        if existing is None:
+            self._resources[key] = {
+                "kind": kind, "name": name, "namespace": namespace, "replicas": replicas,
+                "image": image, "status": "Running" if kind == "pod" else None,
+                "labels": labels or {}, "node": None, "logs": [],
+            }
+        else:
+            if replicas is not None:
+                existing["replicas"] = replicas
+            if image is not None:
+                existing["image"] = image
+            if labels is not None:
+                existing["labels"] = labels
+        self._bump_history(key, image)
+        return dict(self._resources[key])
+
+    def kubectl_delete(self, kind: str, name: str, namespace: str = "default") -> dict:
+        if kind == "namespace":
+            if name not in self._namespaces:
+                return {"error": f"no such namespace {name!r}"}
+            if name == "default":
+                return {"error": "cannot delete the default namespace"}
+            in_use = [f"{k}/{n}" for (ns, k, n) in self._resources if ns == name] + \
+                     [f"helm/{n}" for (ns, n) in self._helm_releases if ns == name]
+            if in_use:
+                return {"error": f"namespace {name!r} still contains {in_use} - remove them first"}
+            self._namespaces.discard(name)
+            return {"kind": "namespace", "name": name, "deleted": True}
+        err = self._require_resource(namespace, kind, name)
+        if err:
+            return err
+        del self._resources[(namespace, kind, name)]
+        return {"kind": kind, "name": name, "namespace": namespace, "deleted": True}
+
+    def kubectl_logs(self, name: str, namespace: str = "default", container: str | None = None,
+                      tail: int | None = None) -> dict:
+        err = self._require_resource(namespace, "pod", name)
+        if err:
+            return err
+        logs = self._resources[(namespace, "pod", name)]["logs"]
+        if tail:
+            logs = logs[-int(tail):]
+        return {"name": name, "logs": logs}
+
+    def kubectl_context(self, operation: str = "get", name: str | None = None) -> dict:
+        if operation == "get":
+            return {"current_context": self._current_context}
+        if operation == "list":
+            return {"contexts": sorted(self._contexts)}
+        if operation == "use":
+            if name not in self._contexts:
+                return {"error": f"no such context {name!r}"}
+            self._current_context = name
+            return {"current_context": name}
+        return {"error": f"unknown operation {operation!r} (expected get, list, or use)"}
+
+    def kubectl_scale(self, name: str, replicas: int, kind: str = "deployment", namespace: str = "default") -> dict:
+        if kind not in self._SCALABLE_KINDS:
+            return {"error": f"{kind} is not scalable"}
+        err = self._require_resource(namespace, kind, name)
+        if err:
+            return err
+        self._resources[(namespace, kind, name)]["replicas"] = replicas
+        return {"kind": kind, "name": name, "namespace": namespace, "replicas": replicas}
+
+    def kubectl_patch(self, kind: str, name: str, patch: dict, namespace: str = "default") -> dict:
+        err = self._require_resource(namespace, kind, name)
+        if err:
+            return err
+        key = (namespace, kind, name)
+        resource = self._resources[key]
+        patch = patch or {}
+        for field in ("replicas", "image", "labels", "status"):
+            if field in patch:
+                resource[field] = patch[field]
+        if "image" in patch:
+            self._bump_history(key, patch["image"])
+        return dict(resource)
+
+    def kubectl_rollout(self, subcommand: str, name: str, kind: str = "deployment", namespace: str = "default") -> dict:
+        err = self._require_resource(namespace, kind, name)
+        if err:
+            return err
+        key = (namespace, kind, name)
+        history = self._history.get(key, [])
+        if subcommand == "status":
+            return {"kind": kind, "name": name,
+                    "status": "complete", "revision": history[-1]["revision"] if history else 0}
+        if subcommand == "history":
+            return {"kind": kind, "name": name, "history": list(history)}
+        if subcommand == "undo":
+            if len(history) < 2:
+                return {"error": f"no previous revision to undo to for {kind} {name!r}"}
+            history.pop()
+            self._resources[key]["image"] = history[-1]["image"]
+            return {"kind": kind, "name": name, "reverted_to_revision": history[-1]["revision"],
+                     "image": history[-1]["image"]}
+        if subcommand == "restart":
+            image = self._resources[key].get("image")
+            history.append({"revision": len(history) + 1, "image": image})
+            return {"kind": kind, "name": name, "restarted": True, "revision": history[-1]["revision"]}
+        return {"error": f"unknown subcommand {subcommand!r} (expected status, history, undo, or restart)"}
+
+    # ── resource info ────────────────────────────────────────────────────
+
+    def explain_resource(self, resource: str) -> dict:
+        doc = self._EXPLAIN_DOCS.get(resource.lower())
+        if doc is None:
+            return {"error": f"no documentation for resource {resource!r}"}
+        return {"resource": resource, "description": doc}
+
+    def list_api_resources(self) -> dict:
+        return {"resources": sorted(self._EXPLAIN_DOCS)}
+
+    # ── advanced ─────────────────────────────────────────────────────────
+
+    def port_forward(self, name: str, local_port: int, remote_port: int, namespace: str = "default") -> dict:
+        err = self._require_resource(namespace, "pod", name)
+        if err:
+            return err
+        if self._resources[(namespace, "pod", name)]["status"] != "Running":
+            return {"error": f"pod {name!r} is not Running"}
+        forward_id = f"pf{self._next_forward_id}"
+        self._next_forward_id += 1
+        self._port_forwards[forward_id] = {
+            "id": forward_id, "name": name, "namespace": namespace,
+            "local_port": local_port, "remote_port": remote_port,
+        }
+        return dict(self._port_forwards[forward_id])
+
+    def stop_port_forward(self, id: str) -> dict:
+        if id not in self._port_forwards:
+            return {"error": f"no such port-forward {id!r}"}
+        del self._port_forwards[id]
+        return {"id": id, "stopped": True}
+
+    def exec_in_pod(self, name: str, command, namespace: str = "default", container: str | None = None) -> dict:
+        err = self._require_resource(namespace, "pod", name)
+        if err:
+            return err
+        if self._resources[(namespace, "pod", name)]["status"] != "Running":
+            return {"error": f"pod {name!r} is not Running"}
+        command = self._as_list(command)
+        return {"name": name, "command": command, "output": f"<mock output of: {' '.join(command)}>"}
+
+    # ── helm ─────────────────────────────────────────────────────────────
+
+    def install_helm_chart(self, name: str, chart: str, namespace: str = "default",
+                            values: dict | None = None, create_namespace: bool = True) -> dict:
+        key = (namespace, name)
+        if key in self._helm_releases:
+            return {"error": f"release {name!r} already exists in namespace {namespace!r} - use upgrade_helm_chart"}
+        if namespace not in self._namespaces:
+            if not create_namespace:
+                return {"error": f"no such namespace {namespace!r} (create_namespace is false)"}
+            self._namespaces.add(namespace)
+        self._helm_releases[key] = {"chart": chart, "namespace": namespace, "revision": 1, "values": values or {}}
+        return dict(self._helm_releases[key])
+
+    def upgrade_helm_chart(self, name: str, chart: str, namespace: str = "default",
+                            values: dict | None = None) -> dict:
+        key = (namespace, name)
+        if key not in self._helm_releases:
+            return {"error": f"no such release {name!r} in namespace {namespace!r} - install it first"}
+        release = self._helm_releases[key]
+        release["chart"] = chart
+        release["revision"] += 1
+        if values is not None:
+            release["values"] = values
+        return dict(release)
+
+    def uninstall_helm_chart(self, name: str, namespace: str = "default") -> dict:
+        key = (namespace, name)
+        if key not in self._helm_releases:
+            return {"error": f"no such release {name!r} in namespace {namespace!r}"}
+        del self._helm_releases[key]
+        return {"name": name, "namespace": namespace, "uninstalled": True}
+
+    def helm_template_apply(self, name: str, chart: str, namespace: str = "default",
+                             values: dict | None = None) -> dict:
+        # Unlike install_helm_chart, template+apply is idempotent - it
+        # upserts instead of refusing a duplicate, the same
+        # kubectl_apply-vs-kubectl_create distinction at the Helm layer.
+        key = (namespace, name)
+        release = self._helm_releases.get(key)
+        if release is None:
+            self._namespaces.add(namespace)
+            self._helm_releases[key] = {"chart": chart, "namespace": namespace, "revision": 1, "values": values or {}}
+        else:
+            release["chart"] = chart
+            release["revision"] += 1
+            if values is not None:
+                release["values"] = values
+        return dict(self._helm_releases[key])
+
+    def helm_template_uninstall(self, name: str, namespace: str = "default") -> dict:
+        return self.uninstall_helm_chart(name, namespace)
+
+    # ── cleanup ──────────────────────────────────────────────────────────
+
+    def cleanup_pods(self, namespace: str = "default", all_namespaces: bool = False) -> dict:
+        removed = []
+        for key, resource in list(self._resources.items()):
+            ns, kind, name = key
+            if kind != "pod":
+                continue
+            if not all_namespaces and ns != namespace:
+                continue
+            if resource["status"] in self._TERMINAL_POD_STATUSES:
+                del self._resources[key]
+                removed.append({"namespace": ns, "name": name})
+        return {"removed": removed}
+
+    def node_management(self, operation: str, node_name: str, confirm_drain: bool = False) -> dict:
+        if node_name not in self._nodes:
+            return {"error": f"no such node {node_name!r}"}
+        if operation == "cordon":
+            self._nodes[node_name]["schedulable"] = False
+            return {"node": node_name, "schedulable": False}
+        if operation == "uncordon":
+            self._nodes[node_name]["schedulable"] = True
+            return {"node": node_name, "schedulable": True}
+        if operation == "drain":
+            if not confirm_drain:
+                return {"error": "drain is destructive - pass confirm_drain=true to proceed"}
+            self._nodes[node_name]["schedulable"] = False
+            evicted = []
+            for resource in self._resources.values():
+                if resource.get("kind") == "pod" and resource.get("node") == node_name:
+                    resource["status"] = "Evicted"
+                    resource["node"] = None
+                    evicted.append(resource["name"])
+            return {"node": node_name, "schedulable": False, "evicted_pods": sorted(evicted)}
+        return {"error": f"unknown operation {operation!r} (expected cordon, drain, or uncordon)"}
+
+    # ── connectivity ─────────────────────────────────────────────────────
+
+    def ping(self) -> dict:
+        return {"connected": True, "context": self._current_context}
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "namespace_count": len(self._namespaces),
+            "namespaces": sorted(self._namespaces),
+            "current_context": self._current_context,
+            "resource_count": len(self._resources),
+            "pod_count": sum(1 for (_, k, _) in self._resources if k == "pod"),
+            "running_pod_count": sum(
+                1 for (_, k, _), r in self._resources.items() if k == "pod" and r.get("status") == "Running"
+            ),
+            "helm_release_count": len(self._helm_releases),
+            "resources": {
+                f"{ns}/{kind}/{name}": {"status": r.get("status"), "replicas": r.get("replicas"), "image": r.get("image")}
+                for (ns, kind, name), r in sorted(self._resources.items())
+            },
+            "helm_releases": {
+                f"{ns}/{name}": {"chart": r["chart"], "revision": r["revision"]}
+                for (ns, name), r in sorted(self._helm_releases.items())
+            },
+            "node_schedulable": {n: v["schedulable"] for n, v in sorted(self._nodes.items())},
+            "port_forward_count": len(self._port_forwards),
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -1317,11 +1813,157 @@ _DOCKER_SCHEMAS: dict[str, dict] = {
         {}, []),
 }
 
+_KUBERNETES_SCHEMAS: dict[str, dict] = {
+    "kubectl_get": _fn(
+        "kubectl_get", "Get one resource by name, or list all resources of a kind in a namespace.",
+        {"kind": {"type": "string", "description": "Resource kind, e.g. 'pod', 'deployment', 'namespace'."},
+         "name": {"type": "string", "description": "Specific resource name (optional - omit to list)."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."},
+         "all_namespaces": {"type": "boolean", "description": "List across every namespace (optional)."},
+         "selector": {"type": "object", "description": "Label key/value filters to apply when listing (optional)."}},
+        ["kind"]),
+    "kubectl_describe": _fn(
+        "kubectl_describe", "Show detailed information about a specific resource.",
+        {"kind": {"type": "string", "description": "Resource kind."},
+         "name": {"type": "string", "description": "Resource name."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."}},
+        ["kind", "name"]),
+    "kubectl_create": _fn(
+        "kubectl_create", "Create a new resource. Refuses if one with the same kind/name/namespace already exists - use kubectl_apply to update it.",
+        {"kind": {"type": "string", "description": "Resource kind, e.g. 'deployment', 'pod', 'namespace'."},
+         "name": {"type": "string", "description": "Name for the new resource."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default'; must already exist)."},
+         "replicas": {"type": "integer", "description": "Replica count, for deployment/statefulset kinds (optional)."},
+         "image": {"type": "string", "description": "Container image (optional)."},
+         "labels": {"type": "object", "description": "Labels to attach (optional)."}},
+        ["kind", "name"]),
+    "kubectl_apply": _fn(
+        "kubectl_apply", "Create a resource if it doesn't exist, or update it in place if it does (idempotent).",
+        {"kind": {"type": "string", "description": "Resource kind, e.g. 'deployment', 'pod', 'namespace'."},
+         "name": {"type": "string", "description": "Resource name."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default'; must already exist)."},
+         "replicas": {"type": "integer", "description": "Replica count, for deployment/statefulset kinds (optional)."},
+         "image": {"type": "string", "description": "Container image (optional)."},
+         "labels": {"type": "object", "description": "Labels to attach (optional)."}},
+        ["kind", "name"]),
+    "kubectl_delete": _fn(
+        "kubectl_delete", "Delete a resource. Deleting a namespace refuses while it still contains resources or Helm releases.",
+        {"kind": {"type": "string", "description": "Resource kind."},
+         "name": {"type": "string", "description": "Resource name."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."}},
+        ["kind", "name"]),
+    "kubectl_logs": _fn(
+        "kubectl_logs", "Get a pod's log output.",
+        {"name": {"type": "string", "description": "Pod name."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."},
+         "container": {"type": "string", "description": "Specific container within the pod (optional)."},
+         "tail": {"type": "integer", "description": "Only return the last N lines (optional)."}},
+        ["name"]),
+    "kubectl_context": _fn(
+        "kubectl_context", "Get the current kubeconfig context, list all contexts, or switch to a different one.",
+        {"operation": {"type": "string", "enum": ["get", "list", "use"], "description": "What to do (defaults to 'get')."},
+         "name": {"type": "string", "description": "Context name (required for 'use')."}},
+        []),
+    "kubectl_scale": _fn(
+        "kubectl_scale", "Set the replica count for a deployment or statefulset.",
+        {"name": {"type": "string", "description": "Resource name."},
+         "replicas": {"type": "integer", "description": "Desired replica count."},
+         "kind": {"type": "string", "description": "Resource kind (defaults to 'deployment')."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."}},
+        ["name", "replicas"]),
+    "kubectl_patch": _fn(
+        "kubectl_patch", "Modify specific fields of an existing resource without replacing the whole thing.",
+        {"kind": {"type": "string", "description": "Resource kind."},
+         "name": {"type": "string", "description": "Resource name."},
+         "patch": {"type": "object", "description": "Fields to merge in, e.g. {\"replicas\": 3, \"image\": \"app:v2\"}."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."}},
+        ["kind", "name", "patch"]),
+    "kubectl_rollout": _fn(
+        "kubectl_rollout", "Control or inspect a deployment's rollout: status, history, undo (revert to the previous revision), or restart.",
+        {"subcommand": {"type": "string", "enum": ["status", "history", "undo", "restart"], "description": "Which rollout operation to perform."},
+         "name": {"type": "string", "description": "Resource name."},
+         "kind": {"type": "string", "description": "Resource kind (defaults to 'deployment')."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."}},
+        ["subcommand", "name"]),
+    "explain_resource": _fn(
+        "explain_resource", "Get documentation for a Kubernetes resource type.",
+        {"resource": {"type": "string", "description": "Resource kind to explain, e.g. 'pod' or 'deployment'."}},
+        ["resource"]),
+    "list_api_resources": _fn(
+        "list_api_resources", "List the resource kinds available in the cluster.",
+        {}, []),
+    "port_forward": _fn(
+        "port_forward", "Forward a local port to a running pod's port.",
+        {"name": {"type": "string", "description": "Pod to forward to."},
+         "local_port": {"type": "integer", "description": "Local port to listen on."},
+         "remote_port": {"type": "integer", "description": "Port on the pod to forward to."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."}},
+        ["name", "local_port", "remote_port"]),
+    "stop_port_forward": _fn(
+        "stop_port_forward", "Stop an active port-forward session by its id.",
+        {"id": {"type": "string", "description": "Id returned by port_forward."}},
+        ["id"]),
+    "exec_in_pod": _fn(
+        "exec_in_pod", "Execute a command inside a running pod's container.",
+        {"name": {"type": "string", "description": "Pod to execute in."},
+         "command": {"type": "array", "items": {"type": "string"}, "description": "Command and arguments to run."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."},
+         "container": {"type": "string", "description": "Specific container within the pod (optional)."}},
+        ["name", "command"]),
+    "install_helm_chart": _fn(
+        "install_helm_chart", "Install a new Helm release. Refuses if a release with this name already exists in the namespace - use upgrade_helm_chart to update it.",
+        {"name": {"type": "string", "description": "Name for the new release."},
+         "chart": {"type": "string", "description": "Chart name or path."},
+         "namespace": {"type": "string", "description": "Target namespace (defaults to 'default')."},
+         "values": {"type": "object", "description": "Values to override chart defaults (optional)."},
+         "create_namespace": {"type": "boolean", "description": "Create the namespace if it doesn't exist (optional, default true)."}},
+        ["name", "chart"]),
+    "upgrade_helm_chart": _fn(
+        "upgrade_helm_chart", "Upgrade an existing Helm release. Refuses if no release with this name exists yet - use install_helm_chart first.",
+        {"name": {"type": "string", "description": "Release name."},
+         "chart": {"type": "string", "description": "Chart name or path."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."},
+         "values": {"type": "object", "description": "Values to override chart defaults (optional)."}},
+        ["name", "chart"]),
+    "uninstall_helm_chart": _fn(
+        "uninstall_helm_chart", "Uninstall a Helm release.",
+        {"name": {"type": "string", "description": "Release name."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."}},
+        ["name"]),
+    "helm_template_apply": _fn(
+        "helm_template_apply", "Install or update a chart via template rendering + apply - unlike install_helm_chart, this upserts instead of refusing a duplicate.",
+        {"name": {"type": "string", "description": "Release name."},
+         "chart": {"type": "string", "description": "Chart name or path."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."},
+         "values": {"type": "object", "description": "Values to override chart defaults (optional)."}},
+        ["name", "chart"]),
+    "helm_template_uninstall": _fn(
+        "helm_template_uninstall", "Remove a chart that was installed via helm_template_apply.",
+        {"name": {"type": "string", "description": "Release name."},
+         "namespace": {"type": "string", "description": "Namespace (defaults to 'default')."}},
+        ["name"]),
+    "cleanup_pods": _fn(
+        "cleanup_pods", "Remove pods stuck in a terminal error state (Error, CrashLoopBackOff, Completed, Evicted).",
+        {"namespace": {"type": "string", "description": "Namespace to clean up (defaults to 'default')."},
+         "all_namespaces": {"type": "boolean", "description": "Clean up across every namespace (optional)."}},
+        []),
+    "node_management": _fn(
+        "node_management", "Cordon (mark unschedulable), drain (evict pods and mark unschedulable), or uncordon a node. Drain requires confirm_drain=true.",
+        {"operation": {"type": "string", "enum": ["cordon", "drain", "uncordon"], "description": "Which operation to perform."},
+         "node_name": {"type": "string", "description": "Node to operate on."},
+         "confirm_drain": {"type": "boolean", "description": "Required (true) to actually perform a drain (optional, default false)."}},
+        ["operation", "node_name"]),
+    "ping": _fn(
+        "ping", "Check connectivity to the cluster.",
+        {}, []),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
     "filesystem": (FilesystemService, _FILESYSTEM_SCHEMAS),
     "docker": (DockerService, _DOCKER_SCHEMAS),
+    "kubernetes": (KubernetesService, _KUBERNETES_SCHEMAS),
 }
 
 

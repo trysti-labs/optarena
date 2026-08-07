@@ -16,17 +16,25 @@ existed.
   on files written. Two new experimental baseline drivers run the real
   request → tool_call → execute-against-mock-service → feed-result-back loop:
   `openai-tools` (`/v1/chat/completions` tool_calls) and `ollama-tools`
-  (Ollama-native `/api/chat` tool_calls). Ships with four mock services -
+  (Ollama-native `/api/chat` tool_calls). Ships with five mock services -
   `task_tracker` (create/complete/list/delete, 5 cases), `git_repo` (all
   18 tools from the real MCP git-server ecosystem: status/add/reset/commit/
   diff variants/log/show/branch operations/blame/remotes/tags/push/pull,
   12 cases), `filesystem` (all 13 tools from the official MCP filesystem
   server: read/read-media/read-multiple, write, edit, create-directory,
   list/list-with-sizes, move, search, directory-tree, get-info,
-  list-allowed-directories, 13 cases), and `docker` (25 tools across
+  list-allowed-directories, 13 cases), `docker` (25 tools across
   containers/images/networks/volumes/system, several enforcing real
   Docker-like preconditions - can't remove a running container, can't
-  remove an image/volume still referenced - 15 cases) - plus a
+  remove an image/volume still referenced - 15 cases), and `kubernetes`
+  (23 of the 24 tools the reference `Flux159/mcp-server-kubernetes`
+  implementation exposes - kubectl get/describe/create/apply/delete/logs/
+  context/scale/patch/rollout, explain/list-api-resources, port-forward/
+  exec, Helm install/upgrade/uninstall/template, pod cleanup, node
+  cordon/drain/uncordon, ping - several enforcing real kubectl/Helm-like
+  preconditions (`kubectl_create`/`install_helm_chart` refuse a duplicate
+  while `kubectl_apply`/`helm_template_apply` upsert; draining a node
+  refuses without explicit confirmation), 19 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

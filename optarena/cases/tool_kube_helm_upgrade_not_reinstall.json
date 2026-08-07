@@ -1,0 +1,27 @@
+{
+  "name": "tool_kube_helm_upgrade_not_reinstall",
+  "description": "The cache release is already installed - updating it must use upgrade_helm_chart, not install_helm_chart, which would refuse the duplicate.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "helm", "upgrade_helm_chart", "precondition"],
+  "tool_service": "kubernetes",
+  "tools": ["upgrade_helm_chart", "install_helm_chart"],
+  "tool_service_seed": {
+    "helm_releases": [
+      {"name": "cache", "namespace": "default", "chart": "bitnami/redis", "revision": 1}
+    ]
+  },
+  "prompts": [
+    "Update the cache release to use a newer bitnami/redis chart version, with values replicaCount set to 3."
+  ],
+  "expected_calls": [
+    {"tool": "upgrade_helm_chart", "arguments_contains": {"name": "cache", "chart": "bitnami/redis"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "install_helm_chart", "arguments_contains": {"name": "cache"}}
+  ],
+  "expected_final_state": {
+    "helm_releases": {"default/cache": {"revision": 2}}
+  }
+}

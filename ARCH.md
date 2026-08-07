@@ -643,6 +643,62 @@ everything else here uses. A case is one domain or the other, never both -
     benchmark signal, none are case-design bugs (every case's dry-run
     ideal/wrong-trajectory pair in `tests/test_docker_cases.py` behaves
     correctly).
+- **`kubernetes`** (`_cases/_mock_service.py`, `KubernetesService`) - the
+  fifth mock service, 23 of the 24 tools the reference
+  `Flux159/mcp-server-kubernetes` implementation exposes
+  (`DEV_NOTES/TOOL_CATALOG_COMPLETE.md` §5, an "~16+" estimate later
+  confirmed low by reading the actual source tree this session): kubectl
+  get/describe/create/apply/delete/logs/context/scale/patch/rollout,
+  explain/list-api-resources, port-forward/stop-port-forward/exec, Helm
+  install/upgrade/uninstall/template-apply/template-uninstall, pod
+  cleanup, node cordon/drain/uncordon, and ping, across 19 example cases.
+  `kubectl_generic` (an arbitrary kubectl command string with no fixed
+  shape) is the one deliberate omission - mocking it honestly would mean
+  either parsing arbitrary CLI syntax or silently no-op'ing it, neither of
+  which tests anything, the same reasoning that keeps a raw-shell-exec
+  tool out of `filesystem`/`docker`.
+  - Shares `git_repo`/`docker`'s workflow-discipline skill under test, plus
+    two dimensions neither prior service had: a `namespace` scopes nearly
+    every call (so operating on the wrong namespace is itself gradable),
+    and `kubectl_apply`/`helm_template_apply` UPSERT while
+    `kubectl_create`/`install_helm_chart` REFUSE a duplicate - a real,
+    sharp distinction an agent can get wrong by reaching for the
+    non-idempotent tool a second time. Manifests/patches are modeled as
+    explicit keyword fields (kind, name, namespace, replicas, image,
+    labels) rather than a raw YAML/JSON blob, the same "explicit params
+    over an opaque blob" choice `DockerService` made for
+    `create_container`. Deleting a namespace refuses while it still
+    contains resources or Helm releases, the same in-use precondition
+    `remove_image`/`remove_volume` enforce, rather than a real-k8s-style
+    silent cascade.
+  - **A real mock-realism bug, caught live and fixed, not worked
+    around**: the first live run showed a model investigating a failing
+    pod call only `kubectl_describe`, never `kubectl_logs` - not a
+    discipline lapse, `kubectl_describe`'s result included the pod's raw
+    log lines, which no real `kubectl describe` ever surfaces (logs are
+    streamed live from the kubelet, never part of the resource object,
+    only `kubectl logs` returns them). Fixed by stripping `logs` from both
+    `kubectl_get`'s and `kubectl_describe`'s output at the source, not by
+    forcing the case to require a call that had become genuinely
+    redundant.
+  - **A real case-design bug, caught the same way**: a "deploy, then tear
+    it down" case phrased the teardown as conditional on future user
+    confirmation ("once I confirm it's done, remove it") - the model
+    correctly waited for that confirmation rather than assuming it,
+    replying "Let me know when you're ready to remove it." and stopping.
+    Fixed by rewording the prompt to state the confirmation had already
+    happened, the same pattern already used correctly in the
+    port-forward-then-stop case.
+  - **A new live-verified finding, not a bug**: given `kubectl_patch`'s
+    schema description with an explicit flat-shape example
+    (`{"replicas": 3, "image": "app:v2"}`), the model sometimes reached
+    instead for the real Kubernetes Deployment patch shape
+    (`{"spec": {"template": {"spec": {"containers": [{"image": ...}]}}}}`)
+    from its own training knowledge - substituting real-world API
+    structure for the tool's own documented (simplified) contract.
+    Confirmed non-deterministic (retries produced the flat form too) and
+    left as genuine benchmark signal, alongside a fourth reproduction of
+    the already-known malformed-tool-call-as-text quirk.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not
@@ -653,7 +709,8 @@ everything else here uses. A case is one domain or the other, never both -
   equivalent for a tool-calling trajectory yet, so the discriminating-oracle
   guarantee is enforced by unit tests (`tests/test_tool_use_cases.py`,
   `tests/test_git_repo_cases.py`, `tests/test_filesystem_cases.py`,
-  `tests/test_docker_cases.py`) today, not by a corpus-wide verify command.
+  `tests/test_docker_cases.py`, `tests/test_kubernetes_cases.py`) today,
+  not by a corpus-wide verify command.
   A case can only name ONE
   `tool_service` - a realistic workflow spanning two services (e.g. list a
   directory, then commit what's found with git) isn't expressible yet; see

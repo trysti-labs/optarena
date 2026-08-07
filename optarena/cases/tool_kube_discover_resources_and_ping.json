@@ -1,0 +1,17 @@
+{
+  "name": "tool_kube_discover_resources_and_ping",
+  "description": "A basic orientation task: what resource kinds does this cluster support, and is the connection actually alive.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 1,
+  "tags": ["tool-use", "kubernetes", "list_api_resources", "ping"],
+  "tool_service": "kubernetes",
+  "tools": ["list_api_resources", "ping"],
+  "prompts": [
+    "First check that the cluster connection is actually alive, then tell me what resource kinds it supports."
+  ],
+  "expected_calls": [
+    {"tool": "ping"},
+    {"tool": "list_api_resources"}
+  ]
+}

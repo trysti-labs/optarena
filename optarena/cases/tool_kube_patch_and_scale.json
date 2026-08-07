@@ -1,0 +1,25 @@
+{
+  "name": "tool_kube_patch_and_scale",
+  "description": "Two different kinds of change to the same deployment call for two different tools: a direct field patch for the image, and the dedicated scaling tool for replica count.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "kubectl_patch", "kubectl_scale"],
+  "tool_service": "kubernetes",
+  "tools": ["kubectl_patch", "kubectl_scale", "kubectl_apply"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "deployment", "name": "web", "namespace": "default", "replicas": 2, "image": "app:v1"}
+    ]
+  },
+  "prompts": [
+    "Directly patch the web deployment's image to app:v2, and separately scale it up to 5 replicas using the dedicated scaling command."
+  ],
+  "expected_calls": [
+    {"tool": "kubectl_patch", "arguments_contains": {"kind": "deployment", "name": "web", "patch": {"image": "app:v2"}}},
+    {"tool": "kubectl_scale", "arguments_contains": {"name": "web", "replicas": 5}}
+  ],
+  "expected_final_state": {
+    "resources": {"default/deployment/web": {"image": "app:v2", "replicas": 5}}
+  }
+}

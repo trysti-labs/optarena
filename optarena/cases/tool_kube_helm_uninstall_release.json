@@ -1,0 +1,24 @@
+{
+  "name": "tool_kube_helm_uninstall_release",
+  "description": "Remove a Helm release entirely.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 1,
+  "tags": ["tool-use", "kubernetes", "helm", "uninstall_helm_chart"],
+  "tool_service": "kubernetes",
+  "tools": ["uninstall_helm_chart"],
+  "tool_service_seed": {
+    "helm_releases": [
+      {"name": "cache", "namespace": "default", "chart": "bitnami/redis", "revision": 1}
+    ]
+  },
+  "prompts": [
+    "Remove the cache Helm release entirely - we don't need it anymore."
+  ],
+  "expected_calls": [
+    {"tool": "uninstall_helm_chart", "arguments_contains": {"name": "cache"}}
+  ],
+  "expected_final_state": {
+    "helm_release_count": 0
+  }
+}

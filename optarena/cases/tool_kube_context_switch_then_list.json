@@ -1,0 +1,23 @@
+{
+  "name": "tool_kube_context_switch_then_list",
+  "description": "Switch to the correct cluster context before listing resources in it, rather than querying whatever context happens to be active.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 1,
+  "tags": ["tool-use", "kubernetes", "kubectl_context"],
+  "tool_service": "kubernetes",
+  "tools": ["kubectl_context", "kubectl_get"],
+  "tool_service_seed": {
+    "contexts": ["staging"]
+  },
+  "prompts": [
+    "Switch to the staging cluster context, then list all pods there."
+  ],
+  "expected_calls": [
+    {"tool": "kubectl_context", "arguments_contains": {"operation": "use", "name": "staging"}},
+    {"tool": "kubectl_get", "arguments_contains": {"kind": "pod"}}
+  ],
+  "expected_final_state": {
+    "current_context": "staging"
+  }
+}

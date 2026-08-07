@@ -1,0 +1,24 @@
+{
+  "name": "tool_kube_drain_with_confirm",
+  "description": "Draining a node is destructive (evicts everything on it) - the tool refuses without explicit confirm_drain, so a correct agent must pass it rather than retry blindly or give up.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "node_management", "drain", "precondition"],
+  "tool_service": "kubernetes",
+  "tools": ["node_management"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "pod", "name": "web-1", "namespace": "default", "status": "Running", "node": "node-1"}
+    ]
+  },
+  "prompts": [
+    "We need to take node-1 down for maintenance. Drain it."
+  ],
+  "expected_calls": [
+    {"tool": "node_management", "arguments_contains": {"operation": "drain", "node_name": "node-1", "confirm_drain": true}}
+  ],
+  "expected_final_state": {
+    "node_schedulable": {"node-1": false}
+  }
+}

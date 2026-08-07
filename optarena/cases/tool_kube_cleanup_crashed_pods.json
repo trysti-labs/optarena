@@ -1,0 +1,27 @@
+{
+  "name": "tool_kube_cleanup_crashed_pods",
+  "description": "Clean up pods stuck in an error/completed state without touching the healthy one.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 1,
+  "tags": ["tool-use", "kubernetes", "cleanup_pods"],
+  "tool_service": "kubernetes",
+  "tools": ["cleanup_pods", "kubectl_get"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "pod", "name": "web-1", "namespace": "default", "status": "Running"},
+      {"kind": "pod", "name": "worker-1", "namespace": "default", "status": "CrashLoopBackOff"},
+      {"kind": "pod", "name": "migrate-job", "namespace": "default", "status": "Completed"}
+    ]
+  },
+  "prompts": [
+    "Clean up any pods stuck in an error or completed state in the default namespace."
+  ],
+  "expected_calls": [
+    {"tool": "cleanup_pods", "arguments_contains": {"namespace": "default"}}
+  ],
+  "expected_final_state": {
+    "pod_count": 1,
+    "running_pod_count": 1
+  }
+}

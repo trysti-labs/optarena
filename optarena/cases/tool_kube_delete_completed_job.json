@@ -1,0 +1,24 @@
+{
+  "name": "tool_kube_delete_completed_job",
+  "description": "A finished job is no longer needed - delete it after confirming it exists.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 1,
+  "tags": ["tool-use", "kubernetes", "kubectl_delete"],
+  "tool_service": "kubernetes",
+  "tools": ["kubectl_get", "kubectl_delete"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "job", "name": "batch-cleanup", "namespace": "default", "status": "Completed"}
+    ]
+  },
+  "prompts": [
+    "The batch-cleanup job finished running and is no longer needed - delete it."
+  ],
+  "expected_calls": [
+    {"tool": "kubectl_delete", "arguments_contains": {"kind": "job", "name": "batch-cleanup"}}
+  ],
+  "expected_final_state": {
+    "resource_count": 0
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "tool_kube_list_before_assuming",
+  "description": "Asked to scale a deployment that doesn't exist (only 'web' does) - the agent must check first and recognize there's nothing to scale, not guess or scale the wrong thing.",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "kubectl_get", "no-op-precondition"],
+  "tool_service": "kubernetes",
+  "tools": ["kubectl_get", "kubectl_scale"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "deployment", "name": "web", "namespace": "default", "replicas": 2, "image": "app:v1"}
+    ]
+  },
+  "prompts": [
+    "If there's a deployment called cache in the default namespace, scale it to 3 replicas. Otherwise just tell me there's nothing to do."
+  ],
+  "expected_calls": [
+    {"tool": "kubectl_get", "arguments_contains": {"kind": "deployment"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "kubectl_scale"}
+  ],
+  "expected_final_state": {
+    "resource_count": 1
+  }
+}

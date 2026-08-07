@@ -1,0 +1,28 @@
+{
+  "name": "tool_kube_cordon_not_drain",
+  "description": "Asked to stop new work landing on a node WITHOUT disturbing what's already running there - that's cordon, not drain (which would evict existing pods too).",
+  "task_type": "tool_use",
+  "domain": "kubernetes",
+  "difficulty": 2,
+  "tags": ["tool-use", "kubernetes", "node_management", "cordon"],
+  "tool_service": "kubernetes",
+  "tools": ["node_management"],
+  "tool_service_seed": {
+    "resources": [
+      {"kind": "pod", "name": "web-1", "namespace": "default", "status": "Running", "node": "node-1"}
+    ]
+  },
+  "prompts": [
+    "Mark node-1 as unschedulable for new pods, but don't disturb what's already running there."
+  ],
+  "expected_calls": [
+    {"tool": "node_management", "arguments_contains": {"operation": "cordon", "node_name": "node-1"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "node_management", "arguments_contains": {"operation": "drain"}}
+  ],
+  "expected_final_state": {
+    "node_schedulable": {"node-1": false},
+    "resources": {"default/pod/web-1": {"status": "Running"}}
+  }
+}
