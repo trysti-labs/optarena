@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_orientation",
+  "description": "Basic orientation: who am I, what teams exist in the org, who's on one of them, and does the org itself resolve.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "context", "organizations"],
+  "tool_service": "forge",
+  "tools": ["get_me", "get_teams", "get_team_members", "search_orgs"],
+  "tool_service_seed": {
+    "teams": {"acme/backend": ["alice", "bob"]},
+    "orgs": ["acme"]
+  },
+  "prompts": [
+    "Tell me who I'm authenticated as, list the teams in the acme organization, show me the members of the backend team, and confirm the acme organization can be found by search."
+  ],
+  "expected_calls": [
+    {"tool": "get_me"},
+    {"tool": "get_teams", "arguments_contains": {"org": "acme"}},
+    {"tool": "get_team_members", "arguments_contains": {"org": "acme", "team_slug": "backend"}},
+    {"tool": "search_orgs", "arguments_contains": {"query": "acme"}}
+  ]
+}

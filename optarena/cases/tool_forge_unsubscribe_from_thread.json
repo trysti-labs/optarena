@@ -1,0 +1,22 @@
+{
+  "name": "tool_forge_unsubscribe_from_thread",
+  "description": "Find the right notification thread before managing its subscription, not guess at an id.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "notifications"],
+  "tool_service": "forge",
+  "tools": ["list_notifications", "manage_notification_subscription"],
+  "tool_service_seed": {
+    "notifications": [
+      {"id": "n1", "owner": "acme", "repo": "webapp", "reason": "subscribed", "subject": "PR #2 discussion"}
+    ]
+  },
+  "prompts": [
+    "Find the notification thread about PR #2 in acme/webapp and unsubscribe from it entirely."
+  ],
+  "expected_calls": [
+    {"tool": "list_notifications", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "manage_notification_subscription", "arguments_contains": {"notification_id": "n1"}}
+  ]
+}

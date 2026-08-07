@@ -1,0 +1,22 @@
+{
+  "name": "tool_forge_find_commit_by_message",
+  "description": "Search commit history by message text.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories", "commits"],
+  "tool_service": "forge",
+  "tools": ["search_commits"],
+  "tool_service_seed": {
+    "commits": {"acme/webapp": {
+      "sha1": {"message": "Initial commit", "files": ["README.md"]},
+      "sha2": {"message": "Fix login bug", "files": ["app.py"]}
+    }}
+  },
+  "prompts": [
+    "Find the commit in acme/webapp that fixed the login bug."
+  ],
+  "expected_calls": [
+    {"tool": "search_commits", "arguments_contains": {"owner": "acme", "repo": "webapp", "query": "login"}}
+  ]
+}

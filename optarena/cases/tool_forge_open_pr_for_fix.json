@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_open_pr_for_fix",
+  "description": "Open a new pull request between two existing branches.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "pull-requests"],
+  "tool_service": "forge",
+  "tools": ["create_pull_request"],
+  "tool_service_seed": {
+    "branches": {"acme/webapp": {"feature-fix": "sha-fix-0"}}
+  },
+  "prompts": [
+    "Open a pull request in acme/webapp from feature-fix into main, titled 'Fix login crash'."
+  ],
+  "expected_calls": [
+    {"tool": "create_pull_request", "arguments_contains": {"owner": "acme", "repo": "webapp", "title": "Fix login crash", "head": "feature-fix", "base": "main"}}
+  ],
+  "expected_final_state": {
+    "pull_request_count": 1,
+    "open_pull_request_count": 1
+  }
+}

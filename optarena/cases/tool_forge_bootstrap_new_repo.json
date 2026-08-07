@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_bootstrap_new_repo",
+  "description": "Create a new private repository.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories"],
+  "tool_service": "forge",
+  "tools": ["create_repository"],
+  "prompts": [
+    "Create a new private repository called 'internal-tools'."
+  ],
+  "expected_calls": [
+    {"tool": "create_repository", "arguments_contains": {"name": "internal-tools", "private": true}}
+  ],
+  "expected_final_state": {
+    "repo_count": 1
+  }
+}

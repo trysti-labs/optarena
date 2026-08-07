@@ -1,0 +1,20 @@
+{
+  "name": "tool_forge_line_by_line_review",
+  "description": "Leave an inline comment on a pull request review, requiring a pending review to be open first.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 3,
+  "tags": ["tool-use", "forge", "pull-requests", "reviews", "pending-review"],
+  "tool_service": "forge",
+  "tools": ["pull_request_review_write", "add_comment_to_pending_review"],
+  "tool_service_seed": {
+    "pull_requests": [{"owner": "acme", "repo": "webapp", "number": 4, "title": "Refactor auth module"}]
+  },
+  "prompts": [
+    "Start a review on pull request #4 in acme/webapp, leave an inline comment on auth.py line 42 asking for a docstring, then submit the review as a plain comment (not an approval or a change request)."
+  ],
+  "expected_calls": [
+    {"tool": "add_comment_to_pending_review", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 4, "path": "auth.py", "line": 42}},
+    {"tool": "pull_request_review_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 4, "event": "COMMENT"}}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "tool_forge_no_duplicate_issue",
+  "description": "A matching issue already exists - search first and recognize it rather than filing a duplicate.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "issues", "no-op-precondition"],
+  "tool_service": "forge",
+  "tools": ["search_issues", "issue_write"],
+  "tool_service_seed": {
+    "issues": [{"owner": "acme", "repo": "webapp", "number": 5, "title": "App crashes when uploading large files"}]
+  },
+  "prompts": [
+    "A user reports the app crashes when uploading large files. Check if this has already been reported before filing a new issue."
+  ],
+  "expected_calls": [
+    {"tool": "search_issues"}
+  ],
+  "forbidden_calls": [
+    {"tool": "issue_write"}
+  ]
+}

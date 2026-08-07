@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_find_repo_by_name",
+  "description": "Search for repositories by name.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories"],
+  "tool_service": "forge",
+  "tools": ["search_repositories"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}, "acme/api-server": {}}
+  },
+  "prompts": [
+    "Search for repositories with 'webapp' in the name."
+  ],
+  "expected_calls": [
+    {"tool": "search_repositories", "arguments_contains": {"query": "webapp"}}
+  ]
+}

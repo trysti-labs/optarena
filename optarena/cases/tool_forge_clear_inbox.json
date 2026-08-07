@@ -1,0 +1,25 @@
+{
+  "name": "tool_forge_clear_inbox",
+  "description": "Mark every notification as read in one action.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "notifications"],
+  "tool_service": "forge",
+  "tools": ["mark_all_notifications_read"],
+  "tool_service_seed": {
+    "notifications": [
+      {"id": "n1", "owner": "acme", "repo": "webapp", "unread": true},
+      {"id": "n2", "owner": "acme", "repo": "api", "unread": true}
+    ]
+  },
+  "prompts": [
+    "Mark all my notifications as read."
+  ],
+  "expected_calls": [
+    {"tool": "mark_all_notifications_read"}
+  ],
+  "expected_final_state": {
+    "unread_notification_count": 0
+  }
+}

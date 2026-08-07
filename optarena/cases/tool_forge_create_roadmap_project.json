@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_create_roadmap_project",
+  "description": "Create a new project for an organization.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "projects"],
+  "tool_service": "forge",
+  "tools": ["projects_write"],
+  "prompts": [
+    "Create a new project called 'Q3 Roadmap' for the acme organization."
+  ],
+  "expected_calls": [
+    {"tool": "projects_write", "arguments_contains": {"owner": "acme", "title": "Q3 Roadmap"}}
+  ],
+  "expected_final_state": {
+    "project_count": 1
+  }
+}

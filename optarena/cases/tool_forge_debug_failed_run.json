@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_debug_failed_run",
+  "description": "Find the failed CI run, then get the job logs to see why - not guess at the cause.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "actions", "job-logs"],
+  "tool_service": "forge",
+  "tools": ["actions_list", "get_job_logs"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}},
+    "actions_runs": [{"owner": "acme", "repo": "webapp", "run_id": 5, "workflow_id": "ci.yml",
+                       "status": "completed", "conclusion": "failure",
+                       "jobs": [{"id": "job-1", "name": "test", "logs": ["running tests", "FAILED: test_foo"]}]}]
+  },
+  "prompts": [
+    "The last CI run for acme/webapp failed. Find it, then get the logs for its job to see why."
+  ],
+  "expected_calls": [
+    {"tool": "actions_list", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "get_job_logs", "arguments_contains": {"owner": "acme", "repo": "webapp", "job_id": "job-1"}}
+  ]
+}

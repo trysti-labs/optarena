@@ -1,0 +1,24 @@
+{
+  "name": "tool_forge_find_stale_prs",
+  "description": "List open pull requests, search more broadly for a keyword, then inspect the stale-looking one.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "pull-requests"],
+  "tool_service": "forge",
+  "tools": ["list_pull_requests", "search_pull_requests", "pull_request_read"],
+  "tool_service_seed": {
+    "pull_requests": [
+      {"owner": "acme", "repo": "webapp", "number": 8, "title": "Old WIP branch", "state": "open"},
+      {"owner": "acme", "repo": "webapp", "number": 9, "title": "Add pagination", "state": "open"}
+    ]
+  },
+  "prompts": [
+    "List all open pull requests in acme/webapp, search across all repos for any pull request mentioning 'WIP', and check the details of the stale-looking one."
+  ],
+  "expected_calls": [
+    {"tool": "list_pull_requests", "arguments_contains": {"owner": "acme", "repo": "webapp", "state": "open"}},
+    {"tool": "search_pull_requests", "arguments_contains": {"query": "WIP"}},
+    {"tool": "pull_request_read", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 8}}
+  ]
+}

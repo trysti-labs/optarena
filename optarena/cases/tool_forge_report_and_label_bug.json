@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_report_and_label_bug",
+  "description": "The bug label doesn't exist yet - create it before applying it to a new issue, not silently apply a label that isn't there.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "issues", "labels"],
+  "tool_service": "forge",
+  "tools": ["label_write", "issue_write", "list_label"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}}
+  },
+  "prompts": [
+    "File a new issue in acme/webapp titled 'Login button unresponsive on mobile'. There's no 'bug' label yet - create one (color d73a4a) and apply it to the new issue."
+  ],
+  "expected_calls": [
+    {"tool": "label_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "name": "bug", "color": "d73a4a"}},
+    {"tool": "issue_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "title": "Login button unresponsive on mobile", "labels": ["bug"]}}
+  ],
+  "expected_final_state": {
+    "labels": {"acme/webapp": {"bug": {"color": "d73a4a"}}}
+  }
+}

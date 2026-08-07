@@ -1,0 +1,26 @@
+{
+  "name": "tool_forge_triage_notifications",
+  "description": "Check unread notifications, look at one's details, then mark it read once reviewed.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "notifications"],
+  "tool_service": "forge",
+  "tools": ["list_notifications", "get_notification_details", "dismiss_notification"],
+  "tool_service_seed": {
+    "notifications": [
+      {"id": "n1", "owner": "acme", "repo": "webapp", "reason": "mention", "subject": "Issue #1", "unread": true}
+    ]
+  },
+  "prompts": [
+    "Check my unread notifications for acme/webapp, look at the details of the first one, and mark it as read once you've reviewed it."
+  ],
+  "expected_calls": [
+    {"tool": "list_notifications", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "get_notification_details", "arguments_contains": {"notification_id": "n1"}},
+    {"tool": "dismiss_notification", "arguments_contains": {"notification_id": "n1"}}
+  ],
+  "expected_final_state": {
+    "unread_notification_count": 0
+  }
+}

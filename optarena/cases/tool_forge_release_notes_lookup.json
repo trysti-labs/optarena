@@ -1,0 +1,24 @@
+{
+  "name": "tool_forge_release_notes_lookup",
+  "description": "Get the latest release, look up a specific one by tag, and list every release.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "repositories", "releases"],
+  "tool_service": "forge",
+  "tools": ["get_latest_release", "get_release_by_tag", "list_releases"],
+  "tool_service_seed": {
+    "releases": {"acme/webapp": {
+      "v1.0.0": {"name": "First stable release", "body": "...", "draft": false, "prerelease": false},
+      "v1.1.0": {"name": "Bug fixes", "body": "...", "draft": false, "prerelease": false}
+    }}
+  },
+  "prompts": [
+    "Get the release notes for the latest release of acme/webapp, look up v1.0.0 specifically, and list every release."
+  ],
+  "expected_calls": [
+    {"tool": "get_latest_release", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "get_release_by_tag", "arguments_contains": {"owner": "acme", "repo": "webapp", "tag": "v1.0.0"}},
+    {"tool": "list_releases", "arguments_contains": {"owner": "acme", "repo": "webapp"}}
+  ]
+}

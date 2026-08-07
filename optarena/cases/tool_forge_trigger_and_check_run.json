@@ -1,0 +1,20 @@
+{
+  "name": "tool_forge_trigger_and_check_run",
+  "description": "Trigger a workflow run, then check its status.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "actions"],
+  "tool_service": "forge",
+  "tools": ["actions_run_trigger", "actions_get"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}}
+  },
+  "prompts": [
+    "Trigger the ci.yml workflow on the main branch for acme/webapp, then check its status."
+  ],
+  "expected_calls": [
+    {"tool": "actions_run_trigger", "arguments_contains": {"owner": "acme", "repo": "webapp", "workflow_id": "ci.yml"}},
+    {"tool": "actions_get", "arguments_contains": {"owner": "acme", "repo": "webapp"}}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_mute_noisy_repo",
+  "description": "Mute notification for an entire repository.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "notifications"],
+  "tool_service": "forge",
+  "tools": ["manage_repository_notification_subscription"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}}
+  },
+  "prompts": [
+    "I'm getting too many notifications from acme/webapp. Mute notifications for that whole repository."
+  ],
+  "expected_calls": [
+    {"tool": "manage_repository_notification_subscription", "arguments_contains": {"owner": "acme", "repo": "webapp", "action": "ignore"}}
+  ]
+}

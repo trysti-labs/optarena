@@ -1,0 +1,20 @@
+{
+  "name": "tool_forge_comment_before_close",
+  "description": "Explain why an issue is being closed, not close it silently.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "issues"],
+  "tool_service": "forge",
+  "tools": ["add_issue_comment", "issue_write"],
+  "tool_service_seed": {
+    "issues": [{"owner": "acme", "repo": "webapp", "number": 4, "title": "Feature request: dark mode", "state": "open"}]
+  },
+  "prompts": [
+    "Close issue #4 in acme/webapp, but first leave a comment explaining why: it's not planned for this release."
+  ],
+  "expected_calls": [
+    {"tool": "add_issue_comment", "arguments_contains": {"owner": "acme", "repo": "webapp", "issue_number": 4}},
+    {"tool": "issue_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "issue_number": 4, "state": "closed"}}
+  ]
+}

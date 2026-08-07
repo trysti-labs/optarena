@@ -1,0 +1,20 @@
+{
+  "name": "tool_forge_request_copilot_pr_review",
+  "description": "Request a Copilot code review on an open pull request.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "copilot", "pull-requests"],
+  "tool_service": "forge",
+  "tools": ["request_copilot_review"],
+  "tool_service_seed": {
+    "pull_requests": [{"owner": "acme", "repo": "webapp", "number": 2, "title": "Add caching layer",
+                        "head": "feature-x", "base": "main"}]
+  },
+  "prompts": [
+    "Request a Copilot code review on pull request #2 in acme/webapp."
+  ],
+  "expected_calls": [
+    {"tool": "request_copilot_review", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 2}}
+  ]
+}

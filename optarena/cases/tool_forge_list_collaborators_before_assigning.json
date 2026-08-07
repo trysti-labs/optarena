@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_list_collaborators_before_assigning",
+  "description": "Check who has access to a repository before assigning work to them.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories", "collaborators"],
+  "tool_service": "forge",
+  "tools": ["list_repository_collaborators"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {"collaborators": {"alice": "admin", "bob": "write"}}}
+  },
+  "prompts": [
+    "Before assigning this issue to someone, check who has access to acme/webapp."
+  ],
+  "expected_calls": [
+    {"tool": "list_repository_collaborators", "arguments_contains": {"owner": "acme", "repo": "webapp"}}
+  ]
+}

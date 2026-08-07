@@ -1,0 +1,22 @@
+{
+  "name": "tool_forge_delegate_issue_with_intent",
+  "description": "Specific guidance was given for what Copilot should do - use the intent-carrying tool, not the bare assignment that would drop it.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "copilot"],
+  "tool_service": "forge",
+  "tools": ["assign_copilot_to_issue_with_intent", "assign_copilot_to_issue"],
+  "tool_service_seed": {
+    "issues": [{"owner": "acme", "repo": "webapp", "number": 1, "title": "Flaky test in CI"}]
+  },
+  "prompts": [
+    "Assign Copilot to issue #1 in acme/webapp, and tell it specifically to investigate flakiness in the CI pipeline rather than doing general triage."
+  ],
+  "expected_calls": [
+    {"tool": "assign_copilot_to_issue_with_intent", "arguments_contains": {"owner": "acme", "repo": "webapp", "issue_number": 1}}
+  ],
+  "forbidden_calls": [
+    {"tool": "assign_copilot_to_issue"}
+  ]
+}

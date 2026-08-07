@@ -1,0 +1,20 @@
+{
+  "name": "tool_forge_inspect_commit_history",
+  "description": "List commit history, then show the full details of one specific commit.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories", "commits"],
+  "tool_service": "forge",
+  "tools": ["list_commits", "get_commit"],
+  "tool_service_seed": {
+    "commits": {"acme/webapp": {"sha1": {"message": "Initial commit", "files": ["README.md"]}}}
+  },
+  "prompts": [
+    "List the commit history for acme/webapp, then show me the full details of the initial commit (sha1)."
+  ],
+  "expected_calls": [
+    {"tool": "list_commits", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "get_commit", "arguments_contains": {"owner": "acme", "repo": "webapp", "sha": "sha1"}}
+  ]
+}

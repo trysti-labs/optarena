@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_close_resolved_issue",
+  "description": "Check the issue's current details before closing it, not close blind by number alone.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "issues"],
+  "tool_service": "forge",
+  "tools": ["issue_read", "issue_write"],
+  "tool_service_seed": {
+    "issues": [{"owner": "acme", "repo": "webapp", "number": 3, "title": "Crash on login", "state": "open"}]
+  },
+  "prompts": [
+    "Check the details of issue #3 in acme/webapp, and since it's already been fixed, close it."
+  ],
+  "expected_calls": [
+    {"tool": "issue_read", "arguments_contains": {"owner": "acme", "repo": "webapp", "issue_number": 3}},
+    {"tool": "issue_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "issue_number": 3, "state": "closed"}}
+  ],
+  "expected_final_state": {
+    "issues": {"acme/webapp#3": {"state": "closed"}}
+  }
+}

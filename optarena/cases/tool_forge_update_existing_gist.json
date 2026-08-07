@@ -1,0 +1,21 @@
+{
+  "name": "tool_forge_update_existing_gist",
+  "description": "Find the right gist and check its current content before updating it - not guess at a gist id.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "gists"],
+  "tool_service": "forge",
+  "tools": ["list_gists", "get_gist", "update_gist"],
+  "tool_service_seed": {
+    "gists": [{"id": "gist1", "description": "debug helper", "files": {"debug.py": "print(1)"}, "public": true}]
+  },
+  "prompts": [
+    "Find my gist about the debug helper and update debug.py in it to print(2) instead of print(1)."
+  ],
+  "expected_calls": [
+    {"tool": "list_gists"},
+    {"tool": "get_gist", "arguments_contains": {"gist_id": "gist1"}},
+    {"tool": "update_gist", "arguments_contains": {"gist_id": "gist1"}}
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "tool_forge_investigate_specific_alert",
+  "description": "The alert numbers are already known (e.g. from a Slack ping) - go straight to the full-detail lookup for each, not a redundant list first.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "security"],
+  "tool_service": "forge",
+  "tools": ["get_code_scanning_alert", "get_dependabot_alert", "get_secret_scanning_alert"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}},
+    "code_scanning_alerts": [{"owner": "acme", "repo": "webapp", "number": 1, "rule": "sql-injection", "severity": "high", "state": "open"}],
+    "dependabot_alerts": [{"owner": "acme", "repo": "webapp", "number": 1, "package": "lodash", "severity": "high", "state": "open"}],
+    "secret_scanning_alerts": [{"owner": "acme", "repo": "webapp", "number": 1, "secret_type": "aws_key", "state": "open"}]
+  },
+  "prompts": [
+    "I was just pinged about three specific alerts in acme/webapp: code scanning alert #1, dependabot alert #1, and secret scanning alert #1. Get the full details on each."
+  ],
+  "expected_calls": [
+    {"tool": "get_code_scanning_alert", "arguments_contains": {"owner": "acme", "repo": "webapp", "alert_number": 1}},
+    {"tool": "get_dependabot_alert", "arguments_contains": {"owner": "acme", "repo": "webapp", "alert_number": 1}},
+    {"tool": "get_secret_scanning_alert", "arguments_contains": {"owner": "acme", "repo": "webapp", "alert_number": 1}}
+  ]
+}

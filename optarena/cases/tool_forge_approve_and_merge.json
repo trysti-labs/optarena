@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_approve_and_merge",
+  "description": "Approve a safe-looking pull request, then merge it.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "pull-requests", "reviews"],
+  "tool_service": "forge",
+  "tools": ["pull_request_review_write", "merge_pull_request"],
+  "tool_service_seed": {
+    "pull_requests": [{"owner": "acme", "repo": "webapp", "number": 3, "title": "Bump dependency version"}]
+  },
+  "prompts": [
+    "Review pull request #3 in acme/webapp - approve it since the change looks safe, then merge it."
+  ],
+  "expected_calls": [
+    {"tool": "pull_request_review_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 3, "event": "APPROVE"}},
+    {"tool": "merge_pull_request", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 3}}
+  ],
+  "expected_final_state": {
+    "merged_pull_request_count": 1
+  }
+}

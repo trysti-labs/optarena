@@ -699,6 +699,77 @@ everything else here uses. A case is one domain or the other, never both -
     Confirmed non-deterministic (retries produced the flat form too) and
     left as genuine benchmark signal, alongside a fourth reproduction of
     the already-known malformed-tool-call-as-text quirk.
+- **`forge`** (`_cases/_mock_service.py`, `ForgeService`) - the sixth mock
+  service and by far the largest, all 77 tools the official
+  `github/github-mcp-server` exposes across its 17 toolsets
+  (`DEV_NOTES/TOOL_CATALOG_COMPLETE.md` §3: Actions, Code Quality, Code
+  Security, Context, Copilot, Dependabot, Discussions, Gists, Git, Issues,
+  Labels, Notifications, Organizations, Projects, Pull Requests,
+  Repositories, Secret Protection), across 47 example cases. Every
+  repo-scoped tool takes explicit `owner`/`repo` params, same as the real
+  server - "did the agent operate on the right repo" is itself gradable,
+  the same role `namespace` plays for `KubernetesService`.
+  - **Two sharp create-vs-update/refuse-vs-upsert distinctions drive most
+    of the discipline testing here**: `issue_write`/`label_write`/
+    `projects_write` create when their id param is omitted and update (or
+    error on an unknown id) when it's given - a single tool covering both
+    shapes, unlike `kubectl_create` vs `kubectl_apply`'s two-tool split.
+    `merge_pull_request` refuses a draft, an already-merged/closed PR, or
+    one whose most recent review is an unresolved REQUEST_CHANGES not yet
+    superseded by an APPROVE. `pull_request_review_write` models GitHub's
+    real two-shape review flow: no `event` starts/resumes a pending
+    review that `add_comment_to_pending_review` can attach line comments
+    to (refusing if none is open); a real `event` submits it (or creates
+    one directly in one shot if none was pending) - the same workflow-
+    discipline skill `git_repo`'s "no commit without staging" tests.
+  - **Scope decision**: the same "explicit params over an opaque blob"
+    choice `DockerService` made for `create_container` applies to every
+    write tool here - manifests/file batches/patches are explicit keyword
+    fields, not raw JSON blobs, so `expected_calls` can usefully assert
+    against them. This catalog has no `kubectl_generic`-style catch-all
+    tool to exclude.
+  - **A real seeding-robustness bug, caught before any case was run
+    live**: the first implementation required a case to seed `repos`
+    explicitly even when it also seeded `issues`/`pull_requests`/etc. for
+    that same repo, silently making every repo-scoped tool refuse with
+    "no such repository" against state the case clearly intended to
+    exist. Fixed by having every repo-scoped seed section (`files`,
+    `branches`, `labels`, `tags`, `releases`, `commits`, `issues`,
+    `pull_requests`, `discussions`, `actions_runs`, and all three alert
+    kinds) auto-register a bare repo entry via a shared `_ensure_repo`
+    helper - the same "referencing it is enough to seed it" convenience
+    `DockerService`'s container seeding already gives images - rather
+    than requiring every case author to remember a redundant `repos` key.
+  - **A second real case-design bug, caught the same live run**: a
+    "security posture review" case required calling both
+    `list_code_scanning_alerts`/`list_dependabot_alerts`/
+    `list_secret_scanning_alerts` AND the matching single-item
+    `get_*_alert` tools - but this mock's list endpoints already return
+    each alert's full detail (rule, severity, state), the same as GitHub's
+    real list endpoints do, making a same-breath follow-up `get_*_alert`
+    call genuinely redundant, not a discipline lapse. Fixed by dropping
+    those three `get_*_alert` requirements from the case and adding a new
+    one (`tool_forge_investigate_specific_alert`) where the alert numbers
+    are already known up front (e.g. from a ping) - the realistic scenario
+    where a direct single-item lookup, not a list-then-get chain, is the
+    right call.
+  - **A third real case-design bug, same run**: `tool_forge_sub_issue_
+    breakdown`'s prompt never named a repo at all - the model reasonably
+    invented placeholder-looking values (`github/example-repo`) rather
+    than the seeded `acme/webapp`. Fixed by naming the repo explicitly in
+    the prompt, the most basic instance of the same "give the agent what
+    it needs to succeed" principle behind every other seeding/prompt fix
+    in this domain.
+  - Live-verified against `qwen3-coder:30b`: 39/46 on the run that
+    surfaced the two bugs above; after fixing both, the remaining
+    failures all trace to the already-known malformed-tool-call-as-text
+    quirk (confirmed via direct replay: 2/3 retries reproduced it
+    verbatim) plus one additional non-deterministic-but-benign pattern -
+    a multi-step prompt ("trigger it, then check its status") where the
+    model sometimes treats the first action as task-complete and offers
+    to check status "later" rather than continuing immediately; 3/3
+    direct retries completed both steps correctly, confirming genuine
+    sampling variance rather than a systematic gap.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not
@@ -709,8 +780,8 @@ everything else here uses. A case is one domain or the other, never both -
   equivalent for a tool-calling trajectory yet, so the discriminating-oracle
   guarantee is enforced by unit tests (`tests/test_tool_use_cases.py`,
   `tests/test_git_repo_cases.py`, `tests/test_filesystem_cases.py`,
-  `tests/test_docker_cases.py`, `tests/test_kubernetes_cases.py`) today,
-  not by a corpus-wide verify command.
+  `tests/test_docker_cases.py`, `tests/test_kubernetes_cases.py`,
+  `tests/test_forge_cases.py`) today, not by a corpus-wide verify command.
   A case can only name ONE
   `tool_service` - a realistic workflow spanning two services (e.g. list a
   directory, then commit what's found with git) isn't expressible yet; see

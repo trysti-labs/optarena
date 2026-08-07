@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_batch_update_files",
+  "description": "Create several files in a single commit rather than one call per file.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "repositories", "files"],
+  "tool_service": "forge",
+  "tools": ["push_files", "create_or_update_file"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}}
+  },
+  "prompts": [
+    "In one commit to the main branch of acme/webapp, create two new files: config/dev.yaml with content 'debug: true' and config/prod.yaml with content 'debug: false'. Use the commit message 'Add environment configs'."
+  ],
+  "expected_calls": [
+    {"tool": "push_files", "arguments_contains": {"owner": "acme", "repo": "webapp", "branch": "main",
+                                                   "files": {"config/dev.yaml": "debug: true", "config/prod.yaml": "debug: false"}}}
+  ],
+  "expected_final_state": {
+    "files": {"acme/webapp": {"config/dev.yaml": "debug: true", "config/prod.yaml": "debug: false"}}
+  }
+}

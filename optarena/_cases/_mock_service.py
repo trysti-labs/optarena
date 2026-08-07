@@ -1490,6 +1490,990 @@ class KubernetesService(MockService):
         }
 
 
+class ForgeService(MockService):
+    """A mock issue/PR forge (GitHub-MCP-inspired) - all 77 tools the
+    official `github/github-mcp-server` exposes across its 17 toolsets
+    (`DEV_NOTES/TOOL_CATALOG_COMPLETE.md` §3: Actions, Code Quality, Code
+    Security, Context, Copilot, Dependabot, Discussions, Gists, Git,
+    Issues, Labels, Notifications, Organizations, Projects, Pull Requests,
+    Repositories, Secret Protection).
+
+    Every repo-scoped tool takes explicit ``owner``/``repo`` params, same
+    as the real server - "did the agent operate on the right repo" is
+    itself gradable, the same role `namespace` plays for
+    `KubernetesService`. File/commit/tree content is modeled as a flat
+    ``{path: content}`` map per repo rather than a real git object graph -
+    `git_repo`/`filesystem` already own "does the agent use git/filesystem
+    tools correctly"; this service exists to test forge-specific judgment
+    (issue/PR/review/label/notification workflow), so file content here is
+    just enough state for `get_file_contents`/`create_or_update_file`/
+    `push_files` to have somewhere real to act, not a second git
+    implementation.
+
+    `pull_request_review_write` models GitHub's real two-shape review
+    flow: called with no ``event`` (or ``event="PENDING"``), it starts (or
+    resumes) a pending review that `add_comment_to_pending_review` can
+    then attach line comments to across several calls; called with a real
+    ``event`` (APPROVE/REQUEST_CHANGES/COMMENT), it submits that pending
+    review if one is open, or creates and submits a review directly in
+    one shot if not - `add_comment_to_pending_review` refuses if no
+    pending review is open, so "start a review before attaching line
+    comments to it" is a real, testable precondition. `merge_pull_request`
+    refuses a draft, an already-merged/closed PR, or one whose most recent
+    review is an unresolved REQUEST_CHANGES not yet superseded by an
+    APPROVE - "don't merge over open change requests" is the same
+    workflow-discipline skill `git_repo`'s "no commit without staging" and
+    `docker`'s precondition-enforcing tools test.
+    """
+
+    TOOLS = {name: name for name in (
+        "actions_list", "actions_get", "actions_run_trigger", "get_job_logs",
+        "get_code_quality_finding",
+        "get_code_scanning_alert", "list_code_scanning_alerts",
+        "get_me", "get_teams", "get_team_members",
+        "assign_copilot_to_issue", "assign_copilot_to_issue_with_intent", "request_copilot_review",
+        "get_dependabot_alert", "list_dependabot_alerts",
+        "list_discussions", "get_discussion", "list_discussion_categories",
+        "get_discussion_comments", "discussion_comment_write",
+        "create_gist", "get_gist", "list_gists", "update_gist",
+        "get_repository_tree",
+        "list_issues", "search_issues", "issue_read", "issue_write",
+        "add_issue_comment", "get_label", "list_issue_fields", "list_issue_types",
+        "sub_issue_write",
+        "label_write", "list_label",
+        "list_notifications", "get_notification_details", "dismiss_notification",
+        "mark_all_notifications_read", "manage_notification_subscription",
+        "manage_repository_notification_subscription",
+        "search_orgs",
+        "projects_list", "projects_get", "projects_write",
+        "list_pull_requests", "search_pull_requests", "pull_request_read",
+        "create_pull_request", "update_pull_request", "merge_pull_request",
+        "update_pull_request_branch", "pull_request_review_write",
+        "add_comment_to_pending_review", "add_reply_to_pull_request_comment",
+        "create_repository", "fork_repository", "search_repositories",
+        "get_file_contents", "create_or_update_file", "delete_file", "push_files",
+        "create_branch", "list_branches", "get_commit", "list_commits",
+        "search_commits", "search_code", "get_tag", "list_tags",
+        "get_latest_release", "get_release_by_tag", "list_releases",
+        "list_repository_collaborators",
+        "get_secret_scanning_alert", "list_secret_scanning_alerts",
+    )}
+
+    _CURRENT_USER = "octo-agent"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._repos: dict[str, dict] = {}
+        self._files: dict[str, dict[str, str]] = {}
+        self._branches: dict[str, dict[str, str]] = {}
+        self._commits: dict[str, dict[str, dict]] = {}
+        self._tags: dict[str, dict[str, str]] = {}
+        self._releases: dict[str, dict[str, dict]] = {}
+        self._issues: dict[tuple[str, int], dict] = {}
+        self._pull_requests: dict[tuple[str, int], dict] = {}
+        self._pending_reviews: dict[tuple[str, int], dict] = {}
+        self._labels: dict[str, dict[str, dict]] = {}
+        self._gists: dict[str, dict] = {}
+        self._discussions: dict[tuple[str, int], dict] = {}
+        self._discussion_categories: dict[str, list[str]] = {}
+        self._notifications: dict[str, dict] = {}
+        self._projects: dict[str, dict] = {}
+        self._actions_runs: dict[tuple[str, int], dict] = {}
+        self._code_scanning_alerts: dict[tuple[str, int], dict] = {}
+        self._dependabot_alerts: dict[tuple[str, int], dict] = {}
+        self._secret_scanning_alerts: dict[tuple[str, int], dict] = {}
+        self._code_quality_findings: dict[tuple[str, str], dict] = {}
+        self._teams: dict[str, list[str]] = {}
+        self._orgs: set[str] = set()
+        self._next_number: dict[str, int] = {}   # "owner/repo" -> shared issue+PR counter
+        self._next_run_id = 1
+        self._next_gist_id = 1
+        self._next_notification_id = 1
+        self._next_project_id = 1
+        self._next_discussion_number: dict[str, int] = {}
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional - repo-scoped ones keyed by
+        ``"owner/repo"``:
+        - ``repos`` ({"owner/repo": {description, private, default_branch,
+          collaborators: {user: role}}}).
+        - ``files`` ({"owner/repo": {path: content}}).
+        - ``branches`` ({"owner/repo": {branch: sha}}) - ``main`` always
+          exists once its repo is seeded, even with an empty dict.
+        - ``labels`` ({"owner/repo": {name: {color, description}}}).
+        - ``tags`` ({"owner/repo": {tag: sha}}).
+        - ``releases`` ({"owner/repo": {tag: {name, body, draft,
+          prerelease}}}).
+        - ``issues`` ([{owner, repo, number, title, body, state, labels,
+          assignees, type, comments}, ...]).
+        - ``pull_requests`` ([{owner, repo, number, title, body, state,
+          head, base, draft, merged, reviews: [{event}, ...]}, ...]).
+        - ``gists`` ([{id, description, files, public}, ...]).
+        - ``discussions`` ([{owner, repo, number, title, body, category,
+          comments}, ...]).
+        - ``discussion_categories`` ({"owner/repo": [name, ...]}).
+        - ``notifications`` ([{id, owner, repo, reason, unread, subject},
+          ...]).
+        - ``projects`` ([{id, owner, title, body}, ...]).
+        - ``commits`` ({"owner/repo": {sha: {message, files}}}).
+        - ``actions_runs`` ([{owner, repo, run_id, workflow_id, status,
+          conclusion, jobs: [{id, name, logs}]}, ...]).
+        - ``code_scanning_alerts`` / ``dependabot_alerts`` /
+          ``secret_scanning_alerts`` ([{owner, repo, number, ...}, ...]).
+        - ``code_quality_findings`` ([{owner, repo, id, ...}, ...]).
+        - ``teams`` ({"org/team_slug": [member, ...]}).
+        - ``orgs`` ([name, ...]).
+        """
+        for full_name, cfg in (spec.get("repos") or {}).items():
+            self._repos[full_name] = {
+                "description": cfg.get("description", ""), "private": cfg.get("private", False),
+                "default_branch": cfg.get("default_branch", "main"),
+                "collaborators": dict(cfg.get("collaborators", {})),
+            }
+            self._branches.setdefault(full_name, {"main": "sha-main-0"})
+            self._files.setdefault(full_name, {})
+            self._labels.setdefault(full_name, {})
+            self._next_number.setdefault(full_name, 0)
+        for full_name, files in (spec.get("files") or {}).items():
+            self._ensure_repo(full_name)
+            self._files.setdefault(full_name, {}).update(files)
+        for full_name, branches in (spec.get("branches") or {}).items():
+            self._ensure_repo(full_name)
+            self._branches.setdefault(full_name, {}).update(branches)
+        for full_name, labels in (spec.get("labels") or {}).items():
+            self._ensure_repo(full_name)
+            self._labels.setdefault(full_name, {}).update(labels)
+        for full_name, tags in (spec.get("tags") or {}).items():
+            self._ensure_repo(full_name)
+            self._tags.setdefault(full_name, {}).update(tags)
+        for full_name, releases in (spec.get("releases") or {}).items():
+            self._ensure_repo(full_name)
+            self._releases.setdefault(full_name, {}).update(releases)
+        for full_name, commits in (spec.get("commits") or {}).items():
+            self._ensure_repo(full_name)
+            self._commits.setdefault(full_name, {}).update(commits)
+        for entry in spec.get("issues") or []:
+            full_name = f"{entry['owner']}/{entry['repo']}"
+            self._ensure_repo(full_name)
+            number = entry["number"]
+            self._issues[(full_name, number)] = {
+                "number": number, "title": entry["title"], "body": entry.get("body", ""),
+                "state": entry.get("state", "open"), "labels": list(entry.get("labels", [])),
+                "assignees": list(entry.get("assignees", [])), "type": entry.get("type"),
+                "comments": list(entry.get("comments", [])), "sub_issues": [],
+            }
+            self._next_number[full_name] = max(self._next_number.get(full_name, 0), number)
+        for entry in spec.get("pull_requests") or []:
+            full_name = f"{entry['owner']}/{entry['repo']}"
+            self._ensure_repo(full_name)
+            number = entry["number"]
+            head, base = entry.get("head", "feature"), entry.get("base", "main")
+            self._branches[full_name].setdefault(head, f"sha-{head}-0")
+            self._branches[full_name].setdefault(base, f"sha-{base}-0")
+            self._pull_requests[(full_name, number)] = {
+                "number": number, "title": entry["title"], "body": entry.get("body", ""),
+                "state": entry.get("state", "open"), "head": head, "base": base,
+                "draft": entry.get("draft", False),
+                "merged": entry.get("merged", False), "reviews": list(entry.get("reviews", [])),
+                "review_comments": list(entry.get("review_comments", [])),
+            }
+            self._next_number[full_name] = max(self._next_number.get(full_name, 0), number)
+        for entry in spec.get("gists") or []:
+            self._gists[entry["id"]] = {
+                "id": entry["id"], "description": entry.get("description", ""),
+                "files": dict(entry.get("files", {})), "public": entry.get("public", False),
+            }
+        for entry in spec.get("discussions") or []:
+            full_name = f"{entry['owner']}/{entry['repo']}"
+            self._ensure_repo(full_name)
+            number = entry["number"]
+            self._discussions[(full_name, number)] = {
+                "number": number, "title": entry["title"], "body": entry.get("body", ""),
+                "category": entry.get("category", "General"), "comments": list(entry.get("comments", [])),
+            }
+            self._next_discussion_number[full_name] = max(self._next_discussion_number.get(full_name, 0), number)
+        for full_name, categories in (spec.get("discussion_categories") or {}).items():
+            self._ensure_repo(full_name)
+            self._discussion_categories[full_name] = list(categories)
+        for entry in spec.get("notifications") or []:
+            self._notifications[entry["id"]] = {
+                "id": entry["id"], "owner": entry.get("owner"), "repo": entry.get("repo"),
+                "reason": entry.get("reason", "mention"), "unread": entry.get("unread", True),
+                "subject": entry.get("subject", ""),
+            }
+        for entry in spec.get("projects") or []:
+            self._projects[entry["id"]] = {
+                "id": entry["id"], "owner": entry["owner"], "title": entry["title"],
+                "body": entry.get("body", ""),
+            }
+        for entry in spec.get("actions_runs") or []:
+            full_name = f"{entry['owner']}/{entry['repo']}"
+            self._ensure_repo(full_name)
+            self._actions_runs[(full_name, entry["run_id"])] = {
+                "run_id": entry["run_id"], "workflow_id": entry.get("workflow_id", "ci.yml"),
+                "status": entry.get("status", "completed"), "conclusion": entry.get("conclusion"),
+                "jobs": list(entry.get("jobs", [])),
+            }
+        for entry in spec.get("code_scanning_alerts") or []:
+            full_name = f"{entry['owner']}/{entry['repo']}"
+            self._ensure_repo(full_name)
+            self._code_scanning_alerts[(full_name, entry["number"])] = dict(entry)
+        for entry in spec.get("dependabot_alerts") or []:
+            full_name = f"{entry['owner']}/{entry['repo']}"
+            self._ensure_repo(full_name)
+            self._dependabot_alerts[(full_name, entry["number"])] = dict(entry)
+        for entry in spec.get("secret_scanning_alerts") or []:
+            full_name = f"{entry['owner']}/{entry['repo']}"
+            self._ensure_repo(full_name)
+            self._secret_scanning_alerts[(full_name, entry["number"])] = dict(entry)
+        for entry in spec.get("code_quality_findings") or []:
+            full_name = f"{entry['owner']}/{entry['repo']}"
+            self._ensure_repo(full_name)
+            self._code_quality_findings[(full_name, entry["id"])] = dict(entry)
+        for key, members in (spec.get("teams") or {}).items():
+            self._teams[key] = list(members)
+        for org in spec.get("orgs") or []:
+            self._orgs.add(org)
+
+    # ── internal helpers ────────────────────────────────────────────────
+
+    def _ensure_repo(self, full_name: str) -> None:
+        """Auto-registers a bare repo entry when a seed section references
+        ``owner/repo`` without an explicit ``repos`` entry for it - seeding
+        an issue/PR/alert/etc. obviously implies its repo exists, the same
+        "referencing it is enough to seed it" convenience `DockerService`
+        gives a container's image."""
+        if full_name not in self._repos:
+            self._repos[full_name] = {"description": "", "private": False,
+                                       "default_branch": "main", "collaborators": {}}
+        self._branches.setdefault(full_name, {"main": "sha-main-0"})
+        self._files.setdefault(full_name, {})
+        self._labels.setdefault(full_name, {})
+        self._next_number.setdefault(full_name, 0)
+
+    @staticmethod
+    def _full(owner: str, repo: str) -> str:
+        return f"{owner}/{repo}"
+
+    def _require_repo(self, owner: str, repo: str) -> dict | None:
+        if self._full(owner, repo) not in self._repos:
+            return {"error": f"no such repository {owner}/{repo}"}
+        return None
+
+    def _require_issue(self, owner: str, repo: str, number: int) -> dict | None:
+        if (self._full(owner, repo), number) not in self._issues:
+            return {"error": f"no such issue {owner}/{repo}#{number}"}
+        return None
+
+    def _require_pr(self, owner: str, repo: str, number: int) -> dict | None:
+        if (self._full(owner, repo), number) not in self._pull_requests:
+            return {"error": f"no such pull request {owner}/{repo}#{number}"}
+        return None
+
+    def _next_issue_or_pr_number(self, full_name: str) -> int:
+        self._next_number[full_name] = self._next_number.get(full_name, 0) + 1
+        return self._next_number[full_name]
+
+    # ── actions ──────────────────────────────────────────────────────────
+
+    def actions_list(self, owner: str, repo: str, workflow_id: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        full = self._full(owner, repo)
+        runs = [r for (fn, _), r in self._actions_runs.items()
+                if fn == full and (workflow_id is None or r["workflow_id"] == workflow_id)]
+        return {"runs": runs}
+
+    def actions_get(self, owner: str, repo: str, run_id: int) -> dict:
+        key = (self._full(owner, repo), run_id)
+        if key not in self._actions_runs:
+            return {"error": f"no such run {run_id} in {owner}/{repo}"}
+        return dict(self._actions_runs[key])
+
+    def actions_run_trigger(self, owner: str, repo: str, workflow_id: str, ref: str = "main",
+                             inputs: dict | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        full = self._full(owner, repo)
+        run_id = self._next_run_id
+        self._next_run_id += 1
+        self._actions_runs[(full, run_id)] = {
+            "run_id": run_id, "workflow_id": workflow_id, "ref": ref, "status": "queued",
+            "conclusion": None, "jobs": [],
+        }
+        return dict(self._actions_runs[(full, run_id)])
+
+    def get_job_logs(self, owner: str, repo: str, job_id: str) -> dict:
+        full = self._full(owner, repo)
+        for (fn, _run_id), run in self._actions_runs.items():
+            if fn != full:
+                continue
+            for job in run.get("jobs", []):
+                if job.get("id") == job_id:
+                    return {"job_id": job_id, "logs": job.get("logs", [])}
+        return {"error": f"no such job {job_id!r} in {owner}/{repo}"}
+
+    # ── code quality / security / dependabot / secret protection ───────
+
+    def get_code_quality_finding(self, owner: str, repo: str, finding_id: str) -> dict:
+        key = (self._full(owner, repo), finding_id)
+        if key not in self._code_quality_findings:
+            return {"error": f"no such finding {finding_id!r} in {owner}/{repo}"}
+        return dict(self._code_quality_findings[key])
+
+    def get_code_scanning_alert(self, owner: str, repo: str, alert_number: int) -> dict:
+        key = (self._full(owner, repo), alert_number)
+        if key not in self._code_scanning_alerts:
+            return {"error": f"no such alert #{alert_number} in {owner}/{repo}"}
+        return dict(self._code_scanning_alerts[key])
+
+    def list_code_scanning_alerts(self, owner: str, repo: str, state: str | None = None) -> dict:
+        full = self._full(owner, repo)
+        alerts = [a for (fn, _), a in self._code_scanning_alerts.items()
+                  if fn == full and (state is None or a.get("state") == state)]
+        return {"alerts": alerts}
+
+    def get_dependabot_alert(self, owner: str, repo: str, alert_number: int) -> dict:
+        key = (self._full(owner, repo), alert_number)
+        if key not in self._dependabot_alerts:
+            return {"error": f"no such alert #{alert_number} in {owner}/{repo}"}
+        return dict(self._dependabot_alerts[key])
+
+    def list_dependabot_alerts(self, owner: str, repo: str, state: str | None = None) -> dict:
+        full = self._full(owner, repo)
+        alerts = [a for (fn, _), a in self._dependabot_alerts.items()
+                  if fn == full and (state is None or a.get("state") == state)]
+        return {"alerts": alerts}
+
+    def get_secret_scanning_alert(self, owner: str, repo: str, alert_number: int) -> dict:
+        key = (self._full(owner, repo), alert_number)
+        if key not in self._secret_scanning_alerts:
+            return {"error": f"no such alert #{alert_number} in {owner}/{repo}"}
+        return dict(self._secret_scanning_alerts[key])
+
+    def list_secret_scanning_alerts(self, owner: str, repo: str, state: str | None = None) -> dict:
+        full = self._full(owner, repo)
+        alerts = [a for (fn, _), a in self._secret_scanning_alerts.items()
+                  if fn == full and (state is None or a.get("state") == state)]
+        return {"alerts": alerts}
+
+    # ── context / copilot / organizations ───────────────────────────────
+
+    def get_me(self) -> dict:
+        return {"login": self._CURRENT_USER}
+
+    def get_teams(self, org: str) -> dict:
+        return {"teams": sorted({k.split("/", 1)[1] for k in self._teams if k.startswith(f"{org}/")})}
+
+    def get_team_members(self, org: str, team_slug: str) -> dict:
+        key = f"{org}/{team_slug}"
+        if key not in self._teams:
+            return {"error": f"no such team {team_slug!r} in org {org!r}"}
+        return {"members": list(self._teams[key])}
+
+    def assign_copilot_to_issue(self, owner: str, repo: str, issue_number: int) -> dict:
+        err = self._require_issue(owner, repo, issue_number)
+        if err:
+            return err
+        self._issues[(self._full(owner, repo), issue_number)]["assignees"].append("copilot")
+        return {"owner": owner, "repo": repo, "issue_number": issue_number, "assigned": "copilot"}
+
+    def assign_copilot_to_issue_with_intent(self, owner: str, repo: str, issue_number: int, intent: str) -> dict:
+        result = self.assign_copilot_to_issue(owner, repo, issue_number)
+        if "error" not in result:
+            result["intent"] = intent
+        return result
+
+    def request_copilot_review(self, owner: str, repo: str, pull_number: int) -> dict:
+        err = self._require_pr(owner, repo, pull_number)
+        if err:
+            return err
+        return {"owner": owner, "repo": repo, "pull_number": pull_number, "requested_reviewer": "copilot"}
+
+    def search_orgs(self, query: str) -> dict:
+        q = (query or "").lower()
+        return {"organizations": sorted(o for o in self._orgs if q in o.lower())}
+
+    # ── discussions ──────────────────────────────────────────────────────
+
+    def list_discussions(self, owner: str, repo: str) -> dict:
+        full = self._full(owner, repo)
+        return {"discussions": [d for (fn, _), d in self._discussions.items() if fn == full]}
+
+    def get_discussion(self, owner: str, repo: str, discussion_number: int) -> dict:
+        key = (self._full(owner, repo), discussion_number)
+        if key not in self._discussions:
+            return {"error": f"no such discussion #{discussion_number} in {owner}/{repo}"}
+        return dict(self._discussions[key])
+
+    def list_discussion_categories(self, owner: str, repo: str) -> dict:
+        return {"categories": list(self._discussion_categories.get(self._full(owner, repo), ["General"]))}
+
+    def get_discussion_comments(self, owner: str, repo: str, discussion_number: int) -> dict:
+        key = (self._full(owner, repo), discussion_number)
+        if key not in self._discussions:
+            return {"error": f"no such discussion #{discussion_number} in {owner}/{repo}"}
+        return {"comments": list(self._discussions[key]["comments"])}
+
+    def discussion_comment_write(self, owner: str, repo: str, discussion_number: int, body: str) -> dict:
+        key = (self._full(owner, repo), discussion_number)
+        if key not in self._discussions:
+            return {"error": f"no such discussion #{discussion_number} in {owner}/{repo}"}
+        comment = {"body": body, "author": self._CURRENT_USER}
+        self._discussions[key]["comments"].append(comment)
+        return comment
+
+    # ── gists ────────────────────────────────────────────────────────────
+
+    def create_gist(self, description: str, files: dict, public: bool = False) -> dict:
+        gist_id = f"gist{self._next_gist_id}"
+        self._next_gist_id += 1
+        self._gists[gist_id] = {"id": gist_id, "description": description, "files": dict(files), "public": public}
+        return dict(self._gists[gist_id])
+
+    def get_gist(self, gist_id: str) -> dict:
+        if gist_id not in self._gists:
+            return {"error": f"no such gist {gist_id!r}"}
+        return dict(self._gists[gist_id])
+
+    def list_gists(self) -> dict:
+        return {"gists": list(self._gists.values())}
+
+    def update_gist(self, gist_id: str, files: dict | None = None, description: str | None = None) -> dict:
+        if gist_id not in self._gists:
+            return {"error": f"no such gist {gist_id!r}"}
+        gist = self._gists[gist_id]
+        if files is not None:
+            gist["files"].update(files)
+        if description is not None:
+            gist["description"] = description
+        return dict(gist)
+
+    # ── git ──────────────────────────────────────────────────────────────
+
+    def get_repository_tree(self, owner: str, repo: str, ref: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        return {"paths": sorted(self._files.get(self._full(owner, repo), {}))}
+
+    # ── issues ───────────────────────────────────────────────────────────
+
+    def list_issues(self, owner: str, repo: str, state: str | None = None, labels: list | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        full = self._full(owner, repo)
+        labels = self._as_list(labels)
+        issues = [
+            i for (fn, _), i in self._issues.items() if fn == full
+            and (state is None or i["state"] == state)
+            and (not labels or all(l in i["labels"] for l in labels))
+        ]
+        return {"issues": issues}
+
+    def search_issues(self, query: str) -> dict:
+        q = (query or "").lower()
+        matches = [dict(i, repo=fn) for (fn, _), i in self._issues.items()
+                   if q in i["title"].lower() or q in i.get("body", "").lower()]
+        return {"issues": matches}
+
+    def issue_read(self, owner: str, repo: str, issue_number: int) -> dict:
+        err = self._require_issue(owner, repo, issue_number)
+        if err:
+            return err
+        return dict(self._issues[(self._full(owner, repo), issue_number)])
+
+    def issue_write(self, owner: str, repo: str, issue_number: int | None = None, title: str | None = None,
+                     body: str | None = None, state: str | None = None, labels: list | None = None,
+                     assignees: list | None = None, type: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        full = self._full(owner, repo)
+        if issue_number is None:
+            if not title:
+                return {"error": "title is required to create an issue"}
+            issue_number = self._next_issue_or_pr_number(full)
+            self._issues[(full, issue_number)] = {
+                "number": issue_number, "title": title, "body": body or "", "state": "open",
+                "labels": self._as_list(labels), "assignees": self._as_list(assignees),
+                "type": type, "comments": [], "sub_issues": [],
+            }
+            return dict(self._issues[(full, issue_number)])
+        key = (full, issue_number)
+        if key not in self._issues:
+            return {"error": f"no such issue {owner}/{repo}#{issue_number}"}
+        issue = self._issues[key]
+        if title is not None:
+            issue["title"] = title
+        if body is not None:
+            issue["body"] = body
+        if state is not None:
+            issue["state"] = state
+        if labels is not None:
+            issue["labels"] = self._as_list(labels)
+        if assignees is not None:
+            issue["assignees"] = self._as_list(assignees)
+        if type is not None:
+            issue["type"] = type
+        return dict(issue)
+
+    def add_issue_comment(self, owner: str, repo: str, issue_number: int, body: str) -> dict:
+        err = self._require_issue(owner, repo, issue_number)
+        if err:
+            return err
+        comment = {"body": body, "author": self._CURRENT_USER}
+        self._issues[(self._full(owner, repo), issue_number)]["comments"].append(comment)
+        return comment
+
+    def get_label(self, owner: str, repo: str, name: str) -> dict:
+        label = self._labels.get(self._full(owner, repo), {}).get(name)
+        if label is None:
+            return {"error": f"no such label {name!r} in {owner}/{repo}"}
+        return {"name": name, **label}
+
+    def list_issue_fields(self, owner: str, repo: str) -> dict:
+        return {"fields": ["title", "body", "state", "labels", "assignees", "type"]}
+
+    def list_issue_types(self, owner: str, repo: str) -> dict:
+        return {"types": ["Bug", "Feature", "Task"]}
+
+    def sub_issue_write(self, owner: str, repo: str, issue_number: int, sub_issue_number: int,
+                         operation: str = "add") -> dict:
+        err = self._require_issue(owner, repo, issue_number)
+        if err:
+            return err
+        err2 = self._require_issue(owner, repo, sub_issue_number)
+        if err2:
+            return err2
+        sub_issues = self._issues[(self._full(owner, repo), issue_number)]["sub_issues"]
+        if operation == "add":
+            if sub_issue_number not in sub_issues:
+                sub_issues.append(sub_issue_number)
+        elif operation == "remove":
+            if sub_issue_number in sub_issues:
+                sub_issues.remove(sub_issue_number)
+        else:
+            return {"error": f"unknown operation {operation!r} (expected add or remove)"}
+        return {"issue_number": issue_number, "sub_issues": list(sub_issues)}
+
+    # ── labels ───────────────────────────────────────────────────────────
+
+    def label_write(self, owner: str, repo: str, name: str, color: str | None = None,
+                     description: str | None = None, delete: bool = False) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        labels = self._labels.setdefault(self._full(owner, repo), {})
+        if delete:
+            if name not in labels:
+                return {"error": f"no such label {name!r} in {owner}/{repo}"}
+            del labels[name]
+            return {"name": name, "deleted": True}
+        labels[name] = {"color": color or labels.get(name, {}).get("color", "ededed"),
+                         "description": description or labels.get(name, {}).get("description", "")}
+        return {"name": name, **labels[name]}
+
+    def list_label(self, owner: str, repo: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        return {"labels": [{"name": n, **v} for n, v in sorted(self._labels.get(self._full(owner, repo), {}).items())]}
+
+    # ── notifications ────────────────────────────────────────────────────
+
+    def list_notifications(self, owner: str | None = None, repo: str | None = None, unread_only: bool = True) -> dict:
+        notifications = [
+            n for n in self._notifications.values()
+            if (owner is None or n.get("owner") == owner)
+            and (repo is None or n.get("repo") == repo)
+            and (not unread_only or n["unread"])
+        ]
+        return {"notifications": notifications}
+
+    def get_notification_details(self, notification_id: str) -> dict:
+        if notification_id not in self._notifications:
+            return {"error": f"no such notification {notification_id!r}"}
+        return dict(self._notifications[notification_id])
+
+    def dismiss_notification(self, notification_id: str) -> dict:
+        if notification_id not in self._notifications:
+            return {"error": f"no such notification {notification_id!r}"}
+        self._notifications[notification_id]["unread"] = False
+        return {"id": notification_id, "unread": False}
+
+    def mark_all_notifications_read(self) -> dict:
+        count = 0
+        for n in self._notifications.values():
+            if n["unread"]:
+                n["unread"] = False
+                count += 1
+        return {"marked_read": count}
+
+    def manage_notification_subscription(self, notification_id: str, action: str) -> dict:
+        if notification_id not in self._notifications:
+            return {"error": f"no such notification {notification_id!r}"}
+        if action not in ("ignore", "watch", "delete"):
+            return {"error": f"unknown action {action!r} (expected ignore, watch, or delete)"}
+        if action == "delete":
+            del self._notifications[notification_id]
+            return {"id": notification_id, "deleted": True}
+        self._notifications[notification_id]["subscription"] = action
+        return {"id": notification_id, "subscription": action}
+
+    def manage_repository_notification_subscription(self, owner: str, repo: str, action: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        if action not in ("ignore", "watch", "delete"):
+            return {"error": f"unknown action {action!r} (expected ignore, watch, or delete)"}
+        self._repos[self._full(owner, repo)]["notification_subscription"] = action
+        return {"owner": owner, "repo": repo, "subscription": action}
+
+    # ── projects ─────────────────────────────────────────────────────────
+
+    def projects_list(self, owner: str) -> dict:
+        return {"projects": [p for p in self._projects.values() if p["owner"] == owner]}
+
+    def projects_get(self, project_id: str) -> dict:
+        if project_id not in self._projects:
+            return {"error": f"no such project {project_id!r}"}
+        return dict(self._projects[project_id])
+
+    def projects_write(self, owner: str, project_id: str | None = None, title: str | None = None,
+                        body: str | None = None) -> dict:
+        if project_id is None:
+            if not title:
+                return {"error": "title is required to create a project"}
+            project_id = f"proj{self._next_project_id}"
+            self._next_project_id += 1
+            self._projects[project_id] = {"id": project_id, "owner": owner, "title": title, "body": body or ""}
+            return dict(self._projects[project_id])
+        if project_id not in self._projects:
+            return {"error": f"no such project {project_id!r}"}
+        project = self._projects[project_id]
+        if title is not None:
+            project["title"] = title
+        if body is not None:
+            project["body"] = body
+        return dict(project)
+
+    # ── pull requests ────────────────────────────────────────────────────
+
+    def list_pull_requests(self, owner: str, repo: str, state: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        full = self._full(owner, repo)
+        prs = [p for (fn, _), p in self._pull_requests.items() if fn == full and (state is None or p["state"] == state)]
+        return {"pull_requests": prs}
+
+    def search_pull_requests(self, query: str) -> dict:
+        q = (query or "").lower()
+        matches = [dict(p, repo=fn) for (fn, _), p in self._pull_requests.items()
+                   if q in p["title"].lower() or q in p.get("body", "").lower()]
+        return {"pull_requests": matches}
+
+    def pull_request_read(self, owner: str, repo: str, pull_number: int) -> dict:
+        err = self._require_pr(owner, repo, pull_number)
+        if err:
+            return err
+        return dict(self._pull_requests[(self._full(owner, repo), pull_number)])
+
+    def create_pull_request(self, owner: str, repo: str, title: str, head: str, base: str,
+                             body: str | None = None, draft: bool = False) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        full = self._full(owner, repo)
+        branches = self._branches.get(full, {})
+        if head not in branches:
+            return {"error": f"no such branch {head!r} in {owner}/{repo}"}
+        if base not in branches:
+            return {"error": f"no such branch {base!r} in {owner}/{repo}"}
+        number = self._next_issue_or_pr_number(full)
+        self._pull_requests[(full, number)] = {
+            "number": number, "title": title, "body": body or "", "state": "open",
+            "head": head, "base": base, "draft": draft, "merged": False,
+            "reviews": [], "review_comments": [],
+        }
+        return dict(self._pull_requests[(full, number)])
+
+    def update_pull_request(self, owner: str, repo: str, pull_number: int, title: str | None = None,
+                             body: str | None = None, state: str | None = None, base: str | None = None) -> dict:
+        err = self._require_pr(owner, repo, pull_number)
+        if err:
+            return err
+        pr = self._pull_requests[(self._full(owner, repo), pull_number)]
+        if title is not None:
+            pr["title"] = title
+        if body is not None:
+            pr["body"] = body
+        if state is not None:
+            pr["state"] = state
+        if base is not None:
+            pr["base"] = base
+        return dict(pr)
+
+    @staticmethod
+    def _pr_has_unresolved_change_request(pr: dict) -> bool:
+        for review in reversed(pr["reviews"]):
+            if review["event"] == "REQUEST_CHANGES":
+                return True
+            if review["event"] == "APPROVE":
+                return False
+        return False
+
+    def merge_pull_request(self, owner: str, repo: str, pull_number: int, merge_method: str = "merge") -> dict:
+        err = self._require_pr(owner, repo, pull_number)
+        if err:
+            return err
+        pr = self._pull_requests[(self._full(owner, repo), pull_number)]
+        if pr["merged"]:
+            return {"error": f"pull request #{pull_number} is already merged"}
+        if pr["state"] != "open":
+            return {"error": f"pull request #{pull_number} is not open"}
+        if pr["draft"]:
+            return {"error": f"pull request #{pull_number} is a draft - mark it ready for review first"}
+        if self._pr_has_unresolved_change_request(pr):
+            return {"error": f"pull request #{pull_number} has an unresolved REQUEST_CHANGES review"}
+        pr["merged"] = True
+        pr["state"] = "closed"
+        return {"number": pull_number, "merged": True, "merge_method": merge_method}
+
+    def update_pull_request_branch(self, owner: str, repo: str, pull_number: int) -> dict:
+        err = self._require_pr(owner, repo, pull_number)
+        if err:
+            return err
+        return {"number": pull_number, "synced_with_base": True}
+
+    def pull_request_review_write(self, owner: str, repo: str, pull_number: int,
+                                   event: str | None = None, body: str | None = None) -> dict:
+        err = self._require_pr(owner, repo, pull_number)
+        if err:
+            return err
+        key = (self._full(owner, repo), pull_number)
+        if event is None or event == "PENDING":
+            self._pending_reviews.setdefault(key, {"comments": []})
+            return {"pull_number": pull_number, "review_state": "pending"}
+        if event not in ("APPROVE", "REQUEST_CHANGES", "COMMENT"):
+            return {"error": f"unknown event {event!r} (expected APPROVE, REQUEST_CHANGES, or COMMENT)"}
+        pending = self._pending_reviews.pop(key, None)
+        review = {"event": event, "body": body or "", "author": self._CURRENT_USER,
+                  "comments": pending["comments"] if pending else []}
+        self._pull_requests[key]["reviews"].append(review)
+        return dict(review)
+
+    def add_comment_to_pending_review(self, owner: str, repo: str, pull_number: int, path: str,
+                                       line: int, body: str) -> dict:
+        err = self._require_pr(owner, repo, pull_number)
+        if err:
+            return err
+        key = (self._full(owner, repo), pull_number)
+        if key not in self._pending_reviews:
+            return {"error": f"no pending review open for pull request #{pull_number} - start one first"}
+        comment = {"path": path, "line": line, "body": body}
+        self._pending_reviews[key]["comments"].append(comment)
+        return comment
+
+    def add_reply_to_pull_request_comment(self, owner: str, repo: str, pull_number: int,
+                                           comment_id: int, body: str) -> dict:
+        err = self._require_pr(owner, repo, pull_number)
+        if err:
+            return err
+        reply = {"in_reply_to": comment_id, "body": body, "author": self._CURRENT_USER}
+        self._pull_requests[(self._full(owner, repo), pull_number)]["review_comments"].append(reply)
+        return reply
+
+    # ── repositories ─────────────────────────────────────────────────────
+
+    def create_repository(self, name: str, description: str | None = None, private: bool = False) -> dict:
+        full = self._full(self._CURRENT_USER, name)
+        if full in self._repos:
+            return {"error": f"repository {full!r} already exists"}
+        self._repos[full] = {"description": description or "", "private": private,
+                              "default_branch": "main", "collaborators": {}}
+        self._branches[full] = {"main": "sha-main-0"}
+        self._files[full] = {}
+        self._labels[full] = {}
+        self._next_number[full] = 0
+        return {"owner": self._CURRENT_USER, "repo": name, "full_name": full}
+
+    def fork_repository(self, owner: str, repo: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        src = self._full(owner, repo)
+        dst = self._full(self._CURRENT_USER, repo)
+        if dst in self._repos:
+            return {"error": f"repository {dst!r} already exists"}
+        self._repos[dst] = dict(self._repos[src])
+        self._branches[dst] = dict(self._branches.get(src, {}))
+        self._files[dst] = dict(self._files.get(src, {}))
+        self._labels[dst] = dict(self._labels.get(src, {}))
+        self._next_number[dst] = 0
+        return {"owner": self._CURRENT_USER, "repo": repo, "full_name": dst, "forked_from": src}
+
+    def search_repositories(self, query: str) -> dict:
+        q = (query or "").lower()
+        return {"repositories": [n for n in sorted(self._repos) if q in n.lower()]}
+
+    def get_file_contents(self, owner: str, repo: str, path: str, ref: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        content = self._files.get(self._full(owner, repo), {}).get(path)
+        if content is None:
+            return {"error": f"no such path {path!r} in {owner}/{repo}"}
+        return {"path": path, "content": content}
+
+    def create_or_update_file(self, owner: str, repo: str, path: str, content: str, message: str,
+                               branch: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        self._files.setdefault(self._full(owner, repo), {})[path] = content
+        return {"path": path, "branch": branch or self._repos[self._full(owner, repo)]["default_branch"],
+                "message": message}
+
+    def delete_file(self, owner: str, repo: str, path: str, message: str, branch: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        files = self._files.get(self._full(owner, repo), {})
+        if path not in files:
+            return {"error": f"no such path {path!r} in {owner}/{repo}"}
+        del files[path]
+        return {"path": path, "deleted": True, "message": message}
+
+    def push_files(self, owner: str, repo: str, branch: str, files: dict, message: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        full = self._full(owner, repo)
+        if branch not in self._branches.get(full, {}):
+            return {"error": f"no such branch {branch!r} in {owner}/{repo}"}
+        self._files.setdefault(full, {}).update(files)
+        return {"branch": branch, "files_changed": sorted(files), "message": message}
+
+    def create_branch(self, owner: str, repo: str, branch: str, from_branch: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        full = self._full(owner, repo)
+        branches = self._branches.setdefault(full, {})
+        if branch in branches:
+            return {"error": f"branch {branch!r} already exists in {owner}/{repo}"}
+        source = from_branch or self._repos[full]["default_branch"]
+        if source not in branches:
+            return {"error": f"no such source branch {source!r} in {owner}/{repo}"}
+        branches[branch] = branches[source]
+        return {"branch": branch, "from": source, "sha": branches[branch]}
+
+    def list_branches(self, owner: str, repo: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        return {"branches": sorted(self._branches.get(self._full(owner, repo), {}))}
+
+    def get_commit(self, owner: str, repo: str, sha: str) -> dict:
+        commit = self._commits.get(self._full(owner, repo), {}).get(sha)
+        if commit is None:
+            return {"error": f"no such commit {sha!r} in {owner}/{repo}"}
+        return {"sha": sha, **commit}
+
+    def list_commits(self, owner: str, repo: str, branch: str | None = None) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        commits = self._commits.get(self._full(owner, repo), {})
+        return {"commits": [{"sha": sha, **c} for sha, c in commits.items()]}
+
+    def search_commits(self, owner: str, repo: str, query: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        q = (query or "").lower()
+        commits = self._commits.get(self._full(owner, repo), {})
+        return {"commits": [{"sha": sha, **c} for sha, c in commits.items() if q in c.get("message", "").lower()]}
+
+    def search_code(self, query: str) -> dict:
+        q = (query or "").lower()
+        matches = []
+        for full, files in self._files.items():
+            for path, content in files.items():
+                if q in content.lower() or q in path.lower():
+                    matches.append({"repo": full, "path": path})
+        return {"matches": matches}
+
+    def get_tag(self, owner: str, repo: str, tag: str) -> dict:
+        sha = self._tags.get(self._full(owner, repo), {}).get(tag)
+        if sha is None:
+            return {"error": f"no such tag {tag!r} in {owner}/{repo}"}
+        return {"tag": tag, "sha": sha}
+
+    def list_tags(self, owner: str, repo: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        return {"tags": sorted(self._tags.get(self._full(owner, repo), {}))}
+
+    def get_latest_release(self, owner: str, repo: str) -> dict:
+        releases = self._releases.get(self._full(owner, repo), {})
+        if not releases:
+            return {"error": f"no releases in {owner}/{repo}"}
+        tag = max(releases)   # simplified: lexicographic "latest", no semver parsing
+        return {"tag": tag, **releases[tag]}
+
+    def get_release_by_tag(self, owner: str, repo: str, tag: str) -> dict:
+        release = self._releases.get(self._full(owner, repo), {}).get(tag)
+        if release is None:
+            return {"error": f"no such release {tag!r} in {owner}/{repo}"}
+        return {"tag": tag, **release}
+
+    def list_releases(self, owner: str, repo: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        return {"releases": [{"tag": t, **r} for t, r in sorted(self._releases.get(self._full(owner, repo), {}).items())]}
+
+    def list_repository_collaborators(self, owner: str, repo: str) -> dict:
+        err = self._require_repo(owner, repo)
+        if err:
+            return err
+        return {"collaborators": dict(self._repos[self._full(owner, repo)]["collaborators"])}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "repo_count": len(self._repos),
+            "issue_count": len(self._issues),
+            "open_issue_count": sum(1 for i in self._issues.values() if i["state"] == "open"),
+            "pull_request_count": len(self._pull_requests),
+            "open_pull_request_count": sum(1 for p in self._pull_requests.values() if p["state"] == "open"),
+            "merged_pull_request_count": sum(1 for p in self._pull_requests.values() if p["merged"]),
+            "gist_count": len(self._gists),
+            "discussion_count": len(self._discussions),
+            "project_count": len(self._projects),
+            "unread_notification_count": sum(1 for n in self._notifications.values() if n["unread"]),
+            "issues": {f"{fn}#{n}": {"state": i["state"], "labels": i["labels"], "assignees": i["assignees"]}
+                       for (fn, n), i in sorted(self._issues.items())},
+            "pull_requests": {f"{fn}#{n}": {"state": p["state"], "merged": p["merged"], "draft": p["draft"]}
+                               for (fn, n), p in sorted(self._pull_requests.items())},
+            "labels": {fn: dict(labels) for fn, labels in sorted(self._labels.items()) if labels},
+            "branches": {fn: sorted(b) for fn, b in sorted(self._branches.items())},
+            "notifications": {nid: {"unread": n["unread"]} for nid, n in sorted(self._notifications.items())},
+            "files": {fn: dict(files) for fn, files in sorted(self._files.items()) if files},
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -1958,12 +2942,357 @@ _KUBERNETES_SCHEMAS: dict[str, dict] = {
         {}, []),
 }
 
+_FORGE_SCHEMAS: dict[str, dict] = {
+    # actions
+    "actions_list": _fn(
+        "actions_list", "List workflow runs for a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "workflow_id": {"type": "string", "description": "Filter to one workflow file (optional)."}},
+        ["owner", "repo"]),
+    "actions_get": _fn(
+        "actions_get", "Get details for one workflow run.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "run_id": {"type": "integer"}},
+        ["owner", "repo", "run_id"]),
+    "actions_run_trigger": _fn(
+        "actions_run_trigger", "Manually trigger a workflow run.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "workflow_id": {"type": "string", "description": "Workflow file to trigger, e.g. 'ci.yml'."},
+         "ref": {"type": "string", "description": "Branch/tag to run on (optional, defaults to 'main')."},
+         "inputs": {"type": "object", "description": "Workflow input parameters (optional)."}},
+        ["owner", "repo", "workflow_id"]),
+    "get_job_logs": _fn(
+        "get_job_logs", "Get the log output for one job within a workflow run.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "job_id": {"type": "string"}},
+        ["owner", "repo", "job_id"]),
+    # code quality / security / dependabot / secret protection
+    "get_code_quality_finding": _fn(
+        "get_code_quality_finding", "Get details for one code quality finding.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "finding_id": {"type": "string"}},
+        ["owner", "repo", "finding_id"]),
+    "get_code_scanning_alert": _fn(
+        "get_code_scanning_alert", "Get details for one code scanning alert.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "alert_number": {"type": "integer"}},
+        ["owner", "repo", "alert_number"]),
+    "list_code_scanning_alerts": _fn(
+        "list_code_scanning_alerts", "List code scanning alerts for a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "state": {"type": "string", "description": "Filter by state, e.g. 'open' (optional)."}},
+        ["owner", "repo"]),
+    "get_dependabot_alert": _fn(
+        "get_dependabot_alert", "Get details for one Dependabot alert.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "alert_number": {"type": "integer"}},
+        ["owner", "repo", "alert_number"]),
+    "list_dependabot_alerts": _fn(
+        "list_dependabot_alerts", "List Dependabot alerts for a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "state": {"type": "string", "description": "Filter by state, e.g. 'open' (optional)."}},
+        ["owner", "repo"]),
+    "get_secret_scanning_alert": _fn(
+        "get_secret_scanning_alert", "Get details for one secret scanning alert.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "alert_number": {"type": "integer"}},
+        ["owner", "repo", "alert_number"]),
+    "list_secret_scanning_alerts": _fn(
+        "list_secret_scanning_alerts", "List secret scanning alerts for a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "state": {"type": "string", "description": "Filter by state, e.g. 'open' (optional)."}},
+        ["owner", "repo"]),
+    # context / copilot / organizations
+    "get_me": _fn("get_me", "Get the currently authenticated user.", {}, []),
+    "get_teams": _fn(
+        "get_teams", "List teams in an organization.",
+        {"org": {"type": "string"}}, ["org"]),
+    "get_team_members": _fn(
+        "get_team_members", "List members of one team.",
+        {"org": {"type": "string"}, "team_slug": {"type": "string"}}, ["org", "team_slug"]),
+    "assign_copilot_to_issue": _fn(
+        "assign_copilot_to_issue", "Assign Copilot as a worker on an issue.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "issue_number": {"type": "integer"}},
+        ["owner", "repo", "issue_number"]),
+    "assign_copilot_to_issue_with_intent": _fn(
+        "assign_copilot_to_issue_with_intent", "Assign Copilot to an issue with explicit guidance on what to do.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "issue_number": {"type": "integer"},
+         "intent": {"type": "string", "description": "Guidance for what Copilot should do."}},
+        ["owner", "repo", "issue_number", "intent"]),
+    "request_copilot_review": _fn(
+        "request_copilot_review", "Request a Copilot code review on a pull request.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "pull_number": {"type": "integer"}},
+        ["owner", "repo", "pull_number"]),
+    "search_orgs": _fn(
+        "search_orgs", "Search organizations by name.",
+        {"query": {"type": "string"}}, ["query"]),
+    # discussions
+    "list_discussions": _fn(
+        "list_discussions", "List discussions in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "get_discussion": _fn(
+        "get_discussion", "Get one discussion's details.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "discussion_number": {"type": "integer"}},
+        ["owner", "repo", "discussion_number"]),
+    "list_discussion_categories": _fn(
+        "list_discussion_categories", "List a repository's discussion categories.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "get_discussion_comments": _fn(
+        "get_discussion_comments", "List comments on a discussion.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "discussion_number": {"type": "integer"}},
+        ["owner", "repo", "discussion_number"]),
+    "discussion_comment_write": _fn(
+        "discussion_comment_write", "Add a comment to a discussion.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "discussion_number": {"type": "integer"},
+         "body": {"type": "string"}},
+        ["owner", "repo", "discussion_number", "body"]),
+    # gists
+    "create_gist": _fn(
+        "create_gist", "Create a new gist.",
+        {"description": {"type": "string"},
+         "files": {"type": "object", "description": "{filename: content}."},
+         "public": {"type": "boolean", "description": "Optional, defaults to false."}},
+        ["description", "files"]),
+    "get_gist": _fn(
+        "get_gist", "Get a gist's contents.",
+        {"gist_id": {"type": "string"}}, ["gist_id"]),
+    "list_gists": _fn("list_gists", "List the authenticated user's gists.", {}, []),
+    "update_gist": _fn(
+        "update_gist", "Update an existing gist's files and/or description.",
+        {"gist_id": {"type": "string"},
+         "files": {"type": "object", "description": "{filename: content} to add/overwrite (optional)."},
+         "description": {"type": "string", "description": "New description (optional)."}},
+        ["gist_id"]),
+    # git
+    "get_repository_tree": _fn(
+        "get_repository_tree", "Get the full list of file paths in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "ref": {"type": "string", "description": "Branch/tag/sha (optional, defaults to the default branch)."}},
+        ["owner", "repo"]),
+    # issues
+    "list_issues": _fn(
+        "list_issues", "List issues in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "state": {"type": "string", "description": "Filter by state, e.g. 'open' (optional)."},
+         "labels": {"type": "array", "items": {"type": "string"}, "description": "Only issues with all these labels (optional)."}},
+        ["owner", "repo"]),
+    "search_issues": _fn(
+        "search_issues", "Search issues across repositories by title/body text.",
+        {"query": {"type": "string"}}, ["query"]),
+    "issue_read": _fn(
+        "issue_read", "Get one issue's details.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "issue_number": {"type": "integer"}},
+        ["owner", "repo", "issue_number"]),
+    "issue_write": _fn(
+        "issue_write", "Create a new issue (omit issue_number) or update an existing one (include issue_number).",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "issue_number": {"type": "integer", "description": "Omit to create a new issue."},
+         "title": {"type": "string"}, "body": {"type": "string"},
+         "state": {"type": "string", "enum": ["open", "closed"]},
+         "labels": {"type": "array", "items": {"type": "string"}},
+         "assignees": {"type": "array", "items": {"type": "string"}},
+         "type": {"type": "string", "description": "Issue type, e.g. 'Bug' (optional)."}},
+        ["owner", "repo"]),
+    "add_issue_comment": _fn(
+        "add_issue_comment", "Add a comment to an issue.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "issue_number": {"type": "integer"},
+         "body": {"type": "string"}},
+        ["owner", "repo", "issue_number", "body"]),
+    "get_label": _fn(
+        "get_label", "Get one label's color/description.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "name": {"type": "string"}},
+        ["owner", "repo", "name"]),
+    "list_issue_fields": _fn(
+        "list_issue_fields", "List the custom fields available on issues in this repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "list_issue_types": _fn(
+        "list_issue_types", "List the issue types available in this repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "sub_issue_write": _fn(
+        "sub_issue_write", "Add or remove a sub-issue relationship between two issues.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "issue_number": {"type": "integer"},
+         "sub_issue_number": {"type": "integer"},
+         "operation": {"type": "string", "enum": ["add", "remove"], "description": "Optional, defaults to 'add'."}},
+        ["owner", "repo", "issue_number", "sub_issue_number"]),
+    # labels
+    "label_write": _fn(
+        "label_write", "Create or update a label (pass delete=true to remove it instead).",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "name": {"type": "string"},
+         "color": {"type": "string"}, "description": {"type": "string"},
+         "delete": {"type": "boolean", "description": "Optional, defaults to false."}},
+        ["owner", "repo", "name"]),
+    "list_label": _fn(
+        "list_label", "List labels in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    # notifications
+    "list_notifications": _fn(
+        "list_notifications", "List notifications, optionally scoped to one repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "unread_only": {"type": "boolean", "description": "Optional, defaults to true."}},
+        []),
+    "get_notification_details": _fn(
+        "get_notification_details", "Get one notification's details.",
+        {"notification_id": {"type": "string"}}, ["notification_id"]),
+    "dismiss_notification": _fn(
+        "dismiss_notification", "Mark one notification as read.",
+        {"notification_id": {"type": "string"}}, ["notification_id"]),
+    "mark_all_notifications_read": _fn(
+        "mark_all_notifications_read", "Mark every notification as read.", {}, []),
+    "manage_notification_subscription": _fn(
+        "manage_notification_subscription", "Ignore, watch, or delete the subscription for one notification's thread.",
+        {"notification_id": {"type": "string"}, "action": {"type": "string", "enum": ["ignore", "watch", "delete"]}},
+        ["notification_id", "action"]),
+    "manage_repository_notification_subscription": _fn(
+        "manage_repository_notification_subscription", "Ignore, watch, or delete the notification subscription for an entire repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "action": {"type": "string", "enum": ["ignore", "watch", "delete"]}},
+        ["owner", "repo", "action"]),
+    # projects
+    "projects_list": _fn(
+        "projects_list", "List projects owned by a user or org.",
+        {"owner": {"type": "string"}}, ["owner"]),
+    "projects_get": _fn(
+        "projects_get", "Get one project's details.",
+        {"project_id": {"type": "string"}}, ["project_id"]),
+    "projects_write": _fn(
+        "projects_write", "Create a new project (omit project_id) or update an existing one (include project_id).",
+        {"owner": {"type": "string"}, "project_id": {"type": "string", "description": "Omit to create a new project."},
+         "title": {"type": "string"}, "body": {"type": "string"}},
+        ["owner"]),
+    # pull requests
+    "list_pull_requests": _fn(
+        "list_pull_requests", "List pull requests in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "state": {"type": "string", "description": "Filter by state, e.g. 'open' (optional)."}},
+        ["owner", "repo"]),
+    "search_pull_requests": _fn(
+        "search_pull_requests", "Search pull requests across repositories by title/body text.",
+        {"query": {"type": "string"}}, ["query"]),
+    "pull_request_read": _fn(
+        "pull_request_read", "Get one pull request's details.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "pull_number": {"type": "integer"}},
+        ["owner", "repo", "pull_number"]),
+    "create_pull_request": _fn(
+        "create_pull_request", "Open a new pull request. Both head and base branches must already exist.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "title": {"type": "string"},
+         "head": {"type": "string", "description": "Branch with the changes."},
+         "base": {"type": "string", "description": "Branch to merge into."},
+         "body": {"type": "string"}, "draft": {"type": "boolean", "description": "Optional, defaults to false."}},
+        ["owner", "repo", "title", "head", "base"]),
+    "update_pull_request": _fn(
+        "update_pull_request", "Update a pull request's title, body, state, or base branch.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "pull_number": {"type": "integer"},
+         "title": {"type": "string"}, "body": {"type": "string"},
+         "state": {"type": "string", "enum": ["open", "closed"]}, "base": {"type": "string"}},
+        ["owner", "repo", "pull_number"]),
+    "merge_pull_request": _fn(
+        "merge_pull_request", "Merge a pull request. Refuses a draft, an already-closed/merged PR, or one with an unresolved REQUEST_CHANGES review.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "pull_number": {"type": "integer"},
+         "merge_method": {"type": "string", "enum": ["merge", "squash", "rebase"], "description": "Optional, defaults to 'merge'."}},
+        ["owner", "repo", "pull_number"]),
+    "update_pull_request_branch": _fn(
+        "update_pull_request_branch", "Sync a pull request's branch with its base branch.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "pull_number": {"type": "integer"}},
+        ["owner", "repo", "pull_number"]),
+    "pull_request_review_write": _fn(
+        "pull_request_review_write", "Start/resume a pending review (omit event), or submit one with a decision (event=APPROVE/REQUEST_CHANGES/COMMENT).",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "pull_number": {"type": "integer"},
+         "event": {"type": "string", "enum": ["PENDING", "APPROVE", "REQUEST_CHANGES", "COMMENT"],
+                   "description": "Omit or 'PENDING' to start/resume a pending review without submitting it."},
+         "body": {"type": "string"}},
+        ["owner", "repo", "pull_number"]),
+    "add_comment_to_pending_review": _fn(
+        "add_comment_to_pending_review", "Attach a line comment to the currently-open pending review on a pull request. Requires a pending review to already be open.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "pull_number": {"type": "integer"},
+         "path": {"type": "string"}, "line": {"type": "integer"}, "body": {"type": "string"}},
+        ["owner", "repo", "pull_number", "path", "line", "body"]),
+    "add_reply_to_pull_request_comment": _fn(
+        "add_reply_to_pull_request_comment", "Reply to an existing pull request review comment.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "pull_number": {"type": "integer"},
+         "comment_id": {"type": "integer"}, "body": {"type": "string"}},
+        ["owner", "repo", "pull_number", "comment_id", "body"]),
+    # repositories
+    "create_repository": _fn(
+        "create_repository", "Create a new repository owned by the authenticated user.",
+        {"name": {"type": "string"}, "description": {"type": "string"},
+         "private": {"type": "boolean", "description": "Optional, defaults to false."}},
+        ["name"]),
+    "fork_repository": _fn(
+        "fork_repository", "Fork a repository into the authenticated user's account.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "search_repositories": _fn(
+        "search_repositories", "Search repositories by name.",
+        {"query": {"type": "string"}}, ["query"]),
+    "get_file_contents": _fn(
+        "get_file_contents", "Read a file's contents from a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "path": {"type": "string"},
+         "ref": {"type": "string", "description": "Branch/tag/sha (optional)."}},
+        ["owner", "repo", "path"]),
+    "create_or_update_file": _fn(
+        "create_or_update_file", "Create a new file or overwrite an existing one with a commit message.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "path": {"type": "string"},
+         "content": {"type": "string"}, "message": {"type": "string", "description": "Commit message."},
+         "branch": {"type": "string", "description": "Optional, defaults to the default branch."}},
+        ["owner", "repo", "path", "content", "message"]),
+    "delete_file": _fn(
+        "delete_file", "Delete an existing file with a commit message.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "path": {"type": "string"},
+         "message": {"type": "string", "description": "Commit message."},
+         "branch": {"type": "string", "description": "Optional, defaults to the default branch."}},
+        ["owner", "repo", "path", "message"]),
+    "push_files": _fn(
+        "push_files", "Push several file changes to a branch in a single commit.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "branch": {"type": "string"},
+         "files": {"type": "object", "description": "{path: content}."},
+         "message": {"type": "string", "description": "Commit message."}},
+        ["owner", "repo", "branch", "files", "message"]),
+    "create_branch": _fn(
+        "create_branch", "Create a new branch from an existing one.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "branch": {"type": "string"},
+         "from_branch": {"type": "string", "description": "Optional, defaults to the default branch."}},
+        ["owner", "repo", "branch"]),
+    "list_branches": _fn(
+        "list_branches", "List branches in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "get_commit": _fn(
+        "get_commit", "Get one commit's details.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "sha": {"type": "string"}},
+        ["owner", "repo", "sha"]),
+    "list_commits": _fn(
+        "list_commits", "List commits in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"},
+         "branch": {"type": "string", "description": "Optional, defaults to the default branch."}},
+        ["owner", "repo"]),
+    "search_commits": _fn(
+        "search_commits", "Search commits in a repository by message text.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "query": {"type": "string"}},
+        ["owner", "repo", "query"]),
+    "search_code": _fn(
+        "search_code", "Search file contents/paths across every repository.",
+        {"query": {"type": "string"}}, ["query"]),
+    "get_tag": _fn(
+        "get_tag", "Get the commit a tag points to.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "tag": {"type": "string"}},
+        ["owner", "repo", "tag"]),
+    "list_tags": _fn(
+        "list_tags", "List tags in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "get_latest_release": _fn(
+        "get_latest_release", "Get the most recent release.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "get_release_by_tag": _fn(
+        "get_release_by_tag", "Get one release by its tag.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}, "tag": {"type": "string"}},
+        ["owner", "repo", "tag"]),
+    "list_releases": _fn(
+        "list_releases", "List releases in a repository.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+    "list_repository_collaborators": _fn(
+        "list_repository_collaborators", "List a repository's collaborators and their roles.",
+        {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
     "filesystem": (FilesystemService, _FILESYSTEM_SCHEMAS),
     "docker": (DockerService, _DOCKER_SCHEMAS),
     "kubernetes": (KubernetesService, _KUBERNETES_SCHEMAS),
+    "forge": (ForgeService, _FORGE_SCHEMAS),
 }
 
 

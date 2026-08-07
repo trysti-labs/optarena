@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_branch_before_pr",
+  "description": "Create a new branch, then confirm it exists by listing branches.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories", "branches"],
+  "tool_service": "forge",
+  "tools": ["create_branch", "list_branches"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}}
+  },
+  "prompts": [
+    "Create a new branch called 'feature-search' in acme/webapp off main, then confirm it shows up when listing branches."
+  ],
+  "expected_calls": [
+    {"tool": "create_branch", "arguments_contains": {"owner": "acme", "repo": "webapp", "branch": "feature-search"}},
+    {"tool": "list_branches", "arguments_contains": {"owner": "acme", "repo": "webapp"}}
+  ],
+  "expected_final_state": {
+    "branches": {"acme/webapp": ["feature-search", "main"]}
+  }
+}

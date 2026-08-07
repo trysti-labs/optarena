@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_sync_pr_with_base",
+  "description": "Sync a pull request's branch with the latest base.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "pull-requests"],
+  "tool_service": "forge",
+  "tools": ["update_pull_request_branch"],
+  "tool_service_seed": {
+    "pull_requests": [{"owner": "acme", "repo": "webapp", "number": 6, "title": "Update dependencies"}]
+  },
+  "prompts": [
+    "Pull request #6 in acme/webapp is behind main. Update its branch to sync with the latest base."
+  ],
+  "expected_calls": [
+    {"tool": "update_pull_request_branch", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 6}}
+  ]
+}

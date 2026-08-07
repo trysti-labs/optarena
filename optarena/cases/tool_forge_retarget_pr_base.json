@@ -1,0 +1,20 @@
+{
+  "name": "tool_forge_retarget_pr_base",
+  "description": "Change a pull request's base branch.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "pull-requests"],
+  "tool_service": "forge",
+  "tools": ["update_pull_request"],
+  "tool_service_seed": {
+    "pull_requests": [{"owner": "acme", "repo": "webapp", "number": 7, "title": "Hotfix", "base": "release-1.0"}],
+    "branches": {"acme/webapp": {"release-2.0": "sha-r2-0"}}
+  },
+  "prompts": [
+    "Pull request #7 in acme/webapp was opened against release-1.0 by mistake - it should target release-2.0 instead. Fix that."
+  ],
+  "expected_calls": [
+    {"tool": "update_pull_request", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 7, "base": "release-2.0"}}
+  ]
+}

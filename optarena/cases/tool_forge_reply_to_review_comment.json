@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_reply_to_review_comment",
+  "description": "Reply directly to an existing review comment by id.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "pull-requests", "reviews"],
+  "tool_service": "forge",
+  "tools": ["add_reply_to_pull_request_comment"],
+  "tool_service_seed": {
+    "pull_requests": [{"owner": "acme", "repo": "webapp", "number": 5, "title": "Add rate limiting"}]
+  },
+  "prompts": [
+    "On pull request #5 in acme/webapp, reply to review comment ID 17 with: 'Good catch, fixed in the latest commit.'"
+  ],
+  "expected_calls": [
+    {"tool": "add_reply_to_pull_request_comment", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 5, "comment_id": 17}}
+  ]
+}

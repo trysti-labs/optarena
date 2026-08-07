@@ -1,0 +1,22 @@
+{
+  "name": "tool_forge_explore_then_edit",
+  "description": "Look at what exists, read the specific file, then edit it - not guess at content that was never read.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "repository-tree", "read-before-write"],
+  "tool_service": "forge",
+  "tools": ["get_repository_tree", "get_file_contents", "create_or_update_file"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}},
+    "files": {"acme/webapp": {"README.md": "# webapp\n"}}
+  },
+  "prompts": [
+    "See what files exist in acme/webapp, read the README, then update it to add a License section."
+  ],
+  "expected_calls": [
+    {"tool": "get_repository_tree", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "get_file_contents", "arguments_contains": {"owner": "acme", "repo": "webapp", "path": "README.md"}},
+    {"tool": "create_or_update_file", "arguments_contains": {"owner": "acme", "repo": "webapp", "path": "README.md"}}
+  ]
+}

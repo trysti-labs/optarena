@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_answer_discussion",
+  "description": "Find the discussion, read it and its existing comments, then reply - not answer blind.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "discussions"],
+  "tool_service": "forge",
+  "tools": ["list_discussions", "get_discussion", "get_discussion_comments", "discussion_comment_write"],
+  "tool_service_seed": {
+    "discussions": [{"owner": "acme", "repo": "webapp", "number": 1, "title": "Best way to configure caching?",
+                      "body": "Looking for advice.", "category": "Q&A"}]
+  },
+  "prompts": [
+    "Find the discussion about caching configuration in acme/webapp, read it and its existing comments, then post a helpful reply."
+  ],
+  "expected_calls": [
+    {"tool": "list_discussions", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "get_discussion", "arguments_contains": {"owner": "acme", "repo": "webapp", "discussion_number": 1}},
+    {"tool": "get_discussion_comments", "arguments_contains": {"owner": "acme", "repo": "webapp", "discussion_number": 1}},
+    {"tool": "discussion_comment_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "discussion_number": 1}}
+  ]
+}

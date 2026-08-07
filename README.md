@@ -255,17 +255,22 @@ optarena run --driver ollama-tools --model qwen3-coder:30b \
   --cases tool_create_task,tool_git_stage_review_and_commit
 ```
 
-Ships with five mock services - `task_tracker` (generic create/complete/
+Ships with six mock services - `task_tracker` (generic create/complete/
 list/delete, 5 cases), `git_repo` (all 18 tools a real coding agent's git
 workflow touches - status/add/commit/diff/log/branch/checkout/blame/tags/
 push/pull, 12 cases), `filesystem` (all 13 tools the official MCP
 filesystem server exposes - read/write/edit/move/search/list/directory-tree,
 13 cases), `docker` (25 tools across containers/images/networks/
 volumes - several enforcing real preconditions like "can't remove a
-running container", 15 cases), and `kubernetes` (23 tools across kubectl/
+running container", 15 cases), `kubernetes` (23 tools across kubectl/
 Helm/nodes - several enforcing real preconditions like "kubectl_create
 refuses a duplicate but kubectl_apply upserts", "draining a node refuses
-without explicit confirmation", 19 cases) - deliberately scoped toward
+without explicit confirmation", 19 cases), and `forge` (all 77 tools the
+official GitHub MCP server exposes across issues/PRs/reviews/labels/
+notifications/actions/security alerts/gists/discussions/projects -
+several enforcing real GitHub-like preconditions like "can't merge over
+an unresolved change-request review", "can't attach a line comment
+without an open pending review", 47 cases) - deliberately scoped toward
 coding/dev tools rather than more generic ones; see [ARCH.md](./ARCH.md)
 §3.5 for the schema and oracle mechanics, and what's still deferred
 (agent-driver support beyond the raw baselines, more mock services).

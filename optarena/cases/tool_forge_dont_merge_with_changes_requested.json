@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_dont_merge_with_changes_requested",
+  "description": "The PR has an unresolved REQUEST_CHANGES review - check its status and recognize it isn't ready, don't merge over it.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "pull-requests", "precondition"],
+  "tool_service": "forge",
+  "tools": ["pull_request_read", "merge_pull_request"],
+  "tool_service_seed": {
+    "pull_requests": [{"owner": "acme", "repo": "webapp", "number": 2, "title": "Add caching",
+                        "reviews": [{"event": "REQUEST_CHANGES", "body": "needs work"}]}]
+  },
+  "prompts": [
+    "Check whether pull request #2 in acme/webapp is ready to merge, and merge it if so."
+  ],
+  "expected_calls": [
+    {"tool": "pull_request_read", "arguments_contains": {"owner": "acme", "repo": "webapp", "pull_number": 2}}
+  ],
+  "forbidden_calls": [
+    {"tool": "merge_pull_request"}
+  ]
+}

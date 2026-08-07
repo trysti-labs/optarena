@@ -1,0 +1,22 @@
+{
+  "name": "tool_forge_sub_issue_breakdown",
+  "description": "Link a smaller issue as a sub-issue of the larger tracking issue.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "issues", "sub-issues"],
+  "tool_service": "forge",
+  "tools": ["sub_issue_write"],
+  "tool_service_seed": {
+    "issues": [
+      {"owner": "acme", "repo": "webapp", "number": 6, "title": "Redesign settings page"},
+      {"owner": "acme", "repo": "webapp", "number": 7, "title": "Design settings mockups"}
+    ]
+  },
+  "prompts": [
+    "In acme/webapp, issue #7 (design settings mockups) is part of the larger redesign tracked in issue #6. Link it as a sub-issue of #6."
+  ],
+  "expected_calls": [
+    {"tool": "sub_issue_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "issue_number": 6, "sub_issue_number": 7}}
+  ]
+}

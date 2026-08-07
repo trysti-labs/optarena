@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_list_open_bugs",
+  "description": "List issues filtered by state and label.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "issues"],
+  "tool_service": "forge",
+  "tools": ["list_issues"],
+  "tool_service_seed": {
+    "issues": [
+      {"owner": "acme", "repo": "webapp", "number": 1, "title": "Crash on login", "state": "open", "labels": ["bug"]},
+      {"owner": "acme", "repo": "webapp", "number": 2, "title": "Old fixed bug", "state": "closed", "labels": ["bug"]},
+      {"owner": "acme", "repo": "webapp", "number": 3, "title": "Add dark mode", "state": "open", "labels": ["enhancement"]}
+    ]
+  },
+  "prompts": [
+    "List all open issues labeled 'bug' in acme/webapp."
+  ],
+  "expected_calls": [
+    {"tool": "list_issues", "arguments_contains": {"owner": "acme", "repo": "webapp", "state": "open", "labels": ["bug"]}}
+  ]
+}

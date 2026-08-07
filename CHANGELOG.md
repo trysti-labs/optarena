@@ -16,7 +16,7 @@ existed.
   on files written. Two new experimental baseline drivers run the real
   request → tool_call → execute-against-mock-service → feed-result-back loop:
   `openai-tools` (`/v1/chat/completions` tool_calls) and `ollama-tools`
-  (Ollama-native `/api/chat` tool_calls). Ships with five mock services -
+  (Ollama-native `/api/chat` tool_calls). Ships with six mock services -
   `task_tracker` (create/complete/list/delete, 5 cases), `git_repo` (all
   18 tools from the real MCP git-server ecosystem: status/add/reset/commit/
   diff variants/log/show/branch operations/blame/remotes/tags/push/pull,
@@ -34,7 +34,16 @@ existed.
   cordon/drain/uncordon, ping - several enforcing real kubectl/Helm-like
   preconditions (`kubectl_create`/`install_helm_chart` refuse a duplicate
   while `kubectl_apply`/`helm_template_apply` upsert; draining a node
-  refuses without explicit confirmation), 19 cases) - plus a
+  refuses without explicit confirmation), 19 cases), and `forge` (all 77
+  tools the official `github/github-mcp-server` exposes across 17
+  toolsets - Actions, Code Quality, Code Security, Context, Copilot,
+  Dependabot, Discussions, Gists, Git, Issues, Labels, Notifications,
+  Organizations, Projects, Pull Requests, Repositories, Secret Protection
+  - several enforcing real GitHub-like preconditions (`issue_write`/
+  `label_write`/`projects_write` create-vs-update by id presence,
+  `merge_pull_request` refusing a draft/closed/unresolved-
+  REQUEST_CHANGES pull request, `add_comment_to_pending_review` refusing
+  without an open pending review), 47 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

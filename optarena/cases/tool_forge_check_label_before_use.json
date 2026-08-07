@@ -1,0 +1,23 @@
+{
+  "name": "tool_forge_check_label_before_use",
+  "description": "Check what labels exist and their exact name before filing an issue that uses one.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "labels", "issues"],
+  "tool_service": "forge",
+  "tools": ["list_label", "get_label", "issue_write"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}},
+    "labels": {"acme/webapp": {"bug": {"color": "d73a4a", "description": "Something broken"},
+                                "enhancement": {"color": "a2eeef", "description": "New feature or request"}}}
+  },
+  "prompts": [
+    "Check what labels exist in acme/webapp, look up the exact details of the 'enhancement' label, then file a new issue titled 'Add dark mode' using that label."
+  ],
+  "expected_calls": [
+    {"tool": "list_label", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "get_label", "arguments_contains": {"owner": "acme", "repo": "webapp", "name": "enhancement"}},
+    {"tool": "issue_write", "arguments_contains": {"owner": "acme", "repo": "webapp", "title": "Add dark mode", "labels": ["enhancement"]}}
+  ]
+}

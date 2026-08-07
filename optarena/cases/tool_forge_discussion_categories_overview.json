@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_discussion_categories_overview",
+  "description": "A simple discovery question about a repository's discussion categories.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "discussions"],
+  "tool_service": "forge",
+  "tools": ["list_discussion_categories"],
+  "tool_service_seed": {
+    "discussion_categories": {"acme/webapp": ["Q&A", "Ideas", "Announcements"]}
+  },
+  "prompts": [
+    "What discussion categories does acme/webapp have set up?"
+  ],
+  "expected_calls": [
+    {"tool": "list_discussion_categories", "arguments_contains": {"owner": "acme", "repo": "webapp"}}
+  ]
+}

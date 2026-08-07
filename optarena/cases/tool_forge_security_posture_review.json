@@ -1,0 +1,27 @@
+{
+  "name": "tool_forge_security_posture_review",
+  "description": "A full security and quality overview touches every alert-listing toolset plus a code quality finding lookup.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "security", "code-quality"],
+  "tool_service": "forge",
+  "tools": ["list_code_scanning_alerts", "list_dependabot_alerts", "list_secret_scanning_alerts",
+            "get_code_quality_finding"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}},
+    "code_scanning_alerts": [{"owner": "acme", "repo": "webapp", "number": 1, "rule": "sql-injection", "severity": "high", "state": "open"}],
+    "dependabot_alerts": [{"owner": "acme", "repo": "webapp", "number": 1, "package": "lodash", "severity": "high", "state": "open"}],
+    "secret_scanning_alerts": [{"owner": "acme", "repo": "webapp", "number": 1, "secret_type": "aws_key", "state": "open"}],
+    "code_quality_findings": [{"owner": "acme", "repo": "webapp", "id": "cq1", "rule": "complexity", "severity": "medium"}]
+  },
+  "prompts": [
+    "Give me a full security and quality overview of acme/webapp: list the code scanning alerts, the dependabot alerts, and the secret scanning alerts, and also look up code quality finding cq1."
+  ],
+  "expected_calls": [
+    {"tool": "list_code_scanning_alerts", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "list_dependabot_alerts", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "list_secret_scanning_alerts", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "get_code_quality_finding", "arguments_contains": {"owner": "acme", "repo": "webapp", "finding_id": "cq1"}}
+  ]
+}

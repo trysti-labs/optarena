@@ -1,0 +1,20 @@
+{
+  "name": "tool_forge_check_release_tag",
+  "description": "Check what commit a tag points to, and list all tags.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories", "tags"],
+  "tool_service": "forge",
+  "tools": ["get_tag", "list_tags"],
+  "tool_service_seed": {
+    "tags": {"acme/webapp": {"v1.0.0": "sha-v1"}}
+  },
+  "prompts": [
+    "Check what commit the v1.0.0 tag points to in acme/webapp, and list all tags in that repo."
+  ],
+  "expected_calls": [
+    {"tool": "get_tag", "arguments_contains": {"owner": "acme", "repo": "webapp", "tag": "v1.0.0"}},
+    {"tool": "list_tags", "arguments_contains": {"owner": "acme", "repo": "webapp"}}
+  ]
+}

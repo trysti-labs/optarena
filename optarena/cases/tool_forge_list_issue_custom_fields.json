@@ -1,0 +1,20 @@
+{
+  "name": "tool_forge_list_issue_custom_fields",
+  "description": "A discovery question about what custom fields and issue types a repository supports.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "issues"],
+  "tool_service": "forge",
+  "tools": ["list_issue_fields", "list_issue_types"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}}
+  },
+  "prompts": [
+    "What custom fields and issue types does acme/webapp support?"
+  ],
+  "expected_calls": [
+    {"tool": "list_issue_fields", "arguments_contains": {"owner": "acme", "repo": "webapp"}},
+    {"tool": "list_issue_types", "arguments_contains": {"owner": "acme", "repo": "webapp"}}
+  ]
+}

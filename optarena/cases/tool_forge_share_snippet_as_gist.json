@@ -1,0 +1,17 @@
+{
+  "name": "tool_forge_share_snippet_as_gist",
+  "description": "Create a new public gist with a given filename and content.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "gists"],
+  "tool_service": "forge",
+  "tools": ["create_gist"],
+  "prompts": [
+    "Create a public gist called 'debug-snippet.py' containing the line print(\"debug\"), with description 'quick debug helper'."
+  ],
+  "expected_calls": [
+    {"tool": "create_gist", "arguments_contains": {"description": "quick debug helper", "public": true,
+                                                    "files": {"debug-snippet.py": "print(\"debug\")"}}}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_fork_before_contributing",
+  "description": "Fork a repository before contributing to it.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories"],
+  "tool_service": "forge",
+  "tools": ["fork_repository"],
+  "tool_service_seed": {
+    "repos": {"acme/webapp": {}}
+  },
+  "prompts": [
+    "I want to contribute to acme/webapp - fork it into my own account first."
+  ],
+  "expected_calls": [
+    {"tool": "fork_repository", "arguments_contains": {"owner": "acme", "repo": "webapp"}}
+  ]
+}

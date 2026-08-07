@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_quick_copilot_assign",
+  "description": "No specific guidance given - the plain assignment tool is the right one, no need to invent an intent.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "copilot"],
+  "tool_service": "forge",
+  "tools": ["assign_copilot_to_issue", "assign_copilot_to_issue_with_intent"],
+  "tool_service_seed": {
+    "issues": [{"owner": "acme", "repo": "webapp", "number": 1, "title": "Typo in README"}]
+  },
+  "prompts": [
+    "Just assign Copilot to issue #1 in acme/webapp."
+  ],
+  "expected_calls": [
+    {"tool": "assign_copilot_to_issue", "arguments_contains": {"owner": "acme", "repo": "webapp", "issue_number": 1}}
+  ]
+}

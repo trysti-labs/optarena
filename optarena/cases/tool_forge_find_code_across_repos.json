@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_find_code_across_repos",
+  "description": "Search file contents across every repository.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories", "search"],
+  "tool_service": "forge",
+  "tools": ["search_code"],
+  "tool_service_seed": {
+    "files": {"acme/webapp": {"app.py": "def handle_login():\n    pass\n"}}
+  },
+  "prompts": [
+    "Search all repositories for code mentioning 'handle_login'."
+  ],
+  "expected_calls": [
+    {"tool": "search_code", "arguments_contains": {"query": "handle_login"}}
+  ]
+}

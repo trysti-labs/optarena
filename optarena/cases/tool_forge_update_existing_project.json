@@ -1,0 +1,21 @@
+{
+  "name": "tool_forge_update_existing_project",
+  "description": "Find the right project and check its details before updating it, not guess at an id.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 2,
+  "tags": ["tool-use", "forge", "projects"],
+  "tool_service": "forge",
+  "tools": ["projects_list", "projects_get", "projects_write"],
+  "tool_service_seed": {
+    "projects": [{"id": "proj1", "owner": "acme", "title": "Q2 Roadmap", "body": "old"}]
+  },
+  "prompts": [
+    "Find the acme org's Q2 Roadmap project, check its current details, and update its title to 'Q2 Roadmap (archived)'."
+  ],
+  "expected_calls": [
+    {"tool": "projects_list", "arguments_contains": {"owner": "acme"}},
+    {"tool": "projects_get", "arguments_contains": {"project_id": "proj1"}},
+    {"tool": "projects_write", "arguments_contains": {"project_id": "proj1", "title": "Q2 Roadmap (archived)"}}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "tool_forge_remove_deprecated_file",
+  "description": "Delete a deprecated file with a commit message.",
+  "task_type": "tool_use",
+  "domain": "forge",
+  "difficulty": 1,
+  "tags": ["tool-use", "forge", "repositories", "files"],
+  "tool_service": "forge",
+  "tools": ["delete_file"],
+  "tool_service_seed": {
+    "files": {"acme/webapp": {"legacy.py": "# old code"}}
+  },
+  "prompts": [
+    "Remove the deprecated legacy.py file from acme/webapp with commit message 'Remove deprecated module'."
+  ],
+  "expected_calls": [
+    {"tool": "delete_file", "arguments_contains": {"owner": "acme", "repo": "webapp", "path": "legacy.py"}}
+  ]
+}
