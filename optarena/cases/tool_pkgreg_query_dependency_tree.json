@@ -1,0 +1,21 @@
+{
+  "name": "tool_pkgreg_query_dependency_tree",
+  "description": "Filter installed packages by a name selector.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "query"],
+  "tool_service": "package_registry",
+  "tools": ["query"],
+  "tool_service_seed": {
+    "registry": {"lodash": {"versions": ["4.17.21"]}, "axios": {"versions": ["1.6.0"]}},
+    "project": {"dependencies": {"lodash": "4.17.21", "axios": "1.6.0"}},
+    "installed": {"lodash": {"version": "4.17.21"}, "axios": {"version": "1.6.0"}}
+  },
+  "prompts": [
+    "Find all installed dependencies with 'lo' in their name."
+  ],
+  "expected_calls": [
+    {"tool": "query", "arguments_contains": {"selector": "lo"}}
+  ]
+}

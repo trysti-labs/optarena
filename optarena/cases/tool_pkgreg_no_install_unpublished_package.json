@@ -1,0 +1,23 @@
+{
+  "name": "tool_pkgreg_no_install_unpublished_package",
+  "description": "Check the registry before installing something that was never published there.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 2,
+  "tags": ["tool-use", "package_registry", "search", "no-op-precondition"],
+  "tool_service": "package_registry",
+  "tools": ["search", "install"],
+  "tool_service_seed": {
+    "registry": {"axios": {"versions": ["1.6.0"]}},
+    "project": {}
+  },
+  "prompts": [
+    "Check if 'super-fast-http' is available in the registry before installing it."
+  ],
+  "expected_calls": [
+    {"tool": "search", "arguments_contains": {"query": "super-fast-http"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "install"}
+  ]
+}

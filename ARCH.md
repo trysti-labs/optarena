@@ -770,6 +770,64 @@ everything else here uses. A case is one domain or the other, never both -
     to check status "later" rather than continuing immediately; 3/3
     direct retries completed both steps correctly, confirming genuine
     sampling variance rather than a systematic gap.
+- **`package_registry`** (`_cases/_mock_service.py`, `PackageRegistryService`) -
+  the seventh mock service, all 38 tools the real `npm-mcp`
+  (`mikusnuz/npm-mcp`) reference implementation registers, extracted
+  directly from its source this session rather than trusted from its
+  README (`DEV_NOTES/TOOL_CATALOG_COMPLETE.md` §8 cited a lower "32
+  tools" figure from the README; the actual `server.tool()` call count is
+  38 - the same "the real count runs higher than the survey estimate"
+  pattern already hit once for the whole catalog and again for
+  kubernetes), across 35 example cases.
+  - Single-project design, the same "one thing at a time" scope
+    `git_repo`/`filesystem` use (not multi-repo like `kubernetes`/
+    `forge`) - npm itself always operates against one project directory,
+    so there's no `owner`/`repo`/`namespace` scoping concept here at all.
+  - **Real npm preconditions enforced rather than always succeeding**: a
+    package is only installable once the mock registry has at least one
+    published version of it (installing something never published is a
+    real 404, the same "must exist before you can act on it" precondition
+    `create_container`'s image check enforces); `ci` refuses without a
+    lockfile present (matches real `npm ci`); `publish` refuses a version
+    that's already published (matches npm's real immutable-version rule -
+    you can only deprecate or unpublish, never overwrite); `run-script`/
+    `explain`/`uninstall`/`unpublish`/`deprecate`/`owner`/`dist-tag`/
+    `view`/`bugs`/`repo`/`docs` all refuse a script/package/version that
+    doesn't exist rather than silently no-op'ing.
+  - Two of the real tool names are hyphenated (`dist-tag`, `run-script`) -
+    invalid as Python identifiers, so `TOOLS` maps them to `dist_tag`/
+    `run_script` methods explicitly rather than via the identity
+    comprehension every other tool uses, the schema `name` field still
+    carrying the real hyphenated string the model sees.
+  - **A live-verified schema-ambiguity finding, fixed at the source**:
+    `pkg`'s `value` field is deliberately untyped (a package.json field
+    can hold a string, bool, number, object, or array) - a model
+    reasonably sent the string `"true"` for a boolean-looking field, the
+    same way real npm's CLI-style `pkg set field=value` takes it, not a
+    literal JSON boolean. Fixed the same way `FilesystemService`'s
+    trailing-slash issue was: an overridden `dispatch()` normalizes an
+    exact `"true"`/`"false"` string in `pkg`'s `value` argument to a real
+    boolean before logging, so the oracle sees a consistent
+    representation regardless of which one a model sends.
+  - **Two real case-design bugs, same live run, same fix pattern as
+    forge's `sub_issue_breakdown`**: two publish-related cases seeded a
+    project named `widget-lib` but never said so in the prompt, so the
+    model reasonably invented a plausible name instead (`"my-project"` -
+    likely just a common placeholder from training data, not anything
+    derived from this mock). Fixed by having one case require checking
+    the name via `pkg(operation="get", field="name")` first (the
+    "discover it, don't guess" pattern already used elsewhere) and the
+    other by naming the project directly in its prompt (the "already
+    told directly" pattern `tool_forge_quick_copilot_assign` uses) - kept
+    deliberately different so the two cases don't just duplicate the same
+    lesson.
+  - Live-verified against `qwen3-coder:30b` across two runs. The first
+    (31/35, before the fixes above) surfaced the three findings just
+    described plus one empty-call-log failure. After fixing all three, a
+    second confirmatory run (30/35) showed every failure as an empty call
+    log matching the already-known malformed-tool-call-as-text quirk
+    (confirmed via direct replay at 2/3 retries - a sixth reproduction of
+    the same finding first surfaced by `git_repo`) - no new findings.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not
@@ -781,7 +839,8 @@ everything else here uses. A case is one domain or the other, never both -
   guarantee is enforced by unit tests (`tests/test_tool_use_cases.py`,
   `tests/test_git_repo_cases.py`, `tests/test_filesystem_cases.py`,
   `tests/test_docker_cases.py`, `tests/test_kubernetes_cases.py`,
-  `tests/test_forge_cases.py`) today, not by a corpus-wide verify command.
+  `tests/test_forge_cases.py`, `tests/test_package_registry_cases.py`)
+  today, not by a corpus-wide verify command.
   A case can only name ONE
   `tool_service` - a realistic workflow spanning two services (e.g. list a
   directory, then commit what's found with git) isn't expressible yet; see

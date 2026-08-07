@@ -1,0 +1,19 @@
+{
+  "name": "tool_pkgreg_dedupe_tree",
+  "description": "Deduplicate the dependency tree.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "dedupe"],
+  "tool_service": "package_registry",
+  "tools": ["dedupe"],
+  "tool_service_seed": {
+    "project": {}
+  },
+  "prompts": [
+    "Deduplicate the dependency tree to remove redundant nested copies."
+  ],
+  "expected_calls": [
+    {"tool": "dedupe"}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "tool_pkgreg_check_before_republish",
+  "description": "Check whether a version is already published before attempting to publish it again - npm hard-refuses overwriting a published version.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 2,
+  "tags": ["tool-use", "package_registry", "publish", "no-op-precondition"],
+  "tool_service": "package_registry",
+  "tools": ["view", "publish"],
+  "tool_service_seed": {
+    "registry": {"mypkg": {"versions": ["1.0.0"]}}
+  },
+  "prompts": [
+    "Check whether version 1.0.0 of mypkg is already published before publishing it."
+  ],
+  "expected_calls": [
+    {"tool": "view", "arguments_contains": {"package": "mypkg"}}
+  ],
+  "forbidden_calls": [
+    {"tool": "publish"}
+  ]
+}

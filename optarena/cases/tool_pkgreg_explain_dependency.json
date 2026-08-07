@@ -1,0 +1,21 @@
+{
+  "name": "tool_pkgreg_explain_dependency",
+  "description": "Explain why a package is in the dependency tree.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "explain"],
+  "tool_service": "package_registry",
+  "tools": ["explain"],
+  "tool_service_seed": {
+    "registry": {"lodash": {"versions": ["4.17.21"]}},
+    "project": {"dependencies": {"lodash": "4.17.21"}},
+    "installed": {"lodash": {"version": "4.17.21"}}
+  },
+  "prompts": [
+    "Explain why lodash is in the dependency tree."
+  ],
+  "expected_calls": [
+    {"tool": "explain", "arguments_contains": {"package": "lodash"}}
+  ]
+}

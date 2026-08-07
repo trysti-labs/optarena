@@ -1,0 +1,25 @@
+{
+  "name": "tool_pkgreg_update_outdated_packages",
+  "description": "Check for outdated packages, then update them.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "update"],
+  "tool_service": "package_registry",
+  "tools": ["outdated", "update"],
+  "tool_service_seed": {
+    "registry": {"lodash": {"versions": ["4.17.20", "4.17.21"]}},
+    "project": {"dependencies": {"lodash": "4.17.20"}},
+    "installed": {"lodash": {"version": "4.17.20"}}
+  },
+  "prompts": [
+    "Check for outdated packages, then update them to the latest version."
+  ],
+  "expected_calls": [
+    {"tool": "outdated"},
+    {"tool": "update"}
+  ],
+  "expected_final_state": {
+    "installed": {"lodash": {"version": "4.17.21"}}
+  }
+}

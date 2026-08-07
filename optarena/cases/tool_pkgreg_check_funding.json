@@ -1,0 +1,21 @@
+{
+  "name": "tool_pkgreg_check_funding",
+  "description": "Show funding information for dependencies.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "fund"],
+  "tool_service": "package_registry",
+  "tools": ["fund"],
+  "tool_service_seed": {
+    "registry": {"lodash": {"versions": ["4.17.21"], "funding": true}},
+    "project": {"dependencies": {"lodash": "4.17.21"}},
+    "installed": {"lodash": {"version": "4.17.21"}}
+  },
+  "prompts": [
+    "Show funding information for this project's dependencies."
+  ],
+  "expected_calls": [
+    {"tool": "fund"}
+  ]
+}

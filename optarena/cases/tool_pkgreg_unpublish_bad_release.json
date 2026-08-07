@@ -1,0 +1,19 @@
+{
+  "name": "tool_pkgreg_unpublish_bad_release",
+  "description": "Remove a broken published version from the registry.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "unpublish"],
+  "tool_service": "package_registry",
+  "tools": ["unpublish"],
+  "tool_service_seed": {
+    "registry": {"mypkg": {"versions": ["1.0.0", "1.0.1"]}}
+  },
+  "prompts": [
+    "Remove the broken 1.0.1 release of mypkg from the registry."
+  ],
+  "expected_calls": [
+    {"tool": "unpublish", "arguments_contains": {"package": "mypkg", "version": "1.0.1"}}
+  ]
+}

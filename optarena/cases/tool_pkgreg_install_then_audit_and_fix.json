@@ -1,0 +1,25 @@
+{
+  "name": "tool_pkgreg_install_then_audit_and_fix",
+  "description": "Install a package, then check for vulnerabilities and fix any that are found rather than leaving them.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 2,
+  "tags": ["tool-use", "package_registry", "audit", "security"],
+  "tool_service": "package_registry",
+  "tools": ["install", "audit"],
+  "tool_service_seed": {
+    "registry": {"lodash": {"versions": ["4.17.20", "4.17.21"]}},
+    "vulnerabilities": {"lodash": {"4.17.20": {"severity": "high", "advisory": "prototype pollution"}}},
+    "project": {}
+  },
+  "prompts": [
+    "Install lodash version 4.17.20 into this project, then check for security vulnerabilities and fix any that are found."
+  ],
+  "expected_calls": [
+    {"tool": "install", "arguments_contains": {"packages": ["lodash@4.17.20"]}},
+    {"tool": "audit", "arguments_contains": {"fix": true}}
+  ],
+  "expected_final_state": {
+    "installed": {"lodash": {"version": "4.17.21"}}
+  }
+}

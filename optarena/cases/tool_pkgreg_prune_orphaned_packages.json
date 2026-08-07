@@ -1,0 +1,23 @@
+{
+  "name": "tool_pkgreg_prune_orphaned_packages",
+  "description": "Remove installed packages no longer declared in package.json.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "prune"],
+  "tool_service": "package_registry",
+  "tools": ["prune"],
+  "tool_service_seed": {
+    "project": {},
+    "installed": {"orphan": {"version": "1.0.0"}}
+  },
+  "prompts": [
+    "Remove any installed packages that aren't actually listed in package.json anymore."
+  ],
+  "expected_calls": [
+    {"tool": "prune"}
+  ],
+  "expected_final_state": {
+    "installed_count": 0
+  }
+}

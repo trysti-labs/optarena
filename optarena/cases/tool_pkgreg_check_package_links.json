@@ -1,0 +1,24 @@
+{
+  "name": "tool_pkgreg_check_package_links",
+  "description": "Get a published package's bug tracker, repository, and documentation URLs.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "bugs", "repo", "docs"],
+  "tool_service": "package_registry",
+  "tools": ["bugs", "repo", "docs"],
+  "tool_service_seed": {
+    "registry": {"lodash": {"versions": ["4.17.21"],
+                            "bugs_url": "https://github.com/lodash/lodash/issues",
+                            "repo_url": "https://github.com/lodash/lodash",
+                            "docs_url": "https://lodash.com/docs"}}
+  },
+  "prompts": [
+    "Get the bug tracker, repository, and documentation URLs for the lodash package."
+  ],
+  "expected_calls": [
+    {"tool": "bugs", "arguments_contains": {"package": "lodash"}},
+    {"tool": "repo", "arguments_contains": {"package": "lodash"}},
+    {"tool": "docs", "arguments_contains": {"package": "lodash"}}
+  ]
+}

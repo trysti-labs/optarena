@@ -1,0 +1,16 @@
+{
+  "name": "tool_pkgreg_clean_cache",
+  "description": "Clean the local package cache.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "cache"],
+  "tool_service": "package_registry",
+  "tools": ["cache"],
+  "prompts": [
+    "Clean the local package cache."
+  ],
+  "expected_calls": [
+    {"tool": "cache", "arguments_contains": {"operation": "clean"}}
+  ]
+}

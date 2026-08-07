@@ -1,0 +1,16 @@
+{
+  "name": "tool_pkgreg_ping_registry",
+  "description": "Check connectivity to the package registry.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "ping"],
+  "tool_service": "package_registry",
+  "tools": ["ping"],
+  "prompts": [
+    "Check connectivity to the package registry."
+  ],
+  "expected_calls": [
+    {"tool": "ping"}
+  ]
+}

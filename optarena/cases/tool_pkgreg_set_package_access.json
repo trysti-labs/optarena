@@ -1,0 +1,19 @@
+{
+  "name": "tool_pkgreg_set_package_access",
+  "description": "Change a published package's access level.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "access"],
+  "tool_service": "package_registry",
+  "tools": ["access"],
+  "tool_service_seed": {
+    "registry": {"mypkg": {"versions": ["1.0.0"]}}
+  },
+  "prompts": [
+    "Make the mypkg package restricted-access instead of public."
+  ],
+  "expected_calls": [
+    {"tool": "access", "arguments_contains": {"operation": "set", "package": "mypkg", "level": "restricted"}}
+  ]
+}

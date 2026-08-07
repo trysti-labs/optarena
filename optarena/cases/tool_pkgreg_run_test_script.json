@@ -1,0 +1,19 @@
+{
+  "name": "tool_pkgreg_run_test_script",
+  "description": "Run a script defined in package.json.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "run-script"],
+  "tool_service": "package_registry",
+  "tools": ["run-script"],
+  "tool_service_seed": {
+    "project": {"scripts": {"test": "jest"}}
+  },
+  "prompts": [
+    "Run the test script defined in package.json."
+  ],
+  "expected_calls": [
+    {"tool": "run-script", "arguments_contains": {"name": "test"}}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "tool_pkgreg_whoami_check",
+  "description": "Check the currently authenticated registry user.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "whoami"],
+  "tool_service": "package_registry",
+  "tools": ["whoami"],
+  "prompts": [
+    "Who am I currently authenticated as on the registry?"
+  ],
+  "expected_calls": [
+    {"tool": "whoami"}
+  ]
+}

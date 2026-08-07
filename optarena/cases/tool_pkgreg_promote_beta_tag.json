@@ -1,0 +1,19 @@
+{
+  "name": "tool_pkgreg_promote_beta_tag",
+  "description": "Tag a specific version with a dist-tag.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "dist-tag"],
+  "tool_service": "package_registry",
+  "tools": ["dist-tag"],
+  "tool_service_seed": {
+    "registry": {"mypkg": {"versions": ["1.0.0", "2.0.0-beta.1"]}}
+  },
+  "prompts": [
+    "Tag version 2.0.0-beta.1 of mypkg as 'beta'."
+  ],
+  "expected_calls": [
+    {"tool": "dist-tag", "arguments_contains": {"operation": "add", "package": "mypkg", "tag": "beta", "version": "2.0.0-beta.1"}}
+  ]
+}

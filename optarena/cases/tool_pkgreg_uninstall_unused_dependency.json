@@ -1,0 +1,25 @@
+{
+  "name": "tool_pkgreg_uninstall_unused_dependency",
+  "description": "Check what's installed before removing a specific package.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "uninstall"],
+  "tool_service": "package_registry",
+  "tools": ["ls", "uninstall"],
+  "tool_service_seed": {
+    "registry": {"left-pad": {"versions": ["1.0.0"]}},
+    "project": {"dependencies": {"left-pad": "1.0.0"}},
+    "installed": {"left-pad": {"version": "1.0.0"}}
+  },
+  "prompts": [
+    "Check what's installed, then remove left-pad since we no longer use it."
+  ],
+  "expected_calls": [
+    {"tool": "ls"},
+    {"tool": "uninstall", "arguments_contains": {"packages": ["left-pad"]}}
+  ],
+  "expected_final_state": {
+    "installed_count": 0
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "tool_pkgreg_install_known_package",
+  "description": "Install a package that already exists in the registry.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "install"],
+  "tool_service": "package_registry",
+  "tools": ["install"],
+  "tool_service_seed": {
+    "registry": {"axios": {"versions": ["1.6.0"]}},
+    "project": {}
+  },
+  "prompts": [
+    "Install axios into this project."
+  ],
+  "expected_calls": [
+    {"tool": "install", "arguments_contains": {"packages": ["axios"]}}
+  ],
+  "expected_final_state": {
+    "installed_count": 1
+  }
+}

@@ -2474,6 +2474,552 @@ class ForgeService(MockService):
         }
 
 
+class PackageRegistryService(MockService):
+    """A mock npm-style registry plus a single local project - all 38
+    tools the real `npm-mcp` (mikusnuz/npm-mcp) reference implementation
+    registers, extracted directly from its source this session
+    (`DEV_NOTES/TOOL_CATALOG_COMPLETE.md` §8 cited a lower "32 tools"
+    figure taken from its README; the actual `server.tool()` call count
+    is 38 - the same "the real count runs higher than the survey
+    estimate" pattern already hit once for the whole catalog and again
+    for kubernetes).
+
+    Single-project design, the same "one thing at a time" scope
+    `git_repo`/`filesystem` use (not multi-repo like `kubernetes`/
+    `forge`) - npm itself always operates against one project directory.
+    A package is only INSTALLABLE if the mock registry already has at
+    least one published version of it - installing something never
+    published is a real 404, the same "must exist before you can act on
+    it" precondition `create_container`'s image check and
+    `create_pull_request`'s branch check already enforce elsewhere.
+    `ci` refuses without a lockfile present (matches real `npm ci`);
+    `publish` refuses a version that's already published (matches real
+    npm's hard immutable-version rule - you cannot overwrite a published
+    version, only deprecate or unpublish it); `run_script`/`explain`/
+    `uninstall`/`unpublish`/`deprecate`/`owner`/`dist-tag`/`view`/`bugs`/
+    `repo`/`docs` all refuse a script/package/version that doesn't exist
+    rather than silently no-op'ing.
+    """
+
+    TOOLS: dict[str, str] = {name: name for name in (
+        "publish", "version", "view", "search", "unpublish", "deprecate",
+        "owner", "pack", "whoami", "init", "audit", "outdated", "ls",
+        "install", "uninstall", "update", "access", "token", "ping", "bugs",
+        "repo", "docs", "diff", "pkg", "fund", "dedupe", "explain", "sbom",
+        "profile", "ci", "doctor", "cache", "config", "prune", "link", "query",
+    )}
+    TOOLS["dist-tag"] = "dist_tag"
+    TOOLS["run-script"] = "run_script"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._current_user = "npm-agent"
+        self._registry: dict[str, dict] = {}
+        self._vulnerabilities: dict[str, dict[str, dict]] = {}
+        self._project: dict | None = None
+        self._installed: dict[str, dict] = {}
+        self._lockfile_present = False
+        self._linked: set[str] = set()
+        self._tokens: dict[str, dict] = {}
+        self._config: dict[str, str] = {"registry": "https://registry.npmjs.org/"}
+        self._profile: dict[str, str] = {"email": "agent@example.invalid"}
+        self._next_token_id = 1
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``registry`` ({name: {versions: [version, ...] or
+          {version: {published_by, deprecated, files}}, owners: [...],
+          dist_tags: {tag: version}, access, bugs_url, repo_url,
+          docs_url, funding}}): pre-existing published packages.
+        - ``vulnerabilities`` ({name: {version: {severity, advisory}}}):
+          seeded `audit` findings.
+        - ``project`` ({name, version, dependencies, devDependencies,
+          scripts}): the current project's package.json - a project
+          exists once this key is given (even as ``{}``); omitted means
+          no package.json yet, so most tools refuse until `init` is called.
+        - ``installed`` ({name: {version, dev}}): pre-existing installed
+          packages (need not match a registry version - e.g. installed
+          from a tarball).
+        - ``lockfile_present`` (bool): whether a lockfile exists, for `ci`.
+        """
+        for name, cfg in (spec.get("registry") or {}).items():
+            versions_spec = cfg.get("versions", [])
+            if isinstance(versions_spec, list):
+                versions = {v: {"published_by": self._current_user, "deprecated": None, "files": []}
+                            for v in versions_spec}
+            else:
+                versions = {v: {"published_by": vc.get("published_by", self._current_user),
+                                 "deprecated": vc.get("deprecated"), "files": list(vc.get("files", []))}
+                            for v, vc in versions_spec.items()}
+            self._registry[name] = {
+                "versions": versions, "owners": set(cfg.get("owners", [self._current_user])),
+                "dist_tags": {}, "access": cfg.get("access", "public"),
+                "bugs_url": cfg.get("bugs_url"), "repo_url": cfg.get("repo_url"),
+                "docs_url": cfg.get("docs_url"), "funding": cfg.get("funding"),
+            }
+            default_tags = dict(cfg.get("dist_tags", {}))
+            latest = self._latest_version(name)
+            if latest and "latest" not in default_tags:
+                default_tags["latest"] = latest
+            self._registry[name]["dist_tags"] = default_tags
+        for name, vulns in (spec.get("vulnerabilities") or {}).items():
+            self._vulnerabilities[name] = dict(vulns)
+        if "project" in spec:
+            p = spec["project"] or {}
+            self._project = {
+                "name": p.get("name", "my-project"), "version": p.get("version", "1.0.0"),
+                "dependencies": dict(p.get("dependencies", {})),
+                "devDependencies": dict(p.get("devDependencies", {})),
+                "scripts": dict(p.get("scripts", {})),
+            }
+        for name, info in (spec.get("installed") or {}).items():
+            self._installed[name] = {"version": info["version"], "dev": info.get("dev", False)}
+        self._lockfile_present = bool(spec.get("lockfile_present", False))
+
+    # ── value normalization ─────────────────────────────────────────────
+
+    def dispatch(self, tool_name: str, arguments: dict) -> Any:
+        """``pkg``'s ``value`` field is deliberately untyped in its schema
+        (a package.json field can hold a string, bool, number, object, or
+        array) - live-verified: a model reasonably represented a boolean
+        as the string ``"true"`` the same way real npm's CLI-style
+        `pkg set field=value` takes it, not as a literal JSON boolean.
+        Normalized here, once, before the base class logs/dispatches -
+        same reasoning as `FilesystemService`'s trailing-slash
+        normalization: the call log records what's passed to dispatch,
+        not what the method does internally with it."""
+        if tool_name == "pkg" and isinstance((arguments or {}).get("value"), str):
+            lowered = arguments["value"].lower()
+            if lowered in ("true", "false"):
+                arguments = dict(arguments)
+                arguments["value"] = lowered == "true"
+        return super().dispatch(tool_name, arguments)
+
+    # ── internal helpers ────────────────────────────────────────────────
+
+    @staticmethod
+    def _version_key(v: str) -> tuple:
+        parts = []
+        for p in (v or "0").split("."):
+            try:
+                parts.append(int(p))
+            except ValueError:
+                parts.append(0)
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts[:3])
+
+    def _latest_version(self, name: str) -> str | None:
+        versions = self._registry.get(name, {}).get("versions", {})
+        if not versions:
+            return None
+        return sorted(versions, key=self._version_key)[-1]
+
+    def _require_project(self) -> dict | None:
+        if self._project is None:
+            return {"error": "no package.json in this project - run init first"}
+        return None
+
+    # ── project setup ────────────────────────────────────────────────────
+
+    def init(self, name: str = "my-project", version: str = "1.0.0") -> dict:
+        if self._project is not None:
+            return {"error": "package.json already exists"}
+        self._project = {"name": name, "version": version, "dependencies": {},
+                          "devDependencies": {}, "scripts": {}}
+        return dict(self._project)
+
+    def pkg(self, operation: str, field: str | None = None, value=None) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        if operation == "get":
+            return dict(self._project) if field is None else {field: self._project.get(field)}
+        if operation == "set":
+            if field is None:
+                return {"error": "field is required for set"}
+            self._project[field] = value
+            return {field: value}
+        if operation == "delete":
+            if field is None:
+                return {"error": "field is required for delete"}
+            self._project.pop(field, None)
+            return {"deleted": field}
+        return {"error": f"unknown operation {operation!r} (expected get, set, or delete)"}
+
+    def ci(self) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        if not self._lockfile_present:
+            return {"error": "no lockfile present - ci requires an existing lockfile (use install instead)"}
+        installed = []
+        for name, ver in {**self._project["dependencies"], **self._project["devDependencies"]}.items():
+            self._installed[name] = {"version": ver, "dev": name in self._project["devDependencies"]}
+            installed.append({"name": name, "version": ver})
+        return {"installed": installed}
+
+    def link(self, package: str) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        self._linked.add(package)
+        return {"name": package, "linked": True}
+
+    # ── dependency management ───────────────────────────────────────────
+
+    def install(self, packages, dev: bool = False) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        installed, missing = [], []
+        for spec in self._as_list(packages):
+            name, _, ver = spec.partition("@")
+            ver = ver or self._latest_version(name)
+            if name not in self._registry or ver is None or ver not in self._registry[name]["versions"]:
+                missing.append(spec)
+                continue
+            self._installed[name] = {"version": ver, "dev": dev}
+            (self._project["devDependencies"] if dev else self._project["dependencies"])[name] = ver
+            installed.append({"name": name, "version": ver})
+        result = {"installed": installed}
+        if missing:
+            result["error"] = f"not found in registry: {missing}"
+        return result
+
+    def uninstall(self, packages) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        removed, missing = [], []
+        for name in self._as_list(packages):
+            if name not in self._installed:
+                missing.append(name)
+                continue
+            del self._installed[name]
+            self._project["dependencies"].pop(name, None)
+            self._project["devDependencies"].pop(name, None)
+            removed.append(name)
+        result = {"removed": removed}
+        if missing:
+            result["error"] = f"not installed: {missing}"
+        return result
+
+    def update(self, packages=None) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        names = self._as_list(packages) or list(self._installed)
+        updated = []
+        for name in names:
+            if name not in self._installed:
+                continue
+            latest = self._latest_version(name)
+            if latest and latest != self._installed[name]["version"]:
+                self._installed[name]["version"] = latest
+                dev = self._installed[name]["dev"]
+                (self._project["devDependencies"] if dev else self._project["dependencies"])[name] = latest
+                updated.append({"name": name, "version": latest})
+        return {"updated": updated}
+
+    def ls(self) -> dict:
+        return {"installed": {n: dict(v) for n, v in sorted(self._installed.items())}}
+
+    def outdated(self) -> dict:
+        out = []
+        for name, info in self._installed.items():
+            latest = self._latest_version(name)
+            if latest and latest != info["version"]:
+                out.append({"name": name, "current": info["version"], "latest": latest})
+        return {"outdated": out}
+
+    def prune(self) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        declared = set(self._project["dependencies"]) | set(self._project["devDependencies"])
+        orphans = sorted(n for n in self._installed if n not in declared)
+        for n in orphans:
+            del self._installed[n]
+        return {"removed": orphans}
+
+    def dedupe(self) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        return {"deduped": 0}
+
+    def fund(self) -> dict:
+        return {"funding": [{"name": n} for n in sorted(self._installed) if self._registry.get(n, {}).get("funding")]}
+
+    def explain(self, package: str) -> dict:
+        if package not in self._installed:
+            return {"error": f"{package!r} is not installed"}
+        err = self._require_project()
+        if err:
+            return err
+        direct = package in self._project["dependencies"] or package in self._project["devDependencies"]
+        return {"name": package, "direct_dependency": direct}
+
+    def sbom(self, format: str = "cyclonedx") -> dict:
+        return {"format": format, "components": [{"name": n, "version": v["version"]}
+                                                   for n, v in sorted(self._installed.items())]}
+
+    def query(self, selector: str) -> dict:
+        s = (selector or "").lower()
+        return {"matches": [n for n in sorted(self._installed) if s in n.lower()]}
+
+    def run_script(self, name: str) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        script = self._project["scripts"].get(name)
+        if script is None:
+            return {"error": f"no such script {name!r} in package.json"}
+        return {"name": name, "command": script, "output": f"<mock output of: {script}>"}
+
+    # ── security & diagnostics ──────────────────────────────────────────
+
+    def audit(self, fix: bool = False) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        findings, fixed = [], []
+        for name, info in list(self._installed.items()):
+            vuln = self._vulnerabilities.get(name, {}).get(info["version"])
+            if not vuln:
+                continue
+            if fix:
+                latest = self._latest_version(name)
+                if latest and latest not in self._vulnerabilities.get(name, {}):
+                    info["version"] = latest
+                    deps = self._project["devDependencies"] if info["dev"] else self._project["dependencies"]
+                    deps[name] = latest
+                    fixed.append({"name": name, "fixed_to": latest})
+                    continue
+            findings.append({"name": name, "version": info["version"], **vuln})
+        result = {"vulnerabilities": findings}
+        if fix:
+            result["fixed"] = fixed
+        return result
+
+    def doctor(self) -> dict:
+        return {"registry_reachable": True, "npm_version": "10.9.0", "node_version": "22.10.0", "issues": []}
+
+    def ping(self) -> dict:
+        return {"connected": True, "registry": self._config.get("registry")}
+
+    # ── configuration & auth ─────────────────────────────────────────────
+
+    def whoami(self) -> dict:
+        return {"username": self._current_user}
+
+    def token(self, operation: str, token_id: str | None = None) -> dict:
+        if operation == "list":
+            return {"tokens": sorted(self._tokens)}
+        if operation == "create":
+            token_id = f"tok{self._next_token_id}"
+            self._next_token_id += 1
+            self._tokens[token_id] = {"created_by": self._current_user}
+            return {"id": token_id}
+        if operation == "revoke":
+            if token_id not in self._tokens:
+                return {"error": f"no such token {token_id!r}"}
+            del self._tokens[token_id]
+            return {"id": token_id, "revoked": True}
+        return {"error": f"unknown operation {operation!r} (expected list, create, or revoke)"}
+
+    def access(self, operation: str, package: str, level: str | None = None) -> dict:
+        if package not in self._registry:
+            return {"error": f"no such package {package!r}"}
+        if operation == "get":
+            return {"package": package, "access": self._registry[package]["access"]}
+        if operation == "set":
+            if level not in ("public", "restricted"):
+                return {"error": f"unknown access level {level!r} (expected public or restricted)"}
+            self._registry[package]["access"] = level
+            return {"package": package, "access": level}
+        return {"error": f"unknown operation {operation!r} (expected get or set)"}
+
+    def owner(self, operation: str, package: str, user: str | None = None) -> dict:
+        if package not in self._registry:
+            return {"error": f"no such package {package!r}"}
+        owners = self._registry[package]["owners"]
+        if operation == "ls":
+            return {"package": package, "owners": sorted(owners)}
+        if operation == "add":
+            owners.add(user)
+            return {"package": package, "owners": sorted(owners)}
+        if operation == "rm":
+            owners.discard(user)
+            return {"package": package, "owners": sorted(owners)}
+        return {"error": f"unknown operation {operation!r} (expected ls, add, or rm)"}
+
+    def dist_tag(self, operation: str, package: str, tag: str | None = None, version: str | None = None) -> dict:
+        if package not in self._registry:
+            return {"error": f"no such package {package!r}"}
+        tags = self._registry[package]["dist_tags"]
+        if operation == "ls":
+            return {"package": package, "dist_tags": dict(tags)}
+        if operation == "add":
+            if version not in self._registry[package]["versions"]:
+                return {"error": f"no such version {version!r} of {package!r}"}
+            tags[tag] = version
+            return {"package": package, "tag": tag, "version": version}
+        if operation == "rm":
+            tags.pop(tag, None)
+            return {"package": package, "tag": tag, "removed": True}
+        return {"error": f"unknown operation {operation!r} (expected ls, add, or rm)"}
+
+    def profile(self, operation: str = "view", field: str | None = None, value: str | None = None) -> dict:
+        if operation == "view":
+            return dict(self._profile)
+        if operation == "set":
+            if field is None:
+                return {"error": "field is required for set"}
+            self._profile[field] = value
+            return {field: value}
+        return {"error": f"unknown operation {operation!r} (expected view or set)"}
+
+    def config(self, operation: str, key: str | None = None, value: str | None = None) -> dict:
+        if operation == "get":
+            if key is None:
+                return dict(self._config)
+            if key not in self._config:
+                return {"error": f"no such config key {key!r}"}
+            return {key: self._config[key]}
+        if operation == "set":
+            if key is None:
+                return {"error": "key is required for set"}
+            self._config[key] = value
+            return {key: value}
+        if operation == "delete":
+            if key is None or key not in self._config:
+                return {"error": f"no such config key {key!r}"}
+            del self._config[key]
+            return {"deleted": key}
+        return {"error": f"unknown operation {operation!r} (expected get, set, or delete)"}
+
+    def cache(self, operation: str = "verify") -> dict:
+        if operation not in ("verify", "clean", "ls"):
+            return {"error": f"unknown operation {operation!r} (expected verify, clean, or ls)"}
+        if operation == "ls":
+            return {"entries": sorted(self._installed)}
+        return {"operation": operation, "ok": True}
+
+    # ── publishing & versioning ──────────────────────────────────────────
+
+    def publish(self, name: str, version: str, files: list | None = None) -> dict:
+        entry = self._registry.setdefault(name, {
+            "versions": {}, "owners": {self._current_user}, "dist_tags": {}, "access": "public",
+            "bugs_url": None, "repo_url": None, "docs_url": None, "funding": None,
+        })
+        if version in entry["versions"]:
+            return {"error": f"cannot publish over already-published version {name}@{version}"}
+        entry["versions"][version] = {"published_by": self._current_user, "deprecated": None,
+                                       "files": self._as_list(files)}
+        entry["dist_tags"]["latest"] = version
+        return {"name": name, "version": version, "published": True}
+
+    def unpublish(self, package: str, version: str) -> dict:
+        entry = self._registry.get(package)
+        if entry is None or version not in entry["versions"]:
+            return {"error": f"no such version {version!r} of {package!r}"}
+        del entry["versions"][version]
+        return {"package": package, "version": version, "unpublished": True}
+
+    def deprecate(self, package: str, version: str, message: str | None = None, undo: bool = False) -> dict:
+        entry = self._registry.get(package)
+        if entry is None or version not in entry["versions"]:
+            return {"error": f"no such version {version!r} of {package!r}"}
+        entry["versions"][version]["deprecated"] = None if undo else (message or "deprecated")
+        return {"package": package, "version": version, "deprecated": entry["versions"][version]["deprecated"]}
+
+    def version(self, bump: str = "patch") -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        if bump not in ("patch", "minor", "major"):
+            return {"error": f"unknown bump {bump!r} (expected patch, minor, or major)"}
+        major, minor, patch = self._version_key(self._project["version"])
+        if bump == "major":
+            major, minor, patch = major + 1, 0, 0
+        elif bump == "minor":
+            minor, patch = minor + 1, 0
+        else:
+            patch += 1
+        new_version = f"{major}.{minor}.{patch}"
+        self._project["version"] = new_version
+        return {"version": new_version}
+
+    def pack(self) -> dict:
+        err = self._require_project()
+        if err:
+            return err
+        return {"files": ["package.json", "index.js", "README.md"]}
+
+    # ── package info ─────────────────────────────────────────────────────
+
+    def view(self, package: str, field: str | None = None) -> dict:
+        entry = self._registry.get(package)
+        if entry is None:
+            return {"error": f"no such package {package!r}"}
+        info = {"name": package, "version": self._latest_version(package),
+                "versions": sorted(entry["versions"]), "access": entry["access"]}
+        return info if field is None else {field: info.get(field)}
+
+    def search(self, query: str) -> dict:
+        q = (query or "").lower()
+        return {"packages": sorted(n for n in self._registry if q in n.lower())}
+
+    def bugs(self, package: str) -> dict:
+        entry = self._registry.get(package)
+        if entry is None:
+            return {"error": f"no such package {package!r}"}
+        return {"package": package, "url": entry.get("bugs_url")}
+
+    def repo(self, package: str) -> dict:
+        entry = self._registry.get(package)
+        if entry is None:
+            return {"error": f"no such package {package!r}"}
+        return {"package": package, "url": entry.get("repo_url")}
+
+    def docs(self, package: str) -> dict:
+        entry = self._registry.get(package)
+        if entry is None:
+            return {"error": f"no such package {package!r}"}
+        return {"package": package, "url": entry.get("docs_url")}
+
+    def diff(self, package: str, from_version: str, to_version: str) -> dict:
+        entry = self._registry.get(package)
+        if entry is None or from_version not in entry["versions"] or to_version not in entry["versions"]:
+            return {"error": f"no such version pair for {package!r}"}
+        from_files = set(entry["versions"][from_version]["files"])
+        to_files = set(entry["versions"][to_version]["files"])
+        return {"package": package, "added": sorted(to_files - from_files),
+                "removed": sorted(from_files - to_files)}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "has_project": self._project is not None,
+            "project_version": self._project["version"] if self._project else None,
+            "installed_count": len(self._installed),
+            "installed": {n: dict(v) for n, v in sorted(self._installed.items())},
+            "dependencies": dict(self._project["dependencies"]) if self._project else {},
+            "dev_dependencies": dict(self._project["devDependencies"]) if self._project else {},
+            "scripts": dict(self._project["scripts"]) if self._project else {},
+            "registry_package_count": len(self._registry),
+            "published_versions": {n: sorted(e["versions"]) for n, e in sorted(self._registry.items())},
+            "linked": sorted(self._linked),
+            "token_count": len(self._tokens),
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -3286,6 +3832,143 @@ _FORGE_SCHEMAS: dict[str, dict] = {
         {"owner": {"type": "string"}, "repo": {"type": "string"}}, ["owner", "repo"]),
 }
 
+_PACKAGE_REGISTRY_SCHEMAS: dict[str, dict] = {
+    "init": _fn(
+        "init", "Create a new package.json for the project. Refuses if one already exists.",
+        {"name": {"type": "string", "description": "Package name (optional, defaults to 'my-project')."},
+         "version": {"type": "string", "description": "Initial version (optional, defaults to '1.0.0')."}},
+        []),
+    "pkg": _fn(
+        "pkg", "Get, set, or delete a field in package.json.",
+        {"operation": {"type": "string", "enum": ["get", "set", "delete"]},
+         "field": {"type": "string", "description": "Field name (optional for get)."},
+         "value": {"description": "New value (for set)."}},
+        ["operation"]),
+    "ci": _fn(
+        "ci", "Clean install every dependency exactly as locked. Refuses if no lockfile is present.",
+        {}, []),
+    "link": _fn(
+        "link", "Symlink a local package into the project for development.",
+        {"package": {"type": "string"}}, ["package"]),
+    "install": _fn(
+        "install", "Install one or more packages into the project. Each must already exist in the registry.",
+        {"packages": {"type": "array", "items": {"type": "string"},
+                      "description": "Package names, optionally as 'name@version' (defaults to latest)."},
+         "dev": {"type": "boolean", "description": "Install as a devDependency (optional, default false)."}},
+        ["packages"]),
+    "uninstall": _fn(
+        "uninstall", "Remove one or more installed packages from the project.",
+        {"packages": {"type": "array", "items": {"type": "string"}}}, ["packages"]),
+    "update": _fn(
+        "update", "Upgrade installed packages to their latest registry version.",
+        {"packages": {"type": "array", "items": {"type": "string"},
+                      "description": "Specific packages to update (optional, defaults to all installed)."}},
+        []),
+    "ls": _fn("ls", "List installed packages.", {}, []),
+    "outdated": _fn("outdated", "List installed packages that have a newer registry version available.", {}, []),
+    "prune": _fn(
+        "prune", "Remove installed packages that are no longer listed in package.json.",
+        {}, []),
+    "dedupe": _fn("dedupe", "Eliminate duplicate dependencies in the install tree.", {}, []),
+    "fund": _fn("fund", "List funding information for installed dependencies.", {}, []),
+    "explain": _fn(
+        "explain", "Show why a package is in the dependency tree (direct vs transitive).",
+        {"package": {"type": "string"}}, ["package"]),
+    "sbom": _fn(
+        "sbom", "Generate a Software Bill of Materials for installed packages.",
+        {"format": {"type": "string", "enum": ["cyclonedx", "spdx"], "description": "Optional, defaults to 'cyclonedx'."}},
+        []),
+    "query": _fn(
+        "query", "Filter installed packages by a name selector.",
+        {"selector": {"type": "string"}}, ["selector"]),
+    "run-script": _fn(
+        "run-script", "Run a script defined in package.json. Refuses if the script isn't defined.",
+        {"name": {"type": "string"}}, ["name"]),
+    "audit": _fn(
+        "audit", "Scan installed packages for known vulnerabilities, optionally auto-fixing by upgrading.",
+        {"fix": {"type": "boolean", "description": "Automatically upgrade vulnerable packages where a safe version exists (optional, default false)."}},
+        []),
+    "doctor": _fn("doctor", "Diagnose the local npm/node environment.", {}, []),
+    "ping": _fn("ping", "Check connectivity to the registry.", {}, []),
+    "whoami": _fn("whoami", "Show the currently authenticated registry user.", {}, []),
+    "token": _fn(
+        "token", "List, create, or revoke access tokens.",
+        {"operation": {"type": "string", "enum": ["list", "create", "revoke"]},
+         "token_id": {"type": "string", "description": "Required for revoke."}},
+        ["operation"]),
+    "access": _fn(
+        "access", "Get or set a published package's access level (public/restricted).",
+        {"operation": {"type": "string", "enum": ["get", "set"]}, "package": {"type": "string"},
+         "level": {"type": "string", "enum": ["public", "restricted"], "description": "Required for set."}},
+        ["operation", "package"]),
+    "owner": _fn(
+        "owner", "List, add, or remove owners of a published package.",
+        {"operation": {"type": "string", "enum": ["ls", "add", "rm"]}, "package": {"type": "string"},
+         "user": {"type": "string", "description": "Required for add/rm."}},
+        ["operation", "package"]),
+    "dist-tag": _fn(
+        "dist-tag", "List, add, or remove a dist-tag (e.g. 'latest', 'beta') on a published package.",
+        {"operation": {"type": "string", "enum": ["ls", "add", "rm"]}, "package": {"type": "string"},
+         "tag": {"type": "string", "description": "Required for add/rm."},
+         "version": {"type": "string", "description": "Required for add."}},
+        ["operation", "package"]),
+    "profile": _fn(
+        "profile", "View or update the authenticated user's account profile.",
+        {"operation": {"type": "string", "enum": ["view", "set"], "description": "Optional, defaults to 'view'."},
+         "field": {"type": "string", "description": "Required for set."},
+         "value": {"type": "string", "description": "Required for set."}},
+        []),
+    "config": _fn(
+        "config", "Get, set, or delete an npm configuration value.",
+        {"operation": {"type": "string", "enum": ["get", "set", "delete"]},
+         "key": {"type": "string", "description": "Optional for get (omit to get all)."},
+         "value": {"type": "string", "description": "Required for set."}},
+        ["operation"]),
+    "cache": _fn(
+        "cache", "Verify, clean, or list the local package cache.",
+        {"operation": {"type": "string", "enum": ["verify", "clean", "ls"], "description": "Optional, defaults to 'verify'."}},
+        []),
+    "publish": _fn(
+        "publish", "Publish a new package version to the registry. Refuses if that exact version is already published.",
+        {"name": {"type": "string"}, "version": {"type": "string"},
+         "files": {"type": "array", "items": {"type": "string"}, "description": "Files included in the published package (optional)."}},
+        ["name", "version"]),
+    "unpublish": _fn(
+        "unpublish", "Remove a published version from the registry.",
+        {"package": {"type": "string"}, "version": {"type": "string"}}, ["package", "version"]),
+    "deprecate": _fn(
+        "deprecate", "Mark (or un-mark) a published version as deprecated.",
+        {"package": {"type": "string"}, "version": {"type": "string"},
+         "message": {"type": "string", "description": "Deprecation message (optional)."},
+         "undo": {"type": "boolean", "description": "Remove the deprecation instead (optional, default false)."}},
+        ["package", "version"]),
+    "version": _fn(
+        "version", "Bump the current project's own version (patch/minor/major).",
+        {"bump": {"type": "string", "enum": ["patch", "minor", "major"], "description": "Optional, defaults to 'patch'."}},
+        []),
+    "pack": _fn("pack", "Show which files would be included if the project were published now.", {}, []),
+    "view": _fn(
+        "view", "View a published package's registry metadata.",
+        {"package": {"type": "string"}, "field": {"type": "string", "description": "Only return this field (optional)."}},
+        ["package"]),
+    "search": _fn(
+        "search", "Search the registry for packages by name.",
+        {"query": {"type": "string"}}, ["query"]),
+    "bugs": _fn(
+        "bugs", "Get a published package's bug tracker URL.",
+        {"package": {"type": "string"}}, ["package"]),
+    "repo": _fn(
+        "repo", "Get a published package's repository URL.",
+        {"package": {"type": "string"}}, ["package"]),
+    "docs": _fn(
+        "docs", "Get a published package's documentation URL.",
+        {"package": {"type": "string"}}, ["package"]),
+    "diff": _fn(
+        "diff", "Show which files were added/removed between two published versions of a package.",
+        {"package": {"type": "string"}, "from_version": {"type": "string"}, "to_version": {"type": "string"}},
+        ["package", "from_version", "to_version"]),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
@@ -3293,6 +3976,7 @@ MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "docker": (DockerService, _DOCKER_SCHEMAS),
     "kubernetes": (KubernetesService, _KUBERNETES_SCHEMAS),
     "forge": (ForgeService, _FORGE_SCHEMAS),
+    "package_registry": (PackageRegistryService, _PACKAGE_REGISTRY_SCHEMAS),
 }
 
 

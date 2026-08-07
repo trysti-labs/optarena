@@ -1,0 +1,19 @@
+{
+  "name": "tool_pkgreg_link_local_package",
+  "description": "Symlink a local package into the project for development.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "link"],
+  "tool_service": "package_registry",
+  "tools": ["link"],
+  "tool_service_seed": {
+    "project": {}
+  },
+  "prompts": [
+    "Link the local package 'my-shared-lib' into this project for development."
+  ],
+  "expected_calls": [
+    {"tool": "link", "arguments_contains": {"package": "my-shared-lib"}}
+  ]
+}

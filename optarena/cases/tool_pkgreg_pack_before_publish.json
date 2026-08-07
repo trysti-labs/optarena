@@ -1,0 +1,20 @@
+{
+  "name": "tool_pkgreg_pack_before_publish",
+  "description": "Preview which files would be published before actually publishing.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "pack", "publish"],
+  "tool_service": "package_registry",
+  "tools": ["pkg", "pack", "publish"],
+  "tool_service_seed": {
+    "project": {"name": "widget-lib", "version": "1.0.0"}
+  },
+  "prompts": [
+    "Preview what files would be published for this project (called widget-lib), then publish it."
+  ],
+  "expected_calls": [
+    {"tool": "pack"},
+    {"tool": "publish", "arguments_contains": {"name": "widget-lib", "version": "1.0.0"}}
+  ]
+}

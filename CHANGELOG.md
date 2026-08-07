@@ -16,7 +16,7 @@ existed.
   on files written. Two new experimental baseline drivers run the real
   request → tool_call → execute-against-mock-service → feed-result-back loop:
   `openai-tools` (`/v1/chat/completions` tool_calls) and `ollama-tools`
-  (Ollama-native `/api/chat` tool_calls). Ships with six mock services -
+  (Ollama-native `/api/chat` tool_calls). Ships with seven mock services -
   `task_tracker` (create/complete/list/delete, 5 cases), `git_repo` (all
   18 tools from the real MCP git-server ecosystem: status/add/reset/commit/
   diff variants/log/show/branch operations/blame/remotes/tags/push/pull,
@@ -43,7 +43,15 @@ existed.
   `label_write`/`projects_write` create-vs-update by id presence,
   `merge_pull_request` refusing a draft/closed/unresolved-
   REQUEST_CHANGES pull request, `add_comment_to_pending_review` refusing
-  without an open pending review), 47 cases) - plus a
+  without an open pending review), 47 cases), and `package_registry` (all
+  38 tools the real npm-mcp reference implementation registers server-side
+  - install/uninstall/update/outdated/ls/prune/dedupe/fund/explain/sbom/
+  query/run-script/audit/doctor/ping/whoami/token/access/owner/dist-tag/
+  profile/config/cache/publish/unpublish/deprecate/version/pack/view/
+  search/bugs/repo/docs/diff/init/pkg/ci/link - several enforcing real
+  npm-like preconditions (`install` refuses a package never published to
+  the registry, `ci` refuses without a lockfile, `publish` refuses
+  overwriting an already-published version), 35 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

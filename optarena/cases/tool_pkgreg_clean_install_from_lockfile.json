@@ -1,0 +1,24 @@
+{
+  "name": "tool_pkgreg_clean_install_from_lockfile",
+  "description": "A clean, reproducible install from the existing lockfile.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "ci"],
+  "tool_service": "package_registry",
+  "tools": ["ci"],
+  "tool_service_seed": {
+    "registry": {"lodash": {"versions": ["4.17.21"]}},
+    "project": {"dependencies": {"lodash": "4.17.21"}},
+    "lockfile_present": true
+  },
+  "prompts": [
+    "Do a clean install of this project's dependencies exactly as locked."
+  ],
+  "expected_calls": [
+    {"tool": "ci"}
+  ],
+  "expected_final_state": {
+    "installed_count": 1
+  }
+}

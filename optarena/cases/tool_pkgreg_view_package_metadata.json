@@ -1,0 +1,19 @@
+{
+  "name": "tool_pkgreg_view_package_metadata",
+  "description": "View a published package's registry metadata.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "view"],
+  "tool_service": "package_registry",
+  "tools": ["view"],
+  "tool_service_seed": {
+    "registry": {"axios": {"versions": ["1.6.0"]}}
+  },
+  "prompts": [
+    "Show me the registry metadata for the axios package."
+  ],
+  "expected_calls": [
+    {"tool": "view", "arguments_contains": {"package": "axios"}}
+  ]
+}

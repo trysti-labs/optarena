@@ -1,0 +1,21 @@
+{
+  "name": "tool_pkgreg_bump_and_publish",
+  "description": "Bump the project's own version, then publish that new version.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 2,
+  "tags": ["tool-use", "package_registry", "version", "publish"],
+  "tool_service": "package_registry",
+  "tools": ["pkg", "version", "publish"],
+  "tool_service_seed": {
+    "project": {"name": "widget-lib", "version": "1.0.0"}
+  },
+  "prompts": [
+    "Check this project's current name in package.json, bump the version with a patch release, then publish the new version to the registry under that same name."
+  ],
+  "expected_calls": [
+    {"tool": "pkg", "arguments_contains": {"operation": "get", "field": "name"}},
+    {"tool": "version", "arguments_contains": {"bump": "patch"}},
+    {"tool": "publish", "arguments_contains": {"name": "widget-lib", "version": "1.0.1"}}
+  ]
+}

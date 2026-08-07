@@ -1,0 +1,21 @@
+{
+  "name": "tool_pkgreg_generate_sbom",
+  "description": "Generate a Software Bill of Materials for installed packages.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "sbom"],
+  "tool_service": "package_registry",
+  "tools": ["sbom"],
+  "tool_service_seed": {
+    "registry": {"lodash": {"versions": ["4.17.21"]}},
+    "project": {"dependencies": {"lodash": "4.17.21"}},
+    "installed": {"lodash": {"version": "4.17.21"}}
+  },
+  "prompts": [
+    "Generate a Software Bill of Materials for this project in CycloneDX format."
+  ],
+  "expected_calls": [
+    {"tool": "sbom", "arguments_contains": {"format": "cyclonedx"}}
+  ]
+}

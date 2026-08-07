@@ -1,0 +1,19 @@
+{
+  "name": "tool_pkgreg_deprecate_old_version",
+  "description": "Deprecate an old published version with a message.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "deprecate"],
+  "tool_service": "package_registry",
+  "tools": ["deprecate"],
+  "tool_service_seed": {
+    "registry": {"mypkg": {"versions": ["1.0.0", "2.0.0"]}}
+  },
+  "prompts": [
+    "Deprecate mypkg version 1.0.0 with the message 'use 2.0.0 instead'."
+  ],
+  "expected_calls": [
+    {"tool": "deprecate", "arguments_contains": {"package": "mypkg", "version": "1.0.0", "message": "use 2.0.0 instead"}}
+  ]
+}

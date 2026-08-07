@@ -1,0 +1,20 @@
+{
+  "name": "tool_pkgreg_edit_package_json_field",
+  "description": "Check a package.json field before changing an unrelated one.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "pkg"],
+  "tool_service": "package_registry",
+  "tools": ["pkg"],
+  "tool_service_seed": {
+    "project": {"name": "webapp", "version": "1.0.0"}
+  },
+  "prompts": [
+    "Check what the current package name is in package.json, then set the 'private' field to true."
+  ],
+  "expected_calls": [
+    {"tool": "pkg", "arguments_contains": {"operation": "get", "field": "name"}},
+    {"tool": "pkg", "arguments_contains": {"operation": "set", "field": "private", "value": true}}
+  ]
+}

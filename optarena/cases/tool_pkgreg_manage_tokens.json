@@ -1,0 +1,20 @@
+{
+  "name": "tool_pkgreg_manage_tokens",
+  "description": "Create a new access token, then list all tokens.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "token"],
+  "tool_service": "package_registry",
+  "tools": ["token"],
+  "prompts": [
+    "Create a new access token, then list all my tokens."
+  ],
+  "expected_calls": [
+    {"tool": "token", "arguments_contains": {"operation": "create"}},
+    {"tool": "token", "arguments_contains": {"operation": "list"}}
+  ],
+  "expected_final_state": {
+    "token_count": 1
+  }
+}

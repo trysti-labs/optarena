@@ -1,0 +1,16 @@
+{
+  "name": "tool_pkgreg_doctor_diagnose_environment",
+  "description": "Diagnose the local npm/node environment.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "doctor"],
+  "tool_service": "package_registry",
+  "tools": ["doctor"],
+  "prompts": [
+    "Diagnose the local npm environment for any configuration issues."
+  ],
+  "expected_calls": [
+    {"tool": "doctor"}
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "tool_pkgreg_bootstrap_new_project",
+  "description": "Initialize a new project's package.json.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "init"],
+  "tool_service": "package_registry",
+  "tools": ["init"],
+  "prompts": [
+    "Initialize a new package.json for a project called 'widget-lib' at version 0.1.0."
+  ],
+  "expected_calls": [
+    {"tool": "init", "arguments_contains": {"name": "widget-lib", "version": "0.1.0"}}
+  ],
+  "expected_final_state": {
+    "has_project": true,
+    "project_version": "0.1.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "tool_pkgreg_diff_two_versions",
+  "description": "Show which files changed between two published versions.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "diff"],
+  "tool_service": "package_registry",
+  "tools": ["diff"],
+  "tool_service_seed": {
+    "registry": {"mypkg": {"versions": {
+      "1.0.0": {"files": ["a.js"]},
+      "2.0.0": {"files": ["a.js", "b.js"]}
+    }}}
+  },
+  "prompts": [
+    "Show what files changed between mypkg 1.0.0 and 2.0.0."
+  ],
+  "expected_calls": [
+    {"tool": "diff", "arguments_contains": {"package": "mypkg", "from_version": "1.0.0", "to_version": "2.0.0"}}
+  ]
+}

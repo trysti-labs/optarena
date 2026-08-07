@@ -1,0 +1,16 @@
+{
+  "name": "tool_pkgreg_update_profile",
+  "description": "Update the registry account profile.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "profile"],
+  "tool_service": "package_registry",
+  "tools": ["profile"],
+  "prompts": [
+    "Update my registry account email to newmail@example.com."
+  ],
+  "expected_calls": [
+    {"tool": "profile", "arguments_contains": {"operation": "set", "field": "email", "value": "newmail@example.com"}}
+  ]
+}

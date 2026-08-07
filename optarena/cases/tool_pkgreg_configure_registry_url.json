@@ -1,0 +1,16 @@
+{
+  "name": "tool_pkgreg_configure_registry_url",
+  "description": "Set a custom registry URL in configuration.",
+  "task_type": "tool_use",
+  "domain": "package_registry",
+  "difficulty": 1,
+  "tags": ["tool-use", "package_registry", "config"],
+  "tool_service": "package_registry",
+  "tools": ["config"],
+  "prompts": [
+    "Set the npm registry URL to https://npm.internal.example.com/."
+  ],
+  "expected_calls": [
+    {"tool": "config", "arguments_contains": {"operation": "set", "key": "registry", "value": "https://npm.internal.example.com/"}}
+  ]
+}
