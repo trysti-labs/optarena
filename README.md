@@ -255,7 +255,7 @@ optarena run --driver ollama-tools --model qwen3-coder:30b \
   --cases tool_create_task,tool_git_stage_review_and_commit
 ```
 
-Ships with thirteen mock services - `task_tracker` (generic create/complete/
+Ships with fourteen mock services - `task_tracker` (generic create/complete/
 list/delete, 5 cases), `git_repo` (all 18 tools a real coding agent's git
 workflow touches - status/add/commit/diff/log/branch/checkout/blame/tags/
 push/pull, 12 cases), `filesystem` (all 13 tools the official MCP
@@ -308,11 +308,17 @@ admin/RBAC, and query connectors for Prometheus/Loki/CloudWatch/Athena
 and 8 more datasource types - by far the largest service in this
 domain, several enforcing real preconditions like "a datasource query
 refuses a datasource of the wrong plugin type", "creating a datasource
-requires an explicit schema-review confirmation", 37 cases) -
-deliberately scoped toward coding/dev tools rather than more generic
-ones; see [ARCH.md](./ARCH.md) §3.5 for the schema and oracle mechanics,
-and what's still deferred (agent-driver support beyond the raw
-baselines, more mock services).
+requires an explicit schema-review confirmation", 37 cases), and
+`cloud_infra` (all 9 tools the official AWS IaC MCP server registers -
+CloudFormation template validation and compliance checking, deployment
+troubleshooting, CDK/CloudFormation documentation and code-sample
+search, CDK best practices - several enforcing real preconditions like
+"deployment troubleshooting refuses a stack that doesn't exist",
+"compliance checking flags publicly-accessible resources and
+wildcard IAM policies", 9 cases) - deliberately scoped toward coding/dev
+tools rather than more generic ones; see [ARCH.md](./ARCH.md) §3.5 for
+the schema and oracle mechanics, and what's still deferred (agent-driver
+support beyond the raw baselines, more mock services).
 
 ## Regression testing
 

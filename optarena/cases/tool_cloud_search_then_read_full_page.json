@@ -1,0 +1,21 @@
+{
+  "name": "tool_cloud_search_then_read_full_page",
+  "description": "Search CDK documentation, then read the full content of a relevant result page rather than relying on the snippet.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 2,
+  "tags": ["tool-use", "cloud_infra", "cdk", "docs"],
+  "tool_service": "cloud_infra",
+  "tools": ["search_cdk_documentation", "read_iac_documentation_page"],
+  "tool_service_seed": {
+    "cdk_docs": {"s3 bucket encryption": "Use BucketEncryption property with SSE-S3 or SSE-KMS."},
+    "doc_pages": {"https://docs.aws.amazon.com/cdk/api/v2/docs/aws-s3-readme.html": "Full aws-s3 module documentation, including encryption configuration examples."}
+  },
+  "prompts": [
+    "Search the CDK docs for S3 bucket encryption, and if the snippet doesn't have enough detail, read the full page at https://docs.aws.amazon.com/cdk/api/v2/docs/aws-s3-readme.html."
+  ],
+  "expected_calls": [
+    {"tool": "search_cdk_documentation"},
+    {"tool": "read_iac_documentation_page", "arguments_contains": {"url": "https://docs.aws.amazon.com/cdk/api/v2/docs/aws-s3-readme.html"}}
+  ]
+}

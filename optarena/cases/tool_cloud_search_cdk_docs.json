@@ -1,0 +1,19 @@
+{
+  "name": "tool_cloud_search_cdk_docs",
+  "description": "Search CDK documentation before writing an S3 bucket construct.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 1,
+  "tags": ["tool-use", "cloud_infra", "cdk", "docs"],
+  "tool_service": "cloud_infra",
+  "tools": ["search_cdk_documentation"],
+  "tool_service_seed": {
+    "cdk_docs": {"s3 bucket encryption": "Use BucketEncryption property with SSE-S3 or SSE-KMS on aws-s3.Bucket."}
+  },
+  "prompts": [
+    "Search the CDK docs for how to enable encryption on an S3 bucket construct."
+  ],
+  "expected_calls": [
+    {"tool": "search_cdk_documentation"}
+  ]
+}

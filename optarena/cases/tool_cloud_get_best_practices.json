@@ -1,0 +1,16 @@
+{
+  "name": "tool_cloud_get_best_practices",
+  "description": "Get CDK best practices before reviewing generated infrastructure code.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 1,
+  "tags": ["tool-use", "cloud_infra", "cdk"],
+  "tool_service": "cloud_infra",
+  "tools": ["cdk_best_practices"],
+  "prompts": [
+    "Before I review this CDK code, get the CDK best practices so I know what to check for."
+  ],
+  "expected_calls": [
+    {"tool": "cdk_best_practices"}
+  ]
+}

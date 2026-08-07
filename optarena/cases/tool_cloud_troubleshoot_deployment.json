@@ -1,0 +1,20 @@
+{
+  "name": "tool_cloud_troubleshoot_deployment",
+  "description": "Diagnose why a CloudFormation stack deployment failed.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 1,
+  "tags": ["tool-use", "cloud_infra", "cloudformation", "debugging"],
+  "tool_service": "cloud_infra",
+  "tools": ["troubleshoot_cloudformation_deployment"],
+  "tool_service_seed": {
+    "stacks": [{"name": "my-app-stack", "region": "us-east-1",
+                "failed_resources": [{"logicalId": "MyBucket", "reason": "BucketAlreadyExists"}]}]
+  },
+  "prompts": [
+    "My CloudFormation stack 'my-app-stack' failed to deploy in us-east-1. Find out why."
+  ],
+  "expected_calls": [
+    {"tool": "troubleshoot_cloudformation_deployment", "arguments_contains": {"stack_name": "my-app-stack", "region": "us-east-1"}}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "tool_cloud_search_cfn_docs",
+  "description": "Search CloudFormation documentation for a resource type's properties.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 1,
+  "tags": ["tool-use", "cloud_infra", "cloudformation", "docs"],
+  "tool_service": "cloud_infra",
+  "tools": ["search_cloudformation_documentation"],
+  "tool_service_seed": {
+    "cfn_docs": {"AWS::Lambda::Function": "Properties include Handler, Runtime, Code, MemorySize, Timeout."}
+  },
+  "prompts": [
+    "Search the CloudFormation documentation for the properties of AWS::Lambda::Function."
+  ],
+  "expected_calls": [
+    {"tool": "search_cloudformation_documentation"}
+  ]
+}

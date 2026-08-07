@@ -1125,6 +1125,60 @@ everything else here uses. A case is one domain or the other, never both -
     self-corrects to `get`, but on the original run it recovered via
     `list`+`name_prefix` instead - a different, non-matching resolution
     path. No case fix was needed.
+- **`cloud_infra`** (`_cases/_mock_service.py`, `CloudInfraService`) - the
+  fourteenth and final mock service built this session, all 9 tools the
+  official `awslabs/aws-iac-mcp-server` registers (8 static `@mcp.tool()`
+  functions plus one dynamically-proxied `read_iac_documentation_page`,
+  wired up from a remote AWS knowledge endpoint at server startup -
+  extracted directly from `server.py`). Models a mock AWS
+  Infrastructure-as-Code assistant: CloudFormation template validation
+  and compliance checking, deployment troubleshooting, pre-deploy
+  validation guidance, CDK/CloudFormation documentation and code-sample
+  search, CDK best practices, and full-page documentation reads, across
+  9 example cases.
+  - **AWS's real MCP landscape breaks the pattern every other category
+    this session fit**: not one server but ~59 separate ones under one
+    `awslabs/mcp` monorepo, with no single dominant implementation.
+    Three real candidates were checked: `aws-api-mcp-server` (a thin
+    ~3-tool generic AWS-CLI-string passthrough - `call_aws`,
+    `suggest_aws_commands`, `get_execution_plan` - a poor fit for this
+    domain's structured-tool methodology); `ccapi-mcp-server` (rich
+    resource CRUD across 1,100+ AWS resource types with genuine
+    token-enforced workflow security - explain before create, deletion
+    double-confirmation, IAM wildcard-policy blocking - exactly the
+    precondition-rich design this domain favors, but explicitly marked
+    deprecated in its own source in favor of the one below); and
+    `aws-iac-mcp-server` (the current, actively-maintained official
+    replacement, CloudFormation/CDK authoring-and-validation focused
+    rather than live resource management). Also checked and ruled out:
+    the "most official" `aws/agent-toolkit-for-aws` (2,255 stars, the
+    true `aws` org) turned out to be a thin wrapper around a
+    closed-source hosted MCP endpoint - its actual tool implementations
+    aren't inspectable the way every other service's source has been
+    this session, so it couldn't be source-verified at all.
+  - **A deliberate, user-confirmed scope decision**: presented the
+    tradeoff directly - ship the thinner-but-current `aws-iac-mcp-server`
+    (consistent with never having picked a deprecated implementation as
+    "the" real one anywhere else this session), or ship the richer but
+    deprecated `ccapi-mcp-server` anyway for its precondition depth. The
+    user chose the current implementation.
+  - Real preconditions enforced: `validate_cloudformation_template`
+    refuses malformed JSON or a template missing its `Resources` section
+    and flags resources with an invalid/missing `Type`;
+    `check_cloudformation_template_compliance` flags publicly-accessible
+    resources and wildcard-`Action`/wildcard-`Resource` `Allow` IAM
+    policy statements - real, if simplified, analogues of the actual
+    server's cfn-lint/cfn-guard checks; `troubleshoot_cloudformation_
+    deployment` refuses a stack that was never seeded (matching every
+    other "must exist before you can act on it" precondition in this
+    domain); `search_cdk_samples_and_constructs` refuses an unsupported
+    language; `read_iac_documentation_page` refuses an unseeded URL,
+    with a case (`tool_cloud_search_then_read_full_page`) mirroring
+    Terraform's "search, then follow up on a specific result" pattern.
+  - Live-verified against `qwen3-coder:30b`: 8/9 passed. The one failure
+    (`tool_cloud_validate_template`) was confirmed via direct replay
+    (2/4 retries reproduced it) as the already-known malformed-tool-
+    call-as-text quirk - non-deterministic, not a case-design bug.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not

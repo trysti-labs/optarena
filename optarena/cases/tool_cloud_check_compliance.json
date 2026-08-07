@@ -1,0 +1,16 @@
+{
+  "name": "tool_cloud_check_compliance",
+  "description": "Check a CloudFormation template against security and compliance rules before deployment.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 1,
+  "tags": ["tool-use", "cloud_infra", "cloudformation", "compliance"],
+  "tool_service": "cloud_infra",
+  "tools": ["check_cloudformation_template_compliance"],
+  "prompts": [
+    "Check this CloudFormation template for security and compliance issues: {\"Resources\": {\"MyBucket\": {\"Type\": \"AWS::S3::Bucket\", \"Properties\": {\"PubliclyAccessible\": true}}}}"
+  ],
+  "expected_calls": [
+    {"tool": "check_cloudformation_template_compliance"}
+  ]
+}

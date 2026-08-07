@@ -1,0 +1,16 @@
+{
+  "name": "tool_cloud_pre_deploy_instructions",
+  "description": "Get instructions for CloudFormation's pre-deployment validation feature.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 1,
+  "tags": ["tool-use", "cloud_infra", "cloudformation"],
+  "tool_service": "cloud_infra",
+  "tools": ["get_cloudformation_pre_deploy_validation_instructions"],
+  "prompts": [
+    "How does CloudFormation's pre-deployment validation feature work? Get me the instructions."
+  ],
+  "expected_calls": [
+    {"tool": "get_cloudformation_pre_deploy_validation_instructions"}
+  ]
+}

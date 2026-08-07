@@ -1,0 +1,16 @@
+{
+  "name": "tool_cloud_validate_template",
+  "description": "Validate a CloudFormation template before deployment.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 1,
+  "tags": ["tool-use", "cloud_infra", "cloudformation"],
+  "tool_service": "cloud_infra",
+  "tools": ["validate_cloudformation_template"],
+  "prompts": [
+    "Validate this CloudFormation template before I deploy it: {\"Resources\": {\"MyBucket\": {\"Type\": \"AWS::S3::Bucket\"}}}"
+  ],
+  "expected_calls": [
+    {"tool": "validate_cloudformation_template"}
+  ]
+}

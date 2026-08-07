@@ -106,7 +106,15 @@ existed.
   two-step schema-review confirmation, plugin install's two-step
   version-confirmation flow, and more) plus a shared datasource-type
   check across the ~12 structurally-similar query-connector categories,
-  37 cases) - plus a
+  37 cases), and `cloud_infra` (all 9 tools the official `awslabs/
+  aws-iac-mcp-server` registers - CloudFormation template validation and
+  compliance checking, deployment troubleshooting, pre-deploy validation
+  guidance, CDK/CloudFormation documentation and code-sample search, CDK
+  best practices, and full-page documentation reads - several enforcing
+  real preconditions (template validation refuses malformed JSON or a
+  missing Resources section, compliance checking flags
+  publicly-accessible resources and wildcard-IAM policy statements,
+  deployment troubleshooting refuses an unseeded stack), 9 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

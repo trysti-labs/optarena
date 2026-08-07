@@ -19,6 +19,7 @@ sandbox track is one Dockerfile + one DOCKER_IMAGES entry (_sandbox.py).
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Callable
 
@@ -6020,6 +6021,172 @@ class ObservabilityService(MockService):
         }
 
 
+class CloudInfraService(MockService):
+    """A mock AWS Infrastructure-as-Code assistant - all 9 tools the
+    official `awslabs/aws-iac-mcp-server` registers (8 static
+    `@mcp.tool()` functions plus one dynamically-proxied
+    `read_iac_documentation_page`, wired up from a remote AWS knowledge
+    endpoint at server startup - extracted directly from `server.py`).
+
+    AWS's real MCP landscape is unlike every other category built this
+    session: not one server but ~59 separate ones under one `awslabs/mcp`
+    monorepo, with no single dominant "the" implementation. Three real
+    candidates were considered for this slot: `aws-api-mcp-server` (a
+    thin ~3-tool generic AWS-CLI-string passthrough, a poor fit for this
+    domain's structured-tool methodology), `ccapi-mcp-server` (rich
+    resource CRUD across 1,100+ AWS resource types with genuine
+    token-enforced workflow security - explain before create, deletion
+    double-confirmation, IAM wildcard-policy blocking - but explicitly
+    deprecated in its own source), and `aws-iac-mcp-server` (the current,
+    actively-maintained official replacement, CloudFormation/CDK
+    authoring-and-validation focused rather than live resource
+    management). The user chose the third, consistent with this session
+    never having picked a deprecated implementation as "the" real one
+    anywhere else, even though it is a thinner, more docs/validation-
+    flavored tool than "cloud infra management" originally implied.
+    """
+
+    TOOLS = {name: name for name in (
+        "validate_cloudformation_template", "check_cloudformation_template_compliance",
+        "troubleshoot_cloudformation_deployment", "get_cloudformation_pre_deploy_validation_instructions",
+        "search_cdk_documentation", "search_cloudformation_documentation",
+        "search_cdk_samples_and_constructs", "cdk_best_practices", "read_iac_documentation_page",
+    )}
+
+    _CDK_LANGUAGES = {"typescript", "python", "java", "csharp", "go"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._stacks: dict[tuple[str, str], dict] = {}
+        self._cdk_docs: dict[str, str] = {}
+        self._cfn_docs: dict[str, str] = {}
+        self._cdk_samples: dict[str, dict] = {}
+        self._doc_pages: dict[str, str] = {}
+        self._best_practices: str = "Follow least-privilege IAM, enable encryption at rest, use CDK-NAG."
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``stacks`` ([{name, region, failed_resources: [...], cloudtrail_events: [...]}, ...]) -
+          only a stack seeded here can be troubleshot; anything else refuses.
+        - ``cdk_docs`` / ``cfn_docs`` ({keyword: doc text}) - matched via
+          tokenized substring search, same helper pattern used elsewhere
+          in this domain.
+        - ``cdk_samples`` ({keyword: {language: sample text}}).
+        - ``doc_pages`` ({url: page text}) - only a URL seeded here can be
+          read via ``read_iac_documentation_page``.
+        - ``best_practices`` (str, overrides the default canned guidance).
+        """
+        for entry in spec.get("stacks") or []:
+            key = (entry["name"], entry["region"])
+            self._stacks[key] = {"failed_resources": list(entry.get("failed_resources", [])),
+                                  "cloudtrail_events": list(entry.get("cloudtrail_events", []))}
+        for keyword, text in (spec.get("cdk_docs") or {}).items():
+            self._cdk_docs[keyword] = text
+        for keyword, text in (spec.get("cfn_docs") or {}).items():
+            self._cfn_docs[keyword] = text
+        for keyword, cfg in (spec.get("cdk_samples") or {}).items():
+            self._cdk_samples[keyword] = dict(cfg)
+        for url, text in (spec.get("doc_pages") or {}).items():
+            self._doc_pages[url] = text
+        if "best_practices" in spec:
+            self._best_practices = spec["best_practices"]
+
+    @staticmethod
+    def _matches_query(query: str, target: str) -> bool:
+        words = (query or "").lower().split()
+        if not words:
+            return True
+        target = target.lower()
+        return any(w in target for w in words)
+
+    # ── tools ────────────────────────────────────────────────────────────
+
+    def validate_cloudformation_template(self, template_content: str, regions: list | None = None,
+                                          ignore_checks: list | None = None) -> dict:
+        try:
+            template = json.loads(template_content)
+        except (json.JSONDecodeError, TypeError):
+            return {"valid": False, "error_count": 1, "warning_count": 0,
+                    "issues": [{"message": "template is not valid JSON"}]}
+        resources = template.get("Resources")
+        if not resources:
+            return {"valid": False, "error_count": 1, "warning_count": 0,
+                    "issues": [{"message": "template has no Resources section"}]}
+        issues = []
+        for name, res in resources.items():
+            rtype = res.get("Type", "")
+            if "::" not in rtype:
+                issues.append({"resource": name, "message": f"invalid or missing resource Type {rtype!r}"})
+        ignored = set(ignore_checks or [])
+        return {"valid": not issues, "error_count": len(issues), "warning_count": 0, "issues": issues}
+
+    def check_cloudformation_template_compliance(self, template_content: str) -> dict:
+        try:
+            template = json.loads(template_content)
+        except (json.JSONDecodeError, TypeError):
+            return {"is_compliant": False, "violation_count": 1,
+                    "violations": [{"message": "template is not valid JSON"}]}
+        violations = []
+        for name, res in (template.get("Resources") or {}).items():
+            props = res.get("Properties", {}) or {}
+            if props.get("PubliclyAccessible") is True:
+                violations.append({"resource": name, "message": "resource is publicly accessible"})
+            policy = props.get("PolicyDocument") or {}
+            for stmt in (policy.get("Statement") or []):
+                if stmt.get("Effect") == "Allow" and stmt.get("Action") == "*" and stmt.get("Resource") == "*":
+                    violations.append({"resource": name, "message": "overly permissive IAM policy (Action=* Resource=*)"})
+        return {"is_compliant": not violations, "violation_count": len(violations), "violations": violations}
+
+    def troubleshoot_cloudformation_deployment(self, stack_name: str, region: str, include_cloudtrail: bool = True) -> dict:
+        stack = self._stacks.get((stack_name, region))
+        if stack is None:
+            return {"error": f"no stack named {stack_name!r} found in region {region!r}"}
+        result = {"stackName": stack_name, "region": region, "failedResources": stack["failed_resources"]}
+        if include_cloudtrail:
+            result["cloudtrailEvents"] = stack["cloudtrail_events"]
+        return result
+
+    def get_cloudformation_pre_deploy_validation_instructions(self) -> dict:
+        return {"overview": "CloudFormation change sets validate templates against three common failure "
+                             "causes before provisioning: invalid property syntax, resource name conflicts, "
+                             "and S3 bucket emptiness constraints on delete."}
+
+    def search_cdk_documentation(self, query: str) -> dict:
+        results = [{"title": kw, "context": text} for kw, text in self._cdk_docs.items() if self._matches_query(query, kw)]
+        return {"results": results}
+
+    def search_cloudformation_documentation(self, query: str) -> dict:
+        results = [{"title": kw, "context": text} for kw, text in self._cfn_docs.items() if self._matches_query(query, kw)]
+        return {"results": results}
+
+    def search_cdk_samples_and_constructs(self, query: str, language: str = "typescript") -> dict:
+        if language not in self._CDK_LANGUAGES:
+            return {"error": f"unknown language {language!r} (expected one of {sorted(self._CDK_LANGUAGES)})"}
+        results = [{"title": kw, "context": cfg[language]} for kw, cfg in self._cdk_samples.items()
+                   if self._matches_query(query, kw) and language in cfg]
+        return {"results": results}
+
+    def cdk_best_practices(self) -> dict:
+        return {"results": [{"title": "CDK Best Practices", "context": self._best_practices}]}
+
+    def read_iac_documentation_page(self, url: str, starting_index: int = 0) -> dict:
+        page = self._doc_pages.get(url)
+        if page is None:
+            return {"error": f"no documentation page found at {url!r}"}
+        return {"url": url, "content": page[starting_index:]}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "stack_count": len(self._stacks),
+            "doc_page_count": len(self._doc_pages),
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -7511,6 +7678,50 @@ _OBSERVABILITY_SCHEMAS: dict[str, dict] = {
     'update_datasource': _fn('update_datasource', "Update an existing datasource by UID, using the same schema-confirmation flow.", {'uid': {"type": 'string'}, 'schemaReviewed': {"type": 'boolean'}, 'name': {"type": 'string'}, 'url': {"type": 'string'}, 'fields': {"type": 'object'}}, ['uid']),
     'validate_provisioning_file': _fn('validate_provisioning_file', "Dry-run validate a file inside a provisioning repository.", {'repo': {"type": 'string'}, 'path': {"type": 'string'}, 'namespace': {"type": 'string'}, 'ref': {"type": 'string'}}, ['repo', 'path']),
 }
+
+_CLOUD_INFRA_SCHEMAS: dict[str, dict] = {
+    "validate_cloudformation_template": _fn(
+        "validate_cloudformation_template", "Validate CloudFormation template syntax, schema, and resource "
+        "properties using cfn-lint.",
+        {"template_content": {"type": "string", "description": "CloudFormation template as a JSON string."},
+         "regions": {"type": "array", "items": {"type": "string"}, "description": "Optional AWS regions to validate against."},
+         "ignore_checks": {"type": "array", "items": {"type": "string"}, "description": "Optional rule IDs to ignore."}},
+        ["template_content"]),
+    "check_cloudformation_template_compliance": _fn(
+        "check_cloudformation_template_compliance", "Validate a CloudFormation template against security and "
+        "compliance rules using cfn-guard.",
+        {"template_content": {"type": "string"}}, ["template_content"]),
+    "troubleshoot_cloudformation_deployment": _fn(
+        "troubleshoot_cloudformation_deployment", "Diagnose a failed CloudFormation stack with root cause "
+        "analysis and optional CloudTrail integration.",
+        {"stack_name": {"type": "string"}, "region": {"type": "string"},
+         "include_cloudtrail": {"type": "boolean", "description": "Optional, defaults to true."}},
+        ["stack_name", "region"]),
+    "get_cloudformation_pre_deploy_validation_instructions": _fn(
+        "get_cloudformation_pre_deploy_validation_instructions", "Get instructions for CloudFormation's "
+        "pre-deployment change-set validation feature.", {}, []),
+    "search_cdk_documentation": _fn(
+        "search_cdk_documentation", "Search AWS CDK documentation knowledge bases.",
+        {"query": {"type": "string"}}, ["query"]),
+    "search_cloudformation_documentation": _fn(
+        "search_cloudformation_documentation", "Search AWS CloudFormation documentation knowledge bases.",
+        {"query": {"type": "string"}}, ["query"]),
+    "search_cdk_samples_and_constructs": _fn(
+        "search_cdk_samples_and_constructs", "Search CDK code samples, examples, constructs, and patterns.",
+        {"query": {"type": "string"},
+         "language": {"type": "string", "enum": ["typescript", "python", "java", "csharp", "go"],
+                       "description": "Optional, defaults to 'typescript'."}},
+        ["query"]),
+    "cdk_best_practices": _fn(
+        "cdk_best_practices", "Get CDK best practices and security guidelines.", {}, []),
+    "read_iac_documentation_page": _fn(
+        "read_iac_documentation_page", "Fetch and convert a specific CDK or CloudFormation documentation page "
+        "to markdown, with pagination support.",
+        {"url": {"type": "string", "description": "URL from a prior search result."},
+         "starting_index": {"type": "integer", "description": "Optional pagination offset, defaults to 0."}},
+        ["url"]),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
@@ -7525,6 +7736,7 @@ MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "build_tools": (BuildToolsService, _BUILD_TOOLS_SCHEMAS),
     "code_intel": (CodeIntelService, _CODE_INTEL_SCHEMAS),
     "observability": (ObservabilityService, _OBSERVABILITY_SCHEMAS),
+    "cloud_infra": (CloudInfraService, _CLOUD_INFRA_SCHEMAS),
 }
 
 

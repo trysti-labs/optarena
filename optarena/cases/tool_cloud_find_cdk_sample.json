@@ -1,0 +1,19 @@
+{
+  "name": "tool_cloud_find_cdk_sample",
+  "description": "Find a working CDK code sample in Python for a serverless API.",
+  "task_type": "tool_use",
+  "domain": "cloud_infra",
+  "difficulty": 1,
+  "tags": ["tool-use", "cloud_infra", "cdk", "samples"],
+  "tool_service": "cloud_infra",
+  "tools": ["search_cdk_samples_and_constructs"],
+  "tool_service_seed": {
+    "cdk_samples": {"serverless api": {"python": "api = apigw.RestApi(self, 'Api')\nlambda_fn = _lambda.Function(self, 'Fn', ...)"}}
+  },
+  "prompts": [
+    "Find me a working CDK code sample in Python for a serverless API."
+  ],
+  "expected_calls": [
+    {"tool": "search_cdk_samples_and_constructs", "arguments_contains": {"language": "python"}}
+  ]
+}
