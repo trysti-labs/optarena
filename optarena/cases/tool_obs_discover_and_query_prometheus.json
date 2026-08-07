@@ -1,0 +1,21 @@
+{
+  "name": "tool_obs_discover_and_query_prometheus",
+  "description": "Discover an available metric name before querying it with PromQL, following the documented workflow.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "prometheus"],
+  "tool_service": "observability",
+  "tools": ["list_prometheus_metric_names", "query_prometheus"],
+  "tool_service_seed": {
+    "datasources": {"ds-prom": {"name": "Prometheus", "type": "prometheus"}},
+    "metric_data": {"ds-prom": {"metric_names": ["http_requests_total", "http_request_duration_seconds"]}}
+  },
+  "prompts": [
+    "Find HTTP-related metrics on the Prometheus datasource ds-prom, then run an instant PromQL query for http_requests_total."
+  ],
+  "expected_calls": [
+    {"tool": "list_prometheus_metric_names", "arguments_contains": {"datasourceUid": "ds-prom"}},
+    {"tool": "query_prometheus", "arguments_contains": {"datasourceUid": "ds-prom"}}
+  ]
+}

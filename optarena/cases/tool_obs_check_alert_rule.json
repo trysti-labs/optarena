@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_check_alert_rule",
+  "description": "Check the current state/configuration of a specific alert rule.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "alerting"],
+  "tool_service": "observability",
+  "tools": ["alerting_manage_rules"],
+  "tool_service_seed": {
+    "alert_rules": {"rule-1": {"title": "High error rate", "state": "firing"}}
+  },
+  "prompts": [
+    "Is the 'High error rate' alert rule (uid rule-1) currently firing? Check its state."
+  ],
+  "expected_calls": [
+    {"tool": "alerting_manage_rules", "arguments_contains": {"operation": "get", "rule_uid": "rule-1"}}
+  ]
+}

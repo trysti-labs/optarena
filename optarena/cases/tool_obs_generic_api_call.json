@@ -1,0 +1,16 @@
+{
+  "name": "tool_obs_generic_api_call",
+  "description": "Use the generic API passthrough for an endpoint with no dedicated tool.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "api"],
+  "tool_service": "observability",
+  "tools": ["grafana_api_request"],
+  "prompts": [
+    "There's no dedicated tool for this, so make a raw GET request to the Grafana API endpoint /api/org to check the current organization."
+  ],
+  "expected_calls": [
+    {"tool": "grafana_api_request", "arguments_contains": {"endpoint": "/api/org"}}
+  ]
+}

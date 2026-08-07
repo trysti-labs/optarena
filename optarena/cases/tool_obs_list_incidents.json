@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_list_incidents",
+  "description": "List currently active incidents.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "incident"],
+  "tool_service": "observability",
+  "tools": ["list_incidents"],
+  "tool_service_seed": {
+    "incidents": {"incident-1": {"title": "API outage", "status": "active", "severity": "critical"}}
+  },
+  "prompts": [
+    "List the currently active incidents."
+  ],
+  "expected_calls": [
+    {"tool": "list_incidents"}
+  ]
+}

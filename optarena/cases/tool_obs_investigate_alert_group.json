@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_investigate_alert_group",
+  "description": "Get the full details of a specific OnCall alert group.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "oncall"],
+  "tool_service": "observability",
+  "tools": ["get_alert_group"],
+  "tool_service_seed": {
+    "alert_groups": {"grp-1": {"state": "acknowledged", "integration": "prometheus"}}
+  },
+  "prompts": [
+    "Get the full details of OnCall alert group grp-1."
+  ],
+  "expected_calls": [
+    {"tool": "get_alert_group", "arguments_contains": {"alertGroupId": "grp-1"}}
+  ]
+}

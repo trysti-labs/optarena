@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_check_datasource_health",
+  "description": "Bulk health-check all configured datasources.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "datasources"],
+  "tool_service": "observability",
+  "tools": ["check_datasources_health"],
+  "tool_service_seed": {
+    "datasources": {"ds-prom": {"name": "Prometheus", "type": "prometheus"}, "ds-loki": {"name": "Loki", "type": "loki"}}
+  },
+  "prompts": [
+    "Check the health of all configured datasources."
+  ],
+  "expected_calls": [
+    {"tool": "check_datasources_health"}
+  ]
+}

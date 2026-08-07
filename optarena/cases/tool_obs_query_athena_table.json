@@ -1,0 +1,21 @@
+{
+  "name": "tool_obs_query_athena_table",
+  "description": "Check a table's columns before writing a SQL query against it.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "athena"],
+  "tool_service": "observability",
+  "tools": ["describe_athena_table", "query_athena"],
+  "tool_service_seed": {
+    "datasources": {"ds-athena": {"name": "Athena", "type": "grafana-athena-datasource"}},
+    "metric_data": {"ds-athena": {"columns_by_table": {"orders": ["order_id", "user_id", "total"]}}}
+  },
+  "prompts": [
+    "Check the columns of the orders table on the ds-athena datasource, then run a SQL query to count all rows in it."
+  ],
+  "expected_calls": [
+    {"tool": "describe_athena_table", "arguments_contains": {"datasourceUid": "ds-athena", "table": "orders"}},
+    {"tool": "query_athena", "arguments_contains": {"datasourceUid": "ds-athena"}}
+  ]
+}

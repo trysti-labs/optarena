@@ -1,0 +1,16 @@
+{
+  "name": "tool_obs_create_folder",
+  "description": "Create a new dashboard folder.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "folder"],
+  "tool_service": "observability",
+  "tools": ["create_folder"],
+  "prompts": [
+    "Create a new Grafana folder called 'Platform Team'."
+  ],
+  "expected_calls": [
+    {"tool": "create_folder", "arguments_contains": {"title": "Platform Team"}}
+  ]
+}

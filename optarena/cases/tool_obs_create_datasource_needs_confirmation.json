@@ -1,0 +1,16 @@
+{
+  "name": "tool_obs_create_datasource_needs_confirmation",
+  "description": "Create a new datasource - the real tool requires a name and explicit schema confirmation before it actually creates anything.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "datasources", "precondition"],
+  "tool_service": "observability",
+  "tools": ["create_datasource"],
+  "prompts": [
+    "Create a new Prometheus datasource named 'staging-prometheus'. Go ahead and create it, I've already reviewed the field schema."
+  ],
+  "expected_calls": [
+    {"tool": "create_datasource", "arguments_contains": {"type": "prometheus", "name": "staging-prometheus", "schemaReviewed": true}}
+  ]
+}

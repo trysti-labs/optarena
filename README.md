@@ -255,7 +255,7 @@ optarena run --driver ollama-tools --model qwen3-coder:30b \
   --cases tool_create_task,tool_git_stage_review_and_commit
 ```
 
-Ships with twelve mock services - `task_tracker` (generic create/complete/
+Ships with thirteen mock services - `task_tracker` (generic create/complete/
 list/delete, 5 cases), `git_repo` (all 18 tools a real coding agent's git
 workflow touches - status/add/commit/diff/log/branch/checkout/blame/tags/
 push/pull, 12 cases), `filesystem` (all 13 tools the official MCP
@@ -296,15 +296,23 @@ graph visualization, running-task monitoring, Nx Cloud CI status/logs/
 self-healing-fix management - several enforcing real preconditions like
 "visualizing a task graph requires both a project and task name", "a
 self-healing fix must resolve via its ID, short link, or branch", 13
-cases), and `code_intel` (all 6 tools the real mcp-language-server
+cases), `code_intel` (all 6 tools the real mcp-language-server
 registers - symbol definition/reference lookup, file diagnostics,
 position-based hover info, symbol rename with cross-file updates, and
 line-range text edits - several enforcing real preconditions like
 "can't look up a symbol that doesn't exist", "can't rename a position
-with no known symbol", 9 cases) - deliberately scoped toward coding/dev
-tools rather than more generic ones; see [ARCH.md](./ARCH.md) §3.5 for
-the schema and oracle mechanics, and what's still deferred (agent-driver
-support beyond the raw baselines, more mock services).
+with no known symbol", 9 cases), and `observability` (all 105 tools the
+official Grafana MCP server registers across dashboards, alerting,
+datasources, annotations, incidents, on-call, Sift investigations,
+admin/RBAC, and query connectors for Prometheus/Loki/CloudWatch/Athena
+and 8 more datasource types - by far the largest service in this
+domain, several enforcing real preconditions like "a datasource query
+refuses a datasource of the wrong plugin type", "creating a datasource
+requires an explicit schema-review confirmation", 37 cases) -
+deliberately scoped toward coding/dev tools rather than more generic
+ones; see [ARCH.md](./ARCH.md) §3.5 for the schema and oracle mechanics,
+and what's still deferred (agent-driver support beyond the raw
+baselines, more mock services).
 
 ## Regression testing
 

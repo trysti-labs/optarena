@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_audit_loki_labels",
+  "description": "Audit the Loki label strategy currently in use to find high-cardinality labels that should be removed.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "loki"],
+  "tool_service": "observability",
+  "tools": ["analyze_loki_labels"],
+  "tool_service_seed": {
+    "datasources": {"ds-loki": {"name": "Loki", "type": "loki"}}
+  },
+  "prompts": [
+    "Audit our Loki label strategy on the ds-loki datasource and tell me which labels should be removed for high cardinality."
+  ],
+  "expected_calls": [
+    {"tool": "analyze_loki_labels", "arguments_contains": {"datasourceUid": "ds-loki"}}
+  ]
+}

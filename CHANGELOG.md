@@ -86,12 +86,27 @@ existed.
   enforcing real preconditions (`nx_visualize_graph`'s type-dependent
   required parameters straight from the source, `update_self_healing_fix`
   resolving a fix via ID/short-link/branch and refusing if none resolve),
-  13 cases), and `code_intel` (all 6 tools the real `isaacphi/
+  13 cases), `code_intel` (all 6 tools the real `isaacphi/
   mcp-language-server` registers - definition/reference lookup,
   diagnostics, hover, rename_symbol, edit_file - several enforcing real
   preconditions (definition/references refuse an unknown symbol,
   hover/rename_symbol refuse a position with no known symbol, edit_file
-  refuses an out-of-range line edit), 9 cases) - plus a
+  refuses an out-of-range line edit), 9 cases), and `observability` (all
+  105 tools the official `grafana/mcp-grafana` registers across 30
+  category files - by far the largest service in this domain, bigger
+  than `forge`'s 77 - dashboards, alerting, datasources, annotations,
+  folders, snapshots, plugins, provisioning, incidents, on-call, Sift
+  investigations, admin/RBAC, assertions, navigation, rendering, config
+  generation, panel-query execution, a generic API passthrough, Agent
+  Observability, the Assistant transport, and query connectors for
+  Prometheus/Loki/Pyroscope/Elasticsearch/InfluxDB/Graphite/Quickwit/
+  CloudWatch/Athena/ClickHouse/Snowflake - roughly 22 categories with
+  real source-verified precondition logic (dashboard update's
+  full-JSON-vs-JSON-patch mutual exclusion, datasource create/update's
+  two-step schema-review confirmation, plugin install's two-step
+  version-confirmation flow, and more) plus a shared datasource-type
+  check across the ~12 structurally-similar query-connector categories,
+  37 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_inspect_routing",
+  "description": "Look up the configuration of a specific alerting contact point.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "alerting"],
+  "tool_service": "observability",
+  "tools": ["alerting_manage_routing"],
+  "tool_service_seed": {
+    "contact_points": {"oncall-pagerduty": {"type": "pagerduty"}}
+  },
+  "prompts": [
+    "Show me the configuration of the 'oncall-pagerduty' contact point."
+  ],
+  "expected_calls": [
+    {"tool": "alerting_manage_routing", "arguments_contains": {"operation": "get_contact_point", "contact_point_title": "oncall-pagerduty"}}
+  ]
+}

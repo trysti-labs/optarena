@@ -1,0 +1,20 @@
+{
+  "name": "tool_obs_dashboard_summary_then_panel_queries",
+  "description": "Get a compact dashboard summary first, then drill into one panel's queries.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "dashboard"],
+  "tool_service": "observability",
+  "tools": ["get_dashboard_summary", "get_dashboard_panel_queries"],
+  "tool_service_seed": {
+    "dashboards": {"dash-1": {"title": "API Overview", "panels": [{"id": 1, "title": "Requests/sec"}, {"id": 2, "title": "Errors"}]}}
+  },
+  "prompts": [
+    "Give me a quick summary of dashboard dash-1, then show me the queries for panel 2."
+  ],
+  "expected_calls": [
+    {"tool": "get_dashboard_summary", "arguments_contains": {"uid": "dash-1"}},
+    {"tool": "get_dashboard_panel_queries", "arguments_contains": {"uid": "dash-1", "panelId": 2}}
+  ]
+}

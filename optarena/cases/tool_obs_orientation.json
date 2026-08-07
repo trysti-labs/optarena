@@ -1,0 +1,21 @@
+{
+  "name": "tool_obs_orientation",
+  "description": "List configured datasources, then search for a dashboard by name.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "orientation"],
+  "tool_service": "observability",
+  "tools": ["list_datasources", "search_dashboards"],
+  "tool_service_seed": {
+    "datasources": {"ds-prom": {"name": "Prometheus", "type": "prometheus"}},
+    "dashboards": {"dash-1": {"title": "API Overview", "panels": []}}
+  },
+  "prompts": [
+    "List the configured Grafana datasources, then search for a dashboard called 'API Overview'."
+  ],
+  "expected_calls": [
+    {"tool": "list_datasources"},
+    {"tool": "search_dashboards"}
+  ]
+}

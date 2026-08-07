@@ -1,0 +1,20 @@
+{
+  "name": "tool_obs_investigate_incident",
+  "description": "Look up an incident's details, then add a note to its timeline.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "incident"],
+  "tool_service": "observability",
+  "tools": ["get_incident", "add_activity_to_incident"],
+  "tool_service_seed": {
+    "incidents": {"incident-1": {"title": "API outage", "status": "active", "severity": "critical"}}
+  },
+  "prompts": [
+    "Look up incident incident-1, then add a note saying 'Root cause identified: database connection pool exhaustion'."
+  ],
+  "expected_calls": [
+    {"tool": "get_incident", "arguments_contains": {"id": "incident-1"}},
+    {"tool": "add_activity_to_incident", "arguments_contains": {"incidentId": "incident-1"}}
+  ]
+}

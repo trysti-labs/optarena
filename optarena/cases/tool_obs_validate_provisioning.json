@@ -1,0 +1,20 @@
+{
+  "name": "tool_obs_validate_provisioning",
+  "description": "Validate a dashboard file staged in a provisioning repository before it's merged.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "provisioning"],
+  "tool_service": "observability",
+  "tools": ["validate_provisioning_file"],
+  "tool_service_seed": {
+    "provisioning_repos": {"dashboards-repo": {"url": "https://github.com/acme/dashboards", "branch": "main"}},
+    "provisioning_files": [{"repo": "dashboards-repo", "path": "team-a/overview.json", "valid": true, "action": "create"}]
+  },
+  "prompts": [
+    "Validate the file team-a/overview.json in the dashboards-repo provisioning repository before we merge the PR."
+  ],
+  "expected_calls": [
+    {"tool": "validate_provisioning_file", "arguments_contains": {"repo": "dashboards-repo", "path": "team-a/overview.json"}}
+  ]
+}

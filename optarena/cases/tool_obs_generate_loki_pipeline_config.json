@@ -1,0 +1,16 @@
+{
+  "name": "tool_obs_generate_loki_pipeline_config",
+  "description": "Generate an Alloy pipeline snippet that enforces an approved label allowlist.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "config"],
+  "tool_service": "observability",
+  "tools": ["suggest_loki_alloy_label_config"],
+  "prompts": [
+    "Generate an Alloy config snippet that only keeps the labels app, env, and level on our Loki logs."
+  ],
+  "expected_calls": [
+    {"tool": "suggest_loki_alloy_label_config"}
+  ]
+}

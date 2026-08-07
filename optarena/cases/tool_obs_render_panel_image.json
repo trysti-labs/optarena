@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_render_panel_image",
+  "description": "Render a specific panel of a dashboard as a PNG image.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "rendering"],
+  "tool_service": "observability",
+  "tools": ["get_panel_image"],
+  "tool_service_seed": {
+    "dashboards": {"dash-1": {"title": "API Overview", "panels": [{"id": 1, "title": "Requests/sec"}]}}
+  },
+  "prompts": [
+    "Render panel 1 of dashboard dash-1 as a PNG image."
+  ],
+  "expected_calls": [
+    {"tool": "get_panel_image", "arguments_contains": {"dashboardUid": "dash-1", "panelId": 1}}
+  ]
+}

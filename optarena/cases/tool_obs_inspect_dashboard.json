@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_inspect_dashboard",
+  "description": "Retrieve the full contents of a known dashboard.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "dashboard"],
+  "tool_service": "observability",
+  "tools": ["get_dashboard_by_uid"],
+  "tool_service_seed": {
+    "dashboards": {"dash-1": {"title": "API Overview", "panels": [{"id": 1, "title": "Requests/sec"}]}}
+  },
+  "prompts": [
+    "Show me the full contents of the dashboard with UID dash-1."
+  ],
+  "expected_calls": [
+    {"tool": "get_dashboard_by_uid", "arguments_contains": {"uid": "dash-1"}}
+  ]
+}

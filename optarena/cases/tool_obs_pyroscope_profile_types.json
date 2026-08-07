@@ -1,0 +1,20 @@
+{
+  "name": "tool_obs_pyroscope_profile_types",
+  "description": "List available profiling types before running a profile query.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "pyroscope"],
+  "tool_service": "observability",
+  "tools": ["list_pyroscope_profile_types"],
+  "tool_service_seed": {
+    "datasources": {"ds-pyro": {"name": "Pyroscope", "type": "pyroscope"}},
+    "metric_data": {"ds-pyro": {"profile_types": ["process_cpu:cpu:nanoseconds:cpu:nanoseconds"]}}
+  },
+  "prompts": [
+    "What profile types are available on the Pyroscope datasource ds-pyro?"
+  ],
+  "expected_calls": [
+    {"tool": "list_pyroscope_profile_types", "arguments_contains": {"data_source_uid": "ds-pyro"}}
+  ]
+}

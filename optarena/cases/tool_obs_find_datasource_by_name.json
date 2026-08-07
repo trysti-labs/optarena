@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_find_datasource_by_name",
+  "description": "Look up a datasource by name rather than UID.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "datasources"],
+  "tool_service": "observability",
+  "tools": ["get_datasource"],
+  "tool_service_seed": {
+    "datasources": {"ds-prod-prom": {"name": "prod-prometheus", "type": "prometheus"}}
+  },
+  "prompts": [
+    "Get the details of the datasource named 'prod-prometheus'."
+  ],
+  "expected_calls": [
+    {"tool": "get_datasource", "arguments_contains": {"name": "prod-prometheus"}}
+  ]
+}

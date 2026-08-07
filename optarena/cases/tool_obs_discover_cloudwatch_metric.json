@@ -1,0 +1,21 @@
+{
+  "name": "tool_obs_discover_cloudwatch_metric",
+  "description": "Discover available metrics in a CloudWatch namespace before querying one, following the documented discovery order.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "cloudwatch"],
+  "tool_service": "observability",
+  "tools": ["list_cloudwatch_namespaces", "list_cloudwatch_metrics"],
+  "tool_service_seed": {
+    "datasources": {"ds-cw": {"name": "CloudWatch", "type": "cloudwatch"}},
+    "metric_data": {"ds-cw": {"namespaces": ["AWS/EC2", "AWS/ECS"], "metrics": {"AWS/ECS": ["CPUUtilization", "MemoryUtilization"]}}}
+  },
+  "prompts": [
+    "List the CloudWatch namespaces on datasource ds-cw in us-east-1, then list the available metrics in AWS/ECS."
+  ],
+  "expected_calls": [
+    {"tool": "list_cloudwatch_namespaces", "arguments_contains": {"datasourceUid": "ds-cw"}},
+    {"tool": "list_cloudwatch_metrics", "arguments_contains": {"datasourceUid": "ds-cw", "namespace": "AWS/ECS"}}
+  ]
+}

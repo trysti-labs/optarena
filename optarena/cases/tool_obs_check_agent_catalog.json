@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_check_agent_catalog",
+  "description": "Look up an AI agent's catalog entry (system prompt, tools, version history) by name.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "agento11y"],
+  "tool_service": "observability",
+  "tools": ["agento11y_manage_agents"],
+  "tool_service_seed": {
+    "agento11y_agents": {"claude-code": {"model": "claude-sonnet-5", "tools": ["Read", "Edit", "Bash"]}}
+  },
+  "prompts": [
+    "What does the Agent Observability catalog say about the claude-code agent?"
+  ],
+  "expected_calls": [
+    {"tool": "agento11y_manage_agents", "arguments_contains": {"operation": "get", "agent_name": "claude-code"}}
+  ]
+}

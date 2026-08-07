@@ -4524,6 +4524,1502 @@ class CodeIntelService(MockService):
         }
 
 
+
+class ObservabilityService(MockService):
+    """A mock Grafana instance - all 105 unique tools the official
+    `grafana/mcp-grafana` (3,332 stars) actually registers across its 30
+    tool-category files, extracted directly from its `tools/*.go` source.
+    Six tools (`alerting_manage_rules`, `agento11y_manage_evaluators`,
+    `agento11y_manage_eval_rules`, `agento11y_manage_eval_collections`,
+    `grafana_api_request`, `generate_deeplink`) are registered twice in
+    the real server under the same name - a read-only vs. read-write
+    variant selected at startup by an `enableWriteTools` flag - and this
+    mock models the full read-write variant of each, the same "model the
+    complete capability" choice every other service in this domain makes.
+
+    By far the largest service in this domain (105 vs. forge's 77), and
+    the first where a deliberate two-tier depth choice was made rather
+    than giving every tool equal precondition depth: roughly 22
+    "interactive" categories (dashboards, alerting, datasources,
+    annotations, folders, snapshots, plugins, provisioning, incidents,
+    on-call, Sift investigations, admin/RBAC, assertions, navigation,
+    rendering, config generation, panel-query execution, the generic API
+    passthrough, Agent Observability, and the Assistant transport) get
+    real, source-verified precondition logic (mutual exclusion, XOR
+    requirements, operation-gated required fields, two-step confirmation
+    flows, UUID/regex validation). The other ~12 categories are all
+    structurally the same underlying skill repeated across vendors -
+    "query this specific datasource type" (Prometheus, Loki, Pyroscope,
+    Elasticsearch, InfluxDB, Graphite, Quickwit, CloudWatch, Athena,
+    ClickHouse, Snowflake) - and share one real precondition every one of
+    them enforces in the actual source: the resolved datasource must
+    actually be of the expected type, or the call is refused. Full
+    per-tool extraction (names, parameters, real precondition notes) is
+    in `DEV_NOTES/MCP_IMPLEMENTATION_GAPS.md`'s companion research, not
+    committed; this docstring records the scope decision, not the data.
+    """
+
+    TOOLS = {name: name for name in (
+        # admin.go
+        "list_teams", "list_users_by_org", "list_all_roles", "get_role_details",
+        "get_role_assignments", "list_user_roles", "list_team_roles",
+        "get_resource_permissions", "get_resource_description",
+        # dashboard.go
+        "get_dashboard_by_uid", "update_dashboard", "get_dashboard_panel_queries",
+        "get_dashboard_property", "get_dashboard_summary",
+        # alerting.go
+        "alerting_manage_rules", "alerting_manage_routing",
+        # search.go
+        "search_dashboards", "search_folders",
+        # datasources.go
+        "list_datasources", "create_datasource", "update_datasource", "get_datasource",
+        "check_datasources_health",
+        # annotations.go
+        "get_annotations", "create_annotation", "update_annotation", "get_annotation_tags",
+        # folder.go
+        "create_folder",
+        # snapshot.go
+        "list_snapshots", "get_snapshot", "create_snapshot", "delete_snapshot",
+        # plugins.go
+        "get_plugin", "install_plugin", "search_plugin_information",
+        # provisioning.go
+        "list_provisioning_repositories", "validate_provisioning_file",
+        # incident.go
+        "list_incidents", "create_incident", "add_activity_to_incident", "get_incident",
+        # oncall.go
+        "list_oncall_schedules", "get_oncall_shift", "get_current_oncall_users",
+        "list_oncall_teams", "list_oncall_users", "list_alert_groups", "get_alert_group",
+        # sift.go
+        "get_sift_investigation", "get_sift_analysis", "list_sift_investigations",
+        "find_error_pattern_logs", "find_slow_requests",
+        # asserts.go
+        "get_assertions",
+        # navigation.go
+        "generate_deeplink",
+        # config.go
+        "suggest_loki_alloy_label_config",
+        # rendering.go
+        "get_panel_image",
+        # examples.go
+        "get_query_examples",
+        # run_panel_query.go
+        "run_panel_query",
+        # api.go
+        "grafana_api_request",
+        # agento11y*.go
+        "agento11y_manage_conversations", "agento11y_manage_generations",
+        "agento11y_manage_agents", "agento11y_manage_evaluators",
+        "agento11y_manage_eval_rules", "agento11y_manage_eval_collections",
+        # assistant.go
+        "ask_assistant",
+        # prometheus.go
+        "list_prometheus_metric_metadata", "query_prometheus", "list_prometheus_metric_names",
+        "list_prometheus_label_names", "list_prometheus_label_values", "query_prometheus_histogram",
+        # loki.go / loki_label_analyzer.go
+        "list_loki_label_names", "list_loki_label_values", "query_loki_logs",
+        "query_loki_stats", "query_loki_patterns", "analyze_loki_labels",
+        # elasticsearch.go
+        "query_elasticsearch",
+        # influxdb.go
+        "query_influxdb",
+        # graphite.go
+        "query_graphite", "list_graphite_metrics", "list_graphite_tags", "query_graphite_density",
+        # quickwit.go
+        "query_quickwit",
+        # cloudwatch.go
+        "query_cloudwatch", "list_cloudwatch_namespaces", "list_cloudwatch_metrics",
+        "list_cloudwatch_dimensions",
+        # athena.go
+        "list_athena_catalogs", "list_athena_databases", "list_athena_tables",
+        "describe_athena_table", "query_athena",
+        # clickhouse.go
+        "query_clickhouse", "list_clickhouse_tables", "describe_clickhouse_table",
+        # snowflake.go
+        "query_snowflake", "list_snowflake_tables", "describe_snowflake_table",
+        # pyroscope.go
+        "list_pyroscope_label_names", "list_pyroscope_label_values",
+        "list_pyroscope_profile_types", "query_pyroscope",
+    )}
+
+    _DATASOURCE_TYPES = {
+        "query_prometheus": "prometheus", "query_influxdb": "influxdb",
+        "query_graphite": "graphite", "list_graphite_metrics": "graphite",
+        "list_graphite_tags": "graphite", "query_graphite_density": "graphite",
+        "query_quickwit": "quickwit-quickwit-datasource",
+        "query_cloudwatch": "cloudwatch", "list_cloudwatch_namespaces": "cloudwatch",
+        "list_cloudwatch_metrics": "cloudwatch", "list_cloudwatch_dimensions": "cloudwatch",
+        "list_athena_catalogs": "grafana-athena-datasource", "list_athena_databases": "grafana-athena-datasource",
+        "list_athena_tables": "grafana-athena-datasource", "describe_athena_table": "grafana-athena-datasource",
+        "query_athena": "grafana-athena-datasource",
+        "query_clickhouse": "grafana-clickhouse-datasource",
+        "query_snowflake": "grafana-snowflake-datasource",
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._datasources: dict[str, dict] = {}
+        self._dashboards: dict[str, dict] = {}
+        self._folders: dict[str, dict] = {}
+        self._teams: dict[str, dict] = {}
+        self._org_users: list[dict] = []
+        self._roles: dict[str, dict] = {}
+        self._role_assignments: dict[str, dict] = {}
+        self._user_roles: dict[str, list] = {}
+        self._team_roles: dict[str, list] = {}
+        self._resource_permissions: dict[tuple, list] = {}
+        self._alert_rules: dict[str, dict] = {}
+        self._contact_points: dict[str, dict] = {}
+        self._notification_policies: dict = {}
+        self._time_intervals: dict[str, dict] = {}
+        self._annotations: dict[int, dict] = {}
+        self._next_annotation_id = 1
+        self._snapshots: dict[str, dict] = {}
+        self._plugins: dict[str, dict] = {}
+        self._plugin_catalog: dict[str, dict] = {}
+        self._provisioning_repos: dict[str, dict] = {}
+        self._provisioning_files: dict[tuple, dict] = {}
+        self._incidents: dict[str, dict] = {}
+        self._incident_activities: dict[str, list] = {}
+        self._oncall_schedules: dict[str, dict] = {}
+        self._oncall_shifts: dict[str, dict] = {}
+        self._oncall_teams: list[dict] = []
+        self._oncall_users: dict[str, dict] = {}
+        self._alert_groups: dict[str, dict] = {}
+        self._sift_investigations: dict[str, dict] = {}
+        self._sift_analyses: dict[tuple, dict] = {}
+        self._assertions: list[dict] = []
+        self._agento11y_conversations: dict[str, dict] = {}
+        self._agento11y_generations: dict[str, dict] = {}
+        self._agento11y_agents: dict[str, dict] = {}
+        self._agento11y_evaluators: dict[str, dict] = {}
+        self._agento11y_eval_rules: dict[str, dict] = {}
+        self._agento11y_eval_collections: dict[str, dict] = {}
+        self._agento11y_saved_conversations: dict[str, dict] = {}
+        self._assistant_conversations: dict[str, list] = {}
+        self._metric_data: dict[str, dict] = {}
+        self._next_id = 1
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional - one per category, each a dict or
+        list of dicts matching the shapes returned/consumed by that
+        category's tools. See individual tool methods for exact field
+        names. Any tool taking a ``datasourceUid`` (or ``data_source_uid``)
+        requires a matching entry in ``datasources`` for the type-check
+        precondition shared across the ~12 query-connector categories.
+        """
+        for uid, cfg in (spec.get("datasources") or {}).items():
+            self._datasources[uid] = {"name": cfg.get("name", uid), "type": cfg.get("type", "prometheus")}
+        for uid, cfg in (spec.get("dashboards") or {}).items():
+            self._dashboards[uid] = {"title": cfg.get("title", uid), "panels": list(cfg.get("panels", [])),
+                                      "folderUid": cfg.get("folderUid"), "isV2": cfg.get("isV2", False),
+                                      "variables": dict(cfg.get("variables", {}))}
+        for uid, cfg in (spec.get("folders") or {}).items():
+            self._folders[uid] = {"title": cfg.get("title", uid), "parentUid": cfg.get("parentUid")}
+        for tid, cfg in (spec.get("teams") or {}).items():
+            self._teams[tid] = {"name": cfg.get("name", tid)}
+        for entry in spec.get("org_users") or []:
+            self._org_users.append(dict(entry))
+        for uid, cfg in (spec.get("roles") or {}).items():
+            self._roles[uid] = dict(cfg)
+        for uid, cfg in (spec.get("role_assignments") or {}).items():
+            self._role_assignments[uid] = dict(cfg)
+        for uid, roles in (spec.get("user_roles") or {}).items():
+            self._user_roles[uid] = list(roles)
+        for tid, roles in (spec.get("team_roles") or {}).items():
+            self._team_roles[tid] = list(roles)
+        for entry in spec.get("resource_permissions") or []:
+            key = (entry["resource"], entry["resourceId"])
+            self._resource_permissions[key] = list(entry.get("permissions", []))
+        for uid, cfg in (spec.get("alert_rules") or {}).items():
+            self._alert_rules[uid] = dict(cfg)
+        for title, cfg in (spec.get("contact_points") or {}).items():
+            self._contact_points[title] = dict(cfg)
+        for name, cfg in (spec.get("time_intervals") or {}).items():
+            self._time_intervals[name] = dict(cfg)
+        for entry in spec.get("annotations") or []:
+            aid = entry.get("id", self._next_annotation_id)
+            self._annotations[aid] = dict(entry)
+            self._next_annotation_id = max(self._next_annotation_id, aid + 1)
+        for key, cfg in (spec.get("snapshots") or {}).items():
+            self._snapshots[key] = dict(cfg)
+        for pid, cfg in (spec.get("plugins") or {}).items():
+            self._plugins[pid] = dict(cfg)
+        for pid, cfg in (spec.get("plugin_catalog") or {}).items():
+            self._plugin_catalog[pid] = dict(cfg)
+        for slug, cfg in (spec.get("provisioning_repos") or {}).items():
+            self._provisioning_repos[slug] = dict(cfg)
+        for entry in spec.get("provisioning_files") or []:
+            key = (entry.get("namespace", "default"), entry["repo"], entry["path"])
+            self._provisioning_files[key] = dict(entry)
+        for iid, cfg in (spec.get("incidents") or {}).items():
+            self._incidents[iid] = dict(cfg)
+        for iid, activities in (spec.get("incident_activities") or {}).items():
+            self._incident_activities[iid] = list(activities)
+        for sid, cfg in (spec.get("oncall_schedules") or {}).items():
+            self._oncall_schedules[sid] = dict(cfg)
+        for sid, cfg in (spec.get("oncall_shifts") or {}).items():
+            self._oncall_shifts[sid] = dict(cfg)
+        for entry in spec.get("oncall_teams") or []:
+            self._oncall_teams.append(dict(entry))
+        for uid, cfg in (spec.get("oncall_users") or {}).items():
+            self._oncall_users[uid] = dict(cfg)
+        for gid, cfg in (spec.get("alert_groups") or {}).items():
+            self._alert_groups[gid] = dict(cfg)
+        for iid, cfg in (spec.get("sift_investigations") or {}).items():
+            self._sift_investigations[iid] = dict(cfg)
+        for entry in spec.get("sift_analyses") or []:
+            key = (entry["investigationId"], entry["analysisId"])
+            self._sift_analyses[key] = dict(entry)
+        for entry in spec.get("assertions") or []:
+            self._assertions.append(dict(entry))
+        for cid, cfg in (spec.get("agento11y_conversations") or {}).items():
+            self._agento11y_conversations[cid] = dict(cfg)
+        for gid, cfg in (spec.get("agento11y_generations") or {}).items():
+            self._agento11y_generations[gid] = dict(cfg)
+        for name, cfg in (spec.get("agento11y_agents") or {}).items():
+            self._agento11y_agents[name] = dict(cfg)
+        for eid, cfg in (spec.get("agento11y_evaluators") or {}).items():
+            self._agento11y_evaluators[eid] = dict(cfg)
+        for rid, cfg in (spec.get("agento11y_eval_rules") or {}).items():
+            self._agento11y_eval_rules[rid] = dict(cfg)
+        for cid, cfg in (spec.get("agento11y_eval_collections") or {}).items():
+            self._agento11y_eval_collections[cid] = dict(cfg)
+        for sid, cfg in (spec.get("agento11y_saved_conversations") or {}).items():
+            self._agento11y_saved_conversations[sid] = dict(cfg)
+        for uid, cfg in (spec.get("metric_data") or {}).items():
+            self._metric_data[uid] = dict(cfg)
+
+    # ── shared helper for the datasource-query-connector categories ────────
+
+    def _check_datasource_type(self, tool_name: str, datasourceUid: str) -> dict | None:
+        """Every one of the ~12 real query-connector categories refuses if
+        the resolved datasource isn't actually of the expected plugin
+        type - the one precondition all of them share in the real
+        source. Returns an error dict if the check fails, else None."""
+        ds = self._datasources.get(datasourceUid)
+        if ds is None:
+            return {"error": f"datasource {datasourceUid!r} not found"}
+        want = self._DATASOURCE_TYPES.get(tool_name)
+        if want and ds["type"] != want:
+            return {"error": f"datasource {datasourceUid!r} is type {ds['type']!r}, expected {want!r}"}
+        return None
+
+    # ── admin.go: RBAC/admin (read-only) ────────────────────────────────
+
+    def list_teams(self, query: str = "") -> dict:
+        teams = [{"id": tid, **t} for tid, t in sorted(self._teams.items())]
+        if query:
+            teams = [t for t in teams if query.lower() in t["name"].lower()]
+        return {"teams": teams}
+
+    def list_users_by_org(self) -> dict:
+        return {"users": list(self._org_users)}
+
+    def list_all_roles(self, delegatableOnly: bool = False) -> dict:
+        roles = [{"uid": uid, **r} for uid, r in sorted(self._roles.items())]
+        if delegatableOnly:
+            roles = [r for r in roles if r.get("delegatable")]
+        return {"roles": roles}
+
+    def get_role_details(self, roleUID: str) -> dict:
+        role = self._roles.get(roleUID)
+        if role is None:
+            return {"error": f"role {roleUID!r} not found"}
+        return {"uid": roleUID, **role}
+
+    def get_role_assignments(self, roleUID: str) -> dict:
+        assignment = self._role_assignments.get(roleUID)
+        if assignment is None:
+            return {"error": f"role {roleUID!r} not found"}
+        return {"uid": roleUID, **assignment}
+
+    def list_user_roles(self, userIds: list) -> dict:
+        return {"roles": {str(uid): self._user_roles.get(str(uid), []) for uid in userIds}}
+
+    def list_team_roles(self, teamIds: list) -> dict:
+        return {"roles": {str(tid): self._team_roles.get(str(tid), []) for tid in teamIds}}
+
+    def get_resource_permissions(self, resource: str, resourceId: str) -> dict:
+        return {"permissions": self._resource_permissions.get((resource, resourceId), [])}
+
+    _RESOURCE_TYPES = {"dashboards", "datasources", "folders", "teams", "users", "serviceaccounts"}
+
+    def get_resource_description(self, resourceType: str) -> dict:
+        if resourceType not in self._RESOURCE_TYPES:
+            return {"error": f"unknown resourceType {resourceType!r} (expected one of {sorted(self._RESOURCE_TYPES)})"}
+        return {"resourceType": resourceType, "permissions": ["View", "Edit", "Admin"]}
+
+    # ── dashboard.go ─────────────────────────────────────────────────────
+
+    def get_dashboard_by_uid(self, uid: str) -> dict:
+        d = self._dashboards.get(uid)
+        if d is None:
+            return {"error": f"dashboard {uid!r} not found"}
+        return {"uid": uid, **d}
+
+    def update_dashboard(self, dashboard: dict | None = None, uid: str | None = None,
+                          operations: list | None = None, folderUid: str | None = None,
+                          message: str | None = None, overwrite: bool = False, userId: int | None = None) -> dict:
+        if uid and not operations:
+            return {"error": "uid given without operations - patch mode requires both"}
+        if operations and not uid:
+            return {"error": "operations given without uid - patch mode requires both"}
+        if not dashboard and not (uid and operations):
+            return {"error": "provide either a full dashboard, or uid+operations for a patch"}
+        if uid and operations:
+            existing = self._dashboards.get(uid)
+            if existing is None:
+                return {"error": f"dashboard {uid!r} not found"}
+            for op in operations:
+                pass  # patch application intentionally not deep-simulated; existence/shape already validated
+            existing["message"] = message
+            return {"uid": uid, "operationsApplied": len(operations)}
+        new_uid = uid or f"dash-{self._next_id}"
+        if new_uid in self._dashboards and not overwrite:
+            return {"error": f"dashboard {new_uid!r} already exists - set overwrite=true to replace it"}
+        self._next_id += 1
+        self._dashboards[new_uid] = {"title": dashboard.get("title", new_uid), "panels": dashboard.get("panels", []),
+                                      "folderUid": folderUid, "isV2": False, "variables": {}}
+        return {"uid": new_uid, "created": True}
+
+    def get_dashboard_panel_queries(self, uid: str, panelId: int | None = None, variables: dict | None = None) -> dict:
+        d = self._dashboards.get(uid)
+        if d is None:
+            return {"error": f"dashboard {uid!r} not found"}
+        panels = d["panels"]
+        if panelId is not None:
+            panels = [p for p in panels if p.get("id") == panelId]
+            if not panels:
+                return {"error": f"panel {panelId} not found in dashboard {uid!r}"}
+        return {"uid": uid, "panels": panels}
+
+    def get_dashboard_property(self, uid: str, jsonPath: str) -> dict:
+        d = self._dashboards.get(uid)
+        if d is None:
+            return {"error": f"dashboard {uid!r} not found"}
+        return {"uid": uid, "jsonPath": jsonPath, "value": d.get(jsonPath.lstrip("$.").split(".")[0])}
+
+    def get_dashboard_summary(self, uid: str) -> dict:
+        d = self._dashboards.get(uid)
+        if d is None:
+            return {"error": f"dashboard {uid!r} not found"}
+        return {"uid": uid, "title": d["title"], "panelCount": len(d["panels"]), "variables": list(d["variables"])}
+
+    # ── alerting.go ──────────────────────────────────────────────────────
+
+    _ALERT_STATES = {"firing", "pending", "normal", "recovering", "nodata", "error"}
+
+    def alerting_manage_rules(self, operation: str, rule_uid: str | None = None, title: str | None = None,
+                               rule_group: str | None = None, folder_uid: str | None = None,
+                               search_folder: str | None = None, condition: str | None = None,
+                               data: list | None = None, no_data_state: str | None = None,
+                               exec_err_state: str | None = None, for_: str | None = None,
+                               org_id: int | None = None, states: list | None = None, **kwargs) -> dict:
+        if folder_uid and search_folder:
+            return {"error": "folder_uid and search_folder are mutually exclusive"}
+        if states:
+            unknown = [s for s in states if s not in self._ALERT_STATES]
+            if unknown:
+                return {"error": f"unknown state(s) {unknown} (expected one of {sorted(self._ALERT_STATES)})"}
+        if operation == "list":
+            return {"rules": [{"uid": u, **r} for u, r in sorted(self._alert_rules.items())]}
+        if operation in ("get", "versions"):
+            if not rule_uid:
+                return {"error": f"rule_uid is required for operation {operation!r}"}
+            rule = self._alert_rules.get(rule_uid)
+            if rule is None:
+                return {"error": f"alert rule {rule_uid!r} not found"}
+            return {"uid": rule_uid, **rule}
+        if operation == "delete":
+            if not rule_uid:
+                return {"error": "rule_uid is required for operation 'delete'"}
+            if rule_uid not in self._alert_rules:
+                return {"error": f"alert rule {rule_uid!r} not found"}
+            del self._alert_rules[rule_uid]
+            return {"uid": rule_uid, "deleted": True}
+        if operation in ("create", "update"):
+            missing = [n for n, v in (("title", title), ("rule_group", rule_group), ("folder_uid", folder_uid),
+                                       ("condition", condition), ("data", data), ("no_data_state", no_data_state),
+                                       ("exec_err_state", exec_err_state), ("org_id", org_id)) if not v]
+            if missing:
+                return {"error": f"missing required fields for {operation}: {missing}"}
+            new_uid = rule_uid or f"rule-{self._next_id}"
+            self._next_id += 1
+            self._alert_rules[new_uid] = {"title": title, "rule_group": rule_group, "folder_uid": folder_uid,
+                                           "condition": condition, "state": "normal"}
+            return {"uid": new_uid, operation + "d": True}
+        return {"error": f"unknown operation {operation!r}"}
+
+    _ROUTING_OPS = {"get_notification_policies", "get_contact_points", "get_contact_point",
+                     "get_time_intervals", "get_time_interval"}
+
+    def alerting_manage_routing(self, operation: str, datasource_uid: str | None = None, name: str | None = None,
+                                 contact_point_title: str | None = None, time_interval_name: str | None = None,
+                                 limit: int = 100) -> dict:
+        if operation not in self._ROUTING_OPS:
+            return {"error": f"unknown operation {operation!r} (expected one of {sorted(self._ROUTING_OPS)})"}
+        if operation == "get_contact_point":
+            if not contact_point_title:
+                return {"error": "contact_point_title is required for get_contact_point"}
+            cp = self._contact_points.get(contact_point_title)
+            if cp is None:
+                return {"error": f"contact point {contact_point_title!r} not found"}
+            return {"title": contact_point_title, **cp}
+        if operation == "get_time_interval":
+            if not time_interval_name:
+                return {"error": "time_interval_name is required for get_time_interval"}
+            ti = self._time_intervals.get(time_interval_name)
+            if ti is None:
+                return {"error": f"time interval {time_interval_name!r} not found"}
+            return {"name": time_interval_name, **ti}
+        if operation == "get_contact_points":
+            if limit < 0:
+                return {"error": "limit must be >= 0"}
+            points = [{"title": t, **c} for t, c in sorted(self._contact_points.items())]
+            if name:
+                points = [p for p in points if p["title"] == name]
+            return {"contactPoints": points[:limit]}
+        if operation == "get_time_intervals":
+            return {"timeIntervals": [{"name": n, **t} for n, t in sorted(self._time_intervals.items())]}
+        return {"notificationPolicies": self._notification_policies}
+
+    # ── search.go ────────────────────────────────────────────────────────
+
+    def search_dashboards(self, query: str = "", limit: int = 50, page: int = 1) -> dict:
+        limit = min(limit, 100) if limit > 0 else 50
+        page = page if page > 0 else 1
+        results = [{"uid": u, "title": d["title"]} for u, d in sorted(self._dashboards.items())
+                   if not query or query.lower() in d["title"].lower()]
+        return {"dashboards": results[:limit], "hasMore": len(results) > limit}
+
+    def search_folders(self, query: str = "") -> dict:
+        results = [{"uid": u, "title": f["title"]} for u, f in sorted(self._folders.items())
+                   if not query or query.lower() in f["title"].lower()]
+        return {"folders": results}
+
+    # ── datasources.go ───────────────────────────────────────────────────
+
+    def list_datasources(self, type: str | None = None, limit: int = 50, offset: int = 0) -> dict:
+        limit = min(limit, 100) if limit > 0 else 50
+        offset = max(offset, 0)
+        results = [{"uid": u, **d} for u, d in sorted(self._datasources.items())
+                   if not type or type.lower() in d["type"].lower()]
+        page = results[offset:offset + limit]
+        return {"datasources": page, "hasMore": offset + len(page) < len(results)}
+
+    def create_datasource(self, type: str, name: str | None = None, url: str | None = None,
+                           fields: dict | None = None, schemaReviewed: bool = False, **kwargs) -> dict:
+        if not schemaReviewed or not name:
+            return {"guidance": f"call again with schemaReviewed=true and a name to create a {type!r} datasource",
+                     "schemaReviewRequired": True}
+        new_uid = f"ds-{self._next_id}"
+        self._next_id += 1
+        self._datasources[new_uid] = {"name": name, "type": type}
+        return {"uid": new_uid, "created": True, "healthCheck": {"status": "OK"}}
+
+    def update_datasource(self, uid: str, schemaReviewed: bool = False, name: str | None = None,
+                           url: str | None = None, fields: dict | None = None, **kwargs) -> dict:
+        ds = self._datasources.get(uid)
+        if ds is None:
+            return {"error": f"datasource {uid!r} not found"}
+        if not schemaReviewed:
+            return {"guidance": f"call again with schemaReviewed=true to apply changes to {ds['type']!r} datasource {uid!r}",
+                     "schemaReviewRequired": True}
+        if name:
+            ds["name"] = name
+        return {"uid": uid, "updated": True, "healthCheck": {"status": "OK"}}
+
+    def get_datasource(self, uid: str | None = None, name: str | None = None) -> dict:
+        if not uid and not name:
+            return {"error": "either uid or name must be provided"}
+        if uid:
+            ds = self._datasources.get(uid)
+            if ds is None:
+                return {"error": f"datasource {uid!r} not found"}
+            return {"uid": uid, **ds}
+        for u, d in self._datasources.items():
+            if d["name"] == name:
+                return {"uid": u, **d}
+        return {"error": f"datasource named {name!r} not found"}
+
+    def check_datasources_health(self, type: str | None = None, uids: list | None = None, offset: int = 0) -> dict:
+        if uids:
+            targets = [u for u in uids if u in self._datasources]
+        else:
+            targets = [u for u, d in self._datasources.items() if not type or type.lower() in d["type"].lower()]
+        page = targets[offset:offset + 10]
+        results = {u: {"status": "OK"} for u in page}
+        return {"results": results, "healthy": len(results), "unhealthy": 0}
+
+    # ── annotations.go ───────────────────────────────────────────────────
+
+    def get_annotations(self, from_: int | None = None, to: int | None = None, limit: int = 100,
+                         dashboardUid: str | None = None, tags: list | None = None, **kwargs) -> dict:
+        results = [{"id": aid, **a} for aid, a in sorted(self._annotations.items())]
+        if dashboardUid:
+            results = [a for a in results if a.get("dashboardUid") == dashboardUid]
+        return {"annotations": results[:limit]}
+
+    def create_annotation(self, dashboardUid: str | None = None, panelId: int | None = None,
+                           text: str | None = None, format: str | None = None, what: str | None = None,
+                           tags: list | None = None, **kwargs) -> dict:
+        if format == "graphite":
+            if not what:
+                return {"error": "'what' is required when format is 'graphite'"}
+        elif not text:
+            return {"error": "'text' is required unless format is 'graphite'"}
+        aid = self._next_annotation_id
+        self._next_annotation_id += 1
+        self._annotations[aid] = {"dashboardUid": dashboardUid, "panelId": panelId,
+                                   "text": text or what, "tags": list(tags or [])}
+        return {"id": aid, "created": True}
+
+    def update_annotation(self, id: int, text: str | None = None, tags: list | None = None, **kwargs) -> dict:
+        a = self._annotations.get(id)
+        if a is None:
+            return {"error": f"annotation {id} not found"}
+        if text is not None:
+            a["text"] = text
+        if tags is not None:
+            a["tags"] = list(tags)
+        return {"id": id, "updated": True}
+
+    def get_annotation_tags(self, tag: str | None = None, limit: int = 100) -> dict:
+        all_tags = sorted({t for a in self._annotations.values() for t in a.get("tags", [])})
+        if tag:
+            all_tags = [t for t in all_tags if tag.lower() in t.lower()]
+        return {"tags": all_tags[:limit]}
+
+    # ── folder.go ────────────────────────────────────────────────────────
+
+    def create_folder(self, title: str, uid: str | None = None, parentUid: str | None = None) -> dict:
+        if not title:
+            return {"error": "title must not be empty"}
+        new_uid = uid or f"folder-{self._next_id}"
+        self._next_id += 1
+        self._folders[new_uid] = {"title": title, "parentUid": parentUid}
+        return {"uid": new_uid, "created": True}
+
+    # ── snapshot.go ──────────────────────────────────────────────────────
+
+    def list_snapshots(self, query: str | None = None, limit: int | None = None) -> dict:
+        results = [{"key": k, "name": s.get("name", k)} for k, s in sorted(self._snapshots.items())
+                   if not query or query.lower() in s.get("name", "").lower()]
+        return {"snapshots": results[:limit] if limit else results}
+
+    def get_snapshot(self, key: str) -> dict:
+        key = key.strip()
+        if not key:
+            return {"error": "key must not be empty"}
+        s = self._snapshots.get(key)
+        if s is None:
+            return {"error": f"snapshot {key!r} not found"}
+        return {"key": key, **s}
+
+    def create_snapshot(self, dashboard: dict, name: str | None = None, expires: int | None = None,
+                         external: bool = False, key: str | None = None, deleteKey: str | None = None) -> dict:
+        if not dashboard:
+            return {"error": "dashboard must not be empty"}
+        if external and not (key and deleteKey):
+            return {"error": "external snapshots require both key and deleteKey"}
+        new_key = key or f"snap-{self._next_id}"
+        self._next_id += 1
+        self._snapshots[new_key] = {"name": name or new_key, "dashboard": dashboard, "external": external}
+        return {"key": new_key, "created": True}
+
+    def delete_snapshot(self, key: str) -> dict:
+        key = key.strip()
+        if not key:
+            return {"error": "key must not be empty"}
+        if key not in self._snapshots:
+            return {"error": f"snapshot {key!r} not found"}
+        del self._snapshots[key]
+        return {"key": key, "deleted": True}
+
+    # ── plugins.go ───────────────────────────────────────────────────────
+
+    def get_plugin(self, pluginId: str) -> dict:
+        pluginId = pluginId.strip()
+        if not pluginId:
+            return {"error": "pluginId must not be empty"}
+        p = self._plugins.get(pluginId)
+        if p is None:
+            return {"installed": False, "pluginId": pluginId, "suggestion": "call install_plugin to install it"}
+        return {"installed": True, "pluginId": pluginId, **p}
+
+    def install_plugin(self, pluginId: str, version: str | None = None) -> dict:
+        if not pluginId:
+            return {"error": "pluginId must not be empty"}
+        if not version:
+            catalog = self._plugin_catalog.get(pluginId)
+            if catalog is None:
+                return {"error": f"plugin {pluginId!r} not found in catalog"}
+            return {"confirmationRequired": True, "latestVersion": catalog.get("latest_version"),
+                     "message": "call again with an explicit version once confirmed"}
+        self._plugins[pluginId] = {"version": version, "enabled": True}
+        return {"pluginId": pluginId, "version": version, "installed": True}
+
+    def search_plugin_information(self, query: str) -> dict:
+        query = query.strip().lower()
+        if not query:
+            return {"error": "query must not be empty"}
+        matches = [{"pluginId": pid, **c} for pid, c in self._plugin_catalog.items()
+                   if query in pid.lower() or query in c.get("description", "").lower()]
+        return {"plugins": matches[:10], "note": f"{max(0, len(matches) - 10)} more matches not shown"}
+
+    # ── provisioning.go ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _validate_repo_slug(value: str) -> str | None:
+        if not value or "/" in value or "\\" in value or value in (".", ".."):
+            return f"invalid repository/namespace slug {value!r}"
+        return None
+
+    @staticmethod
+    def _validate_repo_path(value: str) -> str | None:
+        normalized = (value or "").replace("\\", "/")
+        if not normalized or normalized.strip("/") == "":
+            return f"invalid path {value!r}"
+        if any(seg in (".", "..") for seg in normalized.split("/")):
+            return f"invalid path {value!r} (contains '.' or '..' segment)"
+        return None
+
+    def list_provisioning_repositories(self, namespace: str = "default") -> dict:
+        err = self._validate_repo_slug(namespace)
+        if err:
+            return {"error": err}
+        return {"repositories": [{"slug": s, **r} for s, r in sorted(self._provisioning_repos.items())]}
+
+    def validate_provisioning_file(self, repo: str, path: str, namespace: str = "default", ref: str | None = None) -> dict:
+        for value, err in ((namespace, self._validate_repo_slug(namespace)), (repo, self._validate_repo_slug(repo))):
+            if err:
+                return {"error": err}
+        path_err = self._validate_repo_path(path)
+        if path_err:
+            return {"error": path_err}
+        key = (namespace, repo, path)
+        result = self._provisioning_files.get(key)
+        if result is None:
+            return {"error": f"no provisioning file found at {repo}/{path}"}
+        return {"repo": repo, "path": path, **result}
+
+    # ── incident.go ──────────────────────────────────────────────────────
+
+    def list_incidents(self, limit: int = 10, drill: bool = False, status: str | None = None) -> dict:
+        limit = limit if limit > 0 else 10
+        results = [{"id": iid, **i} for iid, i in sorted(self._incidents.items())
+                   if drill or not i.get("isDrill")]
+        if status:
+            results = [i for i in results if i.get("status") == status]
+        return {"incidents": results[:limit]}
+
+    def create_incident(self, title: str, severity: str, roomPrefix: str, isDrill: bool = False,
+                         status: str | None = None, **kwargs) -> dict:
+        new_id = f"incident-{self._next_id}"
+        self._next_id += 1
+        self._incidents[new_id] = {"title": title, "severity": severity, "roomPrefix": roomPrefix,
+                                    "isDrill": isDrill, "status": status or "active"}
+        return {"id": new_id, "created": True}
+
+    def add_activity_to_incident(self, incidentId: str, body: str, eventTime: str | None = None) -> dict:
+        if incidentId not in self._incidents:
+            return {"error": f"incident {incidentId!r} not found"}
+        self._incident_activities.setdefault(incidentId, []).append({"kind": "userNote", "body": body})
+        return {"incidentId": incidentId, "activityAdded": True}
+
+    def get_incident(self, id: str) -> dict:
+        i = self._incidents.get(id)
+        if i is None:
+            return {"error": f"incident {id!r} not found"}
+        return {"id": id, **i}
+
+    # ── oncall.go ────────────────────────────────────────────────────────
+
+    def list_oncall_schedules(self, teamId: str | None = None, scheduleId: str | None = None, page: int = 1) -> dict:
+        if scheduleId:
+            s = self._oncall_schedules.get(scheduleId)
+            if s is None:
+                return {"error": f"schedule {scheduleId!r} not found"}
+            return {"schedules": [{"id": scheduleId, **s}]}
+        results = [{"id": sid, **s} for sid, s in sorted(self._oncall_schedules.items())
+                   if not teamId or s.get("teamId") == teamId]
+        return {"schedules": results}
+
+    def get_oncall_shift(self, shiftId: str) -> dict:
+        s = self._oncall_shifts.get(shiftId)
+        if s is None:
+            return {"error": f"shift {shiftId!r} not found"}
+        return {"id": shiftId, **s}
+
+    def get_current_oncall_users(self, scheduleId: str) -> dict:
+        s = self._oncall_schedules.get(scheduleId)
+        if s is None:
+            return {"error": f"schedule {scheduleId!r} not found"}
+        return {"scheduleId": scheduleId, "users": s.get("currentUsers", [])}
+
+    def list_oncall_teams(self, page: int = 1) -> dict:
+        return {"teams": list(self._oncall_teams)}
+
+    def list_oncall_users(self, userId: str | None = None, username: str | None = None, page: int = 1) -> dict:
+        if userId:
+            u = self._oncall_users.get(userId)
+            if u is None:
+                return {"error": f"user {userId!r} not found"}
+            return {"users": [{"id": userId, **u}]}
+        results = [{"id": uid, **u} for uid, u in sorted(self._oncall_users.items())
+                   if not username or u.get("username") == username]
+        return {"users": results}
+
+    def list_alert_groups(self, page: int = 1, id: str | None = None, teamId: str | None = None,
+                           state: str | None = None, **kwargs) -> dict:
+        results = [{"id": gid, **g} for gid, g in sorted(self._alert_groups.items())]
+        if id:
+            results = [g for g in results if g["id"] == id]
+        if teamId:
+            results = [g for g in results if g.get("teamId") == teamId]
+        if state:
+            results = [g for g in results if g.get("state") == state]
+        return {"alertGroups": results}
+
+    def get_alert_group(self, alertGroupId: str) -> dict:
+        g = self._alert_groups.get(alertGroupId)
+        if g is None:
+            return {"error": f"alert group {alertGroupId!r} not found"}
+        return {"id": alertGroupId, **g}
+
+    # ── sift.go ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _is_uuid(value: str) -> bool:
+        import uuid as _uuid
+        try:
+            _uuid.UUID(value)
+            return True
+        except (ValueError, AttributeError, TypeError):
+            return False
+
+    def get_sift_investigation(self, id: str) -> dict:
+        if not self._is_uuid(id):
+            return {"error": f"{id!r} is not a valid investigation UUID"}
+        inv = self._sift_investigations.get(id)
+        if inv is None:
+            return {"error": f"investigation {id!r} not found"}
+        return {"id": id, **inv}
+
+    def get_sift_analysis(self, investigationId: str, analysisId: str) -> dict:
+        if not self._is_uuid(investigationId) or not self._is_uuid(analysisId):
+            return {"error": "investigationId and analysisId must both be valid UUIDs"}
+        analysis = self._sift_analyses.get((investigationId, analysisId))
+        if analysis is None:
+            return {"error": f"analysis with ID {analysisId} not found"}
+        return {"investigationId": investigationId, "analysisId": analysisId, **analysis}
+
+    def list_sift_investigations(self, limit: int = 10) -> dict:
+        limit = limit if limit > 0 else 10
+        return {"investigations": [{"id": iid, **i} for iid, i in sorted(self._sift_investigations.items())][:limit]}
+
+    def find_error_pattern_logs(self, name: str, labels: dict, start: str | None = None, end: str | None = None) -> dict:
+        new_id = f"00000000-0000-0000-0000-{self._next_id:012d}"
+        self._next_id += 1
+        inv = {"name": name, "labels": labels, "status": "finished", "checkType": "ErrorPatternLogs"}
+        self._sift_investigations[new_id] = inv
+        return {"investigationId": new_id, "status": "finished", "patterns": []}
+
+    def find_slow_requests(self, name: str, labels: dict, start: str | None = None, end: str | None = None) -> dict:
+        new_id = f"00000000-0000-0000-0000-{self._next_id:012d}"
+        self._next_id += 1
+        inv = {"name": name, "labels": labels, "status": "finished", "checkType": "SlowRequests"}
+        self._sift_investigations[new_id] = inv
+        return {"investigationId": new_id, "status": "finished", "slowRequests": []}
+
+    # ── asserts.go ───────────────────────────────────────────────────────
+
+    def get_assertions(self, startTime: str, endTime: str, entityType: str | None = None,
+                        entityName: str | None = None, env: str | None = None, site: str | None = None,
+                        namespace: str | None = None) -> dict:
+        if not startTime or not endTime:
+            return {"error": "startTime and endTime are required"}
+        results = list(self._assertions)
+        if entityName:
+            results = [a for a in results if a.get("entityName") == entityName]
+        return {"assertions": results}
+
+    # ── navigation.go ────────────────────────────────────────────────────
+
+    def generate_deeplink(self, resourceType: str, dashboardUid: str | None = None,
+                           provisioningPreview: dict | None = None, datasourceUid: str | None = None,
+                           panelId: int | None = None, shorten: bool = False, **kwargs) -> dict:
+        if resourceType not in ("dashboard", "panel", "explore"):
+            return {"error": f"unknown resourceType {resourceType!r} (expected dashboard, panel, or explore)"}
+        if resourceType in ("dashboard", "panel"):
+            if bool(dashboardUid) == bool(provisioningPreview):
+                return {"error": "exactly one of dashboardUid or provisioningPreview is required"}
+            if resourceType == "panel" and panelId is None:
+                return {"error": "panelId is required for resourceType 'panel'"}
+        if resourceType == "explore" and not datasourceUid:
+            return {"error": "datasourceUid is required for resourceType 'explore'"}
+        url = f"/d/{dashboardUid}" if dashboardUid else f"/explore?ds={datasourceUid}"
+        if shorten:
+            url = f"/goto/{self._next_id:x}"
+            self._next_id += 1
+        return {"url": url}
+
+    # ── config.go ────────────────────────────────────────────────────────
+
+    def suggest_loki_alloy_label_config(self, approvedLabels: list, requiredLabels: list | None = None,
+                                         normalizeLogLevel: bool = False, componentName: str = "enforce_labels",
+                                         forwardTo: str = "loki.write.default.receiver") -> dict:
+        if not approvedLabels:
+            return {"error": "approvedLabels must not be empty"}
+        kept = sorted(set(approvedLabels) | set(requiredLabels or []))
+        snippet = f"loki.process \"{componentName}\" {{\n  stage.label_keep {{ values = {kept} }}\n  forward_to = [{forwardTo}]\n}}"
+        return {"config": snippet, "keptLabels": kept}
+
+    # ── rendering.go ─────────────────────────────────────────────────────
+
+    def get_panel_image(self, dashboardUid: str | None = None, provisioningPreview: dict | None = None,
+                         panelId: int | None = None, width: int = 1000, height: int = 500,
+                         theme: str = "dark", scale: int = 1, timeout: int = 60, **kwargs) -> dict:
+        if bool(dashboardUid) == bool(provisioningPreview):
+            return {"error": "exactly one of dashboardUid or provisioningPreview is required"}
+        if dashboardUid and dashboardUid not in self._dashboards:
+            return {"error": f"dashboard {dashboardUid!r} not found"}
+        if scale < 1 or scale > 3:
+            scale = 1
+        return {"imageBase64": "iVBORw0KGgo=", "width": width, "height": height}
+
+    # ── examples.go ──────────────────────────────────────────────────────
+
+    _EXAMPLE_DATASOURCE_TYPES = {"prometheus", "loki", "clickhouse", "cloudwatch", "influxdb"}
+
+    def get_query_examples(self, datasourceType: str) -> dict:
+        if datasourceType.lower() not in self._EXAMPLE_DATASOURCE_TYPES:
+            return {"error": f"unsupported datasource type {datasourceType!r} "
+                              f"(expected one of {sorted(self._EXAMPLE_DATASOURCE_TYPES)})"}
+        return {"datasourceType": datasourceType, "examples": [{"query": "example", "description": "placeholder"}]}
+
+    # ── run_panel_query.go ───────────────────────────────────────────────
+
+    def run_panel_query(self, dashboardUid: str, panelIds: list, queryIndex: int = 0, start: str = "now-1h",
+                         end: str = "now", variables: dict | None = None, datasourceUid: str | None = None,
+                         datasourceType: str | None = None) -> dict:
+        if not panelIds:
+            return {"error": "panelIds must not be empty"}
+        d = self._dashboards.get(dashboardUid)
+        if d is None:
+            return {"error": f"dashboard {dashboardUid!r} not found"}
+        results = {}
+        for pid in panelIds:
+            panel = next((p for p in d["panels"] if p.get("id") == pid), None)
+            if panel is None:
+                results[str(pid)] = {"error": f"panel {pid} not found"}
+            else:
+                results[str(pid)] = {"data": []}
+        return {"results": results}
+
+    # ── api.go ───────────────────────────────────────────────────────────
+
+    _API_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+
+    def grafana_api_request(self, endpoint: str, method: str = "GET", body: str | None = None,
+                             headers: dict | None = None, jq: str | None = None) -> dict:
+        if not endpoint.startswith("/"):
+            return {"error": "endpoint must start with '/'"}
+        if method not in self._API_METHODS:
+            return {"error": f"unsupported method {method!r} (expected one of {sorted(self._API_METHODS)})"}
+        return {"endpoint": endpoint, "method": method, "status": 200, "data": {}}
+
+    # ── agento11y*.go ────────────────────────────────────────────────────
+
+    def agento11y_manage_conversations(self, operation: str, conversation_id: str | None = None,
+                                        filters: str | None = None, cursor: str | None = None,
+                                        limit: int = 50, **kwargs) -> dict:
+        if operation not in ("list", "search", "get"):
+            return {"error": f"unknown operation {operation!r}"}
+        if operation == "get":
+            if not conversation_id:
+                return {"error": "conversation_id is required for operation 'get'"}
+            c = self._agento11y_conversations.get(conversation_id)
+            if c is None:
+                return {"error": f"conversation {conversation_id!r} not found"}
+            return {"id": conversation_id, **c}
+        return {"conversations": [{"id": cid, **c} for cid, c in sorted(self._agento11y_conversations.items())][:limit]}
+
+    def agento11y_manage_generations(self, operation: str, generation_id: str, limit: int = 50,
+                                      cursor: str | None = None) -> dict:
+        if not generation_id:
+            return {"error": "generation_id is required"}
+        if operation not in ("get", "scores"):
+            return {"error": f"unknown operation {operation!r}"}
+        g = self._agento11y_generations.get(generation_id)
+        if g is None:
+            return {"error": f"generation {generation_id!r} not found"}
+        if operation == "scores":
+            return {"id": generation_id, "scores": g.get("scores", [])}
+        return {"id": generation_id, **g}
+
+    def agento11y_manage_agents(self, operation: str, agent_name: str | None = None, version: str | None = None,
+                                 name_prefix: str | None = None, limit: int = 50, **kwargs) -> dict:
+        if operation not in ("list", "get", "list_versions", "list_version_scores"):
+            return {"error": f"unknown operation {operation!r}"}
+        if operation in ("get", "list_versions", "list_version_scores") and agent_name is None:
+            return {"error": f"agent_name is required for operation {operation!r}"}
+        if operation == "list_version_scores" and not (agent_name or "").strip():
+            return {"error": "agent_name must not be blank for operation 'list_version_scores'"}
+        if operation == "list":
+            agents = [{"name": n, **a} for n, a in sorted(self._agento11y_agents.items())]
+            if name_prefix:
+                agents = [a for a in agents if a["name"].lower().startswith(name_prefix.lower())]
+            return {"agents": agents[:limit]}
+        agent = self._agento11y_agents.get(agent_name)
+        if agent is None:
+            return {"error": f"agent {agent_name!r} not found"}
+        return {"name": agent_name, **agent}
+
+    _EVALUATOR_OPS = {"list_evaluators", "get_evaluator", "list_templates", "get_template", "list_template_versions",
+                       "list_judge_providers", "list_judge_models", "upsert_evaluator", "delete_evaluator",
+                       "fork_template", "test_evaluator"}
+
+    def agento11y_manage_evaluators(self, operation: str, evaluator_id: str | None = None,
+                                     template_id: str | None = None, definition: dict | None = None,
+                                     generation_id: str | None = None, limit: int = 50, **kwargs) -> dict:
+        if operation not in self._EVALUATOR_OPS:
+            return {"error": f"unknown operation {operation!r}"}
+        if operation in ("get_evaluator", "delete_evaluator") and not evaluator_id:
+            return {"error": f"evaluator_id is required for operation {operation!r}"}
+        if operation in ("get_template", "list_template_versions", "fork_template") and not template_id:
+            return {"error": f"template_id is required for operation {operation!r}"}
+        if operation == "test_evaluator" and not generation_id:
+            return {"error": "generation_id is required for operation 'test_evaluator'"}
+        if operation == "upsert_evaluator":
+            if not definition:
+                return {"error": "definition must not be empty for upsert_evaluator"}
+            def_id = definition.get("evaluator_id")
+            if not def_id:
+                return {"error": "definition.evaluator_id must be a non-empty string"}
+            if evaluator_id and evaluator_id != def_id:
+                return {"error": "top-level evaluator_id conflicts with definition.evaluator_id"}
+            self._agento11y_evaluators[def_id] = dict(definition)
+            return {"evaluatorId": def_id, "upserted": True}
+        if operation == "delete_evaluator":
+            if evaluator_id not in self._agento11y_evaluators:
+                return {"error": f"evaluator {evaluator_id!r} not found"}
+            del self._agento11y_evaluators[evaluator_id]
+            return {"evaluatorId": evaluator_id, "deleted": True}
+        if operation == "list_evaluators":
+            return {"evaluators": [{"id": eid, **e} for eid, e in sorted(self._agento11y_evaluators.items())][:limit]}
+        if operation == "get_evaluator":
+            e = self._agento11y_evaluators.get(evaluator_id)
+            if e is None:
+                return {"error": f"evaluator {evaluator_id!r} not found"}
+            return {"id": evaluator_id, **e}
+        return {"result": []}
+
+    _EVAL_RULE_OPS = {"list_rules", "get_rule", "list_guards", "get_guard", "create_rule", "update_rule",
+                       "delete_rule", "preview_rule", "create_guard", "update_guard", "delete_guard"}
+
+    def agento11y_manage_eval_rules(self, operation: str, rule_id: str | None = None,
+                                     definition: dict | None = None, limit: int = 50, **kwargs) -> dict:
+        if operation not in self._EVAL_RULE_OPS:
+            return {"error": f"unknown operation {operation!r}"}
+        if operation in ("create_rule", "create_guard", "preview_rule") and not definition:
+            return {"error": f"definition must not be empty for operation {operation!r}"}
+        if operation in ("update_rule", "update_guard") and not (rule_id and definition):
+            return {"error": f"operation {operation!r} requires both rule_id and definition"}
+        if operation in ("get_rule", "get_guard", "delete_rule", "delete_guard") and not rule_id:
+            return {"error": f"rule_id is required for operation {operation!r}"}
+        if operation in ("create_rule", "update_rule", "create_guard", "update_guard"):
+            new_id = rule_id or definition.get("rule_id") or f"rule-{self._next_id}"
+            self._next_id += 1
+            self._agento11y_eval_rules[new_id] = dict(definition)
+            return {"ruleId": new_id, "saved": True}
+        if operation in ("delete_rule", "delete_guard"):
+            if rule_id not in self._agento11y_eval_rules:
+                return {"error": f"rule {rule_id!r} not found"}
+            del self._agento11y_eval_rules[rule_id]
+            return {"ruleId": rule_id, "deleted": True}
+        if operation in ("get_rule", "get_guard"):
+            r = self._agento11y_eval_rules.get(rule_id)
+            if r is None:
+                return {"error": f"rule {rule_id!r} not found"}
+            return {"id": rule_id, **r}
+        return {"rules": [{"id": rid, **r} for rid, r in sorted(self._agento11y_eval_rules.items())][:limit]}
+
+    _EVAL_COLLECTION_OPS = {"list_saved_conversations", "get_saved_conversation", "list_collections_for_saved_conversation",
+                             "list_collections", "get_collection", "list_collection_members", "save_conversation",
+                             "delete_saved_conversation", "create_collection", "update_collection", "delete_collection",
+                             "add_collection_members", "remove_collection_member"}
+
+    def agento11y_manage_eval_collections(self, operation: str, saved_id: str | None = None,
+                                           collection_id: str | None = None, conversation_id: str | None = None,
+                                           name: str | None = None, saved_ids: list | None = None,
+                                           limit: int = 50, **kwargs) -> dict:
+        if operation not in self._EVAL_COLLECTION_OPS:
+            return {"error": f"unknown operation {operation!r}"}
+        if operation == "save_conversation":
+            if not conversation_id or not name:
+                return {"error": "conversation_id and name are required for save_conversation"}
+            if collection_id:
+                return {"error": "collection_id must not be set for save_conversation - bookmark first, then add to a collection separately"}
+            new_saved_id = saved_id or f"saved-{conversation_id}"
+            self._agento11y_saved_conversations[new_saved_id] = {"conversation_id": conversation_id, "name": name}
+            return {"savedId": new_saved_id, "saved": True}
+        if operation == "create_collection":
+            if not name:
+                return {"error": "name is required for create_collection"}
+            if collection_id:
+                return {"error": "collection_id must not be supplied for create_collection - it is server-assigned"}
+            if saved_ids:
+                return {"error": "saved_ids must not be supplied for create_collection - collections are created empty"}
+            new_id = f"collection-{self._next_id}"
+            self._next_id += 1
+            self._agento11y_eval_collections[new_id] = {"name": name, "members": []}
+            return {"collectionId": new_id, "created": True}
+        if operation == "add_collection_members":
+            if not collection_id or not saved_ids:
+                return {"error": "collection_id and a non-empty saved_ids are required"}
+            c = self._agento11y_eval_collections.get(collection_id)
+            if c is None:
+                return {"error": f"collection {collection_id!r} not found"}
+            unknown = [s for s in saved_ids if s not in self._agento11y_saved_conversations]
+            if unknown:
+                return {"error": f"unknown saved conversation id(s): {unknown}"}
+            c["members"].extend(saved_ids)
+            return {"collectionId": collection_id, "added": len(saved_ids)}
+        if operation == "get_saved_conversation":
+            if not saved_id:
+                return {"error": "saved_id is required"}
+            s = self._agento11y_saved_conversations.get(saved_id)
+            if s is None:
+                return {"error": f"saved conversation {saved_id!r} not found"}
+            return {"id": saved_id, **s}
+        if operation == "list_saved_conversations":
+            return {"savedConversations": [{"id": sid, **s} for sid, s in sorted(self._agento11y_saved_conversations.items())][:limit]}
+        if operation == "list_collections":
+            return {"collections": [{"id": cid, "name": c["name"]} for cid, c in sorted(self._agento11y_eval_collections.items())][:limit]}
+        return {"result": []}
+
+    # ── assistant.go ─────────────────────────────────────────────────────
+
+    def ask_assistant(self, prompt: str, contextId: str | None = None) -> dict:
+        if not prompt.strip():
+            return {"error": "prompt must not be blank"}
+        ctx = contextId or f"ctx-{self._next_id}"
+        self._next_id += 1
+        self._assistant_conversations.setdefault(ctx, []).append(prompt)
+        return {"contextId": ctx, "reply": "This is a mock assistant reply."}
+
+    # ── prometheus.go (query-connector: shared datasource-type check) ──────
+
+    def list_prometheus_metric_metadata(self, datasourceUid: str, limit: int = 10,
+                                         limitPerMetric: int | None = None, metric: str | None = None,
+                                         projectName: str | None = None) -> dict:
+        err = self._check_datasource_type("list_prometheus_metric_metadata", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"metadata": data.get("metadata", [])[:limit]}
+
+    def query_prometheus(self, datasourceUid: str, expr: str, startTime: str | None = None,
+                          endTime: str | None = None, stepSeconds: int | None = None,
+                          queryType: str = "range", projectName: str | None = None) -> dict:
+        err = self._check_datasource_type("query_prometheus", datasourceUid)
+        if err:
+            return err
+        if queryType == "range" and not stepSeconds:
+            return {"error": "stepSeconds is required when queryType is 'range'"}
+        data = self._metric_data.get(datasourceUid, {})
+        return {"expr": expr, "results": data.get("query_results", [])}
+
+    def list_prometheus_metric_names(self, datasourceUid: str, regex: str | None = None, limit: int = 10,
+                                      page: int = 1, startRfc3339: str | None = None, endRfc3339: str | None = None,
+                                      projectName: str | None = None) -> dict:
+        err = self._check_datasource_type("list_prometheus_metric_names", datasourceUid)
+        if err:
+            return err
+        if regex:
+            try:
+                re.compile(regex)
+            except re.error as e:
+                return {"error": f"invalid regex {regex!r}: {e}"}
+        data = self._metric_data.get(datasourceUid, {})
+        return {"metricNames": data.get("metric_names", [])[:limit]}
+
+    def list_prometheus_label_names(self, datasourceUid: str, matches: list | None = None,
+                                     startRfc3339: str | None = None, endRfc3339: str | None = None,
+                                     limit: int = 100, projectName: str | None = None) -> dict:
+        err = self._check_datasource_type("list_prometheus_label_names", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"labelNames": data.get("label_names", [])[:limit]}
+
+    def list_prometheus_label_values(self, datasourceUid: str, labelName: str, matches: list | None = None,
+                                      startRfc3339: str | None = None, endRfc3339: str | None = None,
+                                      limit: int = 100, projectName: str | None = None) -> dict:
+        err = self._check_datasource_type("list_prometheus_label_values", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"labelValues": data.get("label_values", {}).get(labelName, [])[:limit]}
+
+    def query_prometheus_histogram(self, datasourceUid: str, metric: str, percentile: float,
+                                    labels: str | None = None, rateInterval: str = "5m",
+                                    startTime: str = "now-1h", endTime: str = "now", stepSeconds: int = 60,
+                                    projectName: str | None = None) -> dict:
+        err = self._check_datasource_type("query_prometheus_histogram", datasourceUid)
+        if err:
+            return err
+        if not (0 <= percentile <= 100):
+            return {"error": f"percentile {percentile} must be between 0 and 100"}
+        return {"metric": metric, "percentile": percentile, "results": []}
+
+    # ── loki.go / loki_label_analyzer.go ────────────────────────────────
+
+    def list_loki_label_names(self, datasourceUid: str, startRfc3339: str | None = None,
+                               endRfc3339: str | None = None) -> dict:
+        err = self._check_datasource_type("list_loki_label_names", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"labelNames": data.get("label_names", [])}
+
+    def list_loki_label_values(self, datasourceUid: str, labelName: str, startRfc3339: str | None = None,
+                                endRfc3339: str | None = None) -> dict:
+        err = self._check_datasource_type("list_loki_label_values", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"labelValues": data.get("label_values", {}).get(labelName, [])}
+
+    def query_loki_logs(self, datasourceUid: str, logql: str, startRfc3339: str | None = None,
+                         endRfc3339: str | None = None, limit: int = 10, direction: str = "backward",
+                         queryType: str = "range", stepSeconds: int | None = None) -> dict:
+        err = self._check_datasource_type("query_loki_logs", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        lines = data.get("log_lines", [])
+        return {"logql": logql, "lines": lines[:limit], "resultsTruncated": len(lines) > limit}
+
+    def query_loki_stats(self, datasourceUid: str, logql: str, startRfc3339: str | None = None,
+                          endRfc3339: str | None = None) -> dict:
+        err = self._check_datasource_type("query_loki_stats", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"logql": logql, "stats": data.get("stats", {"streams": 0, "chunks": 0, "entries": 0, "bytes": 0})}
+
+    def query_loki_patterns(self, datasourceUid: str, logql: str, startRfc3339: str | None = None,
+                             endRfc3339: str | None = None, step: str | None = None) -> dict:
+        err = self._check_datasource_type("query_loki_patterns", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"logql": logql, "patterns": data.get("patterns", [])}
+
+    def analyze_loki_labels(self, datasourceUid: str | None = None, labels: list | None = None,
+                             selector: str | None = None, maxLabels: int = 50, startRfc3339: str | None = None,
+                             endRfc3339: str | None = None, expectedBaseLabels: list | None = None,
+                             perfMetrics: dict | None = None) -> dict:
+        if not datasourceUid and not labels:
+            return {"error": "either datasourceUid (live mode) or labels (static mode) is required"}
+        always_remove = {"user_id", "request_id", "trace_id", "span_id", "session_id", "transaction", "uuid"}
+        prefer_metadata = {"pod", "node", "container_id", "instance", "version", "image", "tag", "process_id", "filename"}
+        verdicts = []
+        for label in (labels or []):
+            n = label["name"].lower()
+            if n in always_remove:
+                verdicts.append({"name": label["name"], "verdict": "remove"})
+            elif n in prefer_metadata:
+                verdicts.append({"name": label["name"], "verdict": "prefer_metadata"})
+            else:
+                verdicts.append({"name": label["name"], "verdict": "keep"})
+        return {"verdicts": verdicts, "recommendedLabelSet": [v["name"] for v in verdicts if v["verdict"] == "keep"]}
+
+    # ── elasticsearch.go ─────────────────────────────────────────────────
+
+    def query_elasticsearch(self, datasourceUid: str, index: str, query: str, startTime: str | None = None,
+                             endTime: str | None = None, limit: int = 10) -> dict:
+        ds = self._datasources.get(datasourceUid)
+        if ds is None:
+            return {"error": f"datasource {datasourceUid!r} not found"}
+        if ds["type"] not in ("elasticsearch", "opensearch"):
+            return {"error": f"datasource {datasourceUid!r} is type {ds['type']!r}, expected elasticsearch or opensearch"}
+        limit = min(limit, 100) if limit > 0 else 10
+        data = self._metric_data.get(datasourceUid, {})
+        return {"index": index, "hits": data.get("hits", [])[:limit]}
+
+    # ── influxdb.go ──────────────────────────────────────────────────────
+
+    def query_influxdb(self, datasourceUid: str, query: str, dialect: str | None = None,
+                        start: str = "now-1h", end: str = "now", maxDataPoints: int = 1000) -> dict:
+        if not query.strip():
+            return {"error": "query must not be blank"}
+        ds = self._datasources.get(datasourceUid)
+        if ds is None:
+            return {"error": f"datasource {datasourceUid!r} not found"}
+        if ds["type"] != "influxdb":
+            return {"error": f"datasource {datasourceUid!r} is type {ds['type']!r}, expected 'influxdb'"}
+        if dialect and dialect not in ("influxql", "flux"):
+            return {"error": f"unknown dialect {dialect!r} (expected influxql or flux)"}
+        data = self._metric_data.get(datasourceUid, {})
+        return {"columns": data.get("columns", []), "rows": data.get("rows", [])}
+
+    # ── graphite.go ──────────────────────────────────────────────────────
+
+    def query_graphite(self, datasourceUid: str, target: str, from_: str = "-1h", until: str = "now",
+                        maxDataPoints: int | None = None) -> dict:
+        err = self._check_datasource_type("query_graphite", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"target": target, "series": data.get("series", [])}
+
+    def list_graphite_metrics(self, datasourceUid: str, query: str = "*") -> dict:
+        err = self._check_datasource_type("list_graphite_metrics", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"nodes": data.get("nodes", [])}
+
+    def list_graphite_tags(self, datasourceUid: str, prefix: str | None = None) -> dict:
+        err = self._check_datasource_type("list_graphite_tags", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        tags = data.get("tags", [])
+        if prefix:
+            tags = [t for t in tags if t.startswith(prefix)]
+        return {"tags": tags}
+
+    def query_graphite_density(self, datasourceUid: str, target: str, from_: str = "-1h", until: str = "now") -> dict:
+        err = self._check_datasource_type("query_graphite_density", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"target": target, "density": data.get("density", {"fillRatio": 0, "lastSeen": None})}
+
+    # ── quickwit.go ──────────────────────────────────────────────────────
+
+    def query_quickwit(self, datasourceUid: str, query: str, index: str | None = None,
+                        startTime: str | None = None, endTime: str | None = None, limit: int = 10) -> dict:
+        err = self._check_datasource_type("query_quickwit", datasourceUid)
+        if err:
+            return err
+        ds = self._datasources[datasourceUid]
+        configured_index = ds.get("index")
+        if index and configured_index and index != configured_index:
+            return {"error": f"index {index!r} does not match the datasource's configured index {configured_index!r}"}
+        limit = min(limit, 100) if limit > 0 else 10
+        data = self._metric_data.get(datasourceUid, {})
+        return {"documents": data.get("documents", [])[:limit]}
+
+    # ── cloudwatch.go ────────────────────────────────────────────────────
+
+    def query_cloudwatch(self, datasourceUid: str, namespace: str, metricName: str, region: str,
+                          dimensions: dict | None = None, statistic: str = "Average", period: int = 300,
+                          start: str = "now-1h", end: str = "now", accountId: str | None = None) -> dict:
+        err = self._check_datasource_type("query_cloudwatch", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        values = data.get("values", [])
+        return {"namespace": namespace, "metricName": metricName, "values": values,
+                "sum": sum(values), "min": min(values) if values else None, "max": max(values) if values else None}
+
+    def list_cloudwatch_namespaces(self, datasourceUid: str, region: str, accountId: str | None = None) -> dict:
+        err = self._check_datasource_type("list_cloudwatch_namespaces", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"namespaces": data.get("namespaces", [])}
+
+    def list_cloudwatch_metrics(self, datasourceUid: str, namespace: str, region: str, accountId: str | None = None) -> dict:
+        err = self._check_datasource_type("list_cloudwatch_metrics", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"metrics": data.get("metrics", {}).get(namespace, [])}
+
+    def list_cloudwatch_dimensions(self, datasourceUid: str, namespace: str, metricName: str, region: str,
+                                    accountId: str | None = None) -> dict:
+        err = self._check_datasource_type("list_cloudwatch_dimensions", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"dimensions": data.get("dimensions", {}).get(metricName, [])}
+
+    # ── athena.go ────────────────────────────────────────────────────────
+
+    def list_athena_catalogs(self, datasourceUid: str, region: str | None = None) -> dict:
+        err = self._check_datasource_type("list_athena_catalogs", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"catalogs": data.get("catalogs", [])}
+
+    def list_athena_databases(self, datasourceUid: str, region: str | None = None, catalog: str | None = None) -> dict:
+        err = self._check_datasource_type("list_athena_databases", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"databases": data.get("databases", [])}
+
+    def list_athena_tables(self, datasourceUid: str, region: str | None = None, catalog: str | None = None,
+                            database: str | None = None) -> dict:
+        err = self._check_datasource_type("list_athena_tables", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"tables": data.get("tables", [])}
+
+    def describe_athena_table(self, datasourceUid: str, table: str, region: str | None = None,
+                               catalog: str | None = None, database: str | None = None) -> dict:
+        err = self._check_datasource_type("describe_athena_table", datasourceUid)
+        if err:
+            return err
+        if not table:
+            return {"error": "table must not be empty"}
+        data = self._metric_data.get(datasourceUid, {})
+        return {"table": table, "columns": data.get("columns_by_table", {}).get(table, [])}
+
+    def query_athena(self, datasourceUid: str, query: str, start: str = "now-1h", end: str = "now",
+                      region: str | None = None, catalog: str | None = None, database: str | None = None,
+                      variables: dict | None = None, limit: int = 100, resultReuseEnabled: bool = False,
+                      resultReuseMaxAgeInMinutes: int | None = None) -> dict:
+        err = self._check_datasource_type("query_athena", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"query": query, "rows": data.get("rows", [])}
+
+    # ── clickhouse.go ────────────────────────────────────────────────────
+
+    _IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_]+$")
+
+    def query_clickhouse(self, datasourceUid: str, query: str, start: str = "now-1h", end: str = "now",
+                          variables: dict | None = None, limit: int = 100) -> dict:
+        err = self._check_datasource_type("query_clickhouse", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"query": query, "rows": data.get("rows", [])}
+
+    def list_clickhouse_tables(self, datasourceUid: str, database: str | None = None) -> dict:
+        err = self._check_datasource_type("list_clickhouse_tables", datasourceUid)
+        if err:
+            return err
+        if database and not self._IDENTIFIER_RE.match(database):
+            return {"error": f"invalid database identifier {database!r}"}
+        data = self._metric_data.get(datasourceUid, {})
+        return {"tables": data.get("tables", [])}
+
+    def describe_clickhouse_table(self, datasourceUid: str, table: str, database: str = "default") -> dict:
+        err = self._check_datasource_type("describe_clickhouse_table", datasourceUid)
+        if err:
+            return err
+        if not table:
+            return {"error": "table must not be empty"}
+        if not self._IDENTIFIER_RE.match(database) or not self._IDENTIFIER_RE.match(table):
+            return {"error": "database and table must be valid SQL identifiers (letters, digits, underscore only)"}
+        data = self._metric_data.get(datasourceUid, {})
+        return {"table": table, "columns": data.get("columns_by_table", {}).get(table, [])}
+
+    # ── snowflake.go ─────────────────────────────────────────────────────
+
+    def query_snowflake(self, datasourceUid: str, query: str, start: str = "now-1h", end: str = "now",
+                         variables: dict | None = None, limit: int = 100) -> dict:
+        err = self._check_datasource_type("query_snowflake", datasourceUid)
+        if err:
+            return err
+        data = self._metric_data.get(datasourceUid, {})
+        return {"query": query, "rows": data.get("rows", [])}
+
+    def list_snowflake_tables(self, datasourceUid: str, database: str | None = None, schema: str | None = None) -> dict:
+        err = self._check_datasource_type("list_snowflake_tables", datasourceUid)
+        if err:
+            return err
+        for value in (database, schema):
+            if value and not self._IDENTIFIER_RE.match(value):
+                return {"error": f"invalid identifier {value!r}"}
+        data = self._metric_data.get(datasourceUid, {})
+        return {"tables": data.get("tables", [])}
+
+    def describe_snowflake_table(self, datasourceUid: str, table: str, schema: str = "PUBLIC",
+                                  database: str | None = None) -> dict:
+        err = self._check_datasource_type("describe_snowflake_table", datasourceUid)
+        if err:
+            return err
+        if not table:
+            return {"error": "table must not be empty"}
+        for value in (database, schema, table):
+            if value and not self._IDENTIFIER_RE.match(value):
+                return {"error": f"invalid identifier {value!r}"}
+        data = self._metric_data.get(datasourceUid, {})
+        return {"table": table, "columns": data.get("columns_by_table", {}).get(table, [])}
+
+    # ── pyroscope.go ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _validate_pyroscope_time_range(start: str | None, end: str | None) -> dict | None:
+        if start and end and start >= end:
+            return {"error": f"start {start!r} must be strictly before end {end!r}"}
+        return None
+
+    def list_pyroscope_label_names(self, data_source_uid: str, matchers: str = "{}",
+                                    start_rfc_3339: str | None = None, end_rfc_3339: str | None = None) -> dict:
+        err = self._validate_pyroscope_time_range(start_rfc_3339, end_rfc_3339)
+        if err:
+            return err
+        data = self._metric_data.get(data_source_uid, {})
+        return {"labelNames": data.get("label_names", [])}
+
+    def list_pyroscope_label_values(self, data_source_uid: str, name: str, matchers: str = "{}",
+                                     start_rfc_3339: str | None = None, end_rfc_3339: str | None = None) -> dict:
+        if not name.strip():
+            return {"error": "name must not be blank"}
+        err = self._validate_pyroscope_time_range(start_rfc_3339, end_rfc_3339)
+        if err:
+            return err
+        data = self._metric_data.get(data_source_uid, {})
+        return {"labelValues": data.get("label_values", {}).get(name, [])}
+
+    def list_pyroscope_profile_types(self, data_source_uid: str, start_rfc_3339: str | None = None,
+                                      end_rfc_3339: str | None = None) -> dict:
+        err = self._validate_pyroscope_time_range(start_rfc_3339, end_rfc_3339)
+        if err:
+            return err
+        data = self._metric_data.get(data_source_uid, {})
+        return {"profileTypes": data.get("profile_types", [])}
+
+    def query_pyroscope(self, data_source_uid: str, profile_type: str, query_type: str = "both",
+                         format: str = "table", matchers: str = "{}", group_by: list | None = None,
+                         step: float | None = None, max_node_depth: int = 100,
+                         start_rfc_3339: str | None = None, end_rfc_3339: str | None = None) -> dict:
+        err = self._validate_pyroscope_time_range(start_rfc_3339, end_rfc_3339)
+        if err:
+            return err
+        data = self._metric_data.get(data_source_uid, {})
+        return {"profileType": profile_type, "profile": data.get("profile", []), "metrics": data.get("metrics_series", [])}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "datasource_count": len(self._datasources),
+            "dashboard_count": len(self._dashboards),
+            "folder_count": len(self._folders),
+            "alert_rule_count": len(self._alert_rules),
+            "annotation_count": len(self._annotations),
+            "snapshot_count": len(self._snapshots),
+            "incident_count": len(self._incidents),
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -5908,6 +7404,113 @@ _CODE_INTEL_SCHEMAS: dict[str, dict] = {
         ["filePath", "edits"]),
 }
 
+_OBSERVABILITY_SCHEMAS: dict[str, dict] = {
+    'add_activity_to_incident': _fn('add_activity_to_incident', "Add a note to an existing incident's timeline.", {'incidentId': {"type": 'string'}, 'body': {"type": 'string'}, 'eventTime': {"type": 'string'}}, ['incidentId', 'body']),
+    'agento11y_manage_agents': _fn('agento11y_manage_agents', "Read the telemetry-derived Agent Observability agent catalog.", {'operation': {"type": 'string'}, 'agent_name': {"type": 'string'}, 'version': {"type": 'string'}, 'name_prefix': {"type": 'string'}, 'limit': {"type": 'integer'}}, ['operation']),
+    'agento11y_manage_conversations': _fn('agento11y_manage_conversations', "List, search, and fetch LLM conversations from Agent Observability.", {'operation': {"type": 'string'}, 'conversation_id': {"type": 'string'}, 'filters': {"type": 'string'}, 'cursor': {"type": 'string'}, 'limit': {"type": 'integer'}}, ['operation']),
+    'agento11y_manage_eval_collections': _fn('agento11y_manage_eval_collections', "Manage Agent Observability saved-conversation bookmarks and collections.", {'operation': {"type": 'string'}, 'saved_id': {"type": 'string'}, 'collection_id': {"type": 'string'}, 'conversation_id': {"type": 'string'}, 'name': {"type": 'string'}, 'saved_ids': {"type": 'array'}, 'limit': {"type": 'integer'}}, ['operation']),
+    'agento11y_manage_eval_rules': _fn('agento11y_manage_eval_rules', "Manage Agent Observability async eval rules and inline guards.", {'operation': {"type": 'string'}, 'rule_id': {"type": 'string'}, 'definition': {"type": 'object'}, 'limit': {"type": 'integer'}}, ['operation']),
+    'agento11y_manage_evaluators': _fn('agento11y_manage_evaluators', "Manage the Agent Observability evaluator catalog and templates.", {'operation': {"type": 'string'}, 'evaluator_id': {"type": 'string'}, 'template_id': {"type": 'string'}, 'definition': {"type": 'object'}, 'generation_id': {"type": 'string'}, 'limit': {"type": 'integer'}}, ['operation']),
+    'agento11y_manage_generations': _fn('agento11y_manage_generations', "Fetch a single LLM generation or its evaluation scores.", {'operation': {"type": 'string'}, 'generation_id': {"type": 'string'}, 'limit': {"type": 'integer'}, 'cursor': {"type": 'string'}}, ['operation', 'generation_id']),
+    'alerting_manage_routing': _fn('alerting_manage_routing', "Inspect Grafana alerting routing configuration (notification policies, contact points, time intervals).", {'operation': {"type": 'string'}, 'datasource_uid': {"type": 'string'}, 'name': {"type": 'string'}, 'contact_point_title': {"type": 'string'}, 'time_interval_name': {"type": 'string'}, 'limit': {"type": 'integer'}}, ['operation']),
+    'alerting_manage_rules': _fn('alerting_manage_rules', "List/inspect/create/update/delete Grafana alert rules.", {'operation': {"type": 'string'}, 'rule_uid': {"type": 'string'}, 'title': {"type": 'string'}, 'rule_group': {"type": 'string'}, 'folder_uid': {"type": 'string'}, 'search_folder': {"type": 'string'}, 'condition': {"type": 'string'}, 'data': {"type": 'array'}, 'no_data_state': {"type": 'string'}, 'exec_err_state': {"type": 'string'}, 'for_': {"type": 'string'}, 'org_id': {"type": 'integer'}, 'states': {"type": 'array'}}, ['operation']),
+    'analyze_loki_labels': _fn('analyze_loki_labels', "Audit a Loki label strategy and, optionally, diagnose query performance.", {'datasourceUid': {"type": 'string'}, 'labels': {"type": 'array'}, 'selector': {"type": 'string'}, 'maxLabels': {"type": 'integer'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}, 'expectedBaseLabels': {"type": 'array'}, 'perfMetrics': {"type": 'object'}}, []),
+    'ask_assistant': _fn('ask_assistant', "Send a message to Grafana Assistant and block until the full text reply is ready.", {'prompt': {"type": 'string'}, 'contextId': {"type": 'string'}}, ['prompt']),
+    'check_datasources_health': _fn('check_datasources_health', "Bulk health-check datasources, optionally filtered by type or UID list.", {'type': {"type": 'string'}, 'uids': {"type": 'array'}, 'offset': {"type": 'integer'}}, []),
+    'create_annotation': _fn('create_annotation', "Create a new annotation on a dashboard/panel, or a Graphite-format annotation.", {'dashboardUid': {"type": 'string'}, 'panelId': {"type": 'integer'}, 'text': {"type": 'string'}, 'format': {"type": 'string'}, 'what': {"type": 'string'}, 'tags': {"type": 'array'}}, []),
+    'create_datasource': _fn('create_datasource', "Create a datasource, using a schema-confirmation flow before writing.", {'type': {"type": 'string'}, 'name': {"type": 'string'}, 'url': {"type": 'string'}, 'fields': {"type": 'object'}, 'schemaReviewed': {"type": 'boolean'}}, ['type']),
+    'create_folder': _fn('create_folder', "Create a Grafana folder.", {'title': {"type": 'string'}, 'uid': {"type": 'string'}, 'parentUid': {"type": 'string'}}, ['title']),
+    'create_incident': _fn('create_incident', "Create a new Grafana incident.", {'title': {"type": 'string'}, 'severity': {"type": 'string'}, 'roomPrefix': {"type": 'string'}, 'isDrill': {"type": 'boolean'}, 'status': {"type": 'string'}}, ['title', 'severity', 'roomPrefix']),
+    'create_snapshot': _fn('create_snapshot', "Create a snapshot from a full dashboard JSON payload.", {'dashboard': {"type": 'object'}, 'name': {"type": 'string'}, 'expires': {"type": 'integer'}, 'external': {"type": 'boolean'}, 'key': {"type": 'string'}, 'deleteKey': {"type": 'string'}}, ['dashboard']),
+    'delete_snapshot': _fn('delete_snapshot', "Delete a snapshot by its key.", {'key': {"type": 'string'}}, ['key']),
+    'describe_athena_table': _fn('describe_athena_table', "Get column names for an Athena table.", {'datasourceUid': {"type": 'string'}, 'table': {"type": 'string'}, 'region': {"type": 'string'}, 'catalog': {"type": 'string'}, 'database': {"type": 'string'}}, ['datasourceUid', 'table']),
+    'describe_clickhouse_table': _fn('describe_clickhouse_table', "Get column schema for a ClickHouse table.", {'datasourceUid': {"type": 'string'}, 'table': {"type": 'string'}, 'database': {"type": 'string'}}, ['datasourceUid', 'table']),
+    'describe_snowflake_table': _fn('describe_snowflake_table', "Get column schema for a Snowflake table.", {'datasourceUid': {"type": 'string'}, 'table': {"type": 'string'}, 'schema': {"type": 'string'}, 'database': {"type": 'string'}}, ['datasourceUid', 'table']),
+    'find_error_pattern_logs': _fn('find_error_pattern_logs', "Run a Sift investigation for elevated error patterns in Loki logs.", {'name': {"type": 'string'}, 'labels': {"type": 'object'}, 'start': {"type": 'string'}, 'end': {"type": 'string'}}, ['name', 'labels']),
+    'find_slow_requests': _fn('find_slow_requests', "Run a Sift investigation for slow requests in Tempo traces.", {'name': {"type": 'string'}, 'labels': {"type": 'object'}, 'start': {"type": 'string'}, 'end': {"type": 'string'}}, ['name', 'labels']),
+    'generate_deeplink': _fn('generate_deeplink', "Generate a deeplink URL to a Grafana dashboard, panel, or Explore query.", {'resourceType': {"type": 'string'}, 'dashboardUid': {"type": 'string'}, 'provisioningPreview': {"type": 'object'}, 'datasourceUid': {"type": 'string'}, 'panelId': {"type": 'integer'}, 'shorten': {"type": 'boolean'}}, ['resourceType']),
+    'get_alert_group': _fn('get_alert_group', "Get a specific OnCall alert group by ID.", {'alertGroupId': {"type": 'string'}}, ['alertGroupId']),
+    'get_annotation_tags': _fn('get_annotation_tags', "List annotation tags, optionally filtered by name substring.", {'tag': {"type": 'string'}, 'limit': {"type": 'integer'}}, []),
+    'get_annotations': _fn('get_annotations', "Fetch Grafana annotations filtered by time range, dashboard/panel/user/tags.", {'from_': {"type": 'integer'}, 'to': {"type": 'integer'}, 'limit': {"type": 'integer'}, 'dashboardUid': {"type": 'string'}, 'tags': {"type": 'array'}}, []),
+    'get_assertions': _fn('get_assertions', "Get an assertion (SLO/health-check) summary for an entity over a time range.", {'startTime': {"type": 'string'}, 'endTime': {"type": 'string'}, 'entityType': {"type": 'string'}, 'entityName': {"type": 'string'}, 'env': {"type": 'string'}, 'site': {"type": 'string'}, 'namespace': {"type": 'string'}}, ['startTime', 'endTime']),
+    'get_current_oncall_users': _fn('get_current_oncall_users', "Get the users currently on-call for a schedule.", {'scheduleId': {"type": 'string'}}, ['scheduleId']),
+    'get_dashboard_by_uid': _fn('get_dashboard_by_uid', "Retrieve the complete dashboard (panels, variables, settings) for a given UID.", {'uid': {"type": 'string'}}, ['uid']),
+    'get_dashboard_panel_queries': _fn('get_dashboard_panel_queries', "Retrieve panel queries from a dashboard, optionally filtered to one panel.", {'uid': {"type": 'string'}, 'panelId': {"type": 'integer'}, 'variables': {"type": 'object'}}, ['uid']),
+    'get_dashboard_property': _fn('get_dashboard_property', "Get specific parts of a dashboard via a JSONPath expression.", {'uid': {"type": 'string'}, 'jsonPath': {"type": 'string'}}, ['uid', 'jsonPath']),
+    'get_dashboard_summary': _fn('get_dashboard_summary', "Get a compact summary of a dashboard (title, panel count, variables).", {'uid': {"type": 'string'}}, ['uid']),
+    'get_datasource': _fn('get_datasource', "Retrieve full details of a datasource by UID or name.", {'uid': {"type": 'string'}, 'name': {"type": 'string'}}, []),
+    'get_incident': _fn('get_incident', "Get a single incident by ID.", {'id': {"type": 'string'}}, ['id']),
+    'get_oncall_shift': _fn('get_oncall_shift', "Get detailed information for a specific OnCall shift.", {'shiftId': {"type": 'string'}}, ['shiftId']),
+    'get_panel_image': _fn('get_panel_image', "Render a Grafana dashboard panel or full dashboard as a PNG image.", {'dashboardUid': {"type": 'string'}, 'provisioningPreview': {"type": 'object'}, 'panelId': {"type": 'integer'}, 'width': {"type": 'integer'}, 'height': {"type": 'integer'}, 'theme': {"type": 'string'}, 'scale': {"type": 'integer'}, 'timeout': {"type": 'integer'}}, []),
+    'get_plugin': _fn('get_plugin', "Check whether a Grafana plugin is installed and return its details.", {'pluginId': {"type": 'string'}}, ['pluginId']),
+    'get_query_examples': _fn('get_query_examples', "Return curated example queries for a specific datasource type.", {'datasourceType': {"type": 'string'}}, ['datasourceType']),
+    'get_resource_description': _fn('get_resource_description', "List available permissions for a Grafana resource type.", {'resourceType': {"type": 'string'}}, ['resourceType']),
+    'get_resource_permissions': _fn('get_resource_permissions', "List all permissions set on a specific Grafana resource.", {'resource': {"type": 'string'}, 'resourceId': {"type": 'string'}}, ['resource', 'resourceId']),
+    'get_role_assignments': _fn('get_role_assignments', "List all assignments (users, teams) for a specific role.", {'roleUID': {"type": 'string'}}, ['roleUID']),
+    'get_role_details': _fn('get_role_details', "Get detailed information about a specific Grafana role by UID.", {'roleUID': {"type": 'string'}}, ['roleUID']),
+    'get_sift_analysis': _fn('get_sift_analysis', "Retrieve a specific analysis from a Sift investigation.", {'investigationId': {"type": 'string'}, 'analysisId': {"type": 'string'}}, ['investigationId', 'analysisId']),
+    'get_sift_investigation': _fn('get_sift_investigation', "Retrieve an existing Sift investigation by its UUID.", {'id': {"type": 'string'}}, ['id']),
+    'get_snapshot': _fn('get_snapshot', "Get a snapshot by key, including its dashboard payload.", {'key': {"type": 'string'}}, ['key']),
+    'grafana_api_request': _fn('grafana_api_request', "Make an authenticated HTTP request to any Grafana API endpoint.", {'endpoint': {"type": 'string'}, 'method': {"type": 'string'}, 'body': {"type": 'string'}, 'headers': {"type": 'object'}, 'jq': {"type": 'string'}}, ['endpoint']),
+    'install_plugin': _fn('install_plugin', "Install a Grafana plugin by ID and version.", {'pluginId': {"type": 'string'}, 'version': {"type": 'string'}}, ['pluginId']),
+    'list_alert_groups': _fn('list_alert_groups', "List OnCall alert groups with filtering.", {'page': {"type": 'integer'}, 'id': {"type": 'string'}, 'teamId': {"type": 'string'}, 'state': {"type": 'string'}}, []),
+    'list_all_roles': _fn('list_all_roles', "List all roles in Grafana, optionally filtered to delegatable-only.", {'delegatableOnly': {"type": 'boolean'}}, []),
+    'list_athena_catalogs': _fn('list_athena_catalogs', "List available Athena data catalogs.", {'datasourceUid': {"type": 'string'}, 'region': {"type": 'string'}}, ['datasourceUid']),
+    'list_athena_databases': _fn('list_athena_databases', "List databases within an Athena catalog.", {'datasourceUid': {"type": 'string'}, 'region': {"type": 'string'}, 'catalog': {"type": 'string'}}, ['datasourceUid']),
+    'list_athena_tables': _fn('list_athena_tables', "List tables within an Athena database.", {'datasourceUid': {"type": 'string'}, 'region': {"type": 'string'}, 'catalog': {"type": 'string'}, 'database': {"type": 'string'}}, ['datasourceUid']),
+    'list_clickhouse_tables': _fn('list_clickhouse_tables', "List tables in a ClickHouse instance.", {'datasourceUid': {"type": 'string'}, 'database': {"type": 'string'}}, ['datasourceUid']),
+    'list_cloudwatch_dimensions': _fn('list_cloudwatch_dimensions', "List dimension keys available for a CloudWatch namespace+metric pair.", {'datasourceUid': {"type": 'string'}, 'namespace': {"type": 'string'}, 'metricName': {"type": 'string'}, 'region': {"type": 'string'}, 'accountId': {"type": 'string'}}, ['datasourceUid', 'namespace', 'metricName', 'region']),
+    'list_cloudwatch_metrics': _fn('list_cloudwatch_metrics', "List metric names available in a given CloudWatch namespace.", {'datasourceUid': {"type": 'string'}, 'namespace': {"type": 'string'}, 'region': {"type": 'string'}, 'accountId': {"type": 'string'}}, ['datasourceUid', 'namespace', 'region']),
+    'list_cloudwatch_namespaces': _fn('list_cloudwatch_namespaces', "List available CloudWatch namespaces.", {'datasourceUid': {"type": 'string'}, 'region': {"type": 'string'}, 'accountId': {"type": 'string'}}, ['datasourceUid', 'region']),
+    'list_datasources': _fn('list_datasources', "List configured datasources, with optional type filtering and pagination.", {'type': {"type": 'string'}, 'limit': {"type": 'integer'}, 'offset': {"type": 'integer'}}, []),
+    'list_graphite_metrics': _fn('list_graphite_metrics', "Browse the Graphite metric hierarchy via wildcard path patterns.", {'datasourceUid': {"type": 'string'}, 'query': {"type": 'string'}}, ['datasourceUid']),
+    'list_graphite_tags': _fn('list_graphite_tags', "List tag names available in a tag-enabled Graphite datasource.", {'datasourceUid': {"type": 'string'}, 'prefix': {"type": 'string'}}, ['datasourceUid']),
+    'list_incidents': _fn('list_incidents', "List Grafana incidents, optionally filtered by status.", {'limit': {"type": 'integer'}, 'drill': {"type": 'boolean'}, 'status': {"type": 'string'}}, []),
+    'list_loki_label_names': _fn('list_loki_label_names', "List all label names present in logs within a Loki datasource and time range.", {'datasourceUid': {"type": 'string'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}}, ['datasourceUid']),
+    'list_loki_label_values': _fn('list_loki_label_values', "Get all unique values for a specific label within a Loki datasource.", {'datasourceUid': {"type": 'string'}, 'labelName': {"type": 'string'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}}, ['datasourceUid', 'labelName']),
+    'list_oncall_schedules': _fn('list_oncall_schedules', "List Grafana OnCall schedules, optionally filtered by team.", {'teamId': {"type": 'string'}, 'scheduleId': {"type": 'string'}, 'page': {"type": 'integer'}}, []),
+    'list_oncall_teams': _fn('list_oncall_teams', "List teams configured in Grafana OnCall.", {'page': {"type": 'integer'}}, []),
+    'list_oncall_users': _fn('list_oncall_users', "List OnCall users.", {'userId': {"type": 'string'}, 'username': {"type": 'string'}, 'page': {"type": 'integer'}}, []),
+    'list_prometheus_label_names': _fn('list_prometheus_label_names', "List label names in a PromQL-compatible datasource.", {'datasourceUid': {"type": 'string'}, 'matches': {"type": 'array'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}, 'limit': {"type": 'integer'}, 'projectName': {"type": 'string'}}, ['datasourceUid']),
+    'list_prometheus_label_values': _fn('list_prometheus_label_values', "Get the values for a specific label name.", {'datasourceUid': {"type": 'string'}, 'labelName': {"type": 'string'}, 'matches': {"type": 'array'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}, 'limit': {"type": 'integer'}, 'projectName': {"type": 'string'}}, ['datasourceUid', 'labelName']),
+    'list_prometheus_metric_metadata': _fn('list_prometheus_metric_metadata', "List Prometheus metric metadata (type, help text, unit).", {'datasourceUid': {"type": 'string'}, 'limit': {"type": 'integer'}, 'limitPerMetric': {"type": 'integer'}, 'metric': {"type": 'string'}, 'projectName': {"type": 'string'}}, ['datasourceUid']),
+    'list_prometheus_metric_names': _fn('list_prometheus_metric_names', "Discover available metric names via a regex filter.", {'datasourceUid': {"type": 'string'}, 'regex': {"type": 'string'}, 'limit': {"type": 'integer'}, 'page': {"type": 'integer'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}, 'projectName': {"type": 'string'}}, ['datasourceUid']),
+    'list_provisioning_repositories': _fn('list_provisioning_repositories', "List provisioning (git-sync) repositories configured on the instance.", {'namespace': {"type": 'string'}}, []),
+    'list_pyroscope_label_names': _fn('list_pyroscope_label_names', "List all available label names found in profiles within a datasource.", {'data_source_uid': {"type": 'string'}, 'matchers': {"type": 'string'}, 'start_rfc_3339': {"type": 'string'}, 'end_rfc_3339': {"type": 'string'}}, ['data_source_uid']),
+    'list_pyroscope_label_values': _fn('list_pyroscope_label_values', "List all unique values for a specific Pyroscope label.", {'data_source_uid': {"type": 'string'}, 'name': {"type": 'string'}, 'matchers': {"type": 'string'}, 'start_rfc_3339': {"type": 'string'}, 'end_rfc_3339': {"type": 'string'}}, ['data_source_uid', 'name']),
+    'list_pyroscope_profile_types': _fn('list_pyroscope_profile_types', "List all profile types available in a datasource.", {'data_source_uid': {"type": 'string'}, 'start_rfc_3339': {"type": 'string'}, 'end_rfc_3339': {"type": 'string'}}, ['data_source_uid']),
+    'list_sift_investigations': _fn('list_sift_investigations', "List Sift investigations.", {'limit': {"type": 'integer'}}, []),
+    'list_snapshots': _fn('list_snapshots', "List Grafana dashboard snapshots.", {'query': {"type": 'string'}, 'limit': {"type": 'integer'}}, []),
+    'list_snowflake_tables': _fn('list_snowflake_tables', "List tables via Snowflake's INFORMATION_SCHEMA.", {'datasourceUid': {"type": 'string'}, 'database': {"type": 'string'}, 'schema': {"type": 'string'}}, ['datasourceUid']),
+    'list_team_roles': _fn('list_team_roles', "List all roles assigned to one or more teams.", {'teamIds': {"type": 'array'}}, ['teamIds']),
+    'list_teams': _fn('list_teams', "Search for Grafana teams by a query string.", {'query': {"type": 'string'}}, []),
+    'list_user_roles': _fn('list_user_roles', "List all roles assigned to one or more users.", {'userIds': {"type": 'array'}}, ['userIds']),
+    'list_users_by_org': _fn('list_users_by_org', "List users in the current Grafana organization.", {}, []),
+    'query_athena': _fn('query_athena', "Execute a raw SQL query against Athena via Grafana.", {'datasourceUid': {"type": 'string'}, 'query': {"type": 'string'}, 'start': {"type": 'string'}, 'end': {"type": 'string'}, 'region': {"type": 'string'}, 'catalog': {"type": 'string'}, 'database': {"type": 'string'}, 'variables': {"type": 'object'}, 'limit': {"type": 'integer'}, 'resultReuseEnabled': {"type": 'boolean'}, 'resultReuseMaxAgeInMinutes': {"type": 'integer'}}, ['datasourceUid', 'query']),
+    'query_clickhouse': _fn('query_clickhouse', "Execute a raw SQL query against ClickHouse via Grafana.", {'datasourceUid': {"type": 'string'}, 'query': {"type": 'string'}, 'start': {"type": 'string'}, 'end': {"type": 'string'}, 'variables': {"type": 'object'}, 'limit': {"type": 'integer'}}, ['datasourceUid', 'query']),
+    'query_cloudwatch': _fn('query_cloudwatch', "Query a specific AWS CloudWatch metric over a time range.", {'datasourceUid': {"type": 'string'}, 'namespace': {"type": 'string'}, 'metricName': {"type": 'string'}, 'region': {"type": 'string'}, 'dimensions': {"type": 'object'}, 'statistic': {"type": 'string'}, 'period': {"type": 'integer'}, 'start': {"type": 'string'}, 'end': {"type": 'string'}, 'accountId': {"type": 'string'}}, ['datasourceUid', 'namespace', 'metricName', 'region']),
+    'query_elasticsearch': _fn('query_elasticsearch', "Execute a search query against an index pattern in an Elasticsearch/OpenSearch datasource.", {'datasourceUid': {"type": 'string'}, 'index': {"type": 'string'}, 'query': {"type": 'string'}, 'startTime': {"type": 'string'}, 'endTime': {"type": 'string'}, 'limit': {"type": 'integer'}}, ['datasourceUid', 'index', 'query']),
+    'query_graphite': _fn('query_graphite', "Execute a Graphite render-API query and return matching series.", {'datasourceUid': {"type": 'string'}, 'target': {"type": 'string'}, 'from_': {"type": 'string'}, 'until': {"type": 'string'}, 'maxDataPoints': {"type": 'integer'}}, ['datasourceUid', 'target']),
+    'query_graphite_density': _fn('query_graphite_density', "Analyze data density/staleness for Graphite series.", {'datasourceUid': {"type": 'string'}, 'target': {"type": 'string'}, 'from_': {"type": 'string'}, 'until': {"type": 'string'}}, ['datasourceUid', 'target']),
+    'query_influxdb': _fn('query_influxdb', "Run a raw InfluxQL or Flux query against an InfluxDB datasource.", {'datasourceUid': {"type": 'string'}, 'query': {"type": 'string'}, 'dialect': {"type": 'string'}, 'start': {"type": 'string'}, 'end': {"type": 'string'}, 'maxDataPoints': {"type": 'integer'}}, ['datasourceUid', 'query']),
+    'query_loki_logs': _fn('query_loki_logs', "Execute a LogQL query and return matching log entries or metric samples.", {'datasourceUid': {"type": 'string'}, 'logql': {"type": 'string'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}, 'limit': {"type": 'integer'}, 'direction': {"type": 'string'}, 'queryType': {"type": 'string'}, 'stepSeconds': {"type": 'integer'}}, ['datasourceUid', 'logql']),
+    'query_loki_patterns': _fn('query_loki_patterns', "Retrieve Loki's automatically detected log patterns.", {'datasourceUid': {"type": 'string'}, 'logql': {"type": 'string'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}, 'step': {"type": 'string'}}, ['datasourceUid', 'logql']),
+    'query_loki_stats': _fn('query_loki_stats', "Get index-level statistics for a simple label-selector query.", {'datasourceUid': {"type": 'string'}, 'logql': {"type": 'string'}, 'startRfc3339': {"type": 'string'}, 'endRfc3339': {"type": 'string'}}, ['datasourceUid', 'logql']),
+    'query_prometheus': _fn('query_prometheus', "Run a PromQL instant or range query against a PromQL-compatible datasource.", {'datasourceUid': {"type": 'string'}, 'expr': {"type": 'string'}, 'startTime': {"type": 'string'}, 'endTime': {"type": 'string'}, 'stepSeconds': {"type": 'integer'}, 'queryType': {"type": 'string'}, 'projectName': {"type": 'string'}}, ['datasourceUid', 'expr']),
+    'query_prometheus_histogram': _fn('query_prometheus_histogram', "Compute a histogram percentile for a base histogram metric.", {'datasourceUid': {"type": 'string'}, 'metric': {"type": 'string'}, 'percentile': {"type": 'number'}, 'labels': {"type": 'string'}, 'rateInterval': {"type": 'string'}, 'startTime': {"type": 'string'}, 'endTime': {"type": 'string'}, 'stepSeconds': {"type": 'integer'}, 'projectName': {"type": 'string'}}, ['datasourceUid', 'metric', 'percentile']),
+    'query_pyroscope': _fn('query_pyroscope', "Fetch Pyroscope profile and/or metrics data.", {'data_source_uid': {"type": 'string'}, 'profile_type': {"type": 'string'}, 'query_type': {"type": 'string'}, 'format': {"type": 'string'}, 'matchers': {"type": 'string'}, 'group_by': {"type": 'array'}, 'step': {"type": 'number'}, 'max_node_depth': {"type": 'integer'}, 'start_rfc_3339': {"type": 'string'}, 'end_rfc_3339': {"type": 'string'}}, ['data_source_uid', 'profile_type']),
+    'query_quickwit': _fn('query_quickwit', "Execute a search against a Quickwit datasource/index pattern.", {'datasourceUid': {"type": 'string'}, 'query': {"type": 'string'}, 'index': {"type": 'string'}, 'startTime': {"type": 'string'}, 'endTime': {"type": 'string'}, 'limit': {"type": 'integer'}}, ['datasourceUid', 'query']),
+    'query_snowflake': _fn('query_snowflake', "Execute a raw SQL query against Snowflake via Grafana.", {'datasourceUid': {"type": 'string'}, 'query': {"type": 'string'}, 'start': {"type": 'string'}, 'end': {"type": 'string'}, 'variables': {"type": 'object'}, 'limit': {"type": 'integer'}}, ['datasourceUid', 'query']),
+    'run_panel_query': _fn('run_panel_query', "Execute one or more existing dashboard panels' queries directly.", {'dashboardUid': {"type": 'string'}, 'panelIds': {"type": 'array'}, 'queryIndex': {"type": 'integer'}, 'start': {"type": 'string'}, 'end': {"type": 'string'}, 'variables': {"type": 'object'}, 'datasourceUid': {"type": 'string'}, 'datasourceType': {"type": 'string'}}, ['dashboardUid', 'panelIds']),
+    'search_dashboards': _fn('search_dashboards', "Search for Grafana dashboards by query string.", {'query': {"type": 'string'}, 'limit': {"type": 'integer'}, 'page': {"type": 'integer'}}, []),
+    'search_folders': _fn('search_folders', "Search for Grafana folders by query string.", {'query': {"type": 'string'}}, []),
+    'search_plugin_information': _fn('search_plugin_information', "Search the public Grafana plugin catalog by keyword.", {'query': {"type": 'string'}}, ['query']),
+    'suggest_loki_alloy_label_config': _fn('suggest_loki_alloy_label_config', "Generate an Alloy loki.process pipeline snippet enforcing a label allowlist.", {'approvedLabels': {"type": 'array'}, 'requiredLabels': {"type": 'array'}, 'normalizeLogLevel': {"type": 'boolean'}, 'componentName': {"type": 'string'}, 'forwardTo': {"type": 'string'}}, ['approvedLabels']),
+    'update_annotation': _fn('update_annotation', "Update an existing annotation by ID using partial-update semantics.", {'id': {"type": 'integer'}, 'text': {"type": 'string'}, 'tags': {"type": 'array'}}, ['id']),
+    'update_dashboard': _fn('update_dashboard', "Create or update a dashboard via full JSON or targeted JSON-patch operations.", {'dashboard': {"type": 'object'}, 'uid': {"type": 'string'}, 'operations': {"type": 'array'}, 'folderUid': {"type": 'string'}, 'message': {"type": 'string'}, 'overwrite': {"type": 'boolean'}, 'userId': {"type": 'integer'}}, []),
+    'update_datasource': _fn('update_datasource', "Update an existing datasource by UID, using the same schema-confirmation flow.", {'uid': {"type": 'string'}, 'schemaReviewed': {"type": 'boolean'}, 'name': {"type": 'string'}, 'url': {"type": 'string'}, 'fields': {"type": 'object'}}, ['uid']),
+    'validate_provisioning_file': _fn('validate_provisioning_file', "Dry-run validate a file inside a provisioning repository.", {'repo': {"type": 'string'}, 'path': {"type": 'string'}, 'namespace': {"type": 'string'}, 'ref': {"type": 'string'}}, ['repo', 'path']),
+}
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
@@ -5921,6 +7524,7 @@ MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "ci_pipeline": (CIPipelineService, _CI_PIPELINE_SCHEMAS),
     "build_tools": (BuildToolsService, _BUILD_TOOLS_SCHEMAS),
     "code_intel": (CodeIntelService, _CODE_INTEL_SCHEMAS),
+    "observability": (ObservabilityService, _OBSERVABILITY_SCHEMAS),
 }
 
 

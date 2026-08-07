@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_check_plugin_installed",
+  "description": "Check whether a specific plugin is installed.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "plugins"],
+  "tool_service": "observability",
+  "tools": ["get_plugin"],
+  "tool_service_seed": {
+    "plugins": {"grafana-piechart-panel": {"version": "1.6.4", "enabled": true}}
+  },
+  "prompts": [
+    "Is the grafana-piechart-panel plugin installed on this Grafana instance?"
+  ],
+  "expected_calls": [
+    {"tool": "get_plugin", "arguments_contains": {"pluginId": "grafana-piechart-panel"}}
+  ]
+}

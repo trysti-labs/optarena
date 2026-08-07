@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_run_dashboard_panel_query",
+  "description": "Execute an existing dashboard panel's query directly without needing to know the underlying query syntax.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "panel-query"],
+  "tool_service": "observability",
+  "tools": ["run_panel_query"],
+  "tool_service_seed": {
+    "dashboards": {"dash-1": {"title": "API Overview", "panels": [{"id": 1, "title": "Requests/sec"}]}}
+  },
+  "prompts": [
+    "Run the query for panel 1 of dashboard dash-1 and show me the current data."
+  ],
+  "expected_calls": [
+    {"tool": "run_panel_query", "arguments_contains": {"dashboardUid": "dash-1"}}
+  ]
+}

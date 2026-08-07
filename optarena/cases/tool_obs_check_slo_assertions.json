@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_check_slo_assertions",
+  "description": "Get the assertion (SLO/health) summary for a service over the last hour.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "asserts"],
+  "tool_service": "observability",
+  "tools": ["get_assertions"],
+  "tool_service_seed": {
+    "assertions": [{"entityName": "checkout-service", "category": "failure", "severity": "warning"}]
+  },
+  "prompts": [
+    "Get the assertion summary for the checkout-service entity from now-1h to now."
+  ],
+  "expected_calls": [
+    {"tool": "get_assertions"}
+  ]
+}

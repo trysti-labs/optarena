@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_generate_dashboard_link",
+  "description": "Generate a shareable deeplink to a specific dashboard.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "navigation"],
+  "tool_service": "observability",
+  "tools": ["generate_deeplink"],
+  "tool_service_seed": {
+    "dashboards": {"dash-1": {"title": "API Overview", "panels": []}}
+  },
+  "prompts": [
+    "Generate a link to dashboard dash-1 that I can share with the team."
+  ],
+  "expected_calls": [
+    {"tool": "generate_deeplink", "arguments_contains": {"resourceType": "dashboard", "dashboardUid": "dash-1"}}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_who_is_oncall",
+  "description": "Check who is currently on-call for a schedule.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "oncall"],
+  "tool_service": "observability",
+  "tools": ["get_current_oncall_users"],
+  "tool_service_seed": {
+    "oncall_schedules": {"sched-1": {"name": "Platform on-call", "currentUsers": ["alice", "bob"]}}
+  },
+  "prompts": [
+    "Who is currently on-call for schedule sched-1?"
+  ],
+  "expected_calls": [
+    {"tool": "get_current_oncall_users", "arguments_contains": {"scheduleId": "sched-1"}}
+  ]
+}

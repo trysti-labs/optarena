@@ -1,0 +1,16 @@
+{
+  "name": "tool_obs_run_error_pattern_check",
+  "description": "Run a Sift investigation to find elevated error patterns in a service's logs.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "sift"],
+  "tool_service": "observability",
+  "tools": ["find_error_pattern_logs"],
+  "prompts": [
+    "Run a Sift investigation named 'checkout-error-check' to look for elevated error patterns, scoped to the label service=checkout."
+  ],
+  "expected_calls": [
+    {"tool": "find_error_pattern_logs", "arguments_contains": {"name": "checkout-error-check"}}
+  ]
+}

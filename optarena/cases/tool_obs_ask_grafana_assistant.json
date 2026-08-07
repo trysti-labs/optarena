@@ -1,0 +1,16 @@
+{
+  "name": "tool_obs_ask_grafana_assistant",
+  "description": "Ask Grafana Assistant a natural-language question.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "assistant"],
+  "tool_service": "observability",
+  "tools": ["ask_assistant"],
+  "prompts": [
+    "Ask Grafana Assistant why the checkout service's error rate spiked in the last hour."
+  ],
+  "expected_calls": [
+    {"tool": "ask_assistant"}
+  ]
+}

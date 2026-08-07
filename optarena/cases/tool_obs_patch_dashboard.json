@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_patch_dashboard",
+  "description": "Apply a targeted JSON-patch update to an existing dashboard by UID.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "dashboard", "precondition"],
+  "tool_service": "observability",
+  "tools": ["update_dashboard"],
+  "tool_service_seed": {
+    "dashboards": {"dash-1": {"title": "API Overview", "panels": [{"id": 1, "title": "Requests/sec"}]}}
+  },
+  "prompts": [
+    "Update the dashboard dash-1: change its title to 'API Overview v2' using a targeted patch, not a full rewrite."
+  ],
+  "expected_calls": [
+    {"tool": "update_dashboard", "arguments_contains": {"uid": "dash-1"}}
+  ]
+}

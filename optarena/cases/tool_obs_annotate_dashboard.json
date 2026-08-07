@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_annotate_dashboard",
+  "description": "Add an annotation marking a deployment on a dashboard.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "annotations"],
+  "tool_service": "observability",
+  "tools": ["create_annotation"],
+  "tool_service_seed": {
+    "dashboards": {"dash-1": {"title": "API Overview", "panels": []}}
+  },
+  "prompts": [
+    "Add an annotation to dashboard dash-1 with the text 'Deployed v2.3.0'."
+  ],
+  "expected_calls": [
+    {"tool": "create_annotation", "arguments_contains": {"dashboardUid": "dash-1", "text": "Deployed v2.3.0"}}
+  ]
+}

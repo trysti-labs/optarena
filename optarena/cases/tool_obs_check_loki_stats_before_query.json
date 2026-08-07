@@ -1,0 +1,21 @@
+{
+  "name": "tool_obs_check_loki_stats_before_query",
+  "description": "Cheaply check whether a Loki stream has data before running an expensive log query, per the documented recommendation.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "loki"],
+  "tool_service": "observability",
+  "tools": ["query_loki_stats", "query_loki_logs"],
+  "tool_service_seed": {
+    "datasources": {"ds-loki": {"name": "Loki", "type": "loki"}},
+    "metric_data": {"ds-loki": {"stats": {"streams": 5, "chunks": 20, "entries": 400, "bytes": 80000}, "log_lines": []}}
+  },
+  "prompts": [
+    "Before running an expensive query, cheaply check whether the {app=\"checkout\"} stream has any data on the ds-loki datasource. If it does, go ahead and fetch the actual log lines."
+  ],
+  "expected_calls": [
+    {"tool": "query_loki_stats", "arguments_contains": {"datasourceUid": "ds-loki"}},
+    {"tool": "query_loki_logs", "arguments_contains": {"datasourceUid": "ds-loki"}}
+  ]
+}

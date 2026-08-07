@@ -1,0 +1,16 @@
+{
+  "name": "tool_obs_get_query_examples",
+  "description": "Get example queries for a datasource type before writing a real one.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "examples"],
+  "tool_service": "observability",
+  "tools": ["get_query_examples"],
+  "prompts": [
+    "Show me some example PromQL queries before I write my own."
+  ],
+  "expected_calls": [
+    {"tool": "get_query_examples"}
+  ]
+}

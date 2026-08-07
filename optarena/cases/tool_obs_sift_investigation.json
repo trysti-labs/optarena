@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_sift_investigation",
+  "description": "Retrieve an existing Sift investigation by its UUID.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "sift"],
+  "tool_service": "observability",
+  "tools": ["get_sift_investigation"],
+  "tool_service_seed": {
+    "sift_investigations": {"00000000-0000-0000-0000-000000000001": {"name": "checkout-errors", "status": "finished"}}
+  },
+  "prompts": [
+    "Get the Sift investigation with ID 00000000-0000-0000-0000-000000000001."
+  ],
+  "expected_calls": [
+    {"tool": "get_sift_investigation", "arguments_contains": {"id": "00000000-0000-0000-0000-000000000001"}}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "tool_obs_update_annotation",
+  "description": "Update the text of an existing annotation by ID.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 1,
+  "tags": ["tool-use", "observability", "annotations"],
+  "tool_service": "observability",
+  "tools": ["update_annotation"],
+  "tool_service_seed": {
+    "annotations": [{"id": 5, "dashboardUid": "dash-1", "text": "Deployed v2.3.0", "tags": []}]
+  },
+  "prompts": [
+    "Update annotation 5 - change its text to 'Deployed v2.3.1 (hotfix)'."
+  ],
+  "expected_calls": [
+    {"tool": "update_annotation", "arguments_contains": {"id": 5, "text": "Deployed v2.3.1 (hotfix)"}}
+  ]
+}

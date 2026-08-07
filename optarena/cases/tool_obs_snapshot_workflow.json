@@ -1,0 +1,17 @@
+{
+  "name": "tool_obs_snapshot_workflow",
+  "description": "Create a snapshot of a dashboard, then confirm it exists by fetching it back.",
+  "task_type": "tool_use",
+  "domain": "observability",
+  "difficulty": 2,
+  "tags": ["tool-use", "observability", "snapshot"],
+  "tool_service": "observability",
+  "tools": ["create_snapshot", "get_snapshot"],
+  "prompts": [
+    "Create a snapshot of this dashboard JSON: {\"title\": \"API Overview\", \"panels\": []}. Then confirm it was created by fetching it back using the returned key."
+  ],
+  "expected_calls": [
+    {"tool": "create_snapshot"},
+    {"tool": "get_snapshot"}
+  ]
+}

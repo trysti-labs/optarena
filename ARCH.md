@@ -1054,6 +1054,77 @@ everything else here uses. A case is one domain or the other, never both -
     `hover`), suggesting (not confirmed) the quirk may correlate with
     schema simplicity rather than being uniformly random across tools -
     left as an open observation, not chased further.
+- **`observability`** (`_cases/_mock_service.py`, `ObservabilityService`) -
+  the thirteenth mock service and by far the largest, all 105 unique
+  tools the official `grafana/mcp-grafana` (3,332 stars) actually
+  registers across its 30 tool-category source files - bigger than
+  `forge`'s 77, and confirmed via a bulk local clone + systematic
+  file-by-file extraction rather than a quick grep, given the scale.
+  Six tools (`alerting_manage_rules`, `agento11y_manage_evaluators`,
+  `agento11y_manage_eval_rules`, `agento11y_manage_eval_collections`,
+  `grafana_api_request`, `generate_deeplink`) are registered twice in the
+  real server under the same name - a read-only vs. read-write variant
+  selected at startup by an `enableWriteTools` flag - and this mock
+  models the full read-write variant of each, the same "model the
+  complete capability" choice every other service in this domain makes.
+  Models a mock Grafana instance: dashboards, alerting, datasources,
+  annotations, folders, snapshots, plugins, provisioning, incidents,
+  on-call, Sift investigations, admin/RBAC, assertions, navigation,
+  rendering, config generation, panel-query execution, a generic API
+  passthrough, Agent Observability, the Assistant transport, and query
+  connectors for Prometheus/Loki/Pyroscope/Elasticsearch/InfluxDB/
+  Graphite/Quickwit/CloudWatch/Athena/ClickHouse/Snowflake, across 37
+  example cases.
+  - **A deliberate, user-confirmed scope decision before building**: no
+    build-tool-style single winner exists here - Grafana genuinely is
+    this large. Presented the choice directly rather than silently
+    picking a subset: ship the full 105-tool real surface (matching
+    forge's "mirror it completely" precedent), or scope down to a
+    curated core. Chose the former.
+  - **A deliberate two-tier depth design, new to this service**: roughly
+    22 "interactive" categories get real, source-verified precondition
+    logic (dashboard update's mutual-exclusion between full-JSON and
+    JSON-patch modes; datasource create/update's two-step schema-review
+    confirmation flow; alert-rule operations' per-operation required
+    fields; annotation creation's format-dependent required-text switch;
+    snapshot creation's paired-field requirement for external storage;
+    plugin install's two-step version-confirmation flow; provisioning's
+    path-traversal-style slug/path validation; Sift's UUID validation;
+    deeplink/panel-image generation's XOR between a stored dashboard and
+    a provisioning preview; Agent Observability's operation-gated
+    required fields across six sub-tools). The other ~12 categories are
+    all the same underlying skill repeated across vendors - "query this
+    specific datasource type" - and share the one real precondition
+    every one of them enforces in the actual source: the resolved
+    datasource must actually be of the expected plugin type, or the
+    call is refused (`query_prometheus` against a Loki datasource,
+    `query_cloudwatch` against a Prometheus datasource, etc.), plus each
+    tool's own specific required-field checks (PromQL range queries need
+    a step size, Pyroscope tools need a strictly-ordered time range).
+  - **Extraction method, given the scale**: a background research agent
+    read all 34 real category source files from a local shallow clone
+    and produced a structured tool-by-tool extraction (name, real
+    description, full parameter list, and source-verified precondition
+    notes) before any mock code was written - the same "extract from
+    actual registrations, not README estimates" discipline used
+    throughout this session, scaled up for a service an order of
+    magnitude larger than anything built before it. Schemas were then
+    generated programmatically from the mock's own real Python method
+    signatures rather than hand-transcribed, guaranteeing the advertised
+    schema can never drift from the dispatch logic that actually
+    enforces it.
+  - Live-verified against `qwen3-coder:30b`: 36/37 passed on the first
+    run - an unusually high pass rate for a first live pass in this
+    domain, and the best first-run result of any service built this
+    session. The one failure (`tool_obs_check_agent_catalog`) was
+    confirmed via direct replay (4/4 retries passed) as genuine sampling
+    variance, not a case-design bug: the model reliably first attempts
+    an invalid `operation: "read"` (a reasonable but wrong guess at the
+    real enum, which correctly refuses `list`/`get`/
+    `list_versions`/`list_version_scores` only) and then usually
+    self-corrects to `get`, but on the original run it recovered via
+    `list`+`name_prefix` instead - a different, non-matching resolution
+    path. No case fix was needed.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not
