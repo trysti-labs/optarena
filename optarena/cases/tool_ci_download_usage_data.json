@@ -1,0 +1,19 @@
+{
+  "name": "tool_ci_download_usage_data",
+  "description": "Download CircleCI usage data for an organization.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "usage"],
+  "tool_service": "ci_pipeline",
+  "tools": ["download_usage_api_data"],
+  "tool_service_seed": {
+    "orgs": ["org-1"]
+  },
+  "prompts": [
+    "Download CircleCI usage data for org org-1 covering the last 30 days, and save it to /tmp."
+  ],
+  "expected_calls": [
+    {"tool": "download_usage_api_data", "arguments_contains": {"orgId": "org-1", "outputDir": "/tmp"}}
+  ]
+}

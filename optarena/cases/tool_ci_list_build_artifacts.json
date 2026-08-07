@@ -1,0 +1,20 @@
+{
+  "name": "tool_ci_list_build_artifacts",
+  "description": "List artifacts produced by a project's latest job on a branch.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "artifacts"],
+  "tool_service": "ci_pipeline",
+  "tools": ["list_artifacts"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "artifacts": [{"project_slug": "gh/acme/webapp", "branch": "main", "artifacts": [{"path": "dist/app.zip"}, {"path": "coverage/index.html"}]}]
+  },
+  "prompts": [
+    "List the build artifacts produced on the main branch of gh/acme/webapp."
+  ],
+  "expected_calls": [
+    {"tool": "list_artifacts", "arguments_contains": {"projectSlug": "gh/acme/webapp", "branch": "main"}}
+  ]
+}

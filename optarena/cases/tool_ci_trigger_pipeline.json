@@ -1,0 +1,20 @@
+{
+  "name": "tool_ci_trigger_pipeline",
+  "description": "Trigger a new pipeline run for a project with only one pipeline definition.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "pipeline"],
+  "tool_service": "ci_pipeline",
+  "tools": ["run_pipeline"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "pipeline_definitions": {"gh/acme/webapp": ["build"]}
+  },
+  "prompts": [
+    "Trigger a new pipeline run for gh/acme/webapp on the main branch."
+  ],
+  "expected_calls": [
+    {"tool": "run_pipeline", "arguments_contains": {"projectSlug": "gh/acme/webapp", "branch": "main"}}
+  ]
+}

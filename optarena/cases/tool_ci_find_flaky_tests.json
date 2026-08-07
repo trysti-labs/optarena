@@ -1,0 +1,20 @@
+{
+  "name": "tool_ci_find_flaky_tests",
+  "description": "Look up flaky tests for a project.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "tests"],
+  "tool_service": "ci_pipeline",
+  "tools": ["find_flaky_tests"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "flaky_tests": {"gh/acme/webapp": ["test_login_flaky", "test_upload_timing"]}
+  },
+  "prompts": [
+    "Check gh/acme/webapp for flaky tests."
+  ],
+  "expected_calls": [
+    {"tool": "find_flaky_tests", "arguments_contains": {"projectSlug": "gh/acme/webapp"}}
+  ]
+}

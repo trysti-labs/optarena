@@ -1,0 +1,19 @@
+{
+  "name": "tool_ci_rerun_failed_workflow",
+  "description": "Rerun a known workflow from its failed job.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "workflow"],
+  "tool_service": "ci_pipeline",
+  "tools": ["rerun_workflow"],
+  "tool_service_seed": {
+    "workflows": {"wf-1": {"status": "failed", "project_slug": "gh/acme/webapp"}}
+  },
+  "prompts": [
+    "Rerun workflow wf-1 from the failed job, not from the start."
+  ],
+  "expected_calls": [
+    {"tool": "rerun_workflow", "arguments_contains": {"workflowId": "wf-1"}}
+  ]
+}

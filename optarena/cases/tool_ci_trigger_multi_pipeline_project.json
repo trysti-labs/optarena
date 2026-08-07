@@ -1,0 +1,21 @@
+{
+  "name": "tool_ci_trigger_multi_pipeline_project",
+  "description": "Trigger a pipeline for a project that has multiple pipeline definitions, requiring a follow-up call naming which one.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 2,
+  "tags": ["tool-use", "ci_pipeline", "pipeline", "precondition"],
+  "tool_service": "ci_pipeline",
+  "tools": ["run_pipeline"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "pipeline_definitions": {"gh/acme/webapp": ["deploy", "test-only"]}
+  },
+  "prompts": [
+    "Trigger a new pipeline for gh/acme/webapp on the main branch. If it turns out there's more than one pipeline definition to choose from, pick 'deploy'."
+  ],
+  "expected_calls": [
+    {"tool": "run_pipeline", "arguments_contains": {"projectSlug": "gh/acme/webapp", "branch": "main"}},
+    {"tool": "run_pipeline", "arguments_contains": {"pipelineChoiceName": "deploy"}}
+  ]
+}

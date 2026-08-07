@@ -1,0 +1,24 @@
+{
+  "name": "tool_ci_explore_component_versions",
+  "description": "Discover a component's environment and component IDs before listing its versions - the IDs aren't derivable from the names alone.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 2,
+  "tags": ["tool-use", "ci_pipeline", "discovery"],
+  "tool_service": "ci_pipeline",
+  "tools": ["list_component_versions"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "environments": {"gh/acme/webapp": [{"id": "env-prod", "name": "production"}, {"id": "env-stage", "name": "staging"}]},
+    "components": {"gh/acme/webapp": [{"id": "comp-fe", "name": "frontend"}, {"id": "comp-be", "name": "backend"}]},
+    "component_versions": [{"project_slug": "gh/acme/webapp", "environment_id": "env-prod", "component_id": "comp-fe",
+                             "versions": [{"version": "1.2.0", "is_live": true}, {"version": "1.1.0", "is_live": false}]}]
+  },
+  "prompts": [
+    "For gh/acme/webapp, show me the deployed versions of the frontend component in the production environment."
+  ],
+  "expected_calls": [
+    {"tool": "list_component_versions", "arguments_contains": {"projectSlug": "gh/acme/webapp"}},
+    {"tool": "list_component_versions", "arguments_contains": {"environmentID": "env-prod", "componentID": "comp-fe"}}
+  ]
+}

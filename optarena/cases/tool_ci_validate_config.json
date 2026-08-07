@@ -1,0 +1,16 @@
+{
+  "name": "tool_ci_validate_config",
+  "description": "Validate a CircleCI config file's contents before committing it.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "config"],
+  "tool_service": "ci_pipeline",
+  "tools": ["config_helper"],
+  "prompts": [
+    "Check whether this CircleCI config is valid before I commit it: version: 2.1\njobs:\n  build:\n    docker:\n      - image: cimg/node:20.0\n"
+  ],
+  "expected_calls": [
+    {"tool": "config_helper"}
+  ]
+}

@@ -19,6 +19,7 @@ sandbox track is one Dockerfile + one DOCKER_IMAGES entry (_sandbox.py).
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 
@@ -3904,6 +3905,304 @@ class DatabaseService(MockService):
         }
 
 
+class CIPipelineService(MockService):
+    """A mock CircleCI instance - all 13 tools the official
+    `CircleCI-Public/mcp-server-circleci` registers, extracted directly
+    from its `CCI_TOOLS`/`CCI_HANDLERS` source this session. Jenkins was
+    the originally planned CI/CD category, but no Jenkins MCP server has
+    real traction (best is 29 stars, most are single digits); CircleCI's
+    is vendor-published and the clear best fit for this domain's
+    "one authoritative real implementation" rule, the same "official
+    vendor server wins" choice already made for `forge` (GitHub) and
+    `terraform` (HashiCorp).
+
+    The real server's defining design decision, and the one this mock
+    exists to test: most project-scoped tools accept THREE mutually
+    exclusive ways to identify a project - `projectSlug` (+`branch` for
+    most tools), a `projectURL` to parse, or `workspaceRoot`+
+    `gitRemoteURL` (+`branch`) for local-checkout detection - and the
+    real server's own docs recommend calling `list_followed_projects`
+    first to get the exact slug. None of these are opaque IDs (unlike
+    Terraform Cloud's workspaces), so there's no id-vs-name pitfall here;
+    the discipline being tested is "did the agent supply a complete
+    identification method", not "did it use the right identifier".
+    """
+
+    TOOLS = {name: name for name in (
+        "list_followed_projects", "get_latest_pipeline_status", "get_build_failure_logs",
+        "get_job_test_results", "find_flaky_tests", "list_artifacts", "config_helper",
+        "run_pipeline", "rerun_workflow", "run_rollback_pipeline", "list_component_versions",
+        "download_usage_api_data", "find_underused_resource_classes",
+    )}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._projects: dict[str, dict] = {}
+        self._project_ids: dict[str, str] = {}
+        self._git_remotes: dict[str, str] = {}
+        self._pipeline_status: dict[tuple[str, str], dict] = {}
+        self._failure_logs: dict[tuple[str, str], str] = {}
+        self._flaky_tests: dict[str, list] = {}
+        self._test_results: dict[tuple[str, str], list] = {}
+        self._artifacts: dict[tuple[str, str], list] = {}
+        self._pipeline_definitions: dict[str, list] = {}
+        self._workflows: dict[str, dict] = {}
+        self._rollback_configured: set[str] = set()
+        self._environments: dict[str, list] = {}
+        self._components: dict[str, list] = {}
+        self._component_versions: dict[tuple[str, str, str], list] = {}
+        self._orgs: set[str] = set()
+        self._usage_csvs: dict[str, list] = {}
+        self._next_id = 1
+
+    # ── seeding ──────────────────────────────────────────────────────────
+
+    def seed(self, spec: dict) -> None:
+        """``spec`` keys, all optional:
+        - ``projects`` ({slug: {name, org, id}}) - followed projects;
+          ``id`` (a UUID-shaped string) is optional and only needed for
+          cases exercising the projectID identification path.
+        - ``git_remotes`` ({remote_url: slug}) - for workspaceRoot/
+          gitRemoteURL project detection.
+        - ``pipeline_status`` ([{project_slug, branch, status}, ...]).
+        - ``failure_logs`` ([{project_slug, branch, logs}, ...]).
+        - ``flaky_tests`` ({project_slug: [test name, ...]}).
+        - ``test_results`` ([{project_slug, branch, tests: [{name, result}]}]).
+        - ``artifacts`` ([{project_slug, branch, artifacts: [...]}]).
+        - ``pipeline_definitions`` ({project_slug: [pipeline name, ...]}).
+        - ``workflows`` ({workflow_id: {status, project_slug}}).
+        - ``rollback_configured`` ([project_slug, ...]).
+        - ``environments`` ({project_slug: [{id, name}, ...]}).
+        - ``components`` ({project_slug: [{id, name}, ...]}).
+        - ``component_versions`` ([{project_slug, environment_id,
+          component_id, versions: [...]}]).
+        - ``orgs`` ([org_id, ...]).
+        - ``usage_csvs`` ({path: [row dict, ...]}).
+        """
+        for slug, cfg in (spec.get("projects") or {}).items():
+            self._projects[slug] = {"name": cfg.get("name", slug.rsplit("/", 1)[-1]),
+                                     "org": cfg.get("org", slug.split("/")[1] if "/" in slug else "")}
+            if cfg.get("id"):
+                self._project_ids[cfg["id"]] = slug
+        for url, slug in (spec.get("git_remotes") or {}).items():
+            self._git_remotes[url] = slug
+        for entry in spec.get("pipeline_status") or []:
+            self._pipeline_status[(entry["project_slug"], entry["branch"])] = {
+                "status": entry.get("status", "success"), "pipeline_number": entry.get("pipeline_number", 1)}
+        for entry in spec.get("failure_logs") or []:
+            self._failure_logs[(entry["project_slug"], entry["branch"])] = entry["logs"]
+        for slug, tests in (spec.get("flaky_tests") or {}).items():
+            self._flaky_tests[slug] = list(tests)
+        for entry in spec.get("test_results") or []:
+            self._test_results[(entry["project_slug"], entry["branch"])] = list(entry.get("tests", []))
+        for entry in spec.get("artifacts") or []:
+            self._artifacts[(entry["project_slug"], entry["branch"])] = list(entry.get("artifacts", []))
+        for slug, names in (spec.get("pipeline_definitions") or {}).items():
+            self._pipeline_definitions[slug] = list(names)
+        for wid, cfg in (spec.get("workflows") or {}).items():
+            self._workflows[wid] = {"status": cfg.get("status", "failed"), "project_slug": cfg.get("project_slug", "")}
+        for slug in spec.get("rollback_configured") or []:
+            self._rollback_configured.add(slug)
+        for slug, envs in (spec.get("environments") or {}).items():
+            self._environments[slug] = list(envs)
+        for slug, comps in (spec.get("components") or {}).items():
+            self._components[slug] = list(comps)
+        for entry in spec.get("component_versions") or []:
+            self._component_versions[(entry["project_slug"], entry["environment_id"], entry["component_id"])] = \
+                list(entry.get("versions", []))
+        for org in spec.get("orgs") or []:
+            self._orgs.add(org)
+        for path, rows in (spec.get("usage_csvs") or {}).items():
+            self._usage_csvs[path] = list(rows)
+
+    # ── project identification (the real design decision this mock tests) ─
+
+    @staticmethod
+    def _parse_project_url(url: str) -> str | None:
+        m = re.search(r"/pipelines/([^/?]+/[^/?]+/[^/?]+)", url or "")
+        return m.group(1) if m else None
+
+    def _resolve_project(self, *, projectSlug=None, branch=None, projectURL=None,
+                          workspaceRoot=None, gitRemoteURL=None, require_branch: bool = True) -> tuple[str | None, dict | None]:
+        if projectSlug:
+            if require_branch and not branch:
+                return None, {"error": "branch is required when identifying a project by projectSlug"}
+            if projectSlug not in self._projects:
+                return None, {"error": f"{projectSlug!r} is not a followed project - call list_followed_projects first"}
+            return projectSlug, None
+        if projectURL:
+            slug = self._parse_project_url(projectURL)
+            if slug is None:
+                return None, {"error": f"could not parse a project slug from {projectURL!r}"}
+            return slug, None
+        if workspaceRoot and gitRemoteURL:
+            if require_branch and not branch:
+                return None, {"error": "branch is required when identifying a project by workspaceRoot/gitRemoteURL"}
+            slug = self._git_remotes.get(gitRemoteURL)
+            if slug is None:
+                return None, {"error": f"no followed project matches git remote {gitRemoteURL!r}"}
+            return slug, None
+        return None, {"error": "provide projectSlug+branch, projectURL, or workspaceRoot+gitRemoteURL(+branch) to identify the project"}
+
+    def _resolve_project_no_branch(self, *, projectSlug=None, projectID=None) -> tuple[str | None, dict | None]:
+        if projectSlug:
+            if projectSlug not in self._projects:
+                return None, {"error": f"{projectSlug!r} is not a followed project - call list_followed_projects first"}
+            return projectSlug, None
+        if projectID:
+            slug = self._project_ids.get(projectID)
+            if slug is None:
+                return None, {"error": f"unknown projectID {projectID!r}"}
+            return slug, None
+        return None, {"error": "either projectSlug or projectID must be provided"}
+
+    # ── tools ────────────────────────────────────────────────────────────
+
+    def list_followed_projects(self) -> dict:
+        return {"projects": [{"name": p["name"], "project_slug": slug}
+                              for slug, p in sorted(self._projects.items())]}
+
+    def get_latest_pipeline_status(self, projectSlug=None, branch=None, projectURL=None,
+                                    workspaceRoot=None, gitRemoteURL=None) -> dict:
+        slug, err = self._resolve_project(projectSlug=projectSlug, branch=branch, projectURL=projectURL,
+                                           workspaceRoot=workspaceRoot, gitRemoteURL=gitRemoteURL)
+        if err:
+            return err
+        status = self._pipeline_status.get((slug, branch))
+        if status is None:
+            return {"error": f"no pipeline found for {slug} on branch {branch!r}"}
+        return {"project_slug": slug, "branch": branch, **status}
+
+    def get_build_failure_logs(self, projectSlug=None, branch=None, projectURL=None,
+                                workspaceRoot=None, gitRemoteURL=None, outputDir=None) -> dict:
+        slug, err = self._resolve_project(projectSlug=projectSlug, branch=branch, projectURL=projectURL,
+                                           workspaceRoot=workspaceRoot, gitRemoteURL=gitRemoteURL)
+        if err:
+            return err
+        logs = self._failure_logs.get((slug, branch))
+        if logs is None:
+            return {"error": f"no failed build found for {slug} on branch {branch!r}"}
+        return {"project_slug": slug, "branch": branch, "logs": logs}
+
+    def get_job_test_results(self, projectSlug=None, branch=None, projectURL=None, workspaceRoot=None,
+                              gitRemoteURL=None, filterByTestsResult=None) -> dict:
+        slug, err = self._resolve_project(projectSlug=projectSlug, branch=branch, projectURL=projectURL,
+                                           workspaceRoot=workspaceRoot, gitRemoteURL=gitRemoteURL)
+        if err:
+            return err
+        tests = self._test_results.get((slug, branch), [])
+        if filterByTestsResult:
+            tests = [t for t in tests if t.get("result") == filterByTestsResult]
+        return {"project_slug": slug, "branch": branch, "tests": tests}
+
+    def find_flaky_tests(self, projectSlug=None, projectURL=None, workspaceRoot=None, gitRemoteURL=None) -> dict:
+        slug, err = self._resolve_project(projectSlug=projectSlug, projectURL=projectURL,
+                                           workspaceRoot=workspaceRoot, gitRemoteURL=gitRemoteURL, require_branch=False)
+        if err:
+            return err
+        return {"project_slug": slug, "flaky_tests": self._flaky_tests.get(slug, [])}
+
+    def list_artifacts(self, projectSlug=None, branch=None, projectURL=None,
+                        workspaceRoot=None, gitRemoteURL=None) -> dict:
+        slug, err = self._resolve_project(projectSlug=projectSlug, branch=branch, projectURL=projectURL,
+                                           workspaceRoot=workspaceRoot, gitRemoteURL=gitRemoteURL)
+        if err:
+            return err
+        return {"project_slug": slug, "branch": branch, "artifacts": self._artifacts.get((slug, branch), [])}
+
+    def config_helper(self, configFile: str) -> dict:
+        errors = []
+        if "version" not in configFile:
+            errors.append("missing required top-level 'version' key")
+        if "jobs" not in configFile and "workflows" not in configFile:
+            errors.append("config defines neither 'jobs' nor 'workflows'")
+        if errors:
+            return {"valid": False, "errors": errors, "config": configFile}
+        return {"valid": True}
+
+    def run_pipeline(self, projectSlug=None, branch=None, projectURL=None, workspaceRoot=None,
+                      gitRemoteURL=None, pipelineChoiceName=None, configContent=None) -> dict:
+        slug, err = self._resolve_project(projectSlug=projectSlug, branch=branch, projectURL=projectURL,
+                                           workspaceRoot=workspaceRoot, gitRemoteURL=gitRemoteURL)
+        if err:
+            return err
+        defs = self._pipeline_definitions.get(slug, [])
+        if len(defs) > 1 and not pipelineChoiceName:
+            return {"error": "multiple pipeline definitions - specify pipelineChoiceName",
+                    "available_pipelines": defs}
+        if pipelineChoiceName and defs and pipelineChoiceName not in defs:
+            return {"error": f"unknown pipeline {pipelineChoiceName!r} (expected one of {defs})"}
+        pid = f"pipeline-{self._next_id}"
+        self._next_id += 1
+        return {"pipeline_id": pid, "project_slug": slug, "branch": branch,
+                "pipeline_url": f"https://app.circleci.com/pipelines/{slug}/{pid}"}
+
+    def rerun_workflow(self, workflowId=None, workflowURL=None, fromFailed=None) -> dict:
+        wid = workflowId
+        if not wid and workflowURL:
+            m = re.search(r"/workflows/([^/?]+)", workflowURL)
+            wid = m.group(1) if m else None
+        if not wid:
+            return {"error": "either workflowId or workflowURL must be provided"}
+        wf = self._workflows.get(wid)
+        if wf is None:
+            return {"error": f"no such workflow {wid!r}"}
+        return {"workflow_id": wid, "status": "rerunning", "from_failed": bool(fromFailed)}
+
+    def run_rollback_pipeline(self, environmentName: str, componentName: str, currentVersion: str,
+                               targetVersion: str, namespace: str, projectSlug=None, projectID=None,
+                               reason=None, parameters=None) -> dict:
+        slug, err = self._resolve_project_no_branch(projectSlug=projectSlug, projectID=projectID)
+        if err:
+            return err
+        if slug not in self._rollback_configured:
+            return {"error": f"{slug} has no rollback pipeline configured"}
+        rid = f"rollback-{self._next_id}"
+        self._next_id += 1
+        return {"rollback_id": rid, "project_slug": slug, "status": "started",
+                "environment": environmentName, "component": componentName,
+                "from_version": currentVersion, "to_version": targetVersion}
+
+    def list_component_versions(self, projectSlug=None, projectID=None, orgID=None,
+                                 environmentID=None, componentID=None) -> dict:
+        slug, err = self._resolve_project_no_branch(projectSlug=projectSlug, projectID=projectID)
+        if err:
+            return err
+        if not environmentID:
+            return {"environments": self._environments.get(slug, [])}
+        if not componentID:
+            return {"components": self._components.get(slug, [])}
+        return {"versions": self._component_versions.get((slug, environmentID, componentID), [])}
+
+    def download_usage_api_data(self, orgId: str, outputDir: str, startDate=None, endDate=None, jobId=None) -> dict:
+        if orgId not in self._orgs:
+            return {"error": f"unknown organization {orgId!r}"}
+        path = f"{outputDir.rstrip('/')}/usage_{orgId}.csv"
+        return {"org_id": orgId, "csv_path": path}
+
+    def find_underused_resource_classes(self, csvFilePath, threshold: float = 40) -> dict:
+        paths = csvFilePath if isinstance(csvFilePath, list) else [csvFilePath]
+        rows = []
+        for p in paths:
+            data = self._usage_csvs.get(p)
+            if data is None:
+                return {"error": f"no usage data CSV found at {p!r} - call download_usage_api_data first"}
+            rows.extend(data)
+        underused = [r for r in rows if r.get("median_cpu_utilization_pct", 100) < threshold
+                     or r.get("max_cpu_utilization_pct", 100) < threshold]
+        return {"threshold": threshold, "underused": underused}
+
+    # ── summary ──────────────────────────────────────────────────────────
+
+    def summary(self) -> dict:
+        return {
+            "n_calls": len(self.call_log),
+            "project_count": len(self._projects),
+            "workflow_count": len(self._workflows),
+            "rollback_configured_count": len(self._rollback_configured),
+        }
+
+
 # name -> (service class, {tool_name: OpenAI-function-schema dict})
 # One registry entry per service; a case names the service via
 # ``tool_service`` and (optionally) which of its tools to expose via
@@ -5094,6 +5393,101 @@ _DATABASE_SCHEMAS: dict[str, dict] = {
         []),
 }
 
+_PROJECT_ID_PARAMS = {
+    "projectSlug": {"type": "string", "description": "The project slug from list_followed_projects (e.g. 'gh/organization/project')."},
+    "projectURL": {"type": "string", "description": "A CircleCI project/pipeline/workflow/job URL to parse the project slug from."},
+    "workspaceRoot": {"type": "string", "description": "The absolute path to the local project workspace root."},
+    "gitRemoteURL": {"type": "string", "description": "The git remote URL of the local checkout."},
+}
+
+_CI_PIPELINE_SCHEMAS: dict[str, dict] = {
+    "list_followed_projects": _fn(
+        "list_followed_projects", "List all CircleCI projects the user follows.", {}, []),
+    "get_latest_pipeline_status": _fn(
+        "get_latest_pipeline_status",
+        "Get the status of the latest pipeline for a project. Identify the project via projectSlug+branch, "
+        "projectURL, or workspaceRoot+gitRemoteURL+branch.",
+        {**_PROJECT_ID_PARAMS, "branch": {"type": "string", "description": "Required when identifying by projectSlug or workspaceRoot/gitRemoteURL."}},
+        []),
+    "get_build_failure_logs": _fn(
+        "get_build_failure_logs",
+        "Retrieve failure logs for a project's latest failed build. Identify the project via projectSlug+branch, "
+        "projectURL, or workspaceRoot+gitRemoteURL+branch.",
+        {**_PROJECT_ID_PARAMS, "branch": {"type": "string", "description": "Required when identifying by projectSlug or workspaceRoot/gitRemoteURL."},
+         "outputDir": {"type": "string", "description": "Optional directory to write full logs to instead of returning them inline."}},
+        []),
+    "get_job_test_results": _fn(
+        "get_job_test_results",
+        "Get test result metadata for a project's jobs, optionally filtered by pass/fail. Identify the project via "
+        "projectSlug+branch, projectURL, or workspaceRoot+gitRemoteURL+branch.",
+        {**_PROJECT_ID_PARAMS, "branch": {"type": "string", "description": "Required when identifying by projectSlug or workspaceRoot/gitRemoteURL."},
+         "filterByTestsResult": {"type": "string", "enum": ["failure", "success"], "description": "Optional test result filter."}},
+        []),
+    "find_flaky_tests": _fn(
+        "find_flaky_tests",
+        "List flaky tests for a project. Identify the project via projectSlug, projectURL, or "
+        "workspaceRoot+gitRemoteURL (no branch needed).",
+        {k: v for k, v in _PROJECT_ID_PARAMS.items()},
+        []),
+    "list_artifacts": _fn(
+        "list_artifacts",
+        "List artifacts produced by a project's job. Identify the project via projectSlug+branch, projectURL, or "
+        "workspaceRoot+gitRemoteURL+branch.",
+        {**_PROJECT_ID_PARAMS, "branch": {"type": "string", "description": "Required when identifying by projectSlug or workspaceRoot/gitRemoteURL."}},
+        []),
+    "config_helper": _fn(
+        "config_helper", "Analyze and validate a CircleCI config.yml's contents.",
+        {"configFile": {"type": "string", "description": "The full contents of the .circleci/config.yml file."}},
+        ["configFile"]),
+    "run_pipeline": _fn(
+        "run_pipeline",
+        "Trigger a new CircleCI pipeline. Identify the project via projectSlug+branch, projectURL, or "
+        "workspaceRoot+gitRemoteURL+branch. If the project has multiple pipeline definitions, pipelineChoiceName "
+        "is required.",
+        {**_PROJECT_ID_PARAMS, "branch": {"type": "string", "description": "Required when identifying by projectSlug or workspaceRoot/gitRemoteURL."},
+         "pipelineChoiceName": {"type": "string", "description": "Which pipeline definition to run, if the project has more than one."},
+         "configContent": {"type": "string", "description": "Optional CircleCI config content to override the default."}},
+        []),
+    "rerun_workflow": _fn(
+        "rerun_workflow", "Rerun a workflow from the start or from its failed job.",
+        {"workflowId": {"type": "string", "description": "The UUID of the workflow to rerun."},
+         "workflowURL": {"type": "string", "description": "The URL of the workflow to rerun (alternative to workflowId)."},
+         "fromFailed": {"type": "boolean", "description": "Rerun from the failed job instead of from the start (optional)."}},
+        []),
+    "run_rollback_pipeline": _fn(
+        "run_rollback_pipeline", "Run a rollback pipeline for a component in an environment.",
+        {"projectSlug": {"type": "string", "description": "The project slug (alternative to projectID)."},
+         "projectID": {"type": "string", "description": "The project's UUID (alternative to projectSlug)."},
+         "environmentName": {"type": "string"}, "componentName": {"type": "string"},
+         "currentVersion": {"type": "string"}, "targetVersion": {"type": "string"}, "namespace": {"type": "string"},
+         "reason": {"type": "string", "description": "Optional reason for the rollback."},
+         "parameters": {"type": "object", "description": "Optional extra rollback pipeline parameters."}},
+        ["environmentName", "componentName", "currentVersion", "targetVersion", "namespace"]),
+    "list_component_versions": _fn(
+        "list_component_versions",
+        "List versions of a component in an environment. Omitting environmentID lists available environments; "
+        "omitting componentID (with environmentID given) lists available components.",
+        {"projectSlug": {"type": "string", "description": "The project slug (alternative to projectID)."},
+         "projectID": {"type": "string", "description": "The project's UUID (alternative to projectSlug)."},
+         "orgID": {"type": "string", "description": "Optional, resolved from the project if omitted."},
+         "environmentID": {"type": "string"}, "componentID": {"type": "string"}},
+        []),
+    "download_usage_api_data": _fn(
+        "download_usage_api_data", "Download usage data from the CircleCI Usage API for an organization and date range.",
+        {"orgId": {"type": "string"}, "outputDir": {"type": "string", "description": "Directory to save the usage CSV to."},
+         "startDate": {"type": "string", "description": "Optional, e.g. '2026-01-01' or '5 days ago'."},
+         "endDate": {"type": "string", "description": "Optional."},
+         "jobId": {"type": "string", "description": "Optional, for resuming a previously started export job."}},
+        ["orgId", "outputDir"]),
+    "find_underused_resource_classes": _fn(
+        "find_underused_resource_classes",
+        "Analyze a usage data CSV (from download_usage_api_data) to find jobs/resource classes below a CPU/RAM "
+        "usage threshold.",
+        {"csvFilePath": {"type": "string", "description": "Path to a usage data CSV file (or array of paths)."},
+         "threshold": {"type": "number", "description": "Usage percentage threshold, optional, default 40."}},
+        ["csvFilePath"]),
+}
+
 MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "task_tracker": (TaskTrackerService, _TASK_TRACKER_SCHEMAS),
     "git_repo": (GitRepoService, _GIT_REPO_SCHEMAS),
@@ -5104,6 +5498,7 @@ MOCK_SERVICES: dict[str, tuple[type[MockService], dict[str, dict]]] = {
     "package_registry": (PackageRegistryService, _PACKAGE_REGISTRY_SCHEMAS),
     "terraform": (TerraformService, _TERRAFORM_SCHEMAS),
     "database": (DatabaseService, _DATABASE_SCHEMAS),
+    "ci_pipeline": (CIPipelineService, _CI_PIPELINE_SCHEMAS),
 }
 
 

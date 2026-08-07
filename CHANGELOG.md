@@ -67,7 +67,17 @@ existed.
   workload- and query-level index tuning, health checks, top-query
   reporting - `execute_sql` refuses write statements in restricted-
   access-mode sessions, `explain_query` refuses combining `analyze` with
-  `hypothetical_indexes`, 8 cases) - plus a
+  `hypothetical_indexes`, 8 cases), and `ci_pipeline` (all 13 tools the
+  official `CircleCI-Public/mcp-server-circleci` registers - followed
+  projects, pipeline status, build failure logs, test results with
+  pass/fail filtering, flaky tests, artifacts, config validation,
+  pipeline triggers, workflow reruns, component rollbacks,
+  component-version discovery, usage-API reporting - several enforcing
+  real preconditions (`run_pipeline` refuses a multi-pipeline-definition
+  project without naming which one, `run_rollback_pipeline` refuses a
+  project with no rollback pipeline configured,
+  `find_underused_resource_classes` refuses a CSV path never produced by
+  `download_usage_api_data`), 13 cases) - plus a
   `tool_service_seed` case field for establishing pre-existing state (e.g.
   real commit history, pre-existing files, already-running containers)
   before the conversation starts, and nested-dict subset matching in

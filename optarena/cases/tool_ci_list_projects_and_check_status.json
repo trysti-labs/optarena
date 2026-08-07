@@ -1,0 +1,21 @@
+{
+  "name": "tool_ci_list_projects_and_check_status",
+  "description": "List followed projects, then check the latest pipeline status for one of them.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "orientation"],
+  "tool_service": "ci_pipeline",
+  "tools": ["list_followed_projects", "get_latest_pipeline_status"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "pipeline_status": [{"project_slug": "gh/acme/webapp", "branch": "main", "status": "success"}]
+  },
+  "prompts": [
+    "List the CircleCI projects I follow, then check the latest pipeline status for the webapp project on the main branch."
+  ],
+  "expected_calls": [
+    {"tool": "list_followed_projects"},
+    {"tool": "get_latest_pipeline_status", "arguments_contains": {"projectSlug": "gh/acme/webapp", "branch": "main"}}
+  ]
+}

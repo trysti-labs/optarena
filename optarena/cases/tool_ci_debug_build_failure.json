@@ -1,0 +1,20 @@
+{
+  "name": "tool_ci_debug_build_failure",
+  "description": "Fetch failure logs for a known failing branch.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "debugging"],
+  "tool_service": "ci_pipeline",
+  "tools": ["get_build_failure_logs"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "failure_logs": [{"project_slug": "gh/acme/webapp", "branch": "feature-login", "logs": "Error: connection refused at auth_test.py:42"}]
+  },
+  "prompts": [
+    "The feature-login branch build is failing on gh/acme/webapp. Get the failure logs so I can see what broke."
+  ],
+  "expected_calls": [
+    {"tool": "get_build_failure_logs", "arguments_contains": {"projectSlug": "gh/acme/webapp", "branch": "feature-login"}}
+  ]
+}

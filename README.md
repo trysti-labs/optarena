@@ -255,7 +255,7 @@ optarena run --driver ollama-tools --model qwen3-coder:30b \
   --cases tool_create_task,tool_git_stage_review_and_commit
 ```
 
-Ships with nine mock services - `task_tracker` (generic create/complete/
+Ships with ten mock services - `task_tracker` (generic create/complete/
 list/delete, 5 cases), `git_repo` (all 18 tools a real coding agent's git
 workflow touches - status/add/commit/diff/log/branch/checkout/blame/tags/
 push/pull, 12 cases), `filesystem` (all 13 tools the official MCP
@@ -280,13 +280,20 @@ HashiCorp Terraform MCP server exposes across orgs/projects/teams/
 workspaces/variables/policy sets/runs/plans/applies/state/stacks/registry
 search - several enforcing real preconditions like "can't start a run
 against a locked workspace", "can't force-unlock a workspace that isn't
-locked", 31 cases), and `database` (all 9 tools the real Postgres MCP Pro
+locked", 31 cases), `database` (all 9 tools the real Postgres MCP Pro
 reference implementation registers - schema introspection, EXPLAIN with
 optional hypothetical indexes, SQL execution, workload/query index
-tuning, health checks, top queries, 8 cases) - deliberately scoped toward
-coding/dev tools rather than more generic ones; see [ARCH.md](./ARCH.md)
-§3.5 for the schema and oracle mechanics, and what's still deferred
-(agent-driver support beyond the raw baselines, more mock services).
+tuning, health checks, top queries, 8 cases), and `ci_pipeline` (all 13
+tools the official CircleCI MCP server registers - pipeline status,
+build failure logs, test results, flaky tests, artifacts, config
+validation, pipeline triggers, workflow reruns, component rollbacks,
+usage reporting - several enforcing real preconditions like "can't run a
+pipeline with multiple definitions without naming which one", "can't
+roll back a component with no rollback pipeline configured", 13 cases) -
+deliberately scoped toward coding/dev tools rather than more generic
+ones; see [ARCH.md](./ARCH.md) §3.5 for the schema and oracle mechanics,
+and what's still deferred (agent-driver support beyond the raw
+baselines, more mock services).
 
 ## Regression testing
 

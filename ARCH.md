@@ -917,6 +917,55 @@ everything else here uses. A case is one domain or the other, never both -
     as-text quirk (confirmed via direct replay, reproduced 4/5 times on
     this single-tool case) - no case-design bugs surfaced, the smallest,
     most self-contained service built this session.
+- **`ci_pipeline`** (`_cases/_mock_service.py`, `CIPipelineService`) - the
+  tenth mock service, all 13 tools the official `CircleCI-Public/
+  mcp-server-circleci` registers (`CCI_TOOLS`/`CCI_HANDLERS`), extracted
+  directly from its source. Jenkins was the originally planned category
+  for this slot, but no Jenkins MCP server has real traction (best is 29
+  stars, most are single digits) - the same "one authoritative real
+  implementation" rule that picked `forge` (official GitHub server) and
+  `terraform` (official HashiCorp server) picked CircleCI's official,
+  vendor-published server instead once the research turned up the gap.
+  Models a mock CircleCI instance: followed projects, pipeline status,
+  build failure logs, test results (with pass/fail filtering), flaky
+  tests, artifacts, config validation, pipeline triggers, workflow
+  reruns, component rollbacks, component-version discovery, and usage-API
+  reporting, across 13 example cases.
+  - **The real design decision this mock exists to test**: most
+    project-scoped tools accept THREE mutually exclusive ways to
+    identify a project - `projectSlug`+`branch`, a `projectURL` to parse,
+    or `workspaceRoot`+`gitRemoteURL`(+`branch`) for local-checkout
+    detection - and the real server's own docs recommend calling
+    `list_followed_projects` first to get the exact slug. Unlike
+    Terraform Cloud's workspaces, none of these are opaque IDs, so the
+    discipline being tested is "supplied a complete identification
+    method", not "used the right identifier" - a deliberately different
+    precondition shape than `terraform`'s.
+  - Real preconditions enforced: `run_pipeline` refuses (and lists the
+    options) when a project has multiple pipeline definitions and no
+    `pipelineChoiceName` was given; `run_rollback_pipeline` refuses a
+    project with no rollback pipeline configured;
+    `find_underused_resource_classes` refuses a CSV path that was never
+    produced by `download_usage_api_data`; `list_component_versions`
+    progressively discloses environments, then components, then versions,
+    only when the narrower ID isn't yet supplied.
+  - **A genuine, 100%-reproducible model-behavior finding, left as
+    signal, not a bug**: `tool_ci_explore_component_versions` gives
+    `list_component_versions` a real discovery path (call it with just
+    `projectSlug` to list environments, then add `environmentID` to list
+    components, then add `componentID` for versions) for two opaque IDs
+    the prompt never states (`env-prod`, `comp-fe` - only their
+    human-readable names "production"/"frontend" appear in the prompt).
+    The model never used the discovery path at all: in 5/5 runs
+    (the original live pass plus 4 direct retries) it went straight to
+    `list_component_versions` with `environmentID="production"`,
+    `componentID="frontend"` - guessing the human names directly into
+    the ID fields on the very first call. A cleaner, more deterministic
+    instance of the same conflation `terraform`'s `inspect_stack` finding
+    surfaced (there, the model ignored a correct ID it had just been
+    shown; here, it never asks for the ID at all).
+  - Live-verified against `qwen3-coder:30b`: 12/13 passed, the one
+    failure being the `explore_component_versions` finding above.
 - **What's explicitly deferred, not attempted**: only `openai-tools`/
   `ollama-tools` (raw baselines) drive tool-use cases today - no CLI/SDK
   agent driver has a tool-calling code path yet (they all write files, not

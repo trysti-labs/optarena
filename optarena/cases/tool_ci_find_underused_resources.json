@@ -1,0 +1,21 @@
+{
+  "name": "tool_ci_find_underused_resources",
+  "description": "Download usage data first, then analyze it for underused resource classes - the analysis tool refuses a CSV path that was never produced.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 2,
+  "tags": ["tool-use", "ci_pipeline", "usage", "precondition"],
+  "tool_service": "ci_pipeline",
+  "tools": ["download_usage_api_data", "find_underused_resource_classes"],
+  "tool_service_seed": {
+    "orgs": ["org-1"],
+    "usage_csvs": {"/tmp/usage_org-1.csv": [{"job_name": "build", "resource_class": "medium", "median_cpu_utilization_pct": 12, "max_cpu_utilization_pct": 25, "median_ram_utilization_pct": 30, "max_ram_utilization_pct": 40}]}
+  },
+  "prompts": [
+    "Download the usage data for org org-1 into /tmp, then find any underused resource classes in it."
+  ],
+  "expected_calls": [
+    {"tool": "download_usage_api_data", "arguments_contains": {"orgId": "org-1", "outputDir": "/tmp"}},
+    {"tool": "find_underused_resource_classes"}
+  ]
+}

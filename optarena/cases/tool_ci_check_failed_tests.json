@@ -1,0 +1,21 @@
+{
+  "name": "tool_ci_check_failed_tests",
+  "description": "Check whether tests are passing in CI for a project/branch.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 1,
+  "tags": ["tool-use", "ci_pipeline", "tests"],
+  "tool_service": "ci_pipeline",
+  "tools": ["get_job_test_results"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "test_results": [{"project_slug": "gh/acme/webapp", "branch": "main",
+                       "tests": [{"name": "test_login", "result": "success"}, {"name": "test_checkout", "result": "failure"}]}]
+  },
+  "prompts": [
+    "Are the tests passing in CI for gh/acme/webapp on the main branch? If not, show me which ones failed."
+  ],
+  "expected_calls": [
+    {"tool": "get_job_test_results", "arguments_contains": {"projectSlug": "gh/acme/webapp", "branch": "main"}}
+  ]
+}

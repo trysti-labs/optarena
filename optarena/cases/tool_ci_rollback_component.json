@@ -1,0 +1,20 @@
+{
+  "name": "tool_ci_rollback_component",
+  "description": "Roll back a component in an environment to a prior version.",
+  "task_type": "tool_use",
+  "domain": "ci_pipeline",
+  "difficulty": 2,
+  "tags": ["tool-use", "ci_pipeline", "rollback"],
+  "tool_service": "ci_pipeline",
+  "tools": ["run_rollback_pipeline"],
+  "tool_service_seed": {
+    "projects": {"gh/acme/webapp": {"name": "webapp", "org": "acme"}},
+    "rollback_configured": ["gh/acme/webapp"]
+  },
+  "prompts": [
+    "Roll back the frontend component in the production environment for gh/acme/webapp from version 1.2.0 to version 1.1.0. The namespace is 'ns-1'."
+  ],
+  "expected_calls": [
+    {"tool": "run_rollback_pipeline", "arguments_contains": {"projectSlug": "gh/acme/webapp", "environmentName": "production", "componentName": "frontend", "currentVersion": "1.2.0", "targetVersion": "1.1.0", "namespace": "ns-1"}}
+  ]
+}
