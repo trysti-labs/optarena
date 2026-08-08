@@ -129,7 +129,10 @@ def _validate_string_list(value, where: str) -> None:
 
 # ── Scenario files ─────────────────────────────────────────────────────────
 
-_SCENARIO_KNOWN_KEYS = {"name", "driver", "backend", "cases", "timeout", "cases_dir", "image_overrides"}
+_SCENARIO_KNOWN_KEYS = {
+    "name", "driver", "backend", "cases", "timeout", "cases_dir", "image_overrides",
+    "tool_service_mode",
+}
 _BACKEND_KNOWN_KEYS = {
     "kind", "base_url", "model", "api_key", "num_ctx",
     "temperature", "top_p", "seed",
@@ -150,6 +153,10 @@ def validate_scenario(data: dict, source: str = "<scenario>") -> None:
         raise _err(source, "'name' must be a non-empty string")
     if not isinstance(data.get("driver"), str) or not data["driver"].strip():
         raise _err(source, "'driver' must be a non-empty string")
+    if "tool_service_mode" in data and data["tool_service_mode"] is not None:
+        if data["tool_service_mode"] not in _TOOL_SERVICE_MODES:
+            raise _err(source, f"'tool_service_mode' must be one of {_TOOL_SERVICE_MODES}, "
+                                f"got {data['tool_service_mode']!r}")
 
     backend = data.get("backend")
     if backend is not None:
@@ -204,7 +211,6 @@ def validate_scenario(data: dict, source: str = "<scenario>") -> None:
                 raise _err(f"{source}.image_overrides.{key}",
                            f"not a valid container image reference: {val!r}")
 
-
 # ── Case files ───────────────────────────────────────────────────────────
 
 _CASE_KNOWN_KEYS = {
@@ -223,7 +229,7 @@ _CASE_KNOWN_KEYS = {
     # Tool-use cases (openai-tools/ollama-tools drivers): a case names a mock
     # service instead of expected_files/check_command - see
     # _cases/_mock_service.py and _cases/_tool_evaluate.py.
-    "tool_service", "tools", "max_tool_turns",
+    "tool_service", "tools", "max_tool_turns", "tool_service_mode",
     "expected_calls", "forbidden_calls", "expected_final_state",
     # Initial mock-service state (e.g. an existing git history) established
     # BEFORE the conversation starts, via MockService.seed() - never logged/
@@ -233,6 +239,10 @@ _CASE_KNOWN_KEYS = {
     "tool_service_seed",
 }
 _TOOL_CALL_SPEC_KNOWN_KEYS = {"tool", "arguments_contains"}
+# Sandboxed-real execution (runs the actual reference MCP server in a
+# container instead of the in-process mock) - "live" is reserved for the
+# not-yet-built bring-your-own-external-server mode, not accepted yet.
+_TOOL_SERVICE_MODES = ("mock", "sandboxed")
 _DISRUPTION_KNOWN_KEYS = {"after_prompt", "when", "description", "write_files", "delete_files"}
 _DISRUPTION_WHEN_KNOWN_KEYS = {"file_exists", "file_contains"}
 _DISRUPTION_FILE_CONTAINS_KEYS = {"path", "pattern"}
@@ -342,6 +352,17 @@ def validate_case(data: dict, source: str = "<case>") -> None:
         mt = data["max_tool_turns"]
         if not isinstance(mt, int) or isinstance(mt, bool) or not (1 <= mt <= 20):
             raise _err(source, "'max_tool_turns' must be an integer 1-20")
+    if "tool_service_mode" in data and data["tool_service_mode"] is not None:
+        if data["tool_service_mode"] not in _TOOL_SERVICE_MODES:
+            raise _err(source, f"'tool_service_mode' must be one of {_TOOL_SERVICE_MODES}, "
+                                f"got {data['tool_service_mode']!r}")
+        # E-2 (tool-call audit): the field only means anything on a tool-use
+        # case - on a filesystem-oracle case it's dead weight at best and a
+        # confused author at worst. Cross-field, so case-level only (a
+        # scenario-level tool_service_mode legitimately applies run-wide).
+        if not data.get("tool_service"):
+            raise _err(source, "'tool_service_mode' requires 'tool_service' - "
+                               "it only applies to tool-use cases")
     for key in ("expected_calls", "forbidden_calls"):
         if key in data:
             specs = data[key]
@@ -362,8 +383,36 @@ def validate_case(data: dict, source: str = "<case>") -> None:
         if not isinstance(data["expected_final_state"], dict):
             raise _err(source, "'expected_final_state' must be an object")
     if "tool_service_seed" in data and data["tool_service_seed"] is not None:
-        if not isinstance(data["tool_service_seed"], dict):
+        seed = data["tool_service_seed"]
+        if not isinstance(seed, dict):
             raise _err(source, "'tool_service_seed' must be an object")
+        # S-1 (tool-call audit): the seed spec's overall shape stays
+        # service-defined (deliberately no shared schema), but two keys -
+        # `files` ({path: ...}) and `directories` ([path, ...]) - are
+        # PATHS by convention across every service that uses them, and in
+        # sandboxed-real mode (`--tool-service-mode sandboxed`) they become
+        # real host disk writes. Validate them exactly like every other
+        # case-controlled path field (setup_files, write_files, ...);
+        # SandboxedMCPService._contained re-checks containment at write
+        # time, this is the earlier, clearer gate.
+        if isinstance(seed.get("files"), dict):
+            for k in seed["files"]:
+                if not isinstance(k, str) or not k:
+                    raise _err(f"{source}.tool_service_seed.files",
+                               f"key {k!r} must be a non-empty string (a relative path)")
+                reject_unsafe_relpath(k, f"{source}.tool_service_seed.files")
+        if isinstance(seed.get("media_files"), dict):
+            for k in seed["media_files"]:
+                if not isinstance(k, str) or not k:
+                    raise _err(f"{source}.tool_service_seed.media_files",
+                               f"key {k!r} must be a non-empty string (a relative path)")
+                reject_unsafe_relpath(k, f"{source}.tool_service_seed.media_files")
+        if isinstance(seed.get("directories"), list):
+            for d in seed["directories"]:
+                if not isinstance(d, str) or not d:
+                    raise _err(f"{source}.tool_service_seed.directories",
+                               f"entry {d!r} must be a non-empty string (a relative path)")
+                reject_unsafe_relpath(d, f"{source}.tool_service_seed.directories")
 
     if "reference_solution" in data and data["reference_solution"] is not None:
         _validate_string_map(data["reference_solution"], f"{source}.reference_solution")

@@ -327,6 +327,32 @@ tools rather than more generic ones; see [ARCH.md](./ARCH.md) §3.5 for
 the schema and oracle mechanics, and what's still deferred (agent-driver
 support beyond the raw baselines, more mock services).
 
+Ten of these fourteen services can also run against the ACTUAL real
+open-source MCP server, launched inside a disposable, hardened container,
+instead of the in-process mock:
+
+```bash
+optarena run --driver ollama-tools --model qwen3-coder:30b \
+  --tool-service filesystem --tool-service-mode sandboxed \
+  --cases tool_fs_read_before_answering
+optarena cases verify --tool-service filesystem --sandboxed   # no model call - schema-drift pre-flight only
+```
+
+`filesystem`, `git_repo`, `code_intel`, `build_tools`, `database`,
+`observability`, `package_registry`, `cloud_infra`, `docker`, and
+`kubernetes` each have a real, live-verified sandboxed counterpart.
+Sandboxed execution is granted only by the CLI flag/scenario field - case
+content can opt itself down to mock but never up to sandboxed. Two
+services go further than a sandbox: `docker`/`kubernetes` run
+docker-outside-of-docker (the real server talks to your ACTUAL Docker
+daemon through a mounted socket - meaning the model under test can reach
+it too), so they additionally require `OPTARENA_ALLOW_HOST_DOCKER=1`.
+`task_tracker` has no real reference server to sandbox;
+`forge`/`ci_pipeline`/`terraform` are third-party SaaS with no disposable
+local substitute. See [ARCH.md](./ARCH.md) §3.6 for the mechanism, the
+real schema drift found between each mock and its live counterpart, and
+the real bugs this surfaced.
+
 ## Regression testing
 
 The most concrete real-world use case: did upgrading a model, tool, or

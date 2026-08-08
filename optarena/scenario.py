@@ -94,7 +94,14 @@ class Scenario:
     # None ⇒ every case resolves its image the normal way (image field
     # / OPTARENA_SANDBOX_IMAGE / DOCKER_IMAGE_DEFAULT, all mutable tags).
     image_overrides: dict[str, str] | None = None
-
+    # "mock" (default) | "sandboxed" - which kind of tool_service a tool-use
+    # case gets. Sandboxed execution is granted at THIS level (or the CLI
+    # flag that fills it), never by case content: a case's own
+    # tool_service_mode may opt itself down to mock but can never opt up to
+    # sandboxed (capability-increasing - see
+    # cases.resolve_tool_service_mode, the one shared precedence rule).
+    # None means "unset here", not "mock".
+    tool_service_mode: str | None = None
     @classmethod
     def from_dict(cls, data: dict, source: str = "<scenario>") -> "Scenario":
         # Structural validation before anything else touches this dict - a
@@ -112,6 +119,7 @@ class Scenario:
             timeout=data.get("timeout"),
             cases_dir=data.get("cases_dir"),
             image_overrides=data.get("image_overrides"),
+            tool_service_mode=data.get("tool_service_mode"),
         )
 
     @classmethod
@@ -142,4 +150,5 @@ class Scenario:
             "timeout": self.timeout,
             "cases_dir": self.cases_dir,
             "image_overrides": self.image_overrides,
+            "tool_service_mode": self.tool_service_mode,
         }

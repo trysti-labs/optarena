@@ -1,0 +1,9 @@
+{
+  "name": "optarena-sandbox-mcp-kubernetes",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Sandbox image dependency pin for the real mcp-server-kubernetes MCP server - see docker/mcp-kubernetes/Dockerfile.",
+  "dependencies": {
+    "mcp-server-kubernetes": "4.1.2"
+  }
+}

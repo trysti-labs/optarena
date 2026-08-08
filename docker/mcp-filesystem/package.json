@@ -1,0 +1,9 @@
+{
+  "name": "optarena-sandbox-mcp-filesystem",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Sandbox image dependency pin for the real @modelcontextprotocol/server-filesystem MCP server - see docker/mcp-filesystem/Dockerfile.",
+  "dependencies": {
+    "@modelcontextprotocol/server-filesystem": "2026.7.10"
+  }
+}

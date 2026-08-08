@@ -3430,6 +3430,44 @@ class SchemaValidationTests(unittest.TestCase):
             validate_case({"name": "x", "difficulty": 6})
         validate_case({"name": "x", "difficulty": 3})
 
+    def test_tool_service_mode_accepts_known_values_and_rejects_others(self):
+        validate_case({"name": "x", "tool_service": "filesystem", "tool_service_mode": "mock"})
+        validate_case({"name": "x", "tool_service": "filesystem", "tool_service_mode": "sandboxed"})
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "tool_service": "filesystem", "tool_service_mode": "live"})
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "tool_service": "filesystem", "tool_service_mode": "SANDBOXED"})
+
+    def test_tool_service_mode_requires_tool_service(self):
+        # E-2 (tool-call audit): the field only means anything on a tool-use case.
+        with self.assertRaises(SchemaError) as ctx:
+            validate_case({"name": "x", "prompts": ["p"], "tool_service_mode": "mock"})
+        self.assertIn("requires 'tool_service'", str(ctx.exception))
+
+    def test_tool_service_seed_paths_rejected_like_every_other_path_field(self):
+        """S-1 (tool-call audit): seed `files`/`media_files`/`directories`
+        paths become REAL host disk writes in sandboxed mode - they get the
+        same reject_unsafe_relpath gate as setup_files et al."""
+        for bad in ("../evil.txt", "/absolute.txt", "C:/absolute.txt",
+                    "a/../../b.txt", ".git/hooks/pre-commit", "con.txt"):
+            with self.subTest(path=bad):
+                with self.assertRaises(SchemaError):
+                    validate_case({"name": "x", "tool_service": "filesystem",
+                                   "tool_service_seed": {"files": {bad: "x"}}})
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "tool_service": "filesystem",
+                           "tool_service_seed": {"directories": ["../outside"]}})
+        with self.assertRaises(SchemaError):
+            validate_case({"name": "x", "tool_service": "filesystem",
+                           "tool_service_seed": {"media_files": {"../pic.png": "image/png"}}})
+        # Legitimate relative paths and service-defined non-path shapes both
+        # still pass - the seed spec's overall shape stays service-defined.
+        validate_case({"name": "x", "tool_service": "filesystem",
+                       "tool_service_seed": {"files": {"src/app.py": "x"},
+                                             "directories": ["empty"]}})
+        validate_case({"name": "x", "tool_service": "kubernetes",
+                       "tool_service_seed": {"namespaces": {"prod": {}}}})
+
     def test_setup_files_must_be_string_map(self):
         with self.assertRaises(SchemaError):
             validate_case({"name": "x", "setup_files": ["not", "a", "map"]})
@@ -3523,6 +3561,12 @@ class SchemaValidationTests(unittest.TestCase):
     def test_invalid_backend_kind_rejected(self):
         with self.assertRaises(SchemaError):
             validate_scenario({"name": "x", "driver": "aider", "backend": {"kind": "anthropic"}})
+
+    def test_scenario_tool_service_mode_accepts_known_values_and_rejects_others(self):
+        validate_scenario({"name": "x", "driver": "aider", "tool_service_mode": "mock"})
+        validate_scenario({"name": "x", "driver": "aider", "tool_service_mode": "sandboxed"})
+        with self.assertRaises(SchemaError):
+            validate_scenario({"name": "x", "driver": "aider", "tool_service_mode": "live"})
 
     def test_cases_empty_list_vs_none_both_valid(self):
         validate_scenario({"name": "x", "driver": "aider", "cases": None})
@@ -4110,6 +4154,18 @@ class ComparisonValidityTests(unittest.TestCase):
         c = manifest_compatibility(None, self._man())
         self.assertTrue(c["comparable"])
         self.assertFalse(c["verified"])
+
+    def test_different_tool_service_mode_not_comparable(self):
+        man_a = {**self._man(), "tool_service_modes": ["mock"]}
+        man_b = {**self._man(), "tool_service_modes": ["sandboxed"]}
+        c = manifest_compatibility(man_a, man_b)
+        self.assertFalse(c["comparable"])
+        self.assertTrue(any("tool-service execution mode" in r for r in c["reasons"]))
+
+    def test_both_none_tool_service_modes_stays_comparable(self):
+        # Neither run has tool-use cases at all - nothing to disagree about.
+        c = manifest_compatibility(self._man(), self._man())
+        self.assertTrue(c["comparable"])
 
     def test_verdict_suppressed_when_incompatible(self):
         cmp = compare_runs(self._run("a", self._man("abc"), pass_rate=1.0),
@@ -5453,6 +5509,7 @@ class ManifestTrialsTests(unittest.TestCase):
         self.assertIsInstance(m["python_version"], str)
         self.assertTrue(m["python_version"])
 
+
     def test_manifest_records_driver_version_key(self):
         from optarena.runner import build_manifest
         m = build_manifest(
@@ -5539,6 +5596,59 @@ class ManifestTrialsTests(unittest.TestCase):
             rec = run_scenario(sc, trials=5)
         self.assertEqual(rec.manifest["trials"], 5)
         self.assertEqual(rec.manifest["runner_trials"], 1)
+
+
+class ManifestToolServiceModeTests(unittest.TestCase):
+    """Sandboxed-real tool-use execution is a manifest-gated axis, same as
+    oracle_version/case_set_hash/trials - a mock-mode run and a sandboxed-
+    mode run over the identical case set did not measure the same thing."""
+
+    def _scenario(self, tool_service_mode=None):
+        from optarena.runner import build_manifest
+        return build_manifest, Scenario(
+            name="x", driver="openai-tools",
+            backend=Backend(kind="ollama", base_url="http://x", model="m"),
+            tool_service_mode=tool_service_mode)
+
+    def test_none_when_the_run_has_no_tool_use_cases(self):
+        build_manifest, sc = self._scenario()
+        m = build_manifest(sc, [{"name": "c1", "prompts": ["x"]}], requested_trials=1)
+        self.assertIsNone(m["tool_service_modes"])
+
+    def test_defaults_to_mock_for_tool_use_cases_with_no_mode_set_anywhere(self):
+        build_manifest, sc = self._scenario()
+        m = build_manifest(sc, [{"name": "c1", "tool_service": "filesystem"}], requested_trials=1)
+        self.assertEqual(m["tool_service_modes"], ["mock"])
+
+    def test_scenario_level_mode_recorded(self):
+        build_manifest, sc = self._scenario(tool_service_mode="sandboxed")
+        m = build_manifest(sc, [{"name": "c1", "tool_service": "filesystem"}], requested_trials=1)
+        self.assertEqual(m["tool_service_modes"], ["sandboxed"])
+
+    def test_case_level_mode_overrides_scenario_level(self):
+        build_manifest, sc = self._scenario(tool_service_mode="sandboxed")
+        m = build_manifest(sc, [{"name": "c1", "tool_service": "filesystem", "tool_service_mode": "mock"}],
+                            requested_trials=1)
+        self.assertEqual(m["tool_service_modes"], ["mock"])
+
+    def test_case_level_sandboxed_without_user_grant_records_mock(self):
+        # S-2: the manifest uses the SAME resolve_tool_service_mode as
+        # tool_chat - a case asking for sandboxed under a run that never
+        # enabled it actually runs mock, and the record must say so.
+        build_manifest, sc = self._scenario()
+        m = build_manifest(sc, [
+            {"name": "c1", "tool_service": "filesystem", "tool_service_mode": "sandboxed"},
+            {"name": "c2", "tool_service": "git_repo"},
+        ], requested_trials=1)
+        self.assertEqual(m["tool_service_modes"], ["mock"])
+
+    def test_mixed_modes_recorded_when_a_case_opts_down_under_a_sandboxed_run(self):
+        build_manifest, sc = self._scenario(tool_service_mode="sandboxed")
+        m = build_manifest(sc, [
+            {"name": "c1", "tool_service": "filesystem", "tool_service_mode": "mock"},
+            {"name": "c2", "tool_service": "git_repo"},
+        ], requested_trials=1)
+        self.assertEqual(m["tool_service_modes"], ["mock", "sandboxed"])
 
 
 class GetDriverVersionTests(unittest.TestCase):

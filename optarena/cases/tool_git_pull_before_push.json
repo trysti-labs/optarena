@@ -19,7 +19,7 @@
   ],
   "expected_calls": [
     {"tool": "git_pull"},
-    {"tool": "git_add", "arguments_contains": {"paths": ["new_feature.py"]}},
+    {"tool": "git_add", "arguments_contains": {"files": ["new_feature.py"]}},
     {"tool": "git_commit"},
     {"tool": "git_push"}
   ],

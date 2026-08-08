@@ -1,0 +1,10 @@
+{
+  "name": "optarena-sandbox-mcp-build-tools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Sandbox image dependency pin for the real nx-mcp MCP server (and the nx CLI it introspects a workspace through) - see docker/mcp-build-tools/Dockerfile.",
+  "dependencies": {
+    "nx-mcp": "0.25.0",
+    "nx": "23.1.1"
+  }
+}

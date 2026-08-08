@@ -67,7 +67,44 @@ def manifest_compatibility(man_a: dict | None, man_b: dict | None) -> dict:
     if man_a.get("trials") != man_b.get("trials"):
         reasons.append(f"different trial count "
                        f"({man_a.get('trials')} vs {man_b.get('trials')})")
+    if man_a.get("tool_service_modes") != man_b.get("tool_service_modes"):
+        reasons.append(f"different tool-service execution mode "
+                       f"({man_a.get('tool_service_modes')} vs {man_b.get('tool_service_modes')})")
     return {"comparable": not reasons, "verified": True, "reasons": reasons}
+
+
+#: Manifest fields that are deliberately NOT comparability gates (a
+#: difference here is the thing under test, not a reason to refuse a
+#: verdict) but which a reader must still be told about - otherwise a
+#: comparison says "B won" while nothing on screen says B was a different
+#: model, driver, or MCP server. Label -> manifest key.
+_ATTRIBUTED_FIELDS: list[tuple[str, str]] = [
+    ("driver", "driver"),
+    ("driver version", "driver_version"),
+    ("model", "backend_model"),
+    ("backend", "backend_base_url"),
+]
+
+
+def manifest_differences(man_a: dict | None, man_b: dict | None) -> list[str]:
+    """What actually differed between two runs, on the evidence-only axes.
+
+    `manifest_compatibility` answers "may these be compared at all"; this
+    answers "what am I looking at". They are deliberately separate: every
+    field here is one a comparison is legitimately FOR (tool-vs-tool,
+    model-vs-model), so none of them suppresses a verdict - but a verdict
+    with no statement of what changed is not evidence, it's a number.
+    """
+    if not man_a or not man_b:
+        return []
+    out: list[str] = []
+    for label, key in _ATTRIBUTED_FIELDS:
+        a_val, b_val = man_a.get(key), man_b.get(key)
+        if a_val == b_val:
+            continue
+        out.append(f"{label}: {a_val if a_val is not None else '-'}  vs  "
+                   f"{b_val if b_val is not None else '-'}")
+    return out
 
 
 def compare_runs(run_a: dict, run_b: dict, force: bool = False) -> dict:
@@ -134,6 +171,7 @@ def compare_runs(run_a: dict, run_b: dict, force: bool = False) -> dict:
               "scenario": run_b["scenario"], "manifest": run_b.get("manifest")},
         "cases": rows,
         "compatibility": compat,
+        "differences": manifest_differences(run_a.get("manifest"), run_b.get("manifest")),
         "verdict": verdict,
     }
 
@@ -233,6 +271,9 @@ def regression_summary(cmp: dict) -> dict:
         # regression gate comparing two runs that measured different things
         # must say so, not print clean-looking deltas.
         "compatibility": cmp.get("compatibility", {}),
+        # Same carry-through reasoning for the attribution lines: "which
+        # cases regressed" is only actionable next to "what changed".
+        "differences": cmp.get("differences") or [],
         "a_label": cmp["a"]["label"], "b_label": cmp["b"]["label"],
         "pass_rate_a": sa["pass_rate"], "pass_rate_b": sb["pass_rate"],
         "pass_rate_ci_a": sa.get("pass_rate_ci"), "pass_rate_ci_b": sb.get("pass_rate_ci"),
@@ -262,6 +303,8 @@ def format_regression(summary: dict) -> str:
     lines = [
         f"\n  {s['a_label']}  ->  {s['b_label']}",
     ]
+    for line in s.get("differences") or []:
+        lines.append(f"  {line}")
     # M-03: same warning format_table shows - deltas between runs that did
     # not measure the same thing are not a like-for-like regression verdict.
     compat = s.get("compatibility") or {}
@@ -345,6 +388,14 @@ def format_table(cmp: dict) -> str:
         f"  {a['label']}  vs  {b['label']}",
         f"{'='*78}",
     ]
+    # What differed on the axes a comparison is legitimately FOR - stated
+    # up front, because a verdict that doesn't say what changed is a number,
+    # not evidence. Distinct from the comparability warning below: these
+    # differences are intentional, not a problem.
+    for line in cmp.get("differences") or []:
+        lines.append(f"  {line}")
+    if cmp.get("differences"):
+        lines.append("")
     # M-02: warn loudly when the two runs did not measure the same thing, so
     # nobody reads the per-case table as a like-for-like verdict.
     compat = cmp.get("compatibility", {})

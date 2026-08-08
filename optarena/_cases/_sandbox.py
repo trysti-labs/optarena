@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 
 from ._constants import DOCKER_IMAGE_DEFAULT, DOCKER_IMAGES
@@ -461,6 +462,29 @@ def _active_sandbox_for(image: str) -> "DockerSandbox | None":
     return _active_sandboxes.get(image)
 
 
+def _start_stderr_drain(stream) -> "deque[str]":
+    """Continuously read ``stream`` (a text-mode pipe) on a daemon thread
+    into a bounded deque of lines, returning the deque immediately. Module-
+    level (not a DockerSandbox method) so it can be tested against a real
+    subprocess pipe without a container engine, and guarded so a test's
+    fake Popen with a Mock/None stderr never spins a busy loop."""
+    tail: "deque[str]" = deque(maxlen=200)
+    if stream is None or not hasattr(stream, "readline"):
+        return tail
+
+    def _drain() -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                if not isinstance(line, str):   # a Mock stderr in tests
+                    return
+                tail.append(line.rstrip("\n"))
+        except (ValueError, OSError):
+            pass    # stream closed mid-read during teardown - tail keeps what it has
+
+    threading.Thread(target=_drain, daemon=True).start()
+    return tail
+
+
 class DockerSandbox:
     """
     One long-lived container for an entire ``optarena run`` - every case and
@@ -483,7 +507,8 @@ class DockerSandbox:
     callers fall back to running check_command on the host - unchanged from before.
     """
 
-    def __init__(self, root: Path, image: str | None = None):
+    def __init__(self, root: Path, image: str | None = None, extra_run_args: list[str] | None = None,
+                 network: str = "none", register: bool = True):
         self.root = root.resolve()
         # A-05: validated here too - this constructor is also reachable with
         # an OPTARENA_SANDBOX_IMAGE value that never passed through
@@ -492,6 +517,38 @@ class DockerSandbox:
             image or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT))
         self.name = f"optarena-sandbox-{uuid.uuid4().hex[:12]}"
         self.active = False
+        # An explicit, per-INSTANCE escape hatch from the shared
+        # _HARDENING_ARGS below - e.g. a sandboxed-real service whose real
+        # server needs to drop privileges via `su` at startup (CAP_SETUID/
+        # CAP_SETGID, neither in the default cap set) needs this for ITS one
+        # dedicated container, without loosening every other image's
+        # hardening. None (the default, every existing caller) changes
+        # nothing. See _sandboxed_mcp_service.SANDBOXED_SERVICES["database"].
+        self._extra_run_args = list(extra_run_args or [])
+        # "none" (every existing caller) is a HARD requirement for
+        # check_command - untrusted model-generated code must never reach
+        # the network. A sandboxed-real MCP server can have a legitimate,
+        # narrow exception: one whose entire real tool surface is read-only
+        # public-API lookups with no state-mutating capability at all (e.g.
+        # package_registry's real server has no publish/delete tool - only
+        # search/get-details/list-versions) may need real network access
+        # because there's no way to point it at a local/offline substitute.
+        # A DEDICATED constructor param, not an appended --network flag:
+        # confirmed empirically that Docker rejects two --network flags
+        # outright ("conflicting options"), so this can't be layered via
+        # extra_run_args the way capabilities can.
+        self._network = network
+        # False for a per-case dedicated sandbox (sandboxed-real MCP - see
+        # _sandboxed_mcp_service.build_sandboxed_service): the shared
+        # `_active_sandboxes` map exists so `run_check_command` can route
+        # each case into the one long-lived container for its image, which
+        # is exactly wrong for a container that belongs to a single case -
+        # and under --parallel, two same-service cases would silently
+        # overwrite each other's entry (E-1 in the tool-call audit).
+        self._register = register
+        # Host-side `docker/podman exec -i` client processes started via
+        # exec_attached() - see stop() for why these need explicit teardown.
+        self._attached: list[subprocess.Popen] = []
 
     def start(self) -> bool:
         if os.environ.get("OPTARENA_DISABLE_SANDBOX") == "1" or not _docker_available():
@@ -508,8 +565,9 @@ class DockerSandbox:
         try:
             subprocess.run(
                 [engine, "run", "-d", "--rm", "--name", self.name,
-                 "--network", "none", "--memory", "2g", "--cpus", "2",
-                 *_HARDENING_ARGS, *_sandbox_user_args(), *_writable_cache_args(self.image),
+                 "--network", self._network, "--memory", "2g", "--cpus", "2",
+                 *_HARDENING_ARGS, *self._extra_run_args,
+                 *_sandbox_user_args(), *_writable_cache_args(self.image),
                  "-v", f"{self.root}:/workspace", "-w", "/workspace",
                  self.image, "sleep", "infinity"],
                 capture_output=True, timeout=20, check=True,
@@ -518,9 +576,13 @@ class DockerSandbox:
             print(f"[optarena] could not start {engine} sandbox: {exc}", file=sys.stderr)
             return False
         self.active = True
-        _active_sandboxes[self.image] = self
-        print(f"[optarena] {engine} sandbox: {self.name} (image {self.image}) - "
-              f"one container for this whole run")
+        if self._register:
+            _active_sandboxes[self.image] = self
+            print(f"[optarena] {engine} sandbox: {self.name} (image {self.image}) - "
+                  f"one container for this whole run")
+        else:
+            print(f"[optarena] {engine} sandbox: {self.name} (image {self.image}) - "
+                  f"dedicated to one case")
         return True
 
     def stop(self) -> None:
@@ -531,6 +593,23 @@ class DockerSandbox:
         # cleanup, called from a `finally`, and must never raise - a failed
         # stop/rm here just means a leftover `--rm` container the engine's
         # own garbage collection (or the next `sandbox build`) will reclaim.
+        # exec_attached()'s Popens are the HOST-side exec client process, not
+        # a child of the container's own `sleep infinity` PID 1 - stopping
+        # the container kills the in-container server they were talking to,
+        # but doesn't by itself reap this side of the pipe. Best-effort, same
+        # as everything else in this method: called from a `finally`, must
+        # never raise.
+        for proc in self._attached:
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+            except OSError:
+                pass
+        self._attached.clear()
         if self.active:
             engine = container_engine()
             try:
@@ -567,6 +646,47 @@ class DockerSandbox:
             full_cmd, capture_output=True, text=True,
             timeout=timeout + 10, encoding="utf-8", errors="replace",
         )
+
+    def exec_attached(self, cmd: list[str], case_root: Path,
+                      env: dict[str, str] | None = None) -> subprocess.Popen:
+        """Launch a long-lived process INSIDE the shared container, attached
+        via piped stdin/stdout/stderr - for a process you talk to over its
+        own protocol (e.g. an MCP server's stdio JSON-RPC loop), not a
+        one-shot command whose output you just capture (that's ``exec()``
+        above). No ``timeout`` wrapper here: the caller owns per-request
+        timeouts (see ``_mcp_client.MCPStdioClient``), this method only owns
+        process lifecycle. Text-mode, line-buffered, UTF-8 - what
+        ``MCPStdioClient`` expects. Tracked in ``self._attached`` so
+        ``stop()`` tears it down; the caller should still call ``.terminate()``/
+        close its own client first for a graceful exit where possible.
+
+        ``env`` becomes ``-e KEY=VALUE`` flags on the exec - how the host
+        side passes per-launch facts (e.g. the sandbox's own name, so an
+        in-container wrapper script can derive HOST-visible resource names
+        the host can later reap - see start-k8s-mcp.sh).
+
+        stderr is drained continuously into ``proc.stderr_tail`` (a bounded
+        deque of lines) by a daemon thread. Draining is load-bearing, not a
+        convenience: MCP's spec blesses stderr for server logging, and a
+        server that writes more than the OS pipe buffer (~64KB) to an
+        UNdrained pipe blocks on that write forever - the session hangs and
+        the case burns its whole timeout (B-1 in the tool-call audit; kind's
+        cluster-create progress goes through exactly this pipe). The tail
+        doubles as the diagnostics callers surface on handshake failure.
+        """
+        rel = case_root.resolve().relative_to(self.root).as_posix()
+        env_args: list[str] = []
+        for key, value in (env or {}).items():
+            env_args += ["-e", f"{key}={value}"]
+        full_cmd = [container_engine(), "exec", "-i", *env_args,
+                    "-w", f"/workspace/{rel}", self.name, *cmd]
+        proc = subprocess.Popen(
+            full_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1, encoding="utf-8", errors="replace",
+        )
+        proc.stderr_tail = _start_stderr_drain(proc.stderr)  # type: ignore[attr-defined]
+        self._attached.append(proc)
+        return proc
 
     def reap(self) -> None:
         """

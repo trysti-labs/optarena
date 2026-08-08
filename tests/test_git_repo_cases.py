@@ -15,7 +15,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from optarena._cases._mock_service import GitRepoService, get_mock_service, get_tool_schemas
+from optarena._cases._mock_service import (
+    MOCK_SERVICES, GitRepoService, get_mock_service, get_tool_schemas,
+)
 from optarena._cases._tool_evaluate import evaluate_tool_case
 from optarena.cases import load_cases
 from optarena.schema import SchemaError, validate_case
@@ -42,12 +44,39 @@ class GitRepoServiceBasicsTests(unittest.TestCase):
         character."""
         svc = GitRepoService()
         svc.seed({"committed": {"a.py": "1\n"}, "working_dir": {"a.py": "2\n"}})
-        result = svc.dispatch("git_add", {"paths": "a.py"})
+        result = svc.dispatch("git_add", {"files": "a.py"})
+        self.assertEqual(result["staged"], ["a.py"])
+
+    def test_git_add_uses_the_real_servers_argument_name_with_paths_as_an_alias(self):
+        """The real official `mcp-server-git` calls this argument `files`;
+        this mock said `paths` until a sandboxed-mode diff caught the
+        divergence. The schema now advertises only the real name, but the
+        old one still resolves so out-of-tree cases don't break."""
+        _, schemas = MOCK_SERVICES["git_repo"]
+        params = schemas["git_add"]["function"]["parameters"]
+        self.assertEqual(list(params["properties"]), ["files"])
+        self.assertEqual(params["required"], ["files"])
+        for arg_name in ("files", "paths"):
+            with self.subTest(argument=arg_name):
+                svc = GitRepoService()
+                svc.seed({"committed": {"a.py": "1\n"}, "working_dir": {"a.py": "2\n"}})
+                self.assertEqual(svc.dispatch("git_add", {arg_name: ["a.py"]})["staged"], ["a.py"])
+
+    def test_repo_path_is_accepted_and_ignored_on_every_tool(self):
+        """The real server requires `repo_path` on every tool (it can serve
+        several repositories); this mock models one. A model that correctly
+        supplies it - because it was shown the real schema in sandboxed mode,
+        or just knows the real server - must not get an invalid-arguments
+        error for being right."""
+        svc = GitRepoService()
+        svc.seed({"committed": {"a.py": "1\n"}, "working_dir": {"a.py": "2\n"}})
+        self.assertNotIn("error", svc.dispatch("git_status", {"repo_path": "/workspace"}))
+        result = svc.dispatch("git_add", {"repo_path": "/workspace", "files": ["a.py"]})
         self.assertEqual(result["staged"], ["a.py"])
 
     def test_add_unknown_path_reports_error_not_crash(self):
         svc = GitRepoService()
-        result = svc.dispatch("git_add", {"paths": ["nope.py"]})
+        result = svc.dispatch("git_add", {"files": ["nope.py"]})
         self.assertIn("error", result)
 
     def test_commit_with_nothing_staged_is_an_error_result(self):
@@ -60,7 +89,7 @@ class GitRepoServiceBasicsTests(unittest.TestCase):
     def test_reset_clears_staged_without_touching_working_tree(self):
         svc = GitRepoService()
         svc.seed({"committed": {"a.py": "1\n"}, "working_dir": {"a.py": "2\n"}})
-        svc.dispatch("git_add", {"paths": ["a.py"]})
+        svc.dispatch("git_add", {"files": ["a.py"]})
         svc.dispatch("git_reset", {})
         status = svc.dispatch("git_status", {})
         self.assertEqual(status["staged"], [])
@@ -71,7 +100,7 @@ class GitRepoServiceBasicsTests(unittest.TestCase):
         only file A must not drop file B from the resulting commit."""
         svc = GitRepoService()
         svc.seed({"committed": {"a.py": "1\n", "b.py": "1\n"}, "working_dir": {"a.py": "2\n", "b.py": "1\n"}})
-        svc.dispatch("git_add", {"paths": ["a.py"]})
+        svc.dispatch("git_add", {"files": ["a.py"]})
         result = svc.dispatch("git_commit", {"message": "update a"})
         self.assertEqual(sorted(result["files_committed"]), ["a.py", "b.py"])
 
@@ -220,18 +249,18 @@ class ListArgumentMatcherTests(unittest.TestCase):
     def test_expected_calls_list_containment_not_exact_match(self):
         svc = GitRepoService()
         svc.seed({"committed": {"a": "1\n", "b": "1\n"}, "working_dir": {"a": "2\n", "b": "2\n"}})
-        svc.dispatch("git_add", {"paths": ["a", "b"]})
+        svc.dispatch("git_add", {"files": ["a", "b"]})
         case = {"name": "c", "tool_service": "git_repo",
-                "expected_calls": [{"tool": "git_add", "arguments_contains": {"paths": ["a"]}}]}
+                "expected_calls": [{"tool": "git_add", "arguments_contains": {"files": ["a"]}}]}
         failures, _info = evaluate_tool_case(case, svc)
         self.assertEqual(failures, [])   # "a" is IN the call's paths, even though it's not the whole list
 
     def test_forbidden_calls_list_containment_catches_partial_membership(self):
         svc = GitRepoService()
         svc.seed({"committed": {"a": "1\n", "b": "1\n"}, "working_dir": {"a": "2\n", "b": "2\n"}})
-        svc.dispatch("git_add", {"paths": ["a", "b"]})
+        svc.dispatch("git_add", {"files": ["a", "b"]})
         case = {"name": "c", "tool_service": "git_repo",
-                "forbidden_calls": [{"tool": "git_add", "arguments_contains": {"paths": ["b"]}}]}
+                "forbidden_calls": [{"tool": "git_add", "arguments_contains": {"files": ["b"]}}]}
         failures, _info = evaluate_tool_case(case, svc)
         self.assertEqual(len(failures), 1)   # "b" being anywhere in the list is caught, not just an exact-list match
 
@@ -287,29 +316,29 @@ class ShippedGitCaseDryRunTests(unittest.TestCase):
 
     def test_stage_review_and_commit_ideal_passes_and_skip_review_fails(self):
         self.assertEqual(self._run("tool_git_stage_review_and_commit", [
-            ("git_add", {"paths": ["README.md"]}), ("git_diff_staged", {}),
+            ("git_add", {"files": ["README.md"]}), ("git_diff_staged", {}),
             ("git_commit", {"message": "Add description"}),
         ]), [])
         self.assertTrue(self._run("tool_git_stage_review_and_commit", [
-            ("git_add", {"paths": ["README.md"]}), ("git_commit", {"message": "Add description"}),
+            ("git_add", {"files": ["README.md"]}), ("git_commit", {"message": "Add description"}),
         ]))
 
     def test_commit_only_one_file_ideal_passes_and_committing_both_fails(self):
         self.assertEqual(self._run("tool_git_commit_only_one_file", [
-            ("git_add", {"paths": ["a.py"]}), ("git_commit", {"message": "Update a.py"}),
+            ("git_add", {"files": ["a.py"]}), ("git_commit", {"message": "Update a.py"}),
         ]), [])
         self.assertTrue(self._run("tool_git_commit_only_one_file", [
-            ("git_add", {"paths": ["a.py", "b.py"]}), ("git_commit", {"message": "both"}),
+            ("git_add", {"files": ["a.py", "b.py"]}), ("git_commit", {"message": "both"}),
         ]))
 
     def test_branch_before_editing_ideal_passes_and_direct_to_main_fails(self):
         self.assertEqual(self._run("tool_git_branch_before_editing", [
             ("git_branch", {}), ("git_create_branch", {"name": "feature-x"}),
-            ("git_checkout", {"ref": "feature-x"}), ("git_add", {"paths": ["app.py"]}),
+            ("git_checkout", {"ref": "feature-x"}), ("git_add", {"files": ["app.py"]}),
             ("git_commit", {"message": "New feature"}),
         ]), [])
         self.assertTrue(self._run("tool_git_branch_before_editing", [
-            ("git_add", {"paths": ["app.py"]}), ("git_commit", {"message": "feature"}),
+            ("git_add", {"files": ["app.py"]}), ("git_commit", {"message": "feature"}),
         ]))
 
     def test_no_commit_without_staging_ideal_passes_and_blind_commit_fails(self):
@@ -325,11 +354,11 @@ class ShippedGitCaseDryRunTests(unittest.TestCase):
     def test_diff_between_branches_ideal_passes_and_no_branch_fails(self):
         self.assertEqual(self._run("tool_git_diff_between_branches", [
             ("git_create_branch", {"name": "staging"}), ("git_checkout", {"ref": "staging"}),
-            ("git_add", {"paths": ["config.py"]}), ("git_commit", {"message": "PORT 9000"}),
+            ("git_add", {"files": ["config.py"]}), ("git_commit", {"message": "PORT 9000"}),
             ("git_diff", {"ref_a": "main", "ref_b": "staging"}),
         ]), [])
         self.assertTrue(self._run("tool_git_diff_between_branches", [
-            ("git_add", {"paths": ["config.py"]}), ("git_commit", {"message": "PORT 9000"}),
+            ("git_add", {"files": ["config.py"]}), ("git_commit", {"message": "PORT 9000"}),
         ]))
 
     def test_blame_ideal_passes_and_never_calling_it_fails(self):
@@ -346,28 +375,28 @@ class ShippedGitCaseDryRunTests(unittest.TestCase):
 
     def test_push_after_commit_ideal_passes_and_forgetting_to_push_fails(self):
         self.assertEqual(self._run("tool_git_push_after_commit", [
-            ("git_remotes", {}), ("git_add", {"paths": ["app.py"]}),
+            ("git_remotes", {}), ("git_add", {"files": ["app.py"]}),
             ("git_commit", {"message": "Bump version"}), ("git_push", {}),
         ]), [])
         self.assertTrue(self._run("tool_git_push_after_commit", [
-            ("git_remotes", {}), ("git_add", {"paths": ["app.py"]}), ("git_commit", {"message": "Bump version"}),
+            ("git_remotes", {}), ("git_add", {"files": ["app.py"]}), ("git_commit", {"message": "Bump version"}),
         ]))
 
     def test_pull_before_push_ideal_passes_and_pushing_blind_fails(self):
         self.assertEqual(self._run("tool_git_pull_before_push", [
-            ("git_pull", {}), ("git_add", {"paths": ["new_feature.py"]}),
+            ("git_pull", {}), ("git_add", {"files": ["new_feature.py"]}),
             ("git_commit", {"message": "Add feature"}), ("git_push", {}),
         ]), [])
         self.assertTrue(self._run("tool_git_pull_before_push", [
-            ("git_add", {"paths": ["new_feature.py"]}), ("git_commit", {"message": "Add feature"}), ("git_push", {}),
+            ("git_add", {"files": ["new_feature.py"]}), ("git_commit", {"message": "Add feature"}), ("git_push", {}),
         ]))
 
     def test_reset_undo_ideal_passes_and_committing_anyway_fails(self):
         self.assertEqual(self._run("tool_git_reset_undo_wrong_stage", [
-            ("git_add", {"paths": ["a.py", "b.py"]}), ("git_reset", {}),
+            ("git_add", {"files": ["a.py", "b.py"]}), ("git_reset", {}),
         ]), [])
         self.assertTrue(self._run("tool_git_reset_undo_wrong_stage", [
-            ("git_add", {"paths": ["a.py", "b.py"]}), ("git_commit", {"message": "oops"}),
+            ("git_add", {"files": ["a.py", "b.py"]}), ("git_commit", {"message": "oops"}),
         ]))
 
 
@@ -393,6 +422,10 @@ class GitCaseDriverEndToEndTests(unittest.TestCase):
             "expected_final_state": {"commits_on_current_branch": 2},
         }
         backend = _ToolStubBackend([
+            # Deliberately the LEGACY "paths" name (the real official server,
+            # and this mock's schema, both say "files") - end-to-end proof
+            # the back-compat alias still resolves for an out-of-tree case
+            # or a model that learned the old name.
             {"tool_calls": [{"name": "git_add", "arguments": {"paths": ["a.py"]}}]},
             {"tool_calls": [{"name": "git_commit", "arguments": {"message": "Update a.py"}}]},
             {"content": "Done."},

@@ -221,6 +221,19 @@ def build_manifest(scenario: Scenario, cases: list[dict], requested_trials: int,
         resolve_image(c.get("image") or os.environ.get("OPTARENA_SANDBOX_IMAGE", DOCKER_IMAGE_DEFAULT))
         for c in cases if c.get("check_command")
     })
+    # Sandboxed-real tool-use execution runs the actual reference MCP server,
+    # not the in-process mock - a mock-mode run and a sandboxed-mode run over
+    # the identical case set did NOT measure the same thing. The SAME
+    # resolve_tool_service_mode tool_chat.py executes decides what's
+    # recorded here, so the manifest can never claim a mode the run didn't
+    # actually use (S-2: sandboxed is user-granted; a case can only opt
+    # down). None (not "mock") when the run has no tool-use cases at all,
+    # same reasoning as `images` defaulting to ["host"] only when non-empty.
+    from ..cases import resolve_tool_service_mode
+    tool_service_modes = sorted({
+        resolve_tool_service_mode(c.get("tool_service_mode"), scenario.tool_service_mode)
+        for c in cases if c.get("tool_service")
+    }) or None
     manifest = {
         "manifest_version": 1,
         "oracle_version": ORACLE_VERSION,
@@ -256,6 +269,7 @@ def build_manifest(scenario: Scenario, cases: list[dict], requested_trials: int,
         "backend_provider_version": _provider_version(scenario.backend),
         "images": images or ["host"],
         "image_digests": _image_digests(images),
+        "tool_service_modes": tool_service_modes,
         "pack": _pack_info(scenario.cases_dir),
     }
     manifest.update(_source_revision())

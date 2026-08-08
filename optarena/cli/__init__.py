@@ -58,11 +58,14 @@ from ._constants import REPO_ROOT
 from ._doctor import cmd_doctor
 from ._run import (
     _EXPECTED_RUN_ERRORS,
+    _apply_pack_shorthand,
     _confirm_host_native_execution,
     _format_expected_error,
     _scenario_from_args,
     _warn_baseline_incompatible,
+    cmd_agent,
     cmd_compare,
+    cmd_model,
     cmd_regression,
     cmd_run,
 )
@@ -74,8 +77,8 @@ from ._serve import _ScopedDashboardHandler, cmd_serve
 __all__ = [
     "REPO_ROOT", "main", "main_exit",
     "_EXPECTED_RUN_ERRORS", "_format_expected_error", "_scenario_from_args",
-    "_warn_baseline_incompatible", "_confirm_host_native_execution",
-    "cmd_run", "cmd_compare", "cmd_regression", "cmd_list",
+    "_warn_baseline_incompatible", "_confirm_host_native_execution", "_apply_pack_shorthand",
+    "cmd_run", "cmd_model", "cmd_agent", "cmd_compare", "cmd_regression", "cmd_list",
     "_SAMPLE_CASE", "cmd_init", "cmd_cases_pack", "cmd_cases_install", "cmd_cases_packs",
     "cmd_cases_trust_publisher", "cmd_case_show", "cmd_case_groups", "cmd_validate", "cmd_verify_corpus",
     "cmd_run_show", "cmd_runs_rebuild_index", "cmd_runs_prune", "cmd_runs_scrub_secrets",
@@ -203,6 +206,15 @@ def main(argv: list[str] | None = None) -> int:
                                       "(see `optarena cases groups`)")
     p_run.add_argument("-k", "--like", help="only run cases whose name contains this substring "
                                             "(case-insensitive)")
+    p_run.add_argument("--tool-service-mode", choices=["mock", "sandboxed"],
+                        help="how tool-use cases execute: 'mock' (default) uses the in-process "
+                             "approximation; 'sandboxed' runs the real reference MCP server "
+                             "inside a container (see `optarena sandbox status`). Sandboxed "
+                             "execution is granted HERE (or in the scenario), never by case "
+                             "content: a case's own tool_service_mode can opt itself down to "
+                             "mock, but never up to sandboxed. The docker/kubernetes services "
+                             "additionally require OPTARENA_ALLOW_HOST_DOCKER=1 (they reach "
+                             "the real host Docker daemon).")
     p_run.add_argument("--timeout", type=int, help="per-case timeout override (s)")
     p_run.add_argument("--trials", type=int, default=1,
                        help="run each case N times; majority verdict + per-trial detail (default 1)")
@@ -240,6 +252,102 @@ def main(argv: list[str] | None = None) -> int:
                              "checkpoint_saved, run_completed) - human console output is "
                              "unaffected unless --quiet/--log-level also asks to suppress it")
     p_run.set_defaults(fn=cmd_run)
+
+    # `model`/`agent` are opinionated front doors onto `run` (see _run.py's
+    # _execute_scenarios): the shared execution/save/auto-compare tail is
+    # identical, they only differ in how the scenario list gets built, so
+    # their flag sets below intentionally mirror p_run's rather than
+    # inventing a second vocabulary for the same settings.
+    p_model = sub.add_parser(
+        "model", help="compare raw models directly, no agent in the loop (coding or tool-call)")
+    p_model.add_argument("models", nargs="+", metavar="MODEL",
+                         help="two or more model names to compare (exactly 2 auto-compares; "
+                              "more prints a summary table - see `optarena compare` for any pair)")
+    mode = p_model.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--coding", action="store_true",
+                      help="filesystem-oracle coding cases, via the raw chat-completion driver "
+                           "(ollama-chat/openai-chat depending on --kind)")
+    mode.add_argument("--tool-call", action="store_true",
+                      help="tool-use cases, via the raw tool-calling driver "
+                           "(ollama-tools/openai-tools depending on --kind)")
+    p_model.add_argument("--name", help="prefix for each scenario's name (default: driver-model)")
+    p_model.add_argument("--kind", default="ollama", choices=["ollama", "openai"])
+    p_model.add_argument("--base-url", default=os.environ.get("OPTARENA_BASE_URL", "http://localhost:11434"))
+    p_model.add_argument("--api-key", default=os.environ.get("OPTARENA_API_KEY", "optarena"))
+    p_model.add_argument("--num-ctx", type=int, default=None,
+                         help="Ollama context length override - only honored under --coding "
+                              "with --kind ollama (native /api/chat)")
+    p_model.add_argument("--cases", help="comma-separated case names (default all)")
+    p_model.add_argument("--cases-dir", help="load cases from this directory instead of the built-in catalogue")
+    p_model.add_argument("--pack", help="run an installed case pack by name or name@version; "
+                                        "shorthand for --cases-dir")
+    p_model.add_argument("--language", help="only run cases tagged with this language")
+    p_model.add_argument("--framework", help="only run cases tagged with this framework")
+    p_model.add_argument("--tool-service", help="with --tool-call: only these tool_service(s), "
+                                                "comma-separated (see `optarena cases groups`)")
+    p_model.add_argument("--tags", help="only run cases matching this boolean tag expression")
+    p_model.add_argument("-k", "--like", help="only run cases whose name contains this substring")
+    p_model.add_argument("--tool-service-mode", choices=["mock", "sandboxed"],
+                         help="with --tool-call: 'mock' (default) or 'sandboxed' (the real "
+                              "reference MCP server, in a container - see `optarena sandbox status`)")
+    p_model.add_argument("--timeout", type=int, help="per-case timeout override (s)")
+    p_model.add_argument("--trials", type=int, default=1, help="run each case N times (default 1)")
+    p_model.add_argument("--parallel", type=int, default=1, help="worker threads (default 1)")
+    p_model.add_argument("--allow-empty", action="store_true",
+                         help="permit a run whose filters resolve to zero cases")
+    p_model.add_argument("--keep-workspace", action="store_true")
+    p_model.add_argument("--security-scan", action="store_true")
+    p_model.add_argument("--log-level", choices=LOG_LEVELS, default="info")
+    p_model.add_argument("--quiet", action="store_true")
+    p_model.add_argument("--json-events", action="store_true")
+    p_model.set_defaults(fn=cmd_model)
+
+    p_agent = sub.add_parser(
+        "agent", help="compare (driver, model) pairs directly - same agent/different model, "
+                      "or different agent/different model, your choice, not crossed")
+    p_agent.add_argument("agents", nargs="+", metavar="DRIVER@MODEL",
+                         help="two or more driver@model pairs to compare, e.g. "
+                              "aider@gemma4:12b goose@qwen3-coder:30b (repeat the driver for "
+                              "same-agent-different-model; `optarena drivers list` for choices)")
+    amode = p_agent.add_mutually_exclusive_group(required=True)
+    amode.add_argument("--coding", action="store_true", help="filesystem-oracle coding cases")
+    amode.add_argument("--tool-call", action="store_true",
+                       help="tool-use cases: the agent is pointed at the REAL sandboxed MCP "
+                            "server as its own MCP client (implies --tool-service-mode "
+                            "sandboxed - there is no in-process mock an external agent could "
+                            "reach). Only agents with verified headless MCP-client flags "
+                            "support this; the others are refused by name")
+    p_agent.add_argument("--tool-service", help="with --tool-call: only these tool_service(s), "
+                                                "comma-separated (see `optarena cases groups`)")
+    p_agent.add_argument("--name", help="prefix for each scenario's name (default: driver-model)")
+    p_agent.add_argument("--kind", default="ollama", choices=["ollama", "openai"])
+    p_agent.add_argument("--base-url", default=os.environ.get("OPTARENA_BASE_URL", "http://localhost:11434"))
+    p_agent.add_argument("--api-key", default=os.environ.get("OPTARENA_API_KEY", "optarena"))
+    p_agent.add_argument("--num-ctx", type=int, default=None)
+    p_agent.add_argument("--cases", help="comma-separated case names (default all)")
+    p_agent.add_argument("--cases-dir", help="load cases from this directory instead of the built-in catalogue")
+    p_agent.add_argument("--pack", help="run an installed case pack by name or name@version; "
+                                        "shorthand for --cases-dir")
+    p_agent.add_argument("--language", help="only run cases tagged with this language")
+    p_agent.add_argument("--framework", help="only run cases tagged with this framework")
+    p_agent.add_argument("--tags", help="only run cases matching this boolean tag expression")
+    p_agent.add_argument("-k", "--like", help="only run cases whose name contains this substring")
+    p_agent.add_argument("--timeout", type=int, help="per-case timeout override (s)")
+    p_agent.add_argument("--trials", type=int, default=1, help="run each case N times (default 1)")
+    p_agent.add_argument("--parallel", type=int, default=1, help="worker threads (default 1)")
+    p_agent.add_argument("--allow-empty", action="store_true",
+                         help="permit a run whose filters resolve to zero cases")
+    p_agent.add_argument("--keep-workspace", action="store_true")
+    p_agent.add_argument("--security-scan", action="store_true")
+    p_agent.add_argument("--yes-i-understand-host-execution", action="store_true",
+                         help="required (non-interactively) before running a `cli`-kind driver "
+                              "(aider, Claude Code, Codex, ...): these run headlessly on the "
+                              "HOST with your real filesystem/environment/credentials - only "
+                              "the verifier sandbox is containerized (see SECURITY.md)")
+    p_agent.add_argument("--log-level", choices=LOG_LEVELS, default="info")
+    p_agent.add_argument("--quiet", action="store_true")
+    p_agent.add_argument("--json-events", action="store_true")
+    p_agent.set_defaults(fn=cmd_agent)
 
     p_cmp = sub.add_parser("compare", help="compare two saved runs")
     p_cmp.add_argument("run_a")
@@ -299,6 +407,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="also fail when a case declares nothing that must FAIL "
                              "(no broken_solutions and no implicit 'unmodified' check) - "
                              "such a case only ever proves its oracle can pass")
+    pc_ver.add_argument("--sandboxed", action="store_true",
+                        help="for matched tool-use cases, also check their tool names against "
+                             "the REAL sandboxed MCP server's live tools/list (schema drift, "
+                             "not a model run - see --tool-service-mode on `optarena run`)")
     pc_ver.set_defaults(fn=cmd_verify_corpus)
     pc_pack = cases_sub.add_parser("pack", help="bundle a cases dir into a shareable, versioned pack file")
     pc_pack.add_argument("dir", help="directory of case JSONs to pack")

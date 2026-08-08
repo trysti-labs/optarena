@@ -1,0 +1,9 @@
+{
+  "name": "optarena-sandbox-mcp-package-registry",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Sandbox image dependency pin for the real package-registry-mcp MCP server - see docker/mcp-package-registry/Dockerfile.",
+  "dependencies": {
+    "package-registry-mcp": "2.1.0"
+  }
+}

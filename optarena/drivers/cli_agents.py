@@ -23,12 +23,14 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 
+from .._cases._agent_tool_use import run_agent_tool_case
 from ..cases import (
     apply_disruptions, changed_files, check_expected, evaluate_case,
     evaluate_case_isolated, prepare_workspace, run_capture, snapshot,
@@ -36,6 +38,53 @@ from ..cases import (
 from ..scenario import Scenario
 from ..security import redact_secrets
 from .base import CaseResult, Driver, subprocess_env
+
+
+def _claude_mcp_client(proxy_argv: list[str], service_name: str, workspace: Path) -> dict:
+    """Claude Code: `--mcp-config <file> --strict-mcp-config` - a JSON file
+    naming ONE server (our proxy invocation), with strict-mode ignoring the
+    user's own project/personal MCP config entirely. Real, documented CLI
+    flags (code.claude.com/docs/mcp-quickstart), not a `.mcp.json` written
+    into the workspace - avoids ever touching a file Claude Code would also
+    read from its normal project-scope discovery."""
+    config = {"mcpServers": {service_name: {"command": proxy_argv[0], "args": proxy_argv[1:]}}}
+    fd, path = tempfile.mkstemp(prefix="optarena-claude-mcp-", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    return {"argv": ["--mcp-config", path, "--strict-mcp-config"], "env": {}, "cleanup": [path]}
+
+
+def _goose_mcp_client(proxy_argv: list[str], service_name: str, workspace: Path) -> dict:
+    """goose: `--with-extension "command args..." --no-profile` - session-
+    scoped (verified live via `goose run --help`, not assumed from docs),
+    no `~/.config/goose/config.yaml` mutation. `--no-profile` additionally
+    drops the user's own configured extensions for this run, so the model
+    sees ONLY the one real MCP server under test, not whatever else the
+    user happens to have enabled.
+
+    The command is a generated launcher named after the SERVICE rather than
+    `python -m optarena...` directly, because goose derives the extension
+    name - and therefore the tool namespace the model actually sees - from
+    the command's binary. Invoked directly, every tool reached the model as
+    `python_exe__list_allowed_directories` (observed live, not guessed);
+    via the launcher it is `filesystem__list_allowed_directories`. The
+    oracle is unaffected either way (the proxy logs the raw MCP tool name,
+    not goose's alias), but a model shown a nonsense namespace may call
+    tools less readily - which would show up as a worse score for the
+    MODEL when the cause was our own plumbing.
+    """
+    launcher_dir = Path(tempfile.mkdtemp(prefix="optarena-goose-ext-"))
+    if os.name == "nt":
+        launcher = launcher_dir / f"{service_name}.cmd"
+        body = "@echo off\r\n" + subprocess.list2cmdline(proxy_argv) + " %*\r\n"
+        launcher.write_text(body, encoding="utf-8")
+    else:
+        launcher = launcher_dir / service_name
+        body = "#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in proxy_argv) + ' "$@"\n'
+        launcher.write_text(body, encoding="utf-8")
+        launcher.chmod(0o755)
+    return {"argv": ["--with-extension", str(launcher), "--no-profile"],
+            "env": {}, "cleanup": [launcher, launcher_dir]}
 
 
 def parse_claude_json_metrics(stdout: str) -> dict:
@@ -141,6 +190,7 @@ CLI_AGENTS: dict[str, dict] = {
         # since the allowlist otherwise wouldn't hand it through anymore.
         "auth_env": ("ANTHROPIC_API_KEY",),
         "parse_metrics": parse_claude_json_metrics,
+        "mcp_client": _claude_mcp_client,
     },
     "codex": {
         "label":    "Codex CLI",
@@ -177,6 +227,7 @@ CLI_AGENTS: dict[str, dict] = {
             "OPENAI_API_KEY": backend.api_key,
         },
         "scrub_env_prefixes": (),
+        "mcp_client": _goose_mcp_client,
     },
     "qwen-code": {
         "label":    "Qwen Code",
@@ -219,6 +270,14 @@ class CLIAgentDriver(Driver):
                   f"comparisons are valid; backend-vs-backend are not.")
 
     def run_case(self, case: dict, scenario: Scenario, workspace: Path) -> CaseResult:
+        # A tool-use case (tool_service set) has no expected_files/
+        # check_command at all - the filesystem oracle below would find
+        # nothing to check and read as a trivial, meaningless pass. Route
+        # to the MCP-proxy path instead; see _run_tool_case and
+        # _cases/_agent_tool_use.py for why this needs its own flow rather
+        # than reusing anything below.
+        if case.get("tool_service"):
+            return self._run_tool_case(case, scenario, workspace)
         result = CaseResult(name=case["name"])
         timeout = scenario.timeout or case.get("timeout", 180)
         prepare_workspace(workspace, case)
@@ -367,4 +426,45 @@ class CLIAgentDriver(Driver):
             # The final prompt's real-oracle verdict IS the case verdict -
             # reuse it rather than re-running check_command a second time.
             steps[-1]["oracle_ok"] = result.passed
+        return result
+
+    def _run_tool_case(self, case: dict, scenario: Scenario, workspace: Path) -> CaseResult:
+        """Tool-use case, real agent as the MCP client - see
+        `_cases/_agent_tool_use.py` for the actual orchestration (sandbox
+        lifecycle, proxy wiring, oracle). This method only translates
+        between the two: builds the agent's normal prompt argv/env exactly
+        like the coding path above, hands off, then maps the result dict
+        onto `CaseResult` with the same execution_ok/error/passed
+        conventions `run_case` uses."""
+        result = CaseResult(name=case["name"])
+        timeout = scenario.timeout or case.get("timeout", 180)
+        # Tool-use cases are effectively single-turn in practice (no
+        # disruptions concept exists for this domain) - joining multiple
+        # prompts degrades reasonably rather than silently dropping any.
+        prompt = "\n\n".join(case.get("prompts") or [""])
+        base_argv = self.spec["argv"](prompt, scenario.backend)
+        env = subprocess_env(self.spec["env"](scenario.backend),
+                             passthrough=self.spec.get("auth_env", ()))
+        env = {k: v for k, v in env.items()
+               if not any(k.startswith(p) for p in self.spec["scrub_env_prefixes"])}
+        known_secrets = [scenario.backend.api_key] + [
+            env.get(k) for k in self.spec.get("auth_env", ())]
+
+        outcome = run_agent_tool_case(
+            self.spec, self._binary, base_argv, env, case,
+            getattr(scenario, "tool_service_mode", None), workspace, timeout,
+        )
+        result.duration_s = outcome.get("duration_s", 0.0)
+        result.error = outcome.get("error")
+        result.execution_ok = outcome.get("execution_ok", True)
+        if outcome.get("stderr"):
+            result.extra["stderr"] = redact_secrets(outcome["stderr"], known_secrets)
+        result.extra["tool_calls"] = outcome.get("call_log", [])
+        result.extra["oracle"] = outcome.get("oracle", {})
+        if outcome.get("mcp_server_hint"):
+            result.extra["mcp_server_impl"] = outcome["mcp_server_hint"]
+        if outcome.get("sandboxed_downgraded"):
+            result.extra["sandboxed_downgraded"] = True
+        result.failures = outcome.get("failures", [])
+        result.passed = result.execution_ok and result.error is None and not result.failures
         return result

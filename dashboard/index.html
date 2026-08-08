@@ -409,7 +409,33 @@ function manifestCompatibility(manA, manB) {
   if (manA.trials !== manB.trials) {
     reasons.push(`different trial count (${manA.trials} vs ${manB.trials})`);
   }
+  // Must stay in lockstep with compare.manifest_compatibility's gating
+  // fields. This mirror silently fell one field behind when
+  // tool_service_modes was added on the Python side, so a mock-vs-sandboxed
+  // pair was correctly blocked in the CLI while this UI showed a clean,
+  // confident verdict. tests/test_optarena.py asserts the two field lists
+  // agree so that can't recur unnoticed.
+  if (JSON.stringify(manA.tool_service_modes) !== JSON.stringify(manB.tool_service_modes)) {
+    reasons.push(`different tool-service execution mode (${JSON.stringify(manA.tool_service_modes)} vs ${JSON.stringify(manB.tool_service_modes)})`);
+  }
   return { comparable: reasons.length === 0, verified: true, reasons };
+}
+
+// Mirror of compare.manifest_differences: the evidence-only axes a
+// comparison is legitimately FOR (tool-vs-tool, model-vs-model). Never
+// suppresses a verdict - but a verdict that doesn't say what changed is a
+// number, not evidence.
+function manifestDifferences(manA, manB) {
+  if (!manA || !manB) return [];
+  const fields = [["driver", "driver"], ["driver version", "driver_version"],
+                  ["model", "backend_model"], ["backend", "backend_base_url"]];
+  const out = [];
+  for (const [label, key] of fields) {
+    if (manA[key] !== manB[key]) {
+      out.push(`${label}: ${manA[key] ?? "-"} vs ${manB[key] ?? "-"}`);
+    }
+  }
+  return out;
 }
 
 function compareHTML(runA, runB) {
@@ -513,6 +539,16 @@ function compareHTML(runA, runB) {
         ${compat.reasons.map(esc).join("; ")}${suppressed ? ". Overall winner tiles suppressed; per-case rows below cover shared cases only." : ""}
       </div>` : "";
 
+  // What differed on the intentional axes (driver/model/backend/tool
+  // server). Not a warning - these are what the comparison is FOR - but a
+  // verdict with nothing on screen saying B was a different MCP server is
+  // not evidence.
+  const diffs = manifestDifferences(runA.manifest, runB.manifest);
+  const diffBanner = diffs.length
+    ? `<div class="empty" style="text-align:left;padding:6px 0">
+        ${diffs.map(esc).join(" &middot; ")}
+      </div>` : "";
+
   // H-07: a missing total_cost_usd means "no cost data reported", which must
   // never be coerced to $0.00 and win. A verdict needs BOTH sides known.
   const fmtCost = (v) => v == null ? "-" : "$" + v.toFixed(2);
@@ -529,7 +565,7 @@ function compareHTML(runA, runB) {
     ? "no cost data for one or both runs"
     : `${fmtCost(sa.total_cost_usd)} vs ${fmtCost(sb.total_cost_usd)}${unpricedNote}`;
 
-  const verdict = `${compatBanner}<div class="tiles" style="margin-bottom:14px">
+  const verdict = `${compatBanner}${diffBanner}<div class="tiles" style="margin-bottom:14px">
     <div class="tile"><div class="label">More accurate</div>
       <div class="value" style="font-size:1.05rem">${suppressed ? "(suppressed)" : (accA === accB ? "tie" : esc(accA > accB ? labelA : labelB))}</div>
       <div class="delta">${fmtPct(accA)}${ciStr(sa)} vs ${fmtPct(accB)}${ciStr(sb)}</div></div>

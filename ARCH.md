@@ -82,7 +82,10 @@ optarena/                       repo root
 │   │   ├── _workspace_setup.py    setup_files/setup_repo/git_init/disruptions
 │   │   ├── _evaluate.py           ties the assertion oracle + check_command together
 │   │   ├── _mock_service.py       tool-use cases: in-process mock API + tool registry (§3.5)
-│   │   └── _tool_evaluate.py      tool-use cases: the call-log/final-state oracle (§3.5)
+│   │   ├── _tool_evaluate.py      tool-use cases: the call-log/final-state oracle (§3.5)
+│   │   ├── _mcp_client.py         sandboxed-real: minimal MCP stdio JSON-RPC client (§3.6)
+│   │   ├── _mcp_schema.py         sandboxed-real: MCP tools/list → OpenAI-function-schema (§3.6)
+│   │   └── _sandboxed_mcp_service.py  sandboxed-real: SandboxedMCPService + per-service registry (§3.6)
 │   ├── runner/                 executes one scenario → RunRecord
 │   │   ├── _manifest.py           manifest-building (case hashes, ORACLE_VERSION, driver/
 │   │   │                          provider versions, generation params, pack identity, build commit)
@@ -125,7 +128,17 @@ optarena/                       repo root
 │   ├── dotnet/Dockerfile         + dotnet SDK, NuGet cache warmed + offline.nuget.config
 │   ├── check_vuln_baseline.py    Trivy-scan-vs-accepted-baseline gate (§9.2)
 │   ├── check_images_lock.py      dependency-lock validation for all 9 images
-│   └── vuln-baseline/*.json      per-image accepted-vulnerability baselines
+│   ├── vuln-baseline/*.json      per-image accepted-vulnerability baselines
+│   ├── mcp-filesystem/           sandboxed-real: real @modelcontextprotocol/server-filesystem (§3.6)
+│   ├── mcp-git-repo/             sandboxed-real: real official mcp-server-git (§3.6)
+│   ├── mcp-code-intel/           sandboxed-real: real mcp-language-server + pyright (§3.6)
+│   ├── mcp-build-tools/          sandboxed-real: real official nx-mcp (§3.6)
+│   ├── mcp-database/             sandboxed-real: real postgres-mcp + throwaway Postgres (§3.6)
+│   ├── mcp-observability/        sandboxed-real: real grafana/mcp-grafana + throwaway Grafana (§3.6)
+│   ├── mcp-package-registry/     sandboxed-real: real package-registry-mcp, real network (§3.6)
+│   ├── mcp-cloud-infra/          sandboxed-real: real official awslabs.aws-iac-mcp-server (§3.6)
+│   ├── mcp-docker/               sandboxed-real: real mcp-server-docker, docker-outside-of-docker (§3.6)
+│   └── mcp-kubernetes/           sandboxed-real: real mcp-server-kubernetes + real kind cluster (§3.6)
 ├── .github/workflows/           CI, scheduled integration smoke, signed image publishing
 │   ├── ci.yml                    unit tests + coverage, corpus verify, image-vuln-scan, wheel-smoke
 │   ├── publish-images.yml        per-platform build → scan → combine → attest → sign → :latest (§9.2)
@@ -1242,6 +1255,277 @@ everything else here uses. A case is one domain or the other, never both -
   raises, deliberately left open rather than decided
   ahead of actually needing it.
 
+### 3.6 Sandboxed-real execution (`--tool-service-mode sandboxed`)
+
+§3.5's mock services are hand-written approximations - safe and fast, but
+still approximations, maintained separately from the real reference
+implementations they mirror. Sandboxed-real mode runs the ACTUAL open-source
+MCP server binary inside a disposable, hardened container instead: same
+safety guarantee as a mock (isolated, no real credentials, no third-party
+blast radius for most services - see the two explicit exceptions below), the
+real server's real behavior instead of an approximation of it.
+
+- **`SandboxedMCPService`** (`_cases/_sandboxed_mcp_service.py`) satisfies
+  `MockService`'s exact contract (`dispatch`/`call_log`/`seed`/`summary`),
+  so `tool_chat.py`'s driver loop and `_tool_evaluate.py`'s oracle work
+  against it completely unmodified - the only new branch point is
+  `run_case()` resolving which kind of service a case gets. `dispatch()` is
+  a full override (there's no per-tool Python method here, every call
+  funnels through one live `MCPStdioClient.call_tool()`), but still logs to
+  `call_log` in the identical shape and never raises.
+- **`MCPStdioClient`** (`_cases/_mcp_client.py`) is a minimal MCP stdio
+  JSON-RPC client - newline-delimited messages per the spec, a background
+  reader thread feeding a queue so `_recv` can bound-wait without relying on
+  `select` on pipes (unreliable on Windows). A JSON-RPC protocol error and a
+  tool-execution error (`isError: true`) both collapse to the same
+  `{"error": ...}` shape `MockService.dispatch()` already uses, so nothing
+  downstream needs to tell them apart.
+- **`DockerSandbox.exec_attached()`** (`_sandbox.py`) is the one new
+  container-lifecycle capability this needed: every existing sandbox
+  operation (`exec()`, used by `check_command`) is one-shot - spawn, capture
+  output, return. An MCP server is a long-lived process you hold a live
+  stdio session with, so `exec_attached` does `<engine> exec -i` with
+  attached (not captured) pipes and no `timeout` wrapper (the MCP client
+  owns per-request timeouts; this method only owns process lifecycle).
+  Tracked separately from `check_command`'s shared-container pool -
+  sandboxed tool-use cases get ONE DEDICATED container each (via
+  `build_sandboxed_service()`), never shared, since mixing a long-lived
+  attached process into the pool that `--parallel` workers also `exec` into
+  would let a hung MCP server collide with an unrelated case's compile-and-
+  test run.
+- **Mode selection**: sandboxed execution is granted by the USER
+  (`--tool-service-mode sandboxed` or the scenario field), never by case
+  content - a case's own `tool_service_mode` may opt itself DOWN to mock
+  (it knows it doesn't work sandboxed) but can never opt UP (S-2 in the
+  tool-call audit: case packs install from URLs; content that can
+  self-escalate into container launches - and for docker/kubernetes, the
+  host Docker socket - inverts the project's fail-closed posture). This
+  deliberately breaks symmetry with `image`'s case-wins precedence:
+  `image` selects among equally-trusted local images, this field changes
+  what the run may touch. `cases.resolve_tool_service_mode` is the one
+  shared rule - `tool_chat.run_case` (what happens) and the run manifest
+  (what's recorded) both call it, so they can never disagree; a case that
+  asked for sandboxed and was downgraded gets
+  `extra["sandboxed_downgraded"]` rather than a silent substitution. The
+  manifest records `tool_service_modes`; `compare.manifest_compatibility`
+  treats a mismatch the same as a different oracle version or case set - a
+  mock-mode and a sandboxed-mode run are never silently compared as
+  equivalent.
+- **Schema-drift pre-flight**: `diff_case_tools_against_live()` checks a
+  case's `tools`/`expected_calls`/`forbidden_calls` tool names against the
+  real server's live `tools/list` before the conversation loop starts -
+  turned into a clean `CaseResult.error`, not a confusing "every
+  expected_calls assertion just happens to fail." Name drift isn't the
+  drift that bites, though (git_repo's real server keeps every overlapping
+  NAME but adds a required `repo_path` argument to all of them, confirmed
+  live) - so two argument-level checks sit alongside it, and measuring
+  them against the real corpus sharply separated their value:
+  `diff_case_asserted_arguments()` reports an `arguments_contains` key the
+  real tool doesn't accept, which can NEVER match and so blocks the case
+  exactly like a missing tool; `diff_case_required_arguments()` reports
+  arguments the real server newly requires, which turns out to predict
+  nothing (subset matching means extra arguments are ignored, and the
+  model is shown the real schema) and is therefore advisory - it fires on
+  all 12 git_repo tools while breaking zero cases, whereas the asserted-
+  argument check found the single real breakage in the whole corpus. The
+  result also records `extra["mcp_server_info"]`/`["mcp_protocol_version"]`
+  - what the real server actually negotiated, so a future genuine protocol
+  incompatibility is a recorded fact, not a mystery hang. `optarena cases
+  verify --sandboxed` runs all of this as a batch, no-model-call
+  pre-flight (one sandbox per DISTINCT `tool_service` among matched cases,
+  not per case) - still not the discriminating-oracle proof §3.5's "what's
+  explicitly deferred" note says this domain lacks. Its throwaway probe
+  directory goes through `PROBE_SETUP` first for the services whose real
+  server won't start against an empty one (`git_repo` needs a real repo,
+  `build_tools` a real workspace) - a real run never needs this, it has a
+  real case workspace. Each service's summary line reports
+  sandboxed-readiness directly (`8/12 case(s) sandboxed-ready, 4
+  blocked`), and blocked cases fail the command while advisory warnings
+  don't.
+- **Sandboxed-readiness of the shipped corpus**, measured rather than
+  assumed - `filesystem` 13/13, `git_repo` 8/12, `build_tools` 5/13. What
+  blocks the rest is worth stating precisely, because the two causes have
+  opposite implications:
+  - **Real capability gaps** (all 4 git_repo, all 8 build_tools):
+    the official `mcp-server-git` registers no blame/push/pull/remotes/tag
+    tools at all, so those cases are unrunnable sandboxed by construction,
+    not by a fixable corpus defect - they remain valid mock-mode cases
+    testing real git workflow judgment. `build_tools` is subtler and the
+    mock is NOT wrong: `nx_visualize_graph`/`ci_*`/`update_self_healing_fix`
+    all exist in the real `nx-mcp` binary (confirmed by grepping it) but
+    register only under an IDE context or a live Nx Cloud connection, so
+    "absent" here means "not registered in this sandbox's configuration".
+  - **One genuine mock fidelity bug**, found by this diff and fixed: the
+    mock's `git_add` took `paths` where the real official server takes
+    `files` - a straight violation of this domain's own stated principle
+    (mirror the reference implementation's ACTUAL registrations). The mock
+    schema now advertises `files` (with `paths` kept as a silent alias so
+    out-of-tree cases don't break), which moved a case from blocked to
+    ready. `GitRepoService` also now accepts-and-ignores `repo_path` on
+    every tool: the real server requires it (one server, many repos), this
+    mock models one, and a model that correctly supplies it must not be
+    punished with an invalid-arguments error for being right.
+- **Containment and teardown, hardened by audit** (the tool-call audit's
+  S-1/S-4/B-1/B-2, each verified live before fixing):
+  - `tool_service_seed`'s `files`/`media_files`/`directories` paths get
+    the same `reject_unsafe_relpath` schema gate as every other
+    case-controlled path field, plus a resolved-containment re-check in
+    `SandboxedMCPService._contained()` at write time - in this mode those
+    paths are REAL host disk writes, and a `..`/absolute path would
+    otherwise escape (pathlib's `/` operator replaces the base outright on
+    an absolute right-hand side).
+  - The sandbox bind-mounts the CASE directory itself, never its parent -
+    the parent is the shared run root (other cases' workspaces, hidden
+    test files), and containment must come from the mount, not from
+    trusting the third-party server's own path checks.
+  - `exec_attached` drains the server's stderr continuously into a bounded
+    tail (a server writing more than the OS pipe buffer to an undrained
+    pipe blocks forever - kind's cluster-create progress goes through
+    exactly that pipe); the tail is appended to handshake-failure errors,
+    which is also where every real startup failure this cycle actually
+    needed diagnosing.
+  - Teardown is layered for state that outlives the container BY DESIGN:
+    `close()` sends stdin EOF, waits `shutdown_grace` for the server's own
+    graceful exit (kubernetes' in-container `kind delete cluster` trap runs
+    here), stops the container, then runs a host-side reaper -
+    `docker rm -f` on the kind node container, whose name is derivable
+    because the cluster is named after the sandbox itself (passed in via
+    `exec_attached`'s env support). `docker stop` signals only PID 1,
+    never exec'd scripts, so the trap alone provably leaks privileged kind
+    nodes on non-graceful paths - observed, not theorized.
+- **Two narrow, per-image hardening exceptions** - `DockerSandbox` gained
+  `extra_run_args`/`network` constructor params (default `None`/`"none"`,
+  every pre-existing caller unaffected) rather than loosening the shared
+  `_HARDENING_ARGS` globally:
+  - **`database`**: real Postgres refuses outright to run as uid 0 (no flag
+    overrides this), so its startup script must `su postgres` -
+    `CAP_SETUID`/`CAP_SETGID`, neither in the default cap set (confirmed
+    empirically: `su: cannot set groups: Operation not permitted` without
+    it).
+  - **`package_registry`**: the real server (`package-registry-mcp`) has no
+    offline-registry config option at all - real network access
+    (`network: "bridge"`), judged acceptable because its entire tool
+    surface, confirmed from its own tool list, is read-only public-package
+    metadata lookups (search/get-details/list-versions) with no publish/
+    delete tool at all.
+  - **`docker`/`kubernetes`**: docker-outside-of-docker (a mounted HOST
+    `docker.sock`), not a nested/privileged inner daemon - `docker`'s real
+    MCP server (`ckreiling/mcp-server-docker`) and `kubernetes`'s (a real,
+    throwaway `kind` cluster whose node containers are created as SIBLINGS
+    on the host daemon) both talk to the ACTUAL host Docker daemon. The
+    effective principal is the MODEL UNDER TEST - its tool calls flow
+    unfiltered through the real server to the real daemon
+    (`create_container` with volume binds reaches host root; kind nodes
+    are themselves privileged containers, and the real kubernetes server
+    exposes `exec_in_pod`/`kubectl_generic`) - which suspends the
+    harness's usual "the backend may be arbitrarily bad" premise. So
+    these two services require `OPTARENA_ALLOW_HOST_DOCKER=1` on top of
+    `--tool-service-mode sandboxed` (S-3 in the tool-call audit; the same
+    fail-closed pattern as `OPTARENA_ALLOW_UNSAFE_HOST_EXEC`), enforced
+    in `build_sandboxed_service` via the registry's `host_docker_socket`
+    flag - and a registry tripwire test asserts the flag and the actual
+    socket mount can never disagree. This trust boundary is live-verified,
+    not theoretical: `docker`'s own `list_containers` call returns the
+    sandbox's OWN container. Chosen over full privileged DinD after
+    explicit user sign-off; `kubernetes` additionally needs
+    `network: "bridge"` (Docker refuses `network connect` on a container
+    started in `--network none` mode at all) and a longer
+    initial-handshake timeout (`kind create cluster` alone runs 30-40s+,
+    confirmed empirically, before the MCP server has even started
+    responding - every other service's real server starts in low single
+    digit seconds or instantly, which the client's default timeout was
+    tuned against).
+- **Ten of the fourteen §3.5 mock services have a proven sandboxed-real
+  counterpart** - `filesystem`, `git_repo`, `code_intel`, `build_tools`,
+  `database`, `observability`, `package_registry`, `cloud_infra`, `docker`,
+  `kubernetes` - each built against its real, currently-published reference
+  server and live-verified end to end against actual Docker (real
+  container start, real handshake, real tool calls, clean teardown - not
+  simulated). `task_tracker` has no real reference implementation to sandbox
+  (stays mock-only, nothing to build). `forge`/`ci_pipeline`/`terraform` are
+  inherently third-party SaaS (GitHub, CircleCI, Terraform Cloud) with no
+  disposable local substitute - they belong to a separate, not-yet-built
+  live/bring-your-own-server mode (point at a real, already-running external
+  server with the user's own credentials), not this sandboxed one.
+- **Real, live-verified schema drift** between each mock and its real
+  counterpart, not assumed: `git_repo` (12 real tools vs 18 mock - every
+  real tool additionally requires a `repo_path` argument the mock never
+  modeled, a required-argument mismatch the current drift check doesn't
+  catch, only missing tool NAMES), `observability` (65 real vs 105 mock -
+  the mock significantly over-approximates the real OSS server's surface),
+  `build_tools` (7 real vs 13 mock - `nx-mcp` defaults `--minimal=true`,
+  hiding most workspace-analysis tools unless explicitly disabled),
+  `docker` (14/19 tool-name overlap), `kubernetes` (20/23), `cloud_infra`
+  (8/9, the closest match found, and fully offline - no LocalStack needed
+  at all, contrary to the original plan's assumption), `database` (9/9
+  exact), `code_intel` (6/6 exact), `filesystem` (14 real vs 13 mock - the
+  real server additionally has `read_file`). `package_registry` is total
+  drift (0/38 tool-name overlap) - the mock models an npm-CLI-command-style
+  server (`install`/`publish`/`ci`/...); no credible real MCP server of
+  that shape exists in the current ecosystem, only registry-metadata-lookup
+  servers (search/get-details/list-versions) - itself a real, useful
+  finding about what's actually published, not a gap in this search.
+
+#### Agent-mode tool-use (a real agent as the MCP client)
+
+§3.5/§3.6 grade tool-use cases by having the HARNESS be the MCP client -
+`tool_chat.py` drives the request loop and records every `tools/call` into
+`call_log` as it makes it. That answers "how good is this model at tool
+calling" but not "does putting a real agent in front of it help", because a
+real agent (Claude Code, goose) is itself the MCP client: the harness is no
+longer in that conversation and has nothing to grade.
+
+- **A transparent logging proxy** (`_cases/_mcp_proxy.py`) is what closes
+  that gap. The agent is told to launch it as its MCP server; it execs the
+  REAL server inside the already-running sandbox container (a second,
+  independent `docker exec -i` session) and relays every message verbatim,
+  while parsing `tools/call` request/response pairs into a JSONL log.
+  `_cases/_agent_tool_use.py` reads that back after the agent exits and
+  rebuilds the same `{"tool", "arguments", "result"}` shape
+  `MockService`/`SandboxedMCPService` produce - so `evaluate_tool_case`
+  runs completely unmodified regardless of which side made the calls.
+- **Logging happens BEFORE forwarding**, in both directions, and the
+  ordering is load-bearing rather than stylistic: forwarding first loses
+  calls to a race that was observed intermittently against real goose (the
+  same case grading PASS or "made no calls" run to run). Server->agent, the
+  agent can exit and take the proxy down the instant it has its final
+  response, before a queued write happens; agent->server, the response can
+  arrive before the request's own correlation entry is recorded. A unit
+  test pins the ordering, and was checked to actually fail against the old
+  one.
+- **Sandboxed-only, structurally.** The 14 mock services are in-process
+  Python objects satisfying an internal `dispatch()` contract, not MCP
+  endpoints - an external agent process cannot connect to one at all, so
+  `--tool-call` implies `tool_service_mode: sandboxed` and a case that
+  resolves to `mock` is refused with that reason rather than silently
+  producing an empty log the oracle would grade as "made no calls".
+- **Only agents with verified headless MCP-client isolation qualify** -
+  `CLI_AGENTS[...]["mcp_client"]`, today `claude-code` (`--mcp-config
+  <file> --strict-mcp-config`) and `goose` (`--with-extension <cmd>
+  --no-profile`), both confirmed against the installed binaries' own
+  `--help`, not from documentation. Both flag sets were chosen for the same
+  property: they point the agent at exactly ONE server while ignoring the
+  user's own configured MCP servers entirely, so the model sees only what
+  the case granted. `optarena agent --tool-call` refuses any other driver
+  by name and lists the ones that work.
+- **The tool namespace the model sees is part of the measurement.** goose
+  derives its extension name (and therefore the `<ext>__<tool>` names the
+  model is shown) from the launch command's binary - invoked directly,
+  every tool reached the model as `python_exe__list_allowed_directories`,
+  observed live. A generated launcher named after the service fixes this to
+  `filesystem__...`. The oracle was never affected (the proxy logs the raw
+  MCP tool name, not the agent's alias), but a model shown a nonsense
+  namespace may call tools less readily, which would have scored as a worse
+  MODEL where the real cause was our own plumbing.
+- **Known limitation, deliberately not papered over**:
+  `expected_final_state` can only be graded as far as `{"n_calls": N}`.
+  That assertion inspects a `MockService`'s own `summary()` - domain
+  business logic ("does this folder now exist") with no generic
+  reconstruction from an observed call log against a real server. A case
+  relying on more will report an honest oracle mismatch, never a silent
+  skip or false pass.
+
+
 ---
 
 ## 4. Execution flow
@@ -1811,3 +2095,66 @@ that tracker is retired in dev notes once the branch history was compressed
 for the `v0.1.0` release tag, since it served as a working log, not a
 permanent record - the code and this document are the source of truth going
 forward.
+
+### 10.4 Sandboxed-real tool-use execution (2026-08-07)
+
+§3.6's `SandboxedMCPService`/`--tool-service-mode sandboxed` pilot, built
+and live-verified against real Docker rather than designed and left
+untested. Sequenced as generic plumbing (`_mcp_client.py`,
+`DockerSandbox.exec_attached`) first, proven on one service
+(`filesystem`), then extended service by service - each one a real image
+built, a real handshake against the real published package, and a real
+smoke test, not a paper design. See §3.6 for the mechanism and the full
+per-service schema-drift findings; the real bugs this surfaced (not
+design decisions - actual defects caught by actually running the thing):
+
+- A Windows-only `\n` → `\r\n` corruption in `seed()`'s file-writing
+  (Python's default text-mode `write_text`), invisible until compared
+  against what the real server actually wrote to disk - fixed with
+  `newline=""` on both the write and read sides.
+- `mcp-server-git`'s own declared dependency (`mcp>=1.0.0`) resolves to a
+  real, current, breaking release (`mcp==2.0.0`) that removes the
+  `Server.list_tools()` API the package's source still calls - a live,
+  present-day compatibility break in the published ecosystem, not
+  something reproducible from reading either package's docs alone.
+- Real Postgres refuses to run as root outright, with no override flag -
+  its startup script needs `su`, which needs `CAP_SETUID`/`CAP_SETGID`,
+  neither in this project's default hardened capability set.
+- Docker rejects two `--network` flags on one `docker run` outright
+  ("conflicting options") - confirmed by trying it, not assumed - so a
+  per-service network override had to be a dedicated constructor
+  parameter, not something layered onto the existing hardening args list.
+- A `kind` cluster name keyed by shell PID collided across two different
+  sandboxed containers sharing one host Docker daemon (each container's
+  PID namespace restarts fresh, so low PIDs repeat) - fixed with the
+  container's own Docker-assigned hostname, which doesn't.
+- Docker also refuses to `network connect` a container that was started
+  in `--network none` mode at all (a different failure from the one
+  above), discovered only after the PID-collision fix, requiring
+  `kubernetes`'s sandbox to start on the `bridge` network from the outset
+  rather than acquire more access at runtime.
+
+Ten of fourteen mock services now have a live-verified sandboxed
+counterpart (§3.6 lists all ten and what didn't match). `docker`/
+`kubernetes` specifically required user sign-off before building, since
+their real servers need docker-outside-of-docker (a mounted host
+`docker.sock`) - a materially bigger trust boundary than every other
+service's narrow, single-purpose hardening exception, granted after the
+trade-off was presented explicitly rather than assumed. `task_tracker`
+(no real reference implementation) and `forge`/`ci_pipeline`/`terraform`
+(third-party SaaS, no disposable local substitute - belong to a separate,
+not-yet-built live/bring-your-own-server mode) remain mock-only, by
+design rather than remaining scope.
+
+A same-cycle security/correctness audit of this subsystem (17 findings,
+each verified against code or live behavior rather than pattern-matched)
+was then fixed in full - the two P0s were both new-input-paths that had
+bypassed EXISTING controls (`tool_service_seed` paths skipping the §10.3
+path-containment gate; case content able to self-select sandboxed
+execution against the project's fail-closed posture), and the P1s were
+the whole-run-root bind mount, the undrained stderr pipe, the
+model-as-principal framing of the host-socket services (now gated behind
+`OPTARENA_ALLOW_HOST_DOCKER=1`), and the kind-node teardown leak. The
+recurring pattern - new code not routed through existing, sound controls
+- is worth remembering more than any individual finding. §3.6 describes
+the post-fix behavior; the audit document itself lives in dev notes.

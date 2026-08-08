@@ -93,6 +93,19 @@ from ._cases._corpus import dockerfile_for, filter_cases, load_cases
 from ._cases._tag_expr import TagExpressionError, compile_tag_expression
 from ._cases._evaluate import diff_stats, evaluate_case, evaluate_case_isolated, trajectory_stats
 from ._cases._mock_service import MOCK_SERVICES, MockService, get_mock_service, get_tool_schemas
+from ._cases._sandboxed_mcp_service import (
+    PROBE_SETUP,
+    SANDBOXED_SERVICES,
+    SandboxedMCPService,
+    build_sandboxed_service,
+    diff_case_asserted_arguments,
+    diff_case_required_arguments,
+    diff_case_tools_against_live,
+    get_sandboxed_service_factory,
+    impl_identity,
+    resolve_tool_service_mode,
+    start_sandboxed_container,
+)
 from ._cases._tool_evaluate import evaluate_tool_case
 from ._cases._sandbox import (
     _HARDENING_ARGS,
@@ -137,6 +150,11 @@ __all__ = [
     "dockerfile_for", "filter_cases", "load_cases", "TagExpressionError", "compile_tag_expression",
     "diff_stats", "evaluate_case", "evaluate_case_isolated", "trajectory_stats",
     "MOCK_SERVICES", "MockService", "get_mock_service", "get_tool_schemas", "evaluate_tool_case",
+    "PROBE_SETUP", "SANDBOXED_SERVICES", "SandboxedMCPService", "build_sandboxed_service",
+    "diff_case_asserted_arguments", "diff_case_required_arguments",
+    "diff_case_tools_against_live", "resolve_tool_service_mode",
+    "get_sandboxed_service_factory", "impl_identity",
+    "start_sandboxed_container",
     "_HARDENING_ARGS", "GHCR_PREFIX", "DockerSandbox", "_WorkspaceQuotaWatchdog", "_worker_sandboxes",
     "classify_failure", "container_engine", "docker_image_available", "docker_image_pull",
     "ensure_image", "reset_engine_health_cache", "reset_pull_backoff", "resolve_image",

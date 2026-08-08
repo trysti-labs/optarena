@@ -171,6 +171,20 @@ class GitRepoService(MockService):
         "git_blame", "git_remotes", "git_tags", "git_tag", "git_push", "git_pull",
     )}
 
+    def dispatch(self, tool_name: str, arguments: dict) -> Any:
+        """The real official `mcp-server-git` requires a ``repo_path`` on
+        EVERY tool (one server can serve several repositories); this mock
+        models exactly one, so it has no use for the value - but a model
+        that correctly supplies it (because it was shown the real schema,
+        or simply knows the real server) must not be punished with an
+        invalid-arguments error for being right. Dropped here, once, before
+        the base class dispatches - the same normalize-before-dispatch
+        precedent `FilesystemService.dispatch` sets for trailing slashes.
+        """
+        if arguments and "repo_path" in arguments:
+            arguments = {k: v for k, v in arguments.items() if k != "repo_path"}
+        return super().dispatch(tool_name, arguments)
+
     def __init__(self) -> None:
         super().__init__()
         self._commits: dict[str, dict] = {}          # commit_id -> {message, files, parent, seq}
@@ -287,8 +301,22 @@ class GitRepoService(MockService):
         )
         return {"staged": staged, "unstaged_modified": unstaged_modified, "untracked": untracked}
 
-    def git_add(self, paths) -> dict:
-        paths = self._as_list(paths)
+    def git_add(self, files=None, paths=None, repo_path=None) -> dict:
+        """``files`` is the real official `mcp-server-git`'s parameter name -
+        this mock said ``paths`` for its first several months, a straight
+        fidelity bug against this domain's own stated principle (mirror the
+        reference implementation's ACTUAL registrations), caught by diffing
+        the mock against the real server in sandboxed mode. ``paths`` stays
+        accepted as a silent alias so any out-of-tree case authored against
+        the old name keeps working; the schema advertises only ``files``,
+        so new cases and models see just the real name.
+
+        ``repo_path`` is accepted-and-ignored on every tool of this service
+        for the same reason: the real server requires it (one server can
+        serve several repos), this mock models exactly one, so a model that
+        correctly supplies it must not be punished with an
+        invalid-arguments error."""
+        paths = self._as_list(files if files is not None else paths)
         added, missing = [], []
         for p in paths:
             if p not in self._working_dir:
@@ -6268,8 +6296,8 @@ _GIT_REPO_SCHEMAS: dict[str, dict] = {
         {}, []),
     "git_add": _fn(
         "git_add", "Stage one or more files for the next commit.",
-        {"paths": {"type": "array", "items": {"type": "string"}, "description": "Paths to stage."}},
-        ["paths"]),
+        {"files": {"type": "array", "items": {"type": "string"}, "description": "Files to stage."}},
+        ["files"]),
     "git_reset": _fn(
         "git_reset", "Unstage all currently staged changes (does not touch the working tree).",
         {}, []),

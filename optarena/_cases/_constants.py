@@ -25,6 +25,20 @@ DOCKER_IMAGES: dict[str, str] = {
     "dotnet": "optarena-tester-dotnet:latest",
     "php": "optarena-tester-php:latest",
     "ruby": "optarena-tester-ruby:latest",
+    # Sandboxed-real tool-use execution (--tool-service-mode sandboxed): runs
+    # the ACTUAL reference MCP server binary instead of the in-process mock -
+    # see optarena/_cases/_sandboxed_mcp_service.py. Not a check_command
+    # toolchain image like every entry above.
+    "mcp-filesystem": "optarena-tester-mcp-filesystem:latest",
+    "mcp-git-repo": "optarena-tester-mcp-git-repo:latest",
+    "mcp-code-intel": "optarena-tester-mcp-code-intel:latest",
+    "mcp-build-tools": "optarena-tester-mcp-build-tools:latest",
+    "mcp-database": "optarena-tester-mcp-database:latest",
+    "mcp-observability": "optarena-tester-mcp-observability:latest",
+    "mcp-package-registry": "optarena-tester-mcp-package-registry:latest",
+    "mcp-cloud-infra": "optarena-tester-mcp-cloud-infra:latest",
+    "mcp-docker": "optarena-tester-mcp-docker:latest",
+    "mcp-kubernetes": "optarena-tester-mcp-kubernetes:latest",
 }
 
 IGNORE_DIRS = {".git", ".vscode", ".aider", "node_modules", "__pycache__"}

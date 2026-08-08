@@ -284,5 +284,110 @@ def cmd_verify_corpus(args) -> int:
         return 1
     if weak and getattr(args, "strict", False):
         return 1
+    sandboxed_drift = False
+    if getattr(args, "sandboxed", False):
+        sandboxed_drift = _verify_sandboxed_schema_drift(
+            cases, debug=getattr(args, "debug", False))
+    if sandboxed_drift:
+        return 1
     print("  all verified")
     return 0
+
+
+def _verify_sandboxed_schema_drift(cases: list[dict], *, debug: bool = False) -> bool:
+    """Pre-flight, no model call: for every DISTINCT tool_service among the
+    matched cases that has a sandboxed-real implementation
+    (`SANDBOXED_SERVICES`), start one real sandbox, fetch its live
+    `tools/list`, and check every matched case's `tools`/`expected_calls`/
+    `forbidden_calls` tool names against it - the same check
+    `tool_chat.run_case()` does per-run, surfaced here as a CI-friendly
+    batch pass. One sandbox per service, not per case - a service with 30
+    matched cases still only pays for one container start. Returns True if
+    any drift (or a sandbox that couldn't even start) was found.
+    """
+    by_service: dict[str, list[dict]] = {}
+    for c in cases:
+        if c.get("tool_service"):
+            by_service.setdefault(c["tool_service"], []).append(c)
+    if not by_service:
+        print("\n  sandboxed schema-drift check: no tool-use cases matched - skipped")
+        return False
+
+    print(f"\n  sandboxed schema-drift check: {sum(len(v) for v in by_service.values())} "
+          f"tool-use case(s) across {len(by_service)} service(s)")
+    return _drift_by_service(by_service, debug=debug)
+
+
+def _drift_by_service(by_service: dict[str, list[dict]], *, debug: bool) -> bool:
+    """The per-service body of the drift check."""
+    from .._cases._mcp_client import MCPProtocolError
+    from .._cases._sandboxed_mcp_service import (
+        PROBE_SETUP, SANDBOXED_SERVICES, build_sandboxed_service,
+        diff_case_asserted_arguments, diff_case_required_arguments,
+        diff_case_tools_against_live,
+    )
+    import shutil
+    import tempfile
+
+    found_drift = False
+    for service_name, service_cases in sorted(by_service.items()):
+        if service_name not in SANDBOXED_SERVICES:
+            print(f"    {service_name}: no sandboxed-real implementation yet - skipped "
+                  f"({len(service_cases)} case(s))")
+            continue
+        tmp = Path(tempfile.mkdtemp(prefix="optarena_verify_sandboxed_"))
+        try:
+            try:
+                # Some real servers refuse to start against an empty
+                # directory (mcp-server-git needs a real repo, nx-mcp needs
+                # a workspace) - prepare the throwaway probe dir first.
+                probe = PROBE_SETUP.get(service_name)
+                if probe is not None:
+                    probe(tmp)
+                service = build_sandboxed_service(service_name, tmp)
+            except (KeyError, RuntimeError, MCPProtocolError) as exc:
+                if debug:
+                    raise
+                print(f"    {service_name}: could not start sandbox - {exc}")
+                found_drift = True
+                continue
+            try:
+                live_schemas = dict(service.tool_schemas)
+            finally:
+                service.close()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        live_tools = set(live_schemas)
+        arg_drift_seen: set[str] = set()
+        blocked = 0
+        for c in service_cases:
+            problems: list[str] = []
+            missing = diff_case_tools_against_live(c, live_tools)
+            if missing:
+                problems.append(f"references unknown tool(s) {missing}")
+            # An assertion naming an argument the real server doesn't accept
+            # can NEVER match - a guaranteed failure, same blocking category
+            # as a missing tool (unlike required-argument drift below).
+            problems += diff_case_asserted_arguments(c, live_schemas)
+            if problems:
+                found_drift = True
+                blocked += 1
+                print(f"    BLOCKED {c['name']} ({service_name}):")
+                for p in problems:
+                    print(f"              {p}")
+            # Advisory: names a real mock-vs-reality gap but predicts no
+            # failure (see diff_case_required_arguments' own docstring).
+            # Deduped per service - the same tool-level fact repeated across
+            # 30 cases is noise, not signal.
+            for line in diff_case_required_arguments(c, service_name, live_schemas):
+                if line not in arg_drift_seen:
+                    arg_drift_seen.add(line)
+                    print(f"    warning ({service_name}): {line}")
+        ready = len(service_cases) - blocked
+        summary = f"    {service_name}: {ready}/{len(service_cases)} case(s) sandboxed-ready"
+        if blocked:
+            summary += f", {blocked} blocked"
+        if arg_drift_seen:
+            summary += f" ({len(arg_drift_seen)} advisory argument-drift warning(s))"
+        print(summary)
+    return found_drift

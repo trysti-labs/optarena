@@ -9,7 +9,7 @@ fix commit unless you prefer otherwise.
 
 ## Trust model
 
-OptArena runs three kinds of untrusted-or-semi-trusted code, each with its own
+OptArena runs four kinds of untrusted-or-semi-trusted code, each with its own
 boundary:
 
 1. **Case-defined `check_command`s and test files** (from the built-in corpus
@@ -81,6 +81,56 @@ boundary:
    grades a **private copy** of the workspace rather than the live one it
    will read again on its next turn. The model is graded against tests it
    could not read or watch during its run.
+
+4. **Real third-party MCP servers, under `--tool-service-mode sandboxed`.**
+   Tool-use cases default to an in-process Python mock with no external
+   surface at all; sandboxed mode instead runs the ACTUAL published
+   reference server (npm/PyPI/Go binaries - `@modelcontextprotocol/server-filesystem`,
+   `mcp-server-git`, `mcp-grafana`, and others) inside the same hardened
+   container profile as category 1, one dedicated container per case,
+   bind-mounting only that case's own directory. Two consequences worth
+   stating plainly:
+
+   - **Sandboxed execution is granted by you, never by case content.** A
+     case's own `tool_service_mode` may opt *down* to `mock`, but only
+     `--tool-service-mode sandboxed` (or the scenario field) can opt *up* -
+     so an installed pack cannot decide by itself to start pulling and
+     running third-party server binaries on your machine.
+   - **Running tool-use cases through a real agent combines two of these
+     boundaries at once.** `optarena agent --tool-call` puts a CLI agent
+     (category 2 - host-native, NOT containerized) in front of a real
+     third-party MCP server (this category - containerized). Each keeps its
+     own boundary: the server stays in the hardened container, the agent
+     stays on your host with the usual confirmation gate. What is new is
+     that the model now drives a real server through an agent that can also
+     act on your machine, so the two grants compound - and for
+     `docker`/`kubernetes` they compound with host-daemon access, which is
+     why those still need `OPTARENA_ALLOW_HOST_DOCKER=1` on top. The agent
+     is pointed at exactly one server and explicitly isolated from your own
+     configured MCP servers (`--strict-mcp-config` for Claude Code,
+     `--no-profile` for goose), so a case can never reach a server you
+     configured for unrelated work.
+   - **`docker` and `kubernetes` are a materially larger boundary and are
+     refused by default.** Their real servers work by talking to your
+     *actual* host Docker daemon through a mounted `/var/run/docker.sock`
+     (docker-outside-of-docker; the kubernetes one additionally creates a
+     real `kind` cluster whose nodes are privileged sibling containers on
+     that daemon). Because the model under test drives those tools, the
+     effective principal holding the socket is the model - it can create
+     containers with arbitrary host bind mounts, which is host-root
+     equivalent. These two require `OPTARENA_ALLOW_HOST_DOCKER=1`
+     explicitly and fail closed with a clear message otherwise. Every
+     other sandboxed service keeps `--network none` and needs no such
+     grant.
+
+   `tool_service_seed` paths (`files`/`media_files`/`directories`) become
+   real disk writes in this mode and go through the same two-layer
+   containment as category 1's path fields: schema validation rejects
+   traversal/absolute/`.git`/Windows-alias forms before a case loads, and
+   the write site re-checks resolved containment against the case
+   directory. Sandboxed servers are pinned by version and (for images)
+   digest, but they are still third-party code: treat enabling a
+   sandboxed service as a decision to run that project's binary.
 
 ## Credentials
 
