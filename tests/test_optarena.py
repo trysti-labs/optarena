@@ -4409,6 +4409,54 @@ class ReportArtifactTests(unittest.TestCase):
         self.assertEqual(len(s["runs"][0]["results"]), 1)
         self.assertEqual(s["runs"][0]["results"][0]["ruleId"], "py-os-system")
 
+    def test_markdown_has_header_and_summary(self):
+        from optarena.report import to_markdown_summary
+        md = to_markdown_summary(self._run())
+        self.assertIn("# OptArena Report", md)
+        self.assertIn("Scenario:", md)
+        self.assertIn("Driver:", md)
+        self.assertIn("## Summary", md)
+        self.assertIn("Pass Rate", md)
+
+    def test_markdown_includes_language_breakdown(self):
+        from optarena.report import to_markdown_summary
+        run = self._run()
+        # Add language info to cases
+        run["cases"][0]["language"] = "python"
+        run["cases"][1]["language"] = "javascript"
+        run["cases"][2]["language"] = "python"
+        md = to_markdown_summary(run)
+        self.assertIn("## By Language", md)
+        self.assertIn("python", md)
+        self.assertIn("javascript", md)
+
+    def test_markdown_includes_task_type_breakdown(self):
+        from optarena.report import to_markdown_summary
+        run = self._run()
+        # Add task_type info to cases
+        run["cases"][0]["task_type"] = "feature"
+        run["cases"][1]["task_type"] = "bug_fix"
+        run["cases"][2]["task_type"] = "feature"
+        md = to_markdown_summary(run)
+        self.assertIn("## By Task Type", md)
+        self.assertIn("feature", md)
+        self.assertIn("bug_fix", md)
+
+    def test_markdown_lists_failing_cases(self):
+        from optarena.report import to_markdown_summary
+        md = to_markdown_summary(self._run())
+        self.assertIn("## Failing Cases", md)
+        self.assertIn("bad", md)
+        self.assertIn("err", md)
+        # The passing case should not appear in the failing cases list
+        self.assertNotIn("- **ok**", md)
+
+    def test_markdown_shows_error_details(self):
+        from optarena.report import to_markdown_summary
+        md = to_markdown_summary(self._run())
+        self.assertIn("timeout", md)  # error message from the "err" case
+        self.assertIn("assert x", md)  # failure message from the "bad" case
+
 
 class SecurityScanTests(unittest.TestCase):
     def test_detects_secret_and_injection(self):
