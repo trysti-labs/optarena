@@ -5063,8 +5063,12 @@ class PackSigningTests(unittest.TestCase):
             # Now tamper with the installed case file directly on disk -
             # no re-signing, no re-installing, exactly what a local
             # filesystem edit (or an attacker with local access) looks like.
-            case_file = next(dest.glob("*.json"))
-            self.assertNotEqual(case_file.name, "_pack.json")
+            # Directory-listing order isn't creation order (install_pack
+            # writes case files, then _pack.json, last) - `glob()` happened
+            # to return a case file first on Windows but returned
+            # _pack.json first on Linux CI, so this must exclude it by name
+            # rather than rely on iteration order.
+            case_file = next(f for f in dest.glob("*.json") if f.name != "_pack.json")
             data = json.loads(case_file.read_text(encoding="utf-8"))
             data["prompts"] = ["a completely different, malicious prompt"]
             case_file.write_text(json.dumps(data), encoding="utf-8")

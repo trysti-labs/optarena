@@ -9,6 +9,15 @@ existed.
 
 ### Fixed
 
+- **Flaky `PackSigningTests::test_installed_pack_modified_after_install_is_no_longer_reported_trusted`
+  on Linux CI**: the test picked `next(dest.glob("*.json"))` and assumed it
+  wouldn't be `_pack.json`, but `install_pack()` writes case files then
+  `_pack.json` last, and directory-listing order doesn't have to match
+  write order. It happened to hold on Windows/NTFS but not on Linux/ext4,
+  where `_pack.json` (the install manifest, not a real case) came back
+  first, so the test tampered with the manifest instead of a case file.
+  Now filters it out by name explicitly instead of relying on iteration
+  order.
 - **`docker/vuln-baseline/*.json` re-triaged (2026-08-20)**: a wave of
   freshly-disclosed CRITICAL/HIGH CVEs against packages already in each
   baseline's documented accepted-risk categories (Debian OS-package
@@ -26,6 +35,8 @@ existed.
   Verified with the real `check_vuln_baseline.check()` function against
   reconstructed findings from the actual CI run's Trivy output, not
   assumed.
+
+### Added
 
 - **`CaseResult` carries case metadata**: `language`, `domain`, and
   `task_type` are now copied from the case definition onto every saved
