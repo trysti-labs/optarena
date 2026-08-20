@@ -5803,6 +5803,67 @@ class RunnerCapabilityExclusionWiringTests(unittest.TestCase):
         self.assertNotIn("capability_excluded", result.extra)
 
 
+class RunnerCaseMetadataWiringTests(unittest.TestCase):
+    """`_run_case` must copy language/domain/task_type from the case
+    definition onto the returned CaseResult - this is case metadata, not
+    driver output, so it has to survive regardless of what the driver itself
+    returns, and must not depend on which fields the driver's own
+    CaseResult happened to set."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp(prefix="optarena_test_casemeta_"))
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+
+    def _scenario(self):
+        return Scenario(name="s", driver="aider", backend=Backend(base_url="http://x", model="m"))
+
+    def test_metadata_copied_from_case_onto_result(self):
+        from optarena.runner import _run_case
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.return_value = CaseResult(name="c", passed=True)
+        case = {"name": "c", "prompts": ["do it"], "language": "python",
+                "domain": "backend", "task_type": "feature"}
+        result = _run_case(driver, case, self._scenario(), self.ws, trials=1)
+        self.assertEqual(result.language, "python")
+        self.assertEqual(result.domain, "backend")
+        self.assertEqual(result.task_type, "feature")
+
+    def test_missing_metadata_fields_stay_none_not_dropped_silently(self):
+        from optarena.runner import _run_case
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.return_value = CaseResult(name="c", passed=True)
+        case = {"name": "c", "prompts": ["do it"]}   # no language/domain/task_type
+        result = _run_case(driver, case, self._scenario(), self.ws, trials=1)
+        self.assertIsNone(result.language)
+        self.assertIsNone(result.domain)
+        self.assertIsNone(result.task_type)
+
+    def test_metadata_survives_trial_merging(self):
+        # Same shape as CachingDriverTrialsPlumbingTests below: trials > 1
+        # routes through _merge_trials, which builds a FRESH CaseResult - the
+        # metadata has to be applied to that merged object, not just the
+        # driver's original one, or a >1-trial run would silently lose it.
+        from optarena.runner import _run_case
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.return_value = CaseResult(name="c", passed=True)
+        case = {"name": "c", "prompts": ["do it"], "language": "go", "domain": "cli"}
+        result = _run_case(driver, case, self._scenario(), self.ws, trials=3)
+        self.assertEqual(result.language, "go")
+        self.assertEqual(result.domain, "cli")
+
+    def test_metadata_reaches_to_dict(self):
+        from optarena.runner import _run_case
+        driver = mock.Mock(parallel_safe=True)
+        driver.run_case.return_value = CaseResult(name="c", passed=True)
+        case = {"name": "c", "prompts": ["do it"], "language": "rust",
+                "domain": "backend", "task_type": "security"}
+        result = _run_case(driver, case, self._scenario(), self.ws, trials=1)
+        d = result.to_dict()
+        self.assertEqual(d["language"], "rust")
+        self.assertEqual(d["domain"], "backend")
+        self.assertEqual(d["task_type"], "security")
+
+
 class RunnerWorkspaceQuotaWiringTests(unittest.TestCase):
     """P1-09: `_run_case` must not silently trust a result the driver
     produced if the workspace blew its quota WHILE the driver was running -

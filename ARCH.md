@@ -155,7 +155,8 @@ Case        one task + oracle          "create factorial.c; it must contain int 
 Backend     where the model lives      {kind: ollama|openai, base_url, model, api_key}
 Scenario    one configuration to test  driver + backend + case subset + timeout
 Driver      how a tool is operated     run_case(case, scenario, workspace) → CaseResult
-CaseResult  one case's outcome         passed, duration_s, files, failures, error, extra
+CaseResult  one case's outcome         passed, duration_s, files, failures, error, extra,
+                                        language, domain, task_type
 RunRecord   one scenario execution     run_id, scenario, [CaseResult…], summary
 Comparison  two runs, aligned by case  per-case deltas + verdict
 ```
@@ -512,7 +513,10 @@ dict returned alongside failures by `evaluate_case()` (§3.1): `check_command`,
 failure) `failure_class` - one of `syntax_error`, `compile_error`,
 `assertion_failure`, `timeout`, `runtime_error`, from `classify_failure()` in
 `cases.py`; a best-effort bucket from the captured output, not authoritative
-and not part of the pass/fail verdict itself).
+and not part of the pass/fail verdict itself), plus `language`, `domain`,
+`task_type` - copied from the case definition by the runner (not driver
+output), so a saved run can be filtered or grouped by case metadata without
+re-reading `optarena/cases/*.json`.
 
 `diff_stats()` (`cases.py`) approximates change size: new files count their
 full line length; "modify" cases (with `setup_files`) diff against the known

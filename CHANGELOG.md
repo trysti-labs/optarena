@@ -5,6 +5,18 @@ This starts from the current `v0.1` branch state rather than reconstructing
 full project history - see `git log` for everything before this file
 existed.
 
+## [Unreleased]
+
+### Added
+
+- **`CaseResult` carries case metadata**: `language`, `domain`, and
+  `task_type` are now copied from the case definition onto every saved
+  result (`optarena/runner/_execution.py`), instead of living only in
+  `optarena/cases/*.json`. Lets a saved run be filtered or grouped by
+  language/domain/category (e.g. in the dashboard) without cross-referencing
+  the case corpus. Additive only, not a breaking change to the case or
+  run-result shape (see GOVERNANCE.md).
+
 ## [0.1.0] - 2026-08-03
 
 First tagged release. Three external/internal review rounds against the live

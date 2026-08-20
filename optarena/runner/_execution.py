@@ -87,7 +87,15 @@ def _run_case(driver, case: dict, scenario: Scenario, root: Path, trials: int,
             from ..security import scan_workspace
             r.extra["security"] = scan_workspace(r.files, ws)
         results.append(r)
-    return _merge_trials(case["name"], results)
+    merged = _merge_trials(case["name"], results)
+    # Case metadata, not driver output - copied from the case definition here
+    # (the one place both the serial and --parallel paths funnel through)
+    # rather than in every driver, so a saved run can be filtered/grouped by
+    # it without re-reading optarena/cases/*.json.
+    merged.language = case.get("language")
+    merged.domain = case.get("domain")
+    merged.task_type = case.get("task_type")
+    return merged
 
 
 def _worker_loop(worker_idx: int, case_queue: "queue.Queue", results_queue: "queue.Queue",
