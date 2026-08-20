@@ -7,6 +7,18 @@ existed.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Flaky `PackSigningTests::test_installed_pack_modified_after_install_is_no_longer_reported_trusted`
+  on Linux CI**: the test picked `next(dest.glob("*.json"))` and assumed it
+  wouldn't be `_pack.json`, but `install_pack()` writes case files then
+  `_pack.json` last, and directory-listing order doesn't have to match
+  write order. It happened to hold on Windows/NTFS but not on Linux/ext4,
+  where `_pack.json` (the install manifest, not a real case) came back
+  first, so the test tampered with the manifest instead of a case file.
+  Now filters it out by name explicitly instead of relying on iteration
+  order.
+
 ### Added
 
 - **`CaseResult` carries case metadata**: `language`, `domain`, and
