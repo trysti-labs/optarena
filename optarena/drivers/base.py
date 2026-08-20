@@ -93,6 +93,14 @@ class CaseResult:
     # model got lucky); without this, that case reads as an unqualified PASS.
     execution_ok: bool = True
     extra: dict = field(default_factory=dict)          # driver-specific metrics
+    # Copied from the case definition (not driver output) by the runner right
+    # before a result is recorded, so a saved run can be filtered/grouped by
+    # case metadata without re-reading optarena/cases/*.json. None rather than
+    # "" when a case doesn't set the field, so absence stays distinguishable
+    # from an empty string.
+    language: str | None = None
+    domain: str | None = None
+    task_type: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -104,6 +112,9 @@ class CaseResult:
             "error": self.error,
             "execution_ok": self.execution_ok,
             "extra": self.extra,
+            "language": self.language,
+            "domain": self.domain,
+            "task_type": self.task_type,
         }
 
 
