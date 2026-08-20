@@ -1,14 +1,24 @@
 {
   "image": "optarena-tester",
-  "generated_at": "2026-08-02",
-  "expires_at": "2026-11-02",
+  "generated_at": "2026-08-20",
+  "expires_at": "2026-11-18",
   "owner": "arun@trysti.com",
   "scan_severity": [
     "CRITICAL",
     "HIGH"
   ],
-  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py.",
+  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py. | 2026-08-20 re-triage: 195 newly-disclosed CRITICAL/HIGH finding(s) added against packages already in the accepted risk categories above (Debian security-patch lag on the OS base layer, none with a published fixed_version at triage time - see docker/vuln-baseline/README or check_vuln_baseline.py for the no-fix-available handling). Findings with an actual available fix were deliberately excluded and left failing CI - see the PR this baseline update shipped in for the list; those need a real dependency/version bump, not baseline acceptance.",
   "accepted_vulnerabilities": [
+    {
+      "id": "CVE-2026-53613",
+      "package": "bsdutils",
+      "package_type": "deb",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
     {
       "id": "CVE-2026-53615",
       "package": "bsdutils",
@@ -47,6 +57,16 @@
       "fixed_version": "",
       "severity": "HIGH",
       "status": "fix_deferred",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-8458",
+      "package": "curl",
+      "package_type": "deb",
+      "installed_version": "7.88.1-10+deb12u15",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
       "target": "debian 12.15"
     },
     {
@@ -130,6 +150,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53613",
+      "package": "libblkid1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53615",
       "package": "libblkid1",
       "package_type": "deb",
@@ -167,6 +197,16 @@
       "fixed_version": "",
       "severity": "HIGH",
       "status": "fix_deferred",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-8458",
+      "package": "libcurl4",
+      "package_type": "deb",
+      "installed_version": "7.88.1-10+deb12u15",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
       "target": "debian 12.15"
     },
     {
@@ -224,6 +264,16 @@
       "package": "libldap-2.5-0",
       "package_type": "deb",
       "installed_version": "2.5.13+dfsg-5",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "libmount1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -310,6 +360,26 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-56846",
+      "package": "libnode-dev",
+      "package_type": "deb",
+      "installed_version": "18.20.4+dfsg-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-56848",
+      "package": "libnode-dev",
+      "package_type": "deb",
+      "installed_version": "18.20.4+dfsg-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-48615",
       "package": "libnode108",
       "package_type": "deb",
@@ -361,6 +431,26 @@
     },
     {
       "id": "CVE-2026-48937",
+      "package": "libnode108",
+      "package_type": "deb",
+      "installed_version": "18.20.4+dfsg-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-56846",
+      "package": "libnode108",
+      "package_type": "deb",
+      "installed_version": "18.20.4+dfsg-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-56848",
       "package": "libnode108",
       "package_type": "deb",
       "installed_version": "18.20.4+dfsg-1~deb12u2",
@@ -550,6 +640,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53613",
+      "package": "libsmartcols1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53615",
       "package": "libsmartcols1",
       "package_type": "deb",
@@ -590,6 +690,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-58050",
+      "package": "libssh2-1",
+      "package_type": "deb",
+      "installed_version": "1.10.0-3+b1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-7598",
       "package": "libssh2-1",
       "package_type": "deb",
@@ -600,10 +710,40 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-14456",
+      "package": "libssl-dev",
+      "package_type": "deb",
+      "installed_version": "3.0.20-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-14456",
+      "package": "libssl3",
+      "package_type": "deb",
+      "installed_version": "3.0.20-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-69720",
       "package": "libtinfo6",
       "package_type": "deb",
       "installed_version": "6.4-4",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "libuuid1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -630,6 +770,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2013-7445",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2019-19449",
       "package": "linux-libc-dev",
       "package_type": "deb",
@@ -640,10 +790,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2019-19449",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2019-19814",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2019-19814",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -660,10 +830,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2021-3847",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2021-3864",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2021-3864",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -680,10 +870,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2023-52452",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2023-52586",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2023-52586",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -700,10 +910,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2023-52624",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2023-52751",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2023-52751",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -720,10 +950,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2023-53218",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-21803",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-21803",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -740,10 +990,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-26669",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-26836",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-26836",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -760,10 +1030,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-26913",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-26914",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-26914",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -780,10 +1070,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-26944",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-35887",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-35887",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -800,10 +1110,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-38570",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-38630",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-38630",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -820,10 +1150,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-41045",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-41935",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-41935",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -840,10 +1190,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-42118",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-42162",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-42162",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -860,10 +1230,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-44941",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-44942",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-44942",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -880,10 +1270,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-44951",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-46729",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-46729",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -900,10 +1310,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-46811",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-46813",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-46813",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -920,10 +1350,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-47691",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-50029",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-50029",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -940,10 +1390,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-50217",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-50226",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-50226",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -960,10 +1430,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-50282",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-53068",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-53068",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -980,10 +1470,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-53147",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-53168",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-53168",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1000,10 +1510,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-53179",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-53218",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-53218",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1020,10 +1550,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-56538",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-56775",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-56775",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1040,10 +1590,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2024-57900",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2024-57982",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2024-57982",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1060,10 +1630,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-21927",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-21967",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-21967",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1080,10 +1670,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-21969",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-21985",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-21985",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1100,10 +1710,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-22039",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-22104",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-22104",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1120,10 +1750,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-23133",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-37750",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-37750",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1140,10 +1790,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-37776",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-37777",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-37777",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1160,10 +1830,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-37861",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-37952",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-37952",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1180,10 +1870,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-37957",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-38069",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-38069",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1200,10 +1910,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-38081",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-38117",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-38117",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1220,10 +1950,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-38182",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-38204",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-38204",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1240,10 +1990,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-38206",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-38248",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-38248",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1260,10 +2030,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-38369",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-38582",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-38582",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1280,10 +2070,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-38585",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-38595",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-38595",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1300,10 +2110,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-38616",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-38636",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-38636",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1320,10 +2150,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-38722",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-38734",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-38734",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1340,10 +2190,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-39744",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-39797",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-39797",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1360,10 +2230,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-39810",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-39859",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-39859",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1380,10 +2270,50 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-39901",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-39952",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-39952",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-40354",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-68809",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1400,10 +2330,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-71068",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2025-71073",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2025-71073",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1420,10 +2370,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2025-71152",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-23171",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-23171",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1440,10 +2410,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-23191",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-23208",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-23208",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1460,10 +2450,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-23226",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-23327",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-23327",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1480,10 +2490,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-23361",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-23447",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-23447",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1500,10 +2530,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-23448",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-31419",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-31419",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1520,10 +2570,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-31432",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-31493",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-31493",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1540,10 +2610,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-31527",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-31536",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-31536",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1560,10 +2650,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-31568",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-31663",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-31663",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1580,10 +2690,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-31706",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-31729",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-31729",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1600,10 +2730,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-43049",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-43125",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-43125",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1620,10 +2770,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-43185",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "CRITICAL",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-43198",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-43198",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1640,10 +2810,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-43250",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-43490",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-43490",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1660,10 +2850,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-45893",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-45943",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-45943",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1680,10 +2890,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-45957",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-46054",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-46054",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1700,10 +2930,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-46068",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-46130",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-46130",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1720,6 +2970,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-46181",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-46219",
       "package": "linux-libc-dev",
       "package_type": "deb",
@@ -1730,10 +2990,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-46219",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-46241",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-46241",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1750,10 +3030,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-46293",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-52991",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-52991",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1770,10 +3070,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53000",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53089",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53089",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1790,10 +3110,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53091",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53115",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53115",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1810,10 +3150,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53117",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53118",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53118",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1830,10 +3190,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53120",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53129",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53129",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1850,10 +3230,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53143",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53156",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53156",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1870,10 +3270,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53179",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53262",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53262",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1890,10 +3310,40 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53272",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53330",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53330",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53361",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1940,10 +3390,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-63962",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-64017",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-64017",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -1960,6 +3430,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-64026",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-64268",
       "package": "linux-libc-dev",
       "package_type": "deb",
@@ -1970,10 +3450,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-64270",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-64271",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-64272",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -2070,6 +3570,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-64434",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-64437",
       "package": "linux-libc-dev",
       "package_type": "deb",
@@ -2140,10 +3650,290 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-64564",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-64582",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-64600",
       "package": "linux-libc-dev",
       "package_type": "deb",
       "installed_version": "6.1.177-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68099",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68123",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68136",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68140",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68143",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68144",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68159",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68160",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68202",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68236",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68294",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68376",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68409",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68426",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68432",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68470",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-68480",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-72042",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-72098",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-72130",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-72262",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-72320",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-72323",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-74488",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-74569",
+      "package": "linux-libc-dev",
+      "package_type": "deb",
+      "installed_version": "6.1.180-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "mount",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -2270,6 +4060,26 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-73088",
+      "package": "node-browserslist",
+      "package_type": "deb",
+      "installed_version": "4.21.4+~cs6.1.17-2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-73089",
+      "package": "node-browserslist",
+      "package_type": "deb",
+      "installed_version": "4.21.4+~cs6.1.17-2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-24001",
       "package": "node-diff",
       "package_type": "deb",
@@ -2360,6 +4170,56 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-45623",
+      "package": "node-postcss",
+      "package_type": "deb",
+      "installed_version": "8.4.20+~cs8.0.23-1+deb12u1",
+      "fixed_version": "",
+      "severity": "CRITICAL",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-67213",
+      "package": "node-postcss",
+      "package_type": "deb",
+      "installed_version": "8.4.20+~cs8.0.23-1+deb12u1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-67214",
+      "package": "node-postcss",
+      "package_type": "deb",
+      "installed_version": "8.4.20+~cs8.0.23-1+deb12u1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-73086",
+      "package": "node-postcss",
+      "package_type": "deb",
+      "installed_version": "8.4.20+~cs8.0.23-1+deb12u1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-73646",
+      "package": "node-postcss",
+      "package_type": "deb",
+      "installed_version": "8.4.20+~cs8.0.23-1+deb12u1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2022-25883",
       "package": "node-semver",
       "package_type": "deb",
@@ -2410,6 +4270,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-73566",
+      "package": "node-tar",
+      "package_type": "deb",
+      "installed_version": "6.1.13+~cs7.0.5-1+deb12u1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-12151",
       "package": "node-undici",
       "package_type": "deb",
@@ -2417,6 +4287,26 @@
       "fixed_version": "",
       "severity": "HIGH",
       "status": "fix_deferred",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-13697",
+      "package": "node-undici",
+      "package_type": "deb",
+      "installed_version": "5.15.0+dfsg1+~cs20.10.9.3-1+deb12u4",
+      "fixed_version": "",
+      "severity": "CRITICAL",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-14643",
+      "package": "node-undici",
+      "package_type": "deb",
+      "installed_version": "5.15.0+dfsg1+~cs20.10.9.3-1+deb12u4",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
       "target": "debian 12.15"
     },
     {
@@ -2504,6 +4394,46 @@
       "package": "nodejs",
       "package_type": "deb",
       "installed_version": "18.20.4+dfsg-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-56846",
+      "package": "nodejs",
+      "package_type": "deb",
+      "installed_version": "18.20.4+dfsg-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-56848",
+      "package": "nodejs",
+      "package_type": "deb",
+      "installed_version": "18.20.4+dfsg-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-9496",
+      "package": "npm",
+      "package_type": "deb",
+      "installed_version": "9.2.0~ds1-1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-14456",
+      "package": "openssl",
+      "package_type": "deb",
+      "installed_version": "3.0.20-1~deb12u2",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -2860,8 +4790,28 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53613",
+      "package": "util-linux",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53615",
       "package": "util-linux",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "util-linux-extra",
       "package_type": "deb",
       "installed_version": "2.38.1-5+deb12u3",
       "fixed_version": "",

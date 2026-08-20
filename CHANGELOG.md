@@ -7,7 +7,25 @@ existed.
 
 ## [Unreleased]
 
-### Added
+### Fixed
+
+- **`docker/vuln-baseline/*.json` re-triaged (2026-08-20)**: a wave of
+  freshly-disclosed CRITICAL/HIGH CVEs against packages already in each
+  baseline's documented accepted-risk categories (Debian OS-package
+  security-patch lag, mainly) were failing CI across all 9 images. Checked
+  every new finding's `Fixed Version` in the actual Trivy scan output
+  before touching anything: 225 (across all images) have no fix published
+  yet and are now accepted into the baseline, matching the existing
+  precedent; 19 (`stdlib`/`golang.org/x/*` in the Go toolchain and the
+  vendored Terraform binary, `org.apache.httpcomponents` in the JVM image,
+  the .NET runtime, and `nanoid`/`brace-expansion`/`ip-address`/`postcss`/
+  `js-yaml` in the Node image) do have a real fix and were deliberately
+  left out of the baseline - those need an actual dependency/version bump,
+  not baseline acceptance, and are still expected to fail CI until fixed.
+  `generated_at`/`expires_at` bumped on all 9 files (re-triage cycle).
+  Verified with the real `check_vuln_baseline.check()` function against
+  reconstructed findings from the actual CI run's Trivy output, not
+  assumed.
 
 - **`CaseResult` carries case metadata**: `language`, `domain`, and
   `task_type` are now copied from the case definition onto every saved
