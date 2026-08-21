@@ -1,13 +1,13 @@
 {
   "image": "optarena-tester-ruby",
-  "generated_at": "2026-08-02",
-  "expires_at": "2026-11-02",
+  "generated_at": "2026-08-20",
+  "expires_at": "2026-11-18",
   "owner": "arun@trysti.com",
   "scan_severity": [
     "CRITICAL",
     "HIGH"
   ],
-  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py.",
+  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py. | 2026-08-20 re-triage: 3 newly-disclosed CRITICAL/HIGH finding(s) added against packages already in the accepted risk categories above (Debian security-patch lag on the OS base layer, none with a published fixed_version at triage time - see docker/vuln-baseline/README or check_vuln_baseline.py for the no-fix-available handling). Findings with an actual available fix were deliberately excluded and left failing CI - see the PR this baseline update shipped in for the list; those need a real dependency/version bump, not baseline acceptance.",
   "accepted_vulnerabilities": [
     {
       "id": "CVE-2026-53615",
@@ -150,6 +150,16 @@
       "target": "debian 13.6"
     },
     {
+      "id": "CVE-2026-14456",
+      "package": "libssl3t64",
+      "package_type": "deb",
+      "installed_version": "3.5.6-1~deb13u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 13.6"
+    },
+    {
       "id": "CVE-2025-69720",
       "package": "libtinfo6",
       "package_type": "deb",
@@ -204,6 +214,26 @@
       "package": "ncurses-bin",
       "package_type": "deb",
       "installed_version": "6.5+20250216-2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 13.6"
+    },
+    {
+      "id": "CVE-2026-14456",
+      "package": "openssl",
+      "package_type": "deb",
+      "installed_version": "3.5.6-1~deb13u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 13.6"
+    },
+    {
+      "id": "CVE-2026-14456",
+      "package": "openssl-provider-legacy",
+      "package_type": "deb",
+      "installed_version": "3.5.6-1~deb13u2",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",

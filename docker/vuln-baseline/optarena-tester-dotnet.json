@@ -1,14 +1,24 @@
 {
   "image": "optarena-tester-dotnet",
-  "generated_at": "2026-08-02",
-  "expires_at": "2026-11-02",
+  "generated_at": "2026-08-20",
+  "expires_at": "2026-11-18",
   "owner": "arun@trysti.com",
   "scan_severity": [
     "CRITICAL",
     "HIGH"
   ],
-  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py. P1-08 (2026-08-03): publish-images.yml now scans linux/arm64 independently, not just linux/amd64 - this surfaced 5 findings (CVE-2026-47302/47304/50525/50527/50648, System.Security.Cryptography.Xml 8.0.3, bundled inside PowerShell's arm64 build at usr/share/powershell/.store/powershell.linux.arm64/...) that were already reviewed and accepted for the identical CVE/package/version under the x64 build path - the match key binds on target, so an arch-specific file path is a structurally different key even for the same underlying vulnerability. Not a new risk, just a new key; mirrored with the same disposition, not re-justified from scratch.",
+  "note": "Baseline from the P1-03 remediation pass (2026-08-02): Go/PHP/.NET SDK base images bumped to their latest published builds, Go additionally to a currently-supported minor (was 1.22, EOL), apt-get upgrade added to every Dockerfile, and an unused ImageMagick suite removed from the Rust image - a combined 45% reduction (2508 -> 1367 CRITICAL/HIGH) verified by live Trivy scans, not estimated. What remains here is the baseline: mostly Linux kernel-header CVEs (linux-libc-dev - kernel code that never executes inside a container, and a mandatory transitive dependency of libc6-dev/build-essential, confirmed not removable without breaking cgo/native-extension compilation) and Debian perl-tooling CVEs (perl/perl-base/perl-modules/libperl5.x - a mandatory transitive dependency of adduser/debconf, confirmed not removable). CI fails on any CRITICAL/HIGH finding NOT in this list (a genuinely new vulnerability) or once expires_at passes (forces periodic re-triage instead of silent indefinite acceptance) - see docker/check_vuln_baseline.py. P1-08 (2026-08-03): publish-images.yml now scans linux/arm64 independently, not just linux/amd64 - this surfaced 5 findings (CVE-2026-47302/47304/50525/50527/50648, System.Security.Cryptography.Xml 8.0.3, bundled inside PowerShell's arm64 build at usr/share/powershell/.store/powershell.linux.arm64/...) that were already reviewed and accepted for the identical CVE/package/version under the x64 build path - the match key binds on target, so an arch-specific file path is a structurally different key even for the same underlying vulnerability. Not a new risk, just a new key; mirrored with the same disposition, not re-justified from scratch. | 2026-08-20 re-triage: 14 newly-disclosed CRITICAL/HIGH finding(s) added against packages already in the accepted risk categories above (Debian security-patch lag on the OS base layer, none with a published fixed_version at triage time - see docker/vuln-baseline/README or check_vuln_baseline.py for the no-fix-available handling). Findings with an actual available fix were deliberately excluded and left failing CI - see the PR this baseline update shipped in for the list; those need a real dependency/version bump, not baseline acceptance.",
   "accepted_vulnerabilities": [
+    {
+      "id": "CVE-2026-53613",
+      "package": "bsdutils",
+      "package_type": "deb",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
     {
       "id": "CVE-2026-53615",
       "package": "bsdutils",
@@ -50,6 +60,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-8458",
+      "package": "curl",
+      "package_type": "deb",
+      "installed_version": "7.88.1-10+deb12u15",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-8927",
       "package": "curl",
       "package_type": "deb",
@@ -77,6 +97,16 @@
       "fixed_version": "",
       "severity": "HIGH",
       "status": "fix_deferred",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "libblkid1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
       "target": "debian 12.15"
     },
     {
@@ -120,6 +150,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-8458",
+      "package": "libcurl3-gnutls",
+      "package_type": "deb",
+      "installed_version": "7.88.1-10+deb12u15",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-8927",
       "package": "libcurl3-gnutls",
       "package_type": "deb",
@@ -157,6 +197,16 @@
       "fixed_version": "",
       "severity": "HIGH",
       "status": "fix_deferred",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-8458",
+      "package": "libcurl4",
+      "package_type": "deb",
+      "installed_version": "7.88.1-10+deb12u15",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
       "target": "debian 12.15"
     },
     {
@@ -214,6 +264,16 @@
       "package": "libldap-2.5-0",
       "package_type": "deb",
       "installed_version": "2.5.13+dfsg-5",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "libmount1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -420,6 +480,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53613",
+      "package": "libsmartcols1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53615",
       "package": "libsmartcols1",
       "package_type": "deb",
@@ -460,10 +530,30 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-58050",
+      "package": "libssh2-1",
+      "package_type": "deb",
+      "installed_version": "1.10.0-3+b1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-7598",
       "package": "libssh2-1",
       "package_type": "deb",
       "installed_version": "1.10.0-3+b1",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-14456",
+      "package": "libssl3",
+      "package_type": "deb",
+      "installed_version": "3.0.20-1~deb12u2",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -480,8 +570,28 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-53613",
+      "package": "libuuid1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-53615",
       "package": "libuuid1",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "mount",
       "package_type": "deb",
       "installed_version": "2.38.1-5+deb12u3",
       "fixed_version": "",
@@ -520,6 +630,16 @@
       "target": "debian 12.15"
     },
     {
+      "id": "CVE-2026-14456",
+      "package": "openssl",
+      "package_type": "deb",
+      "installed_version": "3.0.20-1~deb12u2",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
       "id": "CVE-2026-13221",
       "package": "perl",
       "package_type": "deb",
@@ -854,6 +974,16 @@
       "package": "python3.11-minimal",
       "package_type": "deb",
       "installed_version": "3.11.2-6+deb12u8",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "util-linux",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
       "fixed_version": "",
       "severity": "HIGH",
       "status": "affected",
@@ -862,6 +992,16 @@
     {
       "id": "CVE-2026-53615",
       "package": "util-linux",
+      "package_type": "deb",
+      "installed_version": "2.38.1-5+deb12u3",
+      "fixed_version": "",
+      "severity": "HIGH",
+      "status": "affected",
+      "target": "debian 12.15"
+    },
+    {
+      "id": "CVE-2026-53613",
+      "package": "util-linux-extra",
       "package_type": "deb",
       "installed_version": "2.38.1-5+deb12u3",
       "fixed_version": "",
@@ -1047,7 +1187,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-47304",
@@ -1057,7 +1197,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-50525",
@@ -1067,7 +1207,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-50527",
@@ -1077,7 +1217,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-50648",
@@ -1087,7 +1227,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-47302",
@@ -1097,7 +1237,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-47304",
@@ -1107,7 +1247,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-50525",
@@ -1117,7 +1257,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-50527",
@@ -1127,7 +1267,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     },
     {
       "id": "CVE-2026-50648",
@@ -1137,7 +1277,7 @@
       "fixed_version": "10.0.10, 9.0.18, 8.0.4",
       "severity": "HIGH",
       "status": "fixed",
-      "target": "usr/share/powershell/.store/powershell.linux.arm64/7.4.17/powershell.linux.arm64/7.4.17/tools/net8.0/any/pwsh.deps.json"
+      "target": "usr/share/powershell/.store/powershell.linux.x64/7.4.17/powershell.linux.x64/7.4.17/tools/net8.0/any/pwsh.deps.json"
     }
   ]
 }

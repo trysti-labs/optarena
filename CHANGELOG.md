@@ -5,6 +5,47 @@ This starts from the current `v0.1` branch state rather than reconstructing
 full project history - see `git log` for everything before this file
 existed.
 
+## [Unreleased]
+
+### Fixed
+
+- **Flaky `PackSigningTests::test_installed_pack_modified_after_install_is_no_longer_reported_trusted`
+  on Linux CI**: the test picked `next(dest.glob("*.json"))` and assumed it
+  wouldn't be `_pack.json`, but `install_pack()` writes case files then
+  `_pack.json` last, and directory-listing order doesn't have to match
+  write order. It happened to hold on Windows/NTFS but not on Linux/ext4,
+  where `_pack.json` (the install manifest, not a real case) came back
+  first, so the test tampered with the manifest instead of a case file.
+  Now filters it out by name explicitly instead of relying on iteration
+  order.
+- **`docker/vuln-baseline/*.json` re-triaged (2026-08-20)**: a wave of
+  freshly-disclosed CRITICAL/HIGH CVEs against packages already in each
+  baseline's documented accepted-risk categories (Debian OS-package
+  security-patch lag, mainly) were failing CI across all 9 images. Checked
+  every new finding's `Fixed Version` in the actual Trivy scan output
+  before touching anything: 225 (across all images) have no fix published
+  yet and are now accepted into the baseline, matching the existing
+  precedent; 19 (`stdlib`/`golang.org/x/*` in the Go toolchain and the
+  vendored Terraform binary, `org.apache.httpcomponents` in the JVM image,
+  the .NET runtime, and `nanoid`/`brace-expansion`/`ip-address`/`postcss`/
+  `js-yaml` in the Node image) do have a real fix and were deliberately
+  left out of the baseline - those need an actual dependency/version bump,
+  not baseline acceptance, and are still expected to fail CI until fixed.
+  `generated_at`/`expires_at` bumped on all 9 files (re-triage cycle).
+  Verified with the real `check_vuln_baseline.check()` function against
+  reconstructed findings from the actual CI run's Trivy output, not
+  assumed.
+
+### Added
+
+- **`CaseResult` carries case metadata**: `language`, `domain`, and
+  `task_type` are now copied from the case definition onto every saved
+  result (`optarena/runner/_execution.py`), instead of living only in
+  `optarena/cases/*.json`. Lets a saved run be filtered or grouped by
+  language/domain/category (e.g. in the dashboard) without cross-referencing
+  the case corpus. Additive only, not a breaking change to the case or
+  run-result shape (see GOVERNANCE.md).
+
 ## [0.1.0] - 2026-08-03
 
 First tagged release. Three external/internal review rounds against the live
