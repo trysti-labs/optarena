@@ -98,6 +98,11 @@ a{color:inherit;text-decoration:none}
 select{background:var(--bg);border:1px solid var(--border-hi);border-radius:var(--radius);color:var(--text);padding:7px 12px;font-size:0.875rem;font-family:var(--sans);max-width:360px;outline:none;transition:.15s}
 [data-theme="light"] select{background:var(--bg-elevated)}
 select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.case-controls{display:flex;gap:10px;align-items:center;margin:-2px 0 14px}
+.case-controls label{color:var(--text-dim);font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-family:var(--mono)}
+.case-filter{background:var(--bg);border:1px solid var(--border-hi);border-radius:var(--radius);color:var(--text);padding:7px 12px;font-size:0.875rem;font-family:var(--sans);min-width:220px;max-width:100%;outline:none;transition:.15s}
+[data-theme="light"] .case-filter{background:var(--bg-elevated)}
+.case-filter:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 
 /* Bars (div-based): <=24px thick, 4px rounded data-end, square baseline,
    2px surface gap between grouped neighbors, hairline baseline. */
@@ -131,6 +136,9 @@ select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 /* Tables */
 table{width:100%;border-collapse:collapse;font-size:0.875rem}
 th{text-align:left;padding:8px 12px;color:var(--text-dim);font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;border-bottom:1px solid var(--border);font-family:var(--mono)}
+.sortable{cursor:pointer;user-select:none}
+.sortable:hover{color:var(--text)}
+.sort-indicator{color:var(--accent);margin-left:4px}
 td{padding:9px 12px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--bg-hover)}
@@ -298,6 +306,7 @@ function attributeFailure(c) {
 
 let INDEX = [];               // results/index.json entries (newest first)
 const RUN_CACHE = {};         // file -> full run record
+const TABLE_STATE = { query: "", key: null, direction: "asc" };
 
 async function fetchJSON(path) {
   const r = await fetch(path, { cache: "no-store" });
@@ -320,6 +329,42 @@ function bindTips(root) {
       tip.style.top = Math.min(e.clientY + pad, innerHeight - h - 8) + "px";
     });
     el.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+  });
+}
+
+function bindTableControls() {
+  const filter = $("#case-filter");
+  if (filter) {
+    filter.addEventListener("input", (e) => {
+      TABLE_STATE.query = e.target.value;
+      const caret = e.target.selectionStart;
+      render().then(() => {
+        const next = $("#case-filter");
+        if (next) {
+          next.focus();
+          next.setSelectionRange(caret, caret);
+        }
+      });
+    });
+  }
+  app.querySelectorAll("[data-sort]").forEach((header) => {
+    const activate = () => {
+      const key = header.dataset.sort;
+      if (TABLE_STATE.key === key) {
+        TABLE_STATE.direction = TABLE_STATE.direction === "asc" ? "desc" : "asc";
+      } else {
+        TABLE_STATE.key = key;
+        TABLE_STATE.direction = "asc";
+      }
+      render();
+    };
+    header.addEventListener("click", activate);
+    header.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        activate();
+      }
+    });
   });
 }
 
@@ -412,11 +457,54 @@ function manifestCompatibility(manA, manB) {
   return { comparable: reasons.length === 0, verified: true, reasons };
 }
 
+function caseSearchText(name, pair) {
+  const values = [name];
+  for (const c of [pair.a, pair.b]) {
+    if (!c) continue;
+    values.push(c.language, c.domain, c.task_type);
+  }
+  return values.filter((v) => v != null).join(" ").toLowerCase();
+}
+
+function sortableValue(pair, key) {
+  const c = key.endsWith("A") ? pair.a : pair.b;
+  if (!c) return null;
+  if (key.startsWith("duration")) {
+    return typeof c.duration_s === "number" && isFinite(c.duration_s) ? c.duration_s : null;
+  }
+  return typeof c.passed === "boolean" ? c.passed : null;
+}
+
+function sortIndicator(key) {
+  if (TABLE_STATE.key !== key) return "";
+  return TABLE_STATE.direction === "asc" ? "&#9650;" : "&#9660;";
+}
+
+function sortHeader(label, key) {
+  const active = TABLE_STATE.key === key;
+  const direction = active
+    ? (TABLE_STATE.direction === "asc" ? "ascending" : "descending") : "none";
+  return `<th class="sortable" data-sort="${key}" tabindex="0" role="button" aria-sort="${direction}">${label}<span class="sort-indicator">${sortIndicator(key)}</span></th>`;
+}
+
 function compareHTML(runA, runB) {
   const cases = {};
   for (const c of runA.cases) (cases[c.name] = cases[c.name] || {}).a = c;
   for (const c of runB.cases) (cases[c.name] = cases[c.name] || {}).b = c;
   const names = Object.keys(cases).sort();
+  const needle = TABLE_STATE.query.trim().toLowerCase();
+  const visibleNames = names.filter((name) => !needle || caseSearchText(name, cases[name]).includes(needle));
+  if (TABLE_STATE.key) {
+    visibleNames.sort((a, b) => {
+      const av = sortableValue(cases[a], TABLE_STATE.key);
+      const bv = sortableValue(cases[b], TABLE_STATE.key);
+      if (av === bv) return a.localeCompare(b);
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      const order = av < bv ? -1 : 1;
+      return TABLE_STATE.direction === "asc" ? order : -order;
+    });
+  }
   const maxDur = Math.max(1, ...names.flatMap((n) =>
     [cases[n].a, cases[n].b].filter(Boolean).map((c) => c.duration_s || 0)));
 
@@ -473,7 +561,7 @@ function compareHTML(runA, runB) {
     const n = c ? (trajOf(c).off_target_count || 0) : 0;
     return n ? ` <span class="badge-off" title="${esc(side)}: ${esc((trajOf(c).off_target_files || []).join(", "))}">&#9888; ${n} off-target</span>` : "";
   };
-  const tableRows = names.map((n) => {
+  const tableRows = visibleNames.map((n) => {
     const a = cases[n].a, b2 = cases[n].b;
     const delta = a && b2 && a.duration_s != null && b2.duration_s != null
       ? (b2.duration_s - a.duration_s) : null;
@@ -558,8 +646,12 @@ function compareHTML(runA, runB) {
     </div>
     ${groups}
     <h2 style="margin-top:18px">Per-case results</h2>
+    <div class="case-controls">
+      <label for="case-filter">Filter</label>
+      <input id="case-filter" class="case-filter" type="text" placeholder="Name, category, or language" value="${esc(TABLE_STATE.query)}">
+    </div>
     <table>
-      <thead><tr><th>case</th><th>A result</th><th>B result</th><th>A time</th><th>B time</th><th>&Delta; time</th></tr></thead>
+      <thead><tr><th>case</th>${sortHeader("A result", "statusA")}${sortHeader("B result", "statusB")}${sortHeader("A time", "durationA")}${sortHeader("B time", "durationB")}<th>&Delta; time</th></tr></thead>
       <tbody>${tableRows}</tbody>
     </table>`;
 }
@@ -618,6 +710,7 @@ async function render() {
 
   $("#selA").addEventListener("change", render);
   $("#selB").addEventListener("change", render);
+  bindTableControls();
   bindTips(app);
 }
 
