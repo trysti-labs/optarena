@@ -461,10 +461,7 @@ function caseSearchText(name, pair) {
   const values = [name];
   for (const c of [pair.a, pair.b]) {
     if (!c) continue;
-    const extra = c.extra || {};
-    const metadata = extra.metadata || extra.case || {};
-    values.push(c.category, c.language, c.domain, extra.category, extra.language,
-      extra.domain, metadata.category, metadata.language, metadata.domain);
+    values.push(c.language, c.domain, c.task_type);
   }
   return values.filter((v) => v != null).join(" ").toLowerCase();
 }
