@@ -55,10 +55,11 @@ def cmd_report(args) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    formats = ["junit", "html", "sarif"] if args.format == "all" else [args.format]
+    formats = ["junit", "html", "sarif", "markdown"] if args.format == "all" else [args.format]
     renderers = {"junit": (_report.to_junit_xml, "junit.xml"),
                  "html": (_report.to_html, "report.html"),
-                 "sarif": (_report.to_sarif, "results.sarif")}
+                 "sarif": (_report.to_sarif, "results.sarif"),
+                 "markdown": (_report.to_markdown_summary, "summary.md")}
 
     # A-27: --out-dir says "directory", --out says "file" - no guessing.
     # `--out` alone used to be inferred as a file or a directory from the

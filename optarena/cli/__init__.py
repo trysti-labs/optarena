@@ -356,9 +356,9 @@ def main(argv: list[str] | None = None) -> int:
     p_scan.set_defaults(fn=cmd_scan)
 
     p_report = sub.add_parser(
-        "report", help="emit CI report artifacts (JUnit XML / HTML / SARIF) from a saved run")
+        "report", help="emit CI report artifacts (JUnit XML / HTML / SARIF / Markdown) from a saved run")
     p_report.add_argument("run_ref", help="run id, filename, path, or unique substring")
-    p_report.add_argument("--format", choices=["junit", "html", "sarif", "all"], default="all",
+    p_report.add_argument("--format", choices=["junit", "html", "sarif", "markdown", "all"], default="all",
                           help="artifact format (default: all)")
     p_report.add_argument("--out", help="write a single artifact to exactly this file "
                                         "(requires a single --format)")
