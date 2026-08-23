@@ -8,7 +8,7 @@ raw API, and in-process SDK/agent-framework drivers integrating against
 stable process/library contracts.
 
 OptArena evaluates software engineering agents: headless CLI agents (aider,
-Claude Code, Codex, OpenCode, Goose, Qwen Code), in-process agent-framework/
+Claude Code, Codex, OpenCode, Goose, Qwen Code, Gemini CLI), in-process agent-framework/
 SDK agents (crewAI, OpenAI Agents SDK, smolagents, LangGraph, AutoGen,
 Semantic Kernel), and raw-model baselines - all run through the same task
 cases, against **any OpenAI/Ollama-compatible backend** (Ollama, LM Studio, a
@@ -94,7 +94,7 @@ pip install -e ".[crewai]"           # or openai-agents / smolagents /
 ```
 
 Requirements: Python ≥ 3.10. CLI drivers (aider, Claude Code, Codex,
-OpenCode, Goose, Qwen Code) each need their own binary installed and on
+OpenCode, Goose, Qwen Code, Gemini CLI) each need their own binary installed and on
 `PATH` - `optarena doctor` reports what's missing.
 
 **Source-checkout install only.** `docker/`, `dashboard/`, and `repos/` are
@@ -160,6 +160,7 @@ Scenario files are small JSON documents:
 | `opencode` | cli | scenario | experimental | OpenCode (`opencode run`) |
 | `goose` | cli | scenario | experimental | Goose (`goose run -t`) |
 | `qwen-code` | cli | scenario | experimental | Qwen Code (`qwen -p`) |
+| `gemini-cli` | cli | fixed | experimental | Gemini CLI headless (`gemini -p`) |
 | `crewai` | sdk | scenario | optional | crewAI SDK agent (`pip install optarena[crewai]`) |
 | `openai-agents` | sdk | scenario | optional | OpenAI Agents SDK agent (`pip install optarena[openai-agents]`) |
 | `smolagents` | sdk | scenario | optional | smolagents `ToolCallingAgent` (`pip install optarena[smolagents]`) |

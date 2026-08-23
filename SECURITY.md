@@ -54,7 +54,8 @@ boundary:
    ephemeral one mounting only its own workspace).
 
 2. **The coding agents under evaluation.** `optarena run` refuses to start a
-   `cli`-kind driver (aider, Claude Code, Codex, opencode, goose, qwen-code)
+    `cli`-kind driver (aider, Claude Code, Codex, opencode, goose, qwen-code,
+    gemini-cli)
    without confirmation: an interactive terminal gets a y/N prompt, and
    non-interactive use (CI, scripts) requires
    `--yes-i-understand-host-execution` explicitly. CLI agents run headlessly

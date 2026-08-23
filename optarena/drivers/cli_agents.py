@@ -73,6 +73,36 @@ def parse_claude_json_metrics(stdout: str) -> dict:
     return {}
 
 
+def parse_gemini_json_metrics(stdout: str) -> dict:
+    """Token metrics from Gemini CLI's ``--output-format json`` result."""
+    for line in reversed((stdout or "").splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        models = (data.get("stats") or {}).get("models") or {}
+        if not isinstance(models, dict):
+            continue
+        out: dict = {}
+        for model in models.values():
+            if not isinstance(model, dict):
+                continue
+            tokens = model.get("tokens") or {}
+            if not isinstance(tokens, dict):
+                continue
+            out["prompt_tokens"] = out.get("prompt_tokens", 0) + tokens.get("prompt", 0)
+            out["completion_tokens"] = out.get("completion_tokens", 0) + tokens.get("candidates", 0)
+            out["cache_read_tokens"] = out.get("cache_read_tokens", 0) + tokens.get("cached", 0)
+        if out:
+            if not out["cache_read_tokens"]:
+                out.pop("cache_read_tokens")
+            return out
+    return {}
+
+
 def _scenario_openai_env(backend) -> dict:
     """Env for tools that read OpenAI-compatible endpoints from env vars."""
     return {
@@ -185,6 +215,22 @@ CLI_AGENTS: dict[str, dict] = {
         "argv":     lambda prompt, backend: ["-p", prompt, "--yolo"],
         "env":      _scenario_openai_env,
         "scrub_env_prefixes": (),
+    },
+    "gemini-cli": {
+        "label":    "Gemini CLI",
+        "binaries": ["gemini"],
+        "backend":  "fixed",       # uses the logged-in Google account/provider
+        "argv":     lambda prompt, backend: [
+            "-p", prompt, "--output-format", "json",
+            "--approval-mode", "yolo", "--model", backend.model,
+        ],
+        "env":      lambda backend: {},
+        "scrub_env_prefixes": (),
+        "auth_env": (
+            "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
+            "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_PROJECT_ID", "GOOGLE_CLOUD_LOCATION",
+        ),
+        "parse_metrics": parse_gemini_json_metrics,
     },
 }
 
