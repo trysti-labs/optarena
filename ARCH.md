@@ -586,7 +586,8 @@ carries metadata surfaced by `optarena list drivers`:
   valid) or `fixed` (own account/provider; tool-vs-tool only)
 - `status`: `stable | experimental | optional`
 
-The headless terminal agents (Claude Code, Codex, OpenCode, Goose, Qwen Code)
+The headless terminal agents (Claude Code, Codex, OpenCode, Goose, Qwen Code,
+Gemini CLI)
 share one generic driver (`drivers/cli_agents.py`) specialized by per-tool
 descriptors - binary name, prompt/auto-approve flags, backend-injection env.
 The six SDK-agent drivers share one *pattern* (§6.3) but not one module, since
@@ -787,7 +788,7 @@ signed (`cosign sign`, keyless via Sigstore/Fulcio) - and only THEN is
 
 Near-term:
 - **More CLI/SDK drivers** - OpenHands, Copilot CLI when automatable.
-  `opencode`/`goose`/`qwen-code`/`codex` descriptors shipped (experimental);
+  `opencode`/`goose`/`qwen-code`/`codex`/`gemini-cli` descriptors shipped (experimental);
   all six planned SDK-agent frameworks (crewAI, OpenAI Agents SDK,
   smolagents, LangGraph, AutoGen, Semantic Kernel) shipped as of this branch.
 - **IDE UI automation** - not part of this branch; still a possible future
@@ -945,7 +946,7 @@ its own `Tokens: ... sent, ... received. Cost: $... session.` report lines
 (including cache-read tokens separately), `total_cost_usd`, and `num_turns`
 from the structured result object. A generic `parse_metrics` hook was added
 to the `CLI_AGENTS` descriptor shape in `cli_agents.py` so the remaining
-CLI drivers (`opencode`/`goose`/`qwen-code`/`codex`) can adopt the same
+CLI drivers (`opencode`/`goose`/`qwen-code`/`codex`/`gemini-cli`) can adopt the same
 pattern without new plumbing - not done in this pass (see §10 roadmap).
 
 **Comparison trust.** `--trials N` computed a majority verdict but never

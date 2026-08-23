@@ -30,7 +30,9 @@ from optarena.compare import (
 from optarena.drivers import DRIVERS, get_driver
 from optarena.drivers.base import CaseResult, subprocess_env
 from optarena.drivers.aider_cli import AiderDriver, parse_aider_metrics
-from optarena.drivers.cli_agents import CLIAgentDriver, parse_claude_json_metrics
+from optarena.drivers.cli_agents import (
+    CLIAgentDriver, parse_claude_json_metrics, parse_gemini_json_metrics,
+)
 from optarena.drivers.openai_chat import concrete_target
 from optarena.drivers.sdk_base import SingleFileSDKDriver
 from optarena.metrics import aggregate, case_deltas
@@ -1918,6 +1920,64 @@ class TelemetryParsingTests(unittest.TestCase):
 
     def test_claude_json_metrics_empty_on_non_json(self):
         self.assertEqual(parse_claude_json_metrics("plain text output"), {})
+
+    def test_gemini_json_metrics_aggregate_model_usage(self):
+        payload = json.dumps({
+            "response": "done",
+            "stats": {"models": {
+                "gemini-2.5-pro": {
+                    "tokens": {"prompt": 120, "candidates": 45, "cached": 10,
+                               "thoughts": 20, "tool": 5},
+                },
+                "gemini-2.5-flash": {
+                    "tokens": {"prompt": 30, "candidates": 8, "cached": 2},
+                },
+            }},
+        })
+        metrics = parse_gemini_json_metrics("banner\n" + payload + "\n")
+        self.assertEqual(metrics["prompt_tokens"], 150)
+        self.assertEqual(metrics["completion_tokens"], 53)
+        self.assertEqual(metrics["cache_read_tokens"], 12)
+        self.assertNotIn("cost_usd", metrics)
+
+    def test_gemini_json_metrics_empty_on_non_json(self):
+        self.assertEqual(parse_gemini_json_metrics("plain text output"), {})
+
+
+class GeminiDriverTests(unittest.TestCase):
+    def test_gemini_registry_and_invocation(self):
+        from optarena.drivers import DRIVERS
+        from optarena.drivers.cli_agents import CLI_AGENTS
+
+        self.assertIn("gemini-cli", CLI_AGENTS)
+        self.assertEqual(CLI_AGENTS["gemini-cli"]["binaries"], ["gemini"])
+        self.assertEqual(DRIVERS["gemini-cli"]["backend"], "fixed")
+        backend = Backend(model="gemini-2.5-pro")
+        argv = CLI_AGENTS["gemini-cli"]["argv"]("fix this file", backend)
+        self.assertEqual(argv, ["-p", "fix this file", "--output-format", "json",
+                                "--approval-mode", "yolo", "--model", "gemini-2.5-pro"])
+
+    def test_gemini_auth_passthrough_does_not_leak_host_environment(self):
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            captured["env"] = kwargs["env"]
+            return mock.Mock(returncode=0, stdout="{}\n", stderr="")
+
+        driver = CLIAgentDriver("gemini-cli")
+        driver._binary = "gemini"
+        scenario = Scenario(name="s", driver="gemini-cli", backend=Backend())
+        case = {"name": "c", "prompts": ["do it"], "expected_files": []}
+        auth = {"GEMINI_API_KEY": "gemini-secret", "AWS_SECRET_ACCESS_KEY": "host-secret"}
+        workspace = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, workspace, ignore_errors=True)
+        with mock.patch.dict(os.environ, auth), \
+             mock.patch("optarena.drivers.cli_agents.run_capture", side_effect=fake_run):
+            driver.run_case(case, scenario, workspace)
+        self.assertEqual(captured["env"]["GEMINI_API_KEY"], "gemini-secret")
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY", captured["env"])
+        self.assertNotIn("gemini-secret", captured["command"])
 
 
 class VerifyCorpusTests(unittest.TestCase):
