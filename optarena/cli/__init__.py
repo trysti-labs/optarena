@@ -376,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
     p_doc = sub.add_parser("doctor", help="preflight checks for every installed driver")
     p_doc.add_argument("--base-url", default=os.environ.get("OPTARENA_BASE_URL", "http://localhost:11434"))
     p_doc.add_argument("--kind", default="ollama", choices=["ollama", "openai"])
+    p_doc.add_argument("--model", default=os.environ.get("OPTARENA_MODEL", None),
+                       help="verify this model is present on the backend (for ollama kind only)")
     p_doc.add_argument("--json", action="store_true",
                        help="emit the checks as one JSON object instead of the human table "
                             "(scriptable preflight; exit code is unchanged)")

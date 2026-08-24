@@ -3957,6 +3957,225 @@ def _capture_stdout(fn) -> str:
     return out.getvalue()
 
 
+class OllamaModelVerificationTests(unittest.TestCase):
+    """Model verification tests for `optarena doctor --model`."""
+
+    def test_model_found_check_passes(self):
+        """When requested model is present in /api/tags response, check passes."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model="qwen3:8b",
+            json=False
+        )
+        mock_response = {"models": [{"name": "qwen3:8b"}, {"name": "llama3.2:latest"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        self.assertIn("ok", buf)
+        self.assertIn("model qwen3:8b available", buf)
+
+    def test_model_missing_check_fails(self):
+        """When requested model is NOT present, check fails with pull hint."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model="notexist:8b",
+            json=False
+        )
+        mock_response = {"models": [{"name": "qwen3:8b"}, {"name": "llama3.2:latest"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            code = cmd_doctor(args)
+        self.assertEqual(code, 1)  # should fail
+
+    def test_model_missing_check_fails_with_output(self):
+        """Verify missing model produces MISS output with ollama pull hint."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model="notexist:8b",
+            json=False
+        )
+        mock_response = {"models": [{"name": "qwen3:8b"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        self.assertIn("MISS", buf)
+        self.assertIn("model notexist:8b available", buf)
+        self.assertIn("ollama pull notexist:8b", buf)
+
+    def test_model_without_tag_matches_latest(self):
+        """Requesting 'qwen3' should match installed 'qwen3:latest'."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model="qwen3",
+            json=False
+        )
+        mock_response = {"models": [{"name": "qwen3:latest"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        self.assertIn("ok", buf)
+        self.assertIn("model qwen3 available", buf)
+
+    def test_model_latest_matches_untagged(self):
+        """Requesting 'qwen3:latest' should match installed 'qwen3' (no tag)."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model="qwen3:latest",
+            json=False
+        )
+        mock_response = {"models": [{"name": "qwen3"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        self.assertIn("ok", buf)
+        self.assertIn("model qwen3:latest available", buf)
+
+    def test_specific_tag_does_not_match_latest(self):
+        """Requesting 'qwen3:8b' should NOT match installed 'qwen3:latest'."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model="qwen3:8b",
+            json=False
+        )
+        mock_response = {"models": [{"name": "qwen3:latest"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        self.assertIn("MISS", buf)
+        self.assertIn("model qwen3:8b available", buf)
+
+    def test_model_without_model_arg_no_check(self):
+        """Without --model flag, no model check should be performed."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model=None,
+            json=False
+        )
+        mock_response = {"models": [{"name": "qwen3:8b"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        # Should not have model check line
+        self.assertNotIn("model", buf.lower())
+
+    def test_model_only_checks_with_ollama(self):
+        """Model check should only run when kind is 'ollama'."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="openai",
+            model="gpt-4",
+            json=False
+        )
+        # Mock the /v1/models endpoint (openai)
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = b"{}"
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        # Should not have model check for non-ollama backends
+        self.assertNotIn("model gpt-4", buf)
+
+    def test_model_check_json_output(self):
+        """Model check should appear in JSON output."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model="qwen3:8b",
+            json=True
+        )
+        mock_response = {"models": [{"name": "qwen3:8b"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        report = json.loads(buf)
+        model_checks = [c for c in report["checks"] if "model qwen3:8b" in c["label"]]
+        self.assertEqual(len(model_checks), 1)
+        self.assertTrue(model_checks[0]["ok"])
+
+    def test_model_check_json_failure(self):
+        """Failed model check should appear correctly in JSON output."""
+        from optarena.cli._doctor import cmd_doctor
+        args = argparse.Namespace(
+            base_url="http://localhost:11434",
+            kind="ollama",
+            model="notfound:8b",
+            json=True
+        )
+        mock_response = {"models": [{"name": "qwen3:8b"}]}
+        with mock.patch("urllib.request.urlopen") as m:
+            mock_resp = mock.Mock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps(mock_response).encode("utf-8")
+            mock_resp.__enter__ = mock.Mock(return_value=mock_resp)
+            mock_resp.__exit__ = mock.Mock(return_value=None)
+            m.return_value = mock_resp
+            buf = _capture_stdout(lambda: cmd_doctor(args))
+        report = json.loads(buf)
+        model_checks = [c for c in report["checks"] if "model notfound:8b" in c["label"]]
+        self.assertEqual(len(model_checks), 1)
+        self.assertFalse(model_checks[0]["ok"])
+        self.assertIn("ollama pull notfound:8b", model_checks[0]["detail"])
+
+
 class ManifestTests(unittest.TestCase):
     """M-01: every run records an immutable case-set/oracle/trials identity."""
 
