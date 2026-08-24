@@ -62,13 +62,41 @@ def cmd_doctor(args) -> int:
         _print(f"  [{mark}] {label}" + (f" - {detail}" if detail and not good else ""))
         _record(label, good, detail, required=False)
 
+    def _normalize_ollama_tag(model: str) -> str:
+        """Normalize Ollama model tag: models without tags implicitly use :latest."""
+        if ":" not in model:
+            return f"{model}:latest"
+        return model
+
+    def _model_in_ollama_tags(requested: str, installed_models: list[str]) -> bool:
+        """Check if requested model matches any installed model, handling :latest normalization."""
+        normalized_requested = _normalize_ollama_tag(requested)
+        for installed in installed_models:
+            if _normalize_ollama_tag(installed) == normalized_requested:
+                return True
+        return False
+
     _section("backend")
     url = args.base_url.rstrip("/") + ("/api/tags" if args.kind == "ollama" else "/v1/models")
+    backend_ok = False
+    backend_response = None
     try:
         with _rq.urlopen(url, timeout=4) as resp:
-            _check(f"backend {args.base_url}", resp.status == 200)
+            backend_ok = resp.status == 200
+            if backend_ok and args.kind == "ollama":
+                # Store the response for model checking if needed
+                backend_response = json.loads(resp.read().decode("utf-8"))
+            _check(f"backend {args.base_url}", backend_ok)
     except Exception as exc:
         _check(f"backend {args.base_url}", False, f"{type(exc).__name__}: {exc}")
+
+    # Model verification for Ollama (only when backend is reachable and model is specified)
+    if backend_ok and args.kind == "ollama" and getattr(args, "model", None):
+        if backend_response:
+            installed_models = [m.get("name", "") for m in backend_response.get("models", [])]
+            model_found = _model_in_ollama_tags(args.model, installed_models)
+            hint = f"ollama pull {args.model}" if not model_found else ""
+            _check(f"model {args.model} available", model_found, hint)
 
     # P2-06: "record tested driver/SDK versions" - `DRIVERS[key]["tested_with"]`
     # is the version this driver was last confirmed working against via a
